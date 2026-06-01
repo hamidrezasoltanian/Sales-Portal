@@ -334,7 +334,11 @@ select.pot-3{background:#fef3c7;color:#854d0e}select.pot-4{background:#bbf7d0;co
 .wp-cnt{background:#0ea5e9;color:#fff;font-size:9px;padding:1px 5px;border-radius:7px;margin-right:3px}
 .wp-day-body{flex:1;display:flex;flex-direction:column;gap:4px;overflow-y:auto;max-height:350px}
 .wp-empty{color:#cbd5e1;font-size:10px;text-align:center;padding:15px 2px}
-.wp-item{background:var(--bg-raised);border-right:3px solid #0ea5e9;border-radius:4px;padding:5px 7px;cursor:pointer;font-size:11px}
+.wp-item{background:var(--bg-raised);border-right:3px solid #0ea5e9;border-radius:4px;padding:5px 7px;cursor:pointer;font-size:11px;position:relative}
+.wp-item.wp-selected{background:#eff6ff;border-right-color:#2563eb;outline:2px solid #3b82f6}
+.wp-item-cb{position:absolute;top:5px;left:5px;width:14px;height:14px;cursor:pointer;accent-color:#2563eb}
+#wpBulkBar{display:none;background:#1e40af;color:#fff;border-radius:8px;padding:8px 12px;margin-bottom:8px;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;font-weight:600}
+#wpBulkBar.active{display:flex}
 .wp-item:hover{background:#dbeafe}
 .wp-item.done{opacity:.55;text-decoration:line-through}
 .wp-item-name{font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35;font-size:11.5px}
@@ -817,6 +821,13 @@ select.pot-3{background:#fef3c7;color:#854d0e}select.pot-4{background:#bbf7d0;co
       <option value="">همه کارشناسان</option>
     </select>
     <button onclick="wpClearFilters()" style="background:var(--bg-raised);border:1px solid var(--border);border-radius:5px;padding:5px 9px;cursor:pointer;font-size:11px;color:var(--text-muted)">✕</button>
+  </div>
+  <div id="wpBulkBar">
+    <span id="wpBulkCount"></span>
+    <button onclick="wpBulkDone()" style="background:#22c55e;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">✓ انجام شد</button>
+    <button onclick="wpBulkMove()" style="background:#f59e0b;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">↪ انتقال هفته</button>
+    <button onclick="wpBulkRemove()" style="background:#ef4444;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">🗑 حذف</button>
+    <button onclick="wpClearSelection()" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">✕ انصراف</button>
   </div>
   <div class="wp-days" id="wpDays"></div>
   <div id="wpUnsched" class="wp-unscheduled" style="display:none">
@@ -3248,6 +3259,7 @@ function renderWeekPlan(){
   _buildPCCache();
   wpBuildSelect();
   wpBuildOwnerFilter();
+  if(typeof _wpSelected!=='undefined'){_wpSelected.clear();var _bar=document.getElementById('wpBulkBar');if(_bar)_bar.classList.remove('active');}
   var wpSearchQ=(document.getElementById('wpSearch')||{}).value||'';
   var wpOwnerF=(document.getElementById('wpOwnerFilter')||{}).value||'';
   var sel = document.getElementById('wpSel');
@@ -3638,9 +3650,11 @@ function renderWpItem(entry,weekId){
   var actType = entry.actionType || 'call';
   var actIcon = actType === 'visit' ? '🤝 ویزیت' : '📞 تماس';
   var actBg = actType === 'visit' ? '#8b5cf6' : '#0ea5e9';
+  var isSel2 = _wpSelected.has(k);
 
-  return '<div class="wp-item'+(done?' done':'')+'">'
-    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;">'
+  return '<div class="wp-item'+(done?' done':'')+(!done&&isSel2?' wp-selected':'')+'" data-ekey="'+k+'">'
+    + '<input type="checkbox" class="wp-item-cb" '+(isSel2?'checked':'')+' onclick="event.stopPropagation();wpToggleSelect(\''+(k)+'\')" title="انتخاب">'
+    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;padding-left:18px;">'
     + '<div class="wp-item-name">'+esc(name)+'</div>'
     + '<span style="font-size:9px; cursor:pointer; background:'+actBg+'; color:var(--text-primary); padding:2px 5px; border-radius:4px; white-space:nowrap;" onclick="toggleWpActionType(\''+k+'\')" title="تغییر نوع پیگیری با یک کلیک">'+actIcon+'</span>'
     + '</div>'
@@ -3652,6 +3666,91 @@ function renderWpItem(entry,weekId){
     + '<button class="wp-btn" style="border-color:#dc2626;color:#991b1b" onclick="wpRemoveEntry(\''+ k +'\')">✕</button>'
     + '</div></div>';
 }
+var _wpSelected = new Set();
+
+function wpToggleSelect(eKey){
+  if(_wpSelected.has(eKey)) _wpSelected.delete(eKey);
+  else _wpSelected.add(eKey);
+  _wpUpdateBulkBar();
+  var el = document.querySelector('.wp-item[data-ekey="'+eKey+'"]');
+  if(el){
+    if(_wpSelected.has(eKey)) el.classList.add('wp-selected');
+    else el.classList.remove('wp-selected');
+  }
+}
+
+function _wpUpdateBulkBar(){
+  var bar = document.getElementById('wpBulkBar');
+  var cnt = document.getElementById('wpBulkCount');
+  if(!bar) return;
+  if(_wpSelected.size > 0){
+    bar.classList.add('active');
+    if(cnt) cnt.textContent = _wpSelected.size + ' مورد انتخاب شده';
+  } else {
+    bar.classList.remove('active');
+  }
+}
+
+function wpClearSelection(){
+  _wpSelected.clear();
+  document.querySelectorAll('.wp-item.wp-selected').forEach(function(el){ el.classList.remove('wp-selected'); });
+  document.querySelectorAll('.wp-item-cb').forEach(function(cb){ cb.checked = false; });
+  _wpUpdateBulkBar();
+}
+
+function wpBulkDone(){
+  var keys = Array.from(_wpSelected);
+  if(!keys.length) return;
+  keys.forEach(function(k){
+    if(DB.weekEntries[k]){ DB.weekEntries[k].done=true; DB.weekEntries[k].doneDate=todayStr(); }
+  });
+  saveDB(); wpClearSelection(); renderWeekPlan();
+  showToast('✅ '+keys.length+' مورد انجام شد',2000);
+}
+
+function wpBulkRemove(){
+  var keys = Array.from(_wpSelected);
+  if(!keys.length) return;
+  if(!confirm(keys.length+' مورد از برنامه هفته حذف شود؟')) return;
+  keys.forEach(function(k){ delete DB.weekEntries[k]; });
+  saveDB(); wpClearSelection(); renderWeekPlan();
+  showToast('🗑 '+keys.length+' مورد حذف شد',2000);
+}
+
+function wpBulkMove(){
+  var keys = Array.from(_wpSelected);
+  if(!keys.length) return;
+  var sel = document.getElementById('wpSel');
+  var currentWeekId = sel ? sel.value : null;
+  var weeks = wpGetWeeks();
+  var futureWeeks = weeks.filter(function(w){ return w.id!==currentWeekId && !w.isPast; }).slice(0,10);
+  var pastWeeks = weeks.filter(function(w){ return w.id!==currentWeekId && w.isPast; }).slice(-4);
+  var shown = pastWeeks.concat(futureWeeks);
+  var body = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">'+keys.length+' مورد انتخابی را به کدام هفته منتقل کنید؟</div>'
+    +'<div style="display:flex;flex-direction:column;gap:4px;max-height:55vh;overflow-y:auto">'
+    +shown.map(function(wt){
+      return '<button onclick="wpDoBulkMove(''+wt.id+'')" style="display:flex;justify-content:space-between;align-items:center;width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--card);cursor:pointer;font-family:inherit">'
+        +'<span style="font-weight:600;color:var(--text-primary)">'+esc(wt.label)+'</span>'
+        +'<span style="font-size:11px;background:#0ea5e920;color:#0ea5e9;border:1px solid #0ea5e944;padding:2px 8px;border-radius:10px">انتقال</span>'
+        +'</button>';
+    }).join('')+'</div>';
+  openModal('wpBulkMoveModal','انتقال گروهی به هفته دیگر',body,'<button class="btn-secondary" onclick="closeModal('wpBulkMoveModal')">انصراف</button>');
+}
+
+function wpDoBulkMove(targetWeekId){
+  var keys = Array.from(_wpSelected);
+  keys.forEach(function(eKey){
+    if(!DB.weekEntries[eKey]) return;
+    var we = DB.weekEntries[eKey];
+    var parsed = wpParseEntryKey(eKey);
+    var newKey = wpEntryKey(targetWeekId, parsed.rtype||we.rtype||'', parsed.rid||we.rid||'');
+    DB.weekEntries[newKey] = Object.assign({}, we, {scheduledDate:null, done:false, doneDate:null});
+    delete DB.weekEntries[eKey];
+  });
+  saveDB(); wpClearSelection(); closeModal('wpBulkMoveModal'); renderWeekPlan();
+  showToast('↪ '+keys.length+' مورد منتقل شد',2500);
+}
+
 function wpMarkDoneKey(eKey){
   if(!DB.weekEntries[eKey])return;
   DB.weekEntries[eKey].done=true;DB.weekEntries[eKey].doneDate=todayStr();
