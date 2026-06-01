@@ -1,10 +1,15 @@
 'use strict';
 
-// Load .env if it exists
+// Load .env manually (no dotenv dependency needed)
 try {
   const fs = require('fs');
-  if (fs.existsSync(require('path').join(__dirname, '..', '.env'))) {
-    require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+  const path = require('path');
+  const envPath = path.join(__dirname, '..', '.env');
+  if (fs.existsSync(envPath)) {
+    fs.readFileSync(envPath, 'utf8').split('\n').forEach(function(line) {
+      const m = line.match(/^\s*([^#\s][^=]*?)\s*=\s*(.*)\s*$/);
+      if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
+    });
   }
 } catch (e) {}
 
