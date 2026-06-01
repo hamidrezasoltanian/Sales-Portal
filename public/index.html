@@ -512,6 +512,29 @@ select.pot-3{background:#fef3c7;color:#854d0e}select.pot-4{background:#bbf7d0;co
 .kpi-card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.1)}
 .kpi-num{font-size:24px;font-weight:800;color:var(--text-primary)}
 .kpi-label{font-size:11px;color:var(--text-muted);margin-top:4px}
+.kpi-trend-wrap{background:var(--bg-card);border-radius:12px;border:1px solid var(--border);padding:14px 16px;margin-bottom:14px}
+.kpi-trend-bars{display:flex;align-items:flex-end;gap:8px;height:120px;padding:10px 0 0}
+.kpi-trend-col{display:flex;flex-direction:column;align-items:center;flex:1;gap:4px}
+.kpi-trend-score{font-size:10px;font-weight:700;color:var(--text-secondary)}
+.kpi-trend-bar{width:100%;border-radius:4px 4px 0 0;transition:height .4s ease;min-height:3px}
+.kpi-trend-label{font-size:10px;color:var(--text-muted);text-align:center;margin-top:4px;white-space:nowrap}
+.kpi-cmp-wrap{background:var(--bg-card);border-radius:12px;border:1px solid var(--border);padding:14px 16px;margin-bottom:14px}
+.kpi-cmp-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;margin-bottom:5px;background:var(--bg-raised)}
+.kpi-cmp-rank{font-size:16px;min-width:28px;text-align:center}
+.kpi-cmp-name{font-size:13px;font-weight:700;color:var(--text-primary);flex:1}
+.kpi-cmp-score{font-size:18px;font-weight:900}
+.kpi-cmp-bar-wrap{flex:2;background:var(--border);border-radius:4px;height:8px;overflow:hidden}
+.kpi-cmp-bar{height:100%;border-radius:4px;transition:width .5s}
+.rec-card{background:var(--bg-card);border-radius:10px;border:1px solid var(--border);padding:12px 14px;margin-bottom:8px;display:flex;gap:10px;align-items:flex-start}
+.rec-card.rec-critical{border-right:4px solid #dc2626}
+.rec-card.rec-high{border-right:4px solid #ea580c}
+.rec-card.rec-medium{border-right:4px solid #d97706}
+.rec-card.rec-low{border-right:4px solid #94a3b8}
+.rec-body{flex:1}
+.rec-name{font-size:13px;font-weight:800;color:var(--text-primary);margin-bottom:3px}
+.rec-reason{font-size:11px;color:var(--text-muted);margin-bottom:5px}
+.rec-action{font-size:11.5px;color:#0ea5e9;font-weight:600}
+.rec-meta{font-size:10px;color:var(--text-muted);margin-top:4px}
 
 /* ══ مطالبات Panel ══ */
 #mtrPanel{background:var(--bg-raised);color:var(--text-primary);height:calc(100vh - 90px);overflow-y:auto;position:relative}
@@ -6355,6 +6378,9 @@ function calcKPIs(userId,month){
 // ── رندر پنل ─────────────────────────────────────────────────────
 var _kpiUser=null;
 var _kpiMonth=null;
+var _trendOpen=true;
+var _teamOpen=true;
+var _recsOpen=true;
 
 
 // ── مدیریت اهداف تیم ─────────────────────────────────────────
@@ -6547,6 +6573,99 @@ function exportKPIReport() {
   if(w){w.document.write(html);w.document.close();setTimeout(function(){w.print();},400);}
 }
 
+function calcCenterRecommendations() {
+  var today = todayStr();
+  var nowMs = nowTs();
+  var recs = [];
+  var allCenters = [];
+  if(typeof CENTERS !== 'undefined') {
+    CENTERS.forEach(function(c){ allCenters.push({rtype:'center', id:c.id, name:c.name, prov:'تهران'}); });
+  }
+  if(typeof _PC_CACHE !== 'undefined') {
+    Object.keys(_PC_CACHE).forEach(function(pid){
+      (_PC_CACHE[pid]||[]).forEach(function(c){ allCenters.push({rtype:'pc', id:c.id, name:c.name, prov:c.province||pid}); });
+    });
+  }
+  if(DB.extra && DB.extra.length) {
+    DB.extra.forEach(function(c){ allCenters.push({rtype:'pc', id:c.id, name:c.name, prov:c.province||''}); });
+  }
+  allCenters.forEach(function(c) {
+    var k = c.rtype + '_' + c.id;
+    var e = DB.edits[k] || {};
+    var pot = parseInt(e.potential||1);
+    var status = e.status || STATUS_LIST[0];
+    var lead = e.lead || '';
+    var lastAct = e._lastActivity || e._ts || 0;
+    var daysSince = lastAct ? Math.floor((nowMs - lastAct) / 86400000) : 999;
+    var followup = e.followupDate || '';
+    var owner = e.owner || '';
+    var score = 0;
+    var reasons = [];
+    var action = '';
+    var urgency = 'low';
+    if(pot >= 3 && daysSince > 14) {
+      score += pot * 10;
+      reasons.push('پتانسیل ' + pot + '⭐ — ' + daysSince + ' روز بدون تماس');
+      action = action || 'تماس برای پیگیری';
+    }
+    if((lead === 'لید' || lead === 'فرصت') && daysSince > 7) {
+      score += 25;
+      reasons.push(lead + ' — ' + daysSince + ' روز بدون پیشرفت');
+      action = action || 'پیشنهاد قیمت ارسال کنید';
+      urgency = urgency === 'low' ? 'medium' : urgency;
+    }
+    if(status === 'پیشنهاد ارسال شد' && daysSince > 5) {
+      score += 30;
+      reasons.push('پیشنهاد ارسال شده — ' + daysSince + ' روز بدون پاسخ');
+      action = 'پیگیری پیشنهاد';
+      urgency = 'high';
+    }
+    if(lead === 'مشتری' && pot >= 3 && daysSince > 30) {
+      score += 20;
+      reasons.push('مشتری فعال — ' + daysSince + ' روز بدون ارتباط');
+      action = action || 'تماس حفظ ارتباط';
+      urgency = urgency === 'low' ? 'medium' : urgency;
+    }
+    if(followup && followup < today) {
+      score += 40;
+      reasons.push('پیگیری معوق: ' + followup);
+      action = 'پیگیری فوری';
+      urgency = 'critical';
+    }
+    if(status === 'تماس اولیه' && daysSince > 10) {
+      score += 15;
+      reasons.push('تماس اولیه — نیاز به تعمیق');
+      action = action || 'برنامه‌ریزی ملاقات';
+      urgency = urgency === 'low' ? 'medium' : urgency;
+    }
+    if(status === STATUS_LIST[0] && pot >= 3) {
+      score += pot * 8;
+      reasons.push('مرکز با پتانسیل بالا — هنوز تماسی نشده');
+      action = action || 'شروع ارتباط';
+    }
+    if(score > 0 && reasons.length > 0) {
+      recs.push({
+        name: c.name,
+        prov: c.prov,
+        owner: owner,
+        score: score,
+        reasons: reasons,
+        action: action,
+        urgency: urgency,
+        pot: pot,
+        lead: lead,
+        status: status,
+        daysSince: daysSince === 999 ? null : daysSince,
+        rtype: c.rtype,
+        id: c.id
+      });
+    }
+  });
+  recs.sort(function(a,b){ return b.score - a.score; });
+  return recs.slice(0, 15);
+}
+
+
 function renderKPIPanel(){
   ensureKPIDB();
   if(!_kpiUser)_kpiUser=currentUser||Object.keys(USERS)[0];
@@ -6655,6 +6774,119 @@ function renderKPIPanel(){
       +'</div>';
   });
   html+='</div>';
+
+  // ── 6-month trend chart
+  if(_isManager() || _kpiUser === currentUser) {
+    html += '<div class="kpi-trend-wrap">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+      + '<span style="font-size:13px;font-weight:700;color:var(--text-primary)">&#128200; روند ۶ ماهه</span>'
+      + '<button onclick="_trendOpen=!_trendOpen;renderKPIPanel()" style="background:none;border:none;cursor:pointer;font-size:12px;color:var(--text-muted)">'
+      + (_trendOpen ? '▲ جمع' : '▼ باز') + '</button></div>';
+    if(_trendOpen) {
+      var trendMonths = prevJMonths(6).reverse();
+      var trendData = trendMonths.map(function(m) {
+        try { var d = calcKPIs(_kpiUser, m); return {month: m, score: Math.round(d.overall||0)}; }
+        catch(e) { return {month: m, score: 0}; }
+      });
+      var maxScore = Math.max.apply(null, trendData.map(function(t){return t.score;})) || 1;
+      html += '<div class="kpi-trend-bars">';
+      trendData.forEach(function(t) {
+        var barH = Math.max(Math.round((t.score / 100) * 100), 3);
+        var bc = t.score >= 80 ? '#22c55e' : t.score >= 50 ? '#f59e0b' : '#ef4444';
+        var parts = t.month.split('/');
+        var mLabel = jMonthLabel(t.month).split(' ')[0];
+        html += '<div class="kpi-trend-col">'
+          + '<div class="kpi-trend-score">' + t.score + '</div>'
+          + '<div class="kpi-trend-bar" style="height:' + barH + 'px;background:' + bc + '"></div>'
+          + '<div class="kpi-trend-label">' + mLabel + '</div></div>';
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  // ── team comparison (manager only)
+  if(_isManager()) {
+    html += '<div class="kpi-cmp-wrap">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+      + '<span style="font-size:13px;font-weight:700;color:var(--text-primary)">&#128101; مقایسه تیم — ' + jMonthLabel(_kpiMonth) + '</span>'
+      + '<button onclick="_teamOpen=!_teamOpen;renderKPIPanel()" style="background:none;border:none;cursor:pointer;font-size:12px;color:var(--text-muted)">'
+      + (_teamOpen ? '▲ جمع' : '▼ باز') + '</button></div>';
+    if(_teamOpen) {
+      var teamData = [];
+      Object.keys(USERS).forEach(function(u) {
+        try {
+          var d = calcKPIs(u, _kpiMonth);
+          var ov2 = Math.round(d.overall||0);
+          var gr = ov2>=90?'A':ov2>=80?'B+':ov2>=70?'B':ov2>=60?'C':ov2>=50?'D':'F';
+          var bestKPI = d.kpis[0], worstKPI = d.kpis[0];
+          d.kpis.forEach(function(k){ if(k.score>bestKPI.score)bestKPI=k; if(k.score<worstKPI.score)worstKPI=k; });
+          teamData.push({uid:u, name:USERS[u], score:ov2, grade:gr, best:bestKPI, worst:worstKPI});
+        } catch(e) {}
+      });
+      teamData.sort(function(a,b){return b.score-a.score;});
+      teamData.forEach(function(m, idx) {
+        var rankEmoji = idx===0?'🥇':idx===1?'🥈':idx===2?'🥉':'• '+(idx+1);
+        var sc2 = m.score;
+        var bc2 = sc2>=80?'#22c55e':sc2>=50?'#f59e0b':'#ef4444';
+        html += '<div class="kpi-cmp-row">'
+          + '<div class="kpi-cmp-rank">' + rankEmoji + '</div>'
+          + '<div class="kpi-cmp-name">' + esc(m.name) + '</div>'
+          + '<div class="kpi-cmp-score" style="color:' + bc2 + '">' + sc2 + '</div>'
+          + '<div style="font-size:12px;background:#f1f5f9;border-radius:4px;padding:2px 7px;font-weight:700;color:#475569">' + m.grade + '</div>'
+          + '<div class="kpi-cmp-bar-wrap"><div class="kpi-cmp-bar" style="width:' + sc2 + '%;background:' + bc2 + '"></div></div>'
+          + '<span style="font-size:10px;background:#dcfce7;color:#15803d;border-radius:4px;padding:2px 6px" title="بهترین">'
+          + m.best.icon + ' ' + m.best.name + '</span>'
+          + '<span style="font-size:10px;background:#fee2e2;color:#dc2626;border-radius:4px;padding:2px 6px" title="ضعیف‌ترین">'
+          + m.worst.icon + ' ' + m.worst.name + '</span>'
+          + '</div>';
+      });
+    }
+    html += '</div>';
+  }
+
+  // ── smart center recommendations (manager only)
+  if(_isManager()) {
+    var recs = [];
+    try { recs = calcCenterRecommendations(); } catch(e) { recs = []; }
+    html += '<div style="background:var(--bg-card);border-radius:12px;border:1px solid var(--border);padding:14px 16px;margin-bottom:14px">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+      + '<div>'
+      + '<span style="font-size:13px;font-weight:700;color:var(--text-primary)">&#128161; پیشنهاد مراکز برای تماس</span>'
+      + '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">بر اساس پتانسیل، وضعیت، لید و آخرین تماس</div>'
+      + '</div>'
+      + '<button onclick="_recsOpen=!_recsOpen;renderKPIPanel()" style="background:none;border:none;cursor:pointer;font-size:12px;color:var(--text-muted)">'
+      + (_recsOpen ? '▲ جمع' : '▼ باز') + '</button></div>';
+    if(_recsOpen) {
+      if(recs.length === 0) {
+        html += '<div style="text-align:center;padding:16px;color:var(--text-muted);font-size:12px">هیچ توصیه‌ای یافت نشد</div>';
+      } else {
+        recs.forEach(function(r) {
+          var urgBadge = r.urgency==='critical'
+            ? '<span style="background:#fef2f2;color:#dc2626;border-radius:10px;padding:2px 8px;font-size:10px;font-weight:700">🔴 فوری</span>'
+            : r.urgency==='high'
+            ? '<span style="background:#fff7ed;color:#ea580c;border-radius:10px;padding:2px 8px;font-size:10px;font-weight:700">🟠 مهم</span>'
+            : r.urgency==='medium'
+            ? '<span style="background:#fefce8;color:#ca8a04;border-radius:10px;padding:2px 8px;font-size:10px;font-weight:700">🟡 معمول</span>'
+            : '<span style="background:#f1f5f9;color:#64748b;border-radius:10px;padding:2px 8px;font-size:10px;font-weight:700">⚪ کم‌اولویت</span>';
+          var potStars = '';
+          for(var ps=0;ps<r.pot;ps++) potStars+='⭐';
+          var ownerName = r.owner ? (USERS[r.owner]||r.owner) : '—';
+          html += '<div class="rec-card rec-' + r.urgency + '">'
+            + '<div class="rec-body">'
+            + '<div class="rec-name">' + urgBadge + ' ' + esc(r.name) + ' — <span style="font-weight:400;color:var(--text-muted)">' + esc(r.prov) + '</span></div>'
+            + '<div class="rec-reason">' + r.reasons.map(function(rs){return esc(rs);}).join(' • ') + '</div>'
+            + '<div class="rec-action">&#128161; اقدام پیشنهادی: ' + esc(r.action) + '</div>'
+            + '<div class="rec-meta">'
+            + '👤 ' + esc(ownerName) + '  |  ' + potStars
+            + '  |  <button onclick="(function(){var wks=DB.weekEntries?Object.keys(DB.weekEntries):[];if(!wks.length){showToast('ابتدا یک هفته بسازید',2000);return;}var wId=wks[wks.length-1];addToWeekAuto(wId,''+r.rtype+'',''+r.id+'',''+r.name.replace(/'/g,"&#39;").replace(/\/g,"\\").replace(/
+/g,"")+'','visit');})()" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:5px;font-size:10px;padding:2px 8px;cursor:pointer;font-family:inherit">📅 برنامه‌ریزی</button>'
+            + '</div></div></div>';
+        });
+      }
+    }
+    html += '</div>';
+  }
 
   // ── log history
   html+=_renderKPIHistory(_kpiUser,_kpiMonth);
