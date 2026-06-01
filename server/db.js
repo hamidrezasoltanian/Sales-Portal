@@ -79,6 +79,21 @@ async function initSchema() {
     )
   `);
 
+  await query(`
+    CREATE TABLE IF NOT EXISTS center_audit (
+      id SERIAL PRIMARY KEY,
+      center_key VARCHAR(200) NOT NULL,
+      center_name VARCHAR(300),
+      field VARCHAR(100),
+      old_value TEXT,
+      new_value TEXT,
+      changed_by VARCHAR(100),
+      changed_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_center_audit_key ON center_audit(center_key)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_center_audit_at ON center_audit(changed_at DESC)`);
+
   // Seed default users if not exist
   const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
   const defaultPassword = process.env.DEFAULT_USER_PASSWORD || 'Atena@1234';

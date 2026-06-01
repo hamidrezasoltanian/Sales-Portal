@@ -3,6 +3,8 @@
 const express = require('express');
 const { query } = require('../db');
 const { requireAuth, requireManager } = require('../auth');
+let _broadcast = null;
+try { _broadcast = require('./events').broadcast; } catch(e) {}
 
 const router = express.Router();
 
@@ -64,6 +66,7 @@ router.put('/db', async (req, res) => {
       [JSON.stringify(merged), req.user.username]
     );
 
+    try { if (_broadcast) _broadcast('db-updated', { by: req.user.username, at: Date.now() }, req.user.username); } catch(e) {}
     return res.json({ ok: true });
   } catch (e) {
     console.error('[data/db PUT]', e.message);
@@ -99,6 +102,7 @@ router.put('/mtr', async (req, res) => {
        ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
       [JSON.stringify(body), req.user.username]
     );
+    try { if (_broadcast) _broadcast('mtr-updated', { by: req.user.username, at: Date.now() }, req.user.username); } catch(e) {}
     return res.json({ ok: true });
   } catch (e) {
     console.error('[data/mtr PUT]', e.message);

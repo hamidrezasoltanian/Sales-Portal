@@ -279,6 +279,15 @@ select.pot-3{background:#fef3c7;color:#854d0e}select.pot-4{background:#bbf7d0;co
 
 /* ══ KANBAN ══ */
 .kanban-board{display:flex;gap:10px;padding:12px;overflow-x:auto;min-height:400px;background:var(--bg-raised)}
+.pipeline-wrap{padding:14px;overflow-x:auto}
+.pipeline-cols{display:flex;gap:10px;min-width:800px;align-items:flex-start}
+.pipeline-col{flex:1;min-width:160px;background:var(--bg-raised);border-radius:8px;overflow:hidden}
+.pipeline-col-head{padding:8px 12px;font-weight:700;font-size:12px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center}
+.pipeline-col-body{padding:6px;display:flex;flex-direction:column;gap:4px;max-height:70vh;overflow-y:auto}
+.pipeline-card{background:var(--card);border-radius:6px;padding:7px 9px;font-size:11px;cursor:pointer;border-right:3px solid #0ea5e9;transition:.15s}
+.pipeline-card:hover{box-shadow:0 2px 8px rgba(0,0,0,.1)}
+.pipeline-card .pc-name{font-weight:600;color:var(--text-primary);margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pipeline-card .pc-meta{color:var(--text-muted);font-size:10px}
 .kanban-col{flex:0 0 210px;background:var(--bg-input);border-radius:8px;display:flex;flex-direction:column;max-height:80vh;box-shadow:0 1px 3px rgba(0,0,0,.06)}
 .kanban-over{background:#dbeafe!important;outline:2px dashed #0ea5e9}
 .kanban-col-head{padding:8px 12px;font-weight:700;font-size:12px;border-bottom:2px solid var(--border);border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center}
@@ -708,9 +717,11 @@ select.pot-3{background:#fef3c7;color:#854d0e}select.pot-4{background:#bbf7d0;co
     <button class="top-btn" onclick="openSettings()" title="تنظیمات" style="background:rgba(255,255,255,.15);font-weight:700">⚙ تنظیمات</button>
     <button class="top-btn" onclick="openUnifiedBackup()" title="Ctrl+B" style="background:rgba(14,165,233,.2);border-color:rgba(14,165,233,.4);font-weight:700">💾 بک‌آپ</button>
     <input type="file" id="restoreInp" accept=".json" style="display:none" onchange="unifiedRestore(event)">
+    <input type="file" id="importCentersInp" accept=".xlsx,.xls" style="display:none" onchange="importCentersFromExcel(event)">
     <input type="file" id="unifiedMergeInp" accept=".json" multiple style="display:none" onchange="unifiedHandleMergeFiles(event)">
     <button class="top-btn top-btn-secondary" onclick="openDBManager()" data-secondary="1" title="مدیریت دیتابیس مراکز" style="background:rgba(14,165,233,.2);border-color:rgba(14,165,233,.4);font-weight:700">📦 دیتابیس مراکز</button>
     <button class="top-btn top-btn-secondary" onclick="exportCentersExcel()" data-secondary="1" title="خروجی اکسل از همه مراکز" style="background:rgba(34,197,94,.15);border-color:rgba(34,197,94,.3)">📊 خروجی اکسل</button>
+    <button class="top-btn top-btn-secondary" onclick="document.getElementById('importCentersInp').click()" data-secondary="1" title="وارد کردن مراکز از Excel" style="background:rgba(34,197,94,.15);border-color:rgba(34,197,94,.3)">📥 وارد مراکز</button>
     <button class="top-btn top-btn-secondary" onclick="clearAllData()" data-secondary="1" title="پاک کردن همه داده‌ها" style="background:rgba(220,38,38,.15);border-color:rgba(220,38,38,.3);color:#fca5a5">🗑 پاک‌سازی</button>
     </div><!-- /topMenuDropdown -->
   </div><!-- /top-area-right -->
@@ -774,6 +785,7 @@ select.pot-3{background:#fef3c7;color:#854d0e}select.pot-4{background:#bbf7d0;co
     <button class="vb active" id="vb_list" onclick="setViewMode('list')" title="لیست">📋</button>
     <button class="vb" id="vb_kanban" onclick="setViewMode('kanban')" title="کانبان">📊</button>
     <button class="vb" id="vb_card" onclick="setViewMode('card')" title="کارت">🗂</button>
+    <button class="vb" id="vb_pipeline" onclick="setViewMode('pipeline')" title="Pipeline">🔀</button>
   </span>
   <button class="btn-act btn-excel" id="csvBtn" style="display:none" onclick="exportCSV()">📊 CSV</button>
   <button class="btn-act btn-print no-print" id="printBtn" style="display:none" onclick="doPrint()">🖨 چاپ</button>
@@ -1810,7 +1822,28 @@ function saveMasterCenters(centers){
 }
 function recK(type,id){return type+'_'+id;}
 function getE(type,id){return DB.edits[recK(type,id)]||{};}
-function setE(type,id,field,val){var k=recK(type,id);if(!DB.edits[k])DB.edits[k]={};DB.edits[k][field]=val;DB.edits[k]._ts=nowTs();if(field==='status'||field==='lead'||field==='potential')DB.edits[k]._lastActivity=nowTs();if(field==='status')DB.edits[k]._statusChangedTs=nowTs();saveDB();flashRow(id);if(currentTab==='kpi'&&(field==='status'||field==='lead'||field==='owner'))setTimeout(renderKPIPanel,300);}
+function _getCenterName(type,id){
+  if(type==='center'){var c=CENTERS.find(function(x){return x.id===id;});if(c)return c.name;}
+  _buildPCCache();
+  var provId=id.split('||')[0];
+  var arr=_PC_CACHE[provId]||[];
+  var c2=arr.find(function(x){return x.id===id;});
+  if(c2)return c2.name;
+  var ex=(DB.extra||[]).find(function(x){return x.id===id;});
+  return ex?ex.name:id;
+}
+function setE(type,id,field,val){var k=recK(type,id);if(!DB.edits[k])DB.edits[k]={};
+  var _auditFields=['status','owner','lead','potential','followupDate'];
+  if(_auditFields.indexOf(field)>=0){
+    var _oldV=DB.edits[k][field]!==undefined?DB.edits[k][field]:'';
+    if(String(_oldV)!==String(val)){
+      var _cName=_getCenterName(type,id);
+      fetch('/api/audit',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({centerKey:k,centerName:_cName,field:field,oldValue:_oldV,newValue:val})
+      }).catch(function(){});
+    }
+  }
+  DB.edits[k][field]=val;DB.edits[k]._ts=nowTs();if(field==='status'||field==='lead'||field==='potential')DB.edits[k]._lastActivity=nowTs();if(field==='status')DB.edits[k]._statusChangedTs=nowTs();saveDB();flashRow(id);if(currentTab==='kpi'&&(field==='status'||field==='lead'||field==='owner'))setTimeout(renderKPIPanel,300);}
 function rTags(type,id){return DB.rTags[recK(type,id)]||[];}
 function tagById(id){return(DB.tags||[]).find(function(t){return t.id===id;});}
 
@@ -2325,6 +2358,7 @@ function renderTable(){
   }
   if(_viewMode==='kanban'){renderKanban();return;}
   if(_viewMode==='card'){renderCards();return;}
+  if(_viewMode==='pipeline'){renderPipeline();return;}
   renderProvTable();
 }
 
@@ -2548,7 +2582,7 @@ function _doAddCenter(){
 // ════════════════════════ KANBAN / CARD ═════════════
 function setViewMode(m){
   _viewMode=m;
-  ['list','kanban','card'].forEach(function(v){
+  ['list','kanban','card','pipeline'].forEach(function(v){
     var b=document.getElementById('vb_'+v);if(b)b.classList.toggle('active',_viewMode===v);
   });
   renderTable();
@@ -2612,6 +2646,64 @@ function renderCards(){
   }).join('')+'</div>';
   var _rc=document.getElementById('rowCount');if(_rc)_rc.textContent='نمایش '+data.length+' (کارت)';
 }
+
+function renderPipeline() {
+  var tableEl = document.getElementById('tableArea');
+  if (!tableEl) return;
+  _buildPCCache();
+  var rtype = getProvType(_currentProvId);
+  var data = getFiltered();
+  
+  // Group centers by status
+  var groups = {};
+  STATUS_LIST.forEach(function(s) { groups[s] = []; });
+  
+  data.forEach(function(r) {
+    var e = getE(rtype, r.id);
+    var st = e.status || 'بدون تماس';
+    if (!groups[st]) groups[st] = [];
+    groups[st].push({ r: r, e: e });
+  });
+  
+  var ST_COLORS = ['#94a3b8','#3b82f6','#8b5cf6','#f59e0b','#22c55e','#ef4444'];
+  var ST_ICONS = ['⬜','📞','🤝','📋','✅','🚫'];
+  
+  var total = data.length;
+  
+  // Hide other views
+  var tbl = document.getElementById('mainTable');
+  var pg = document.getElementById('provGrid');
+  var cv = document.getElementById('cardView');
+  var kb = document.getElementById('kanbanView');
+  if (tbl) tbl.style.display = 'none';
+  if (pg) pg.style.display = 'none';
+  if (cv) cv.style.display = 'none';
+  if (kb) kb.style.display = 'none';
+  
+  tableEl.innerHTML = '<div class="pipeline-wrap"><div class="pipeline-cols">'
+    + STATUS_LIST.map(function(st, idx) {
+      var items = groups[st] || [];
+      var pct = total ? Math.round(items.length / total * 100) : 0;
+      return '<div class="pipeline-col">'
+        + '<div class="pipeline-col-head" style="background:' + ST_COLORS[idx] + '20;border-bottom:2px solid ' + ST_COLORS[idx] + '">'
+        + '<span>' + ST_ICONS[idx] + ' ' + st + '</span>'
+        + '<span style="background:' + ST_COLORS[idx] + ';color:#fff;border-radius:10px;padding:1px 7px">' + items.length + '</span>'
+        + '</div>'
+        + '<div style="padding:4px 8px;font-size:10px;color:var(--text-muted);border-bottom:1px solid var(--border)">' + pct + '% از کل</div>'
+        + '<div class="pipeline-col-body">'
+        + items.slice(0, 50).map(function(item) {
+          var owner = USERS[item.e.owner || item.r.owner || ''] || '';
+          return '<div class="pipeline-card" style="border-right-color:' + ST_COLORS[idx] + '" onclick="openCenterModal('' + rtype + '','' + item.r.id + '')">'
+            + '<div class="pc-name">' + esc(item.r.name) + '</div>'
+            + '<div class="pc-meta">' + (owner ? '👤 ' + esc(owner) : '') + (item.e.followupDate ? ' 📅 ' + item.e.followupDate : '') + '</div>'
+            + '</div>';
+        }).join('')
+        + (items.length > 50 ? '<div style="text-align:center;font-size:10px;color:var(--text-muted);padding:4px">... و ' + (items.length - 50) + ' مورد دیگر</div>' : '')
+        + '</div></div>';
+    }).join('')
+    + '</div></div>';
+}
+
 
 function rebuildFilters(){
   buildTypeFilter();
@@ -2810,6 +2902,31 @@ function closeAllModals(){
 }
 
 // ════════════════════════ CENTER MODAL ══════════════
+
+function openCenterAudit(centerKey, centerName) {
+  fetch('/api/audit?key='+encodeURIComponent(centerKey)+'&limit=30')
+    .then(function(r){return r.json();})
+    .then(function(rows){
+      if(!rows.length){openModal('auditModal','📋 تاریخچه — '+esc(centerName),'<div style="text-align:center;padding:30px;color:var(--text-muted)">هیچ تغییری ثبت نشده</div>','<button class="btn-secondary" onclick="closeModal(\'auditModal\')">بستن</button>');return;}
+      var FIELD_LABELS={status:'وضعیت',owner:'مسئول',lead:'سرنخ',potential:'پتانسیل',followupDate:'تاریخ پیگیری'};
+      var body='<div style="display:flex;flex-direction:column;gap:4px;max-height:60vh;overflow-y:auto;padding:4px">'
+        +rows.map(function(r){
+          var dt=new Date(r.changed_at);
+          var dStr=dt.toLocaleDateString('fa-IR')+'  '+p2(dt.getHours())+':'+p2(dt.getMinutes());
+          var fLabel=FIELD_LABELS[r.field]||r.field;
+          return '<div style="background:var(--bg-raised);border-radius:6px;padding:8px 10px;font-size:11px">'
+            +'<div style="display:flex;justify-content:space-between;margin-bottom:3px">'
+            +'<span style="font-weight:700;color:var(--text-primary)">'+esc(fLabel)+'</span>'
+            +'<span style="color:var(--text-muted)">'+esc(dStr)+'</span></div>'
+            +'<div style="color:var(--text-muted)">'+esc(r.old_value||'—')+' ← <span style="color:#0ea5e9;font-weight:600">'+esc(r.new_value||'—')+'</span></div>'
+            +'<div style="font-size:10px;color:var(--text-muted);margin-top:2px">توسط: '+esc(r.changed_by)+'</div>'
+            +'</div>';
+        }).join('')
+        +'</div>';
+      openModal('auditModal','📋 تاریخچه — '+esc(centerName),body,'<button class="btn-secondary" onclick="closeModal(\'auditModal\')">بستن</button>');
+    }).catch(function(){showToast('⚠ خطا در بارگذاری تاریخچه');});
+}
+
 function openCenterModal(rtype,id){
   var prov=_currentProvId;
   if(!prov){
@@ -2905,6 +3022,7 @@ function openCenterModal(rtype,id){
     }).join('')+'</div>':'');
 
   var foot='<button style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="closeModal(\'cm_'+id+'\');confirmDeleteCenter(\''+rtype+'\',\''+id+'\',\''+esc(r.name)+'\')">🗑 حذف</button>'
+    +'<button style="background:#f0f9ff;color:#0369a1;border:1px solid #7dd3fc;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openCenterAudit(\''+recK(rtype,r.id)+'\',\''+esc(r.name)+'\')">📋 تاریخچه</button>'
     +'<button class="btn-secondary" onclick="closeModal(\'cm_'+id+'\')">بستن</button>'
     +'<button class="btn-primary" onclick="openAssignWeekForCenter(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')">📋 اضافه به هفته</button>';
   // ── مطالبات section ──
@@ -3386,7 +3504,7 @@ function renderWeekPlan(){
     return '<div class="wp-day'+(d.isToday?' today':'')+'">'
       + '<div class="wp-day-head">'+d.name+'<br><small>'+d.str.split('/').slice(1).join('/')+'</small>'
       + (items.length?'<span class="wp-cnt">'+items.length+'</span>':'')+'</div>'
-      + '<div class="wp-day-body">'
+      + '<div class="wp-day-body" ondragover="event.preventDefault();this.classList.add(\'wp-drop-over\')" ondragleave="this.classList.remove(\'wp-drop-over\')" ondrop="wpDrop(event,\''+d.str+'\')">'
       + (items.length ? items.map(function(e){return renderWpItem(e,weekId);}).join('') : '<div class="wp-empty">—</div>')
       + '</div>'
       + '<button class="wp-add-btn" data-wid="'+weekId+'" data-dstr="'+d.str+'" onclick="wpPickForDay(this.getAttribute(\'data-wid\'),this.getAttribute(\'data-dstr\'))">+ انتقال</button>'
@@ -3662,7 +3780,7 @@ function renderWpItem(entry,weekId){
   // نمایش ویژه پیگیری مطالبات
   if(rtype==='mtr'){
     var amtStr=entry.mtrAmount?Math.round(entry.mtrAmount).toLocaleString('fa')+' ت':'';
-    return '<div class="wp-item'+(done?' done':'')+'" style="border-right-color:#dc2626;background:'+(done?'var(--bg-raised)':'#fef2f2')+'">'
+    return '<div class="wp-item'+(done?' done':'')+'" data-ekey="'+k+'" draggable="true" ondragstart="event.stopPropagation();wpDragStart(event,\''+k+'\')" ondragend="wpDragEnd(event)" style="border-right-color:#dc2626;background:'+(done?'var(--bg-raised)':'#fef2f2')+'">'
       +'<div style="display:flex;justify-content:space-between;align-items:flex-start;">'
       +'<div class="wp-item-name" style="color:#991b1b">📄 '+esc(entry.mtrCustomer||rid)+'</div>'
       +(amtStr?'<span style="font-size:9px;background:#fee2e2;color:#991b1b;padding:2px 6px;border-radius:10px;font-weight:700;white-space:nowrap">'+amtStr+'</span>':'')
@@ -3679,7 +3797,7 @@ function renderWpItem(entry,weekId){
   var actBg = actType === 'visit' ? '#8b5cf6' : '#0ea5e9';
   var isSel2 = _wpSelected.has(k);
 
-  return '<div class="wp-item'+(done?' done':'')+(!done&&isSel2?' wp-selected':'')+'" data-ekey="'+k+'">'
+  return '<div class="wp-item'+(done?' done':'')+(!done&&isSel2?' wp-selected':'')+'" data-ekey="'+k+'" draggable="true" ondragstart="event.stopPropagation();wpDragStart(event,\''+k+'\')" ondragend="wpDragEnd(event)">'
     + '<input type="checkbox" class="wp-item-cb" '+(isSel2?'checked':'')+' onclick="event.stopPropagation();wpToggleSelect(\''+(k)+'\')" title="انتخاب">'
     + '<div style="display:flex;justify-content:space-between;align-items:flex-start;padding-left:18px;">'
     + '<div class="wp-item-name">'+esc(name)+'</div>'
@@ -3783,6 +3901,36 @@ function wpMarkDoneKey(eKey){
   DB.weekEntries[eKey].done=true;DB.weekEntries[eKey].doneDate=todayStr();
   saveDB();renderWeekPlan();showToast('✅ انجام شد!',2000);if(currentTab==='kpi')setTimeout(renderKPIPanel,300);
 }
+var _wpDragging = null;
+
+function wpDragStart(event, eKey) {
+  _wpDragging = eKey;
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', eKey);
+  setTimeout(function() {
+    var el = document.querySelector('.wp-item[data-ekey="' + eKey + '"]');
+    if (el) el.classList.add('dragging');
+  }, 0);
+}
+
+function wpDragEnd(event) {
+  document.querySelectorAll('.wp-item.dragging').forEach(function(el) { el.classList.remove('dragging'); });
+  document.querySelectorAll('.wp-day-body.wp-drop-over').forEach(function(el) { el.classList.remove('wp-drop-over'); });
+  _wpDragging = null;
+}
+
+function wpDrop(event, targetDate) {
+  event.preventDefault();
+  document.querySelectorAll('.wp-day-body.wp-drop-over').forEach(function(el) { el.classList.remove('wp-drop-over'); });
+  var eKey = _wpDragging || event.dataTransfer.getData('text/plain');
+  if (!eKey || !DB.weekEntries[eKey]) return;
+  if (DB.weekEntries[eKey].scheduledDate === targetDate) return;
+  DB.weekEntries[eKey].scheduledDate = targetDate;
+  saveDB();
+  renderWeekPlan();
+  showToast('📅 تاریخ به ' + targetDate + ' تغییر کرد', 2000);
+}
+
 function wpRemoveEntry(eKey){
   delete DB.weekEntries[eKey];saveDB();renderWeekPlan();
 }
@@ -5461,6 +5609,107 @@ function renderManagerPanel(){
 }
 
 // ════════════════════════ EXCEL EXPORT (مراکز) ════════════════════
+
+function importCentersFromExcel(event) {
+  if (typeof XLSX === 'undefined') { showToast('⚠ کتابخانه Excel بارگذاری نشده'); return; }
+  var file = event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      var wb = XLSX.read(e.target.result, { type: 'binary' });
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      if (rows.length < 2) { showToast('⚠ فایل خالی است'); return; }
+      
+      var headers = rows[0].map(function(h) { return String(h).trim(); });
+      var nameIdx = headers.findIndex(function(h) { return /نام|name/i.test(h); });
+      var provIdx = headers.findIndex(function(h) { return /استان|province/i.test(h); });
+      var typeIdx = headers.findIndex(function(h) { return /نوع|type/i.test(h); });
+      var ownerIdx = headers.findIndex(function(h) { return /مسئول|owner|کارشناس/i.test(h); });
+      var potIdx = headers.findIndex(function(h) { return /پتانسیل|potential/i.test(h); });
+      
+      if (nameIdx < 0) { showToast('⚠ ستون «نام» یافت نشد'); return; }
+      
+      var preview = rows.slice(1, 6).filter(function(r) { return r[nameIdx]; });
+      
+      var body = '<div style="font-size:12px;margin-bottom:12px;color:var(--text-muted)">شناسایی‌شده: '
+        + (rows.length - 1) + ' ردیف — پیش‌نمایش ۵ ردیف اول:</div>'
+        + '<div style="background:var(--bg-raised);border-radius:6px;padding:8px;margin-bottom:12px;font-size:11px;overflow-x:auto">'
+        + '<table style="width:100%;border-collapse:collapse">'
+        + '<tr style="border-bottom:1px solid var(--border)">'
+        + ['نام','استان','نوع','مسئول','پتانسیل'].map(function(h){return '<th style="padding:4px 8px;text-align:right;color:var(--text-muted)">'+h+'</th>';}).join('')
+        + '</tr>'
+        + preview.map(function(r) {
+          return '<tr style="border-bottom:1px solid var(--border)">'
+            + ['نام','استان','نوع','مسئول','پتانسیل'].map(function(h, i) {
+              var idx2 = [nameIdx, provIdx, typeIdx, ownerIdx, potIdx][i];
+              return '<td style="padding:4px 8px">' + esc(idx2 >= 0 ? String(r[idx2]) : '—') + '</td>';
+            }).join('')
+            + '</tr>';
+        }).join('')
+        + '</table></div>'
+        + '<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:8px;font-size:11px;margin-bottom:10px">'
+        + '⚠ مراکز وارد شده به عنوان «مراکز اضافه» (DB.extra) ذخیره می‌شوند.'
+        + '</div>'
+        + '<div style="font-size:12px">استان پیش‌فرض برای مراکز بدون استان: <select id="importProvDef" style="padding:4px;border:1px solid var(--border-input);border-radius:4px;font-family:inherit;font-size:11px">'
+        + getAllProvinces().map(function(p){return '<option value="'+p.id+'">'+p.name+'</option>';}).join('')
+        + '</select></div>';
+      
+      var rowsJson = JSON.stringify(rows);
+      var foot = '<button class="btn-secondary" onclick="closeModal(\'importCentersModal\')">انصراف</button>'
+        + '<button class="btn-primary" onclick="doImportCenters(JSON.parse(this.dataset.rows),'+nameIdx+','+provIdx+','+typeIdx+','+ownerIdx+','+potIdx+')" data-rows=\''+rowsJson.replace(/'/g,"&#39;")+'\'">✅ وارد کردن '+(rows.length-1)+' مرکز</button>';
+      
+      openModal('importCentersModal', '📥 وارد کردن مراکز از Excel', body, foot);
+    } catch(err) {
+      showToast('⚠ خطا در خواندن فایل: ' + err.message);
+    }
+  };
+  reader.readAsBinaryString(file);
+}
+
+function doImportCenters(rows, nameIdx, provIdx, typeIdx, ownerIdx, potIdx) {
+  if (!DB.extra) DB.extra = [];
+  var dataRows = rows.slice(1).filter(function(r) { return r[nameIdx]; });
+  var defProv = (document.getElementById('importProvDef') || {}).value || 'tehran';
+  var added = 0;
+  
+  dataRows.forEach(function(r) {
+    var name = String(r[nameIdx]).trim();
+    if (!name) return;
+    var provRaw = provIdx >= 0 ? String(r[provIdx]).trim() : '';
+    var province_id = defProv;
+    if (provRaw) {
+      var pFound = getAllProvinces().find(function(p) { return fNorm(p.name).indexOf(fNorm(provRaw)) >= 0; });
+      if (pFound) province_id = pFound.id;
+    }
+    var id = 'imp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+    var entry = {
+      id: id,
+      name: name,
+      province_id: province_id,
+      type: typeIdx >= 0 ? String(r[typeIdx]).trim() : '',
+      potential: potIdx >= 0 ? (parseInt(r[potIdx]) || 1) : 1,
+      owner: '',
+      source: 'excel_import'
+    };
+    if (ownerIdx >= 0 && r[ownerIdx]) {
+      var ownerRaw = fNorm(String(r[ownerIdx]));
+      var matchedOwner = Object.keys(USERS).find(function(uid) { return fNorm(USERS[uid]).indexOf(ownerRaw) >= 0; });
+      if (matchedOwner) entry.owner = matchedOwner;
+    }
+    DB.extra.push(entry);
+    added++;
+  });
+  
+  saveDB();
+  closeModal('importCentersModal');
+  renderTable();
+  showToast('✅ ' + added + ' مرکز وارد شد', 3000);
+}
+
 function exportCentersExcel(){
   _buildPCCache();
   var rows=[['استان','نام مرکز','نوع','پتانسیل','سرنخ','مسئول','وضعیت','پیگیری بعدی']];
@@ -5566,7 +5815,45 @@ async function init(){
     if(e.key==='Escape'){closeAllModals();closeQS();}
     if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openQS();}
   });
+  initSSE();
 }
+var _sse = null;
+var _sseReconnectTimer = null;
+
+function initSSE() {
+  if (_sse) return;
+  _sse = new EventSource('/api/events/stream');
+  _sse.onmessage = function(e) {
+    try {
+      var data = JSON.parse(e.data);
+      if (data.type === 'db-updated') {
+        _sseReloadDB(data.by);
+      }
+    } catch(err) {}
+  };
+  _sse.onerror = function() {
+    _sse.close(); _sse = null;
+    clearTimeout(_sseReconnectTimer);
+    _sseReconnectTimer = setTimeout(initSSE, 8000);
+  };
+}
+
+function _sseReloadDB(byUser) {
+  fetch('/api/data/db').then(function(r){ return r.ok ? r.json() : null; }).then(function(d) {
+    if (!d || typeof d !== 'object') return;
+    var merged = Object.assign({}, DB, d);
+    merged.weekEntries = Object.assign({}, DB.weekEntries, d.weekEntries || {});
+    merged.edits = Object.assign({}, DB.edits, d.edits || {});
+    Object.keys(merged).forEach(function(k) { DB[k] = merged[k]; });
+    if (currentTab === 'weekplan') renderWeekPlan();
+    else if (currentTab === 'provinces') { renderDashboard(); renderTable(); }
+    else if (currentTab === 'activity') renderActivity();
+    else if (currentTab === 'kpi') renderKPIPanel();
+    var name = byUser ? (USERS[byUser] || byUser) : 'کاربر دیگری';
+    showToast('🔄 ' + name + ' تغییراتی اعمال کرد', 3000);
+  }).catch(function() {});
+}
+
 
 // ── پاک‌سازی ورودی‌های منسوخ (orphaned) ─────────────────────────
 function _getAllValidRecKeys(){
@@ -5908,6 +6195,54 @@ function _kpiUserChange(v){
   if(d&&window.umGetColor)d.style.background=umGetColor(v);
   renderKPIPanel();
 }
+
+function getProvKPITarget(provId) {
+  var pt = (DB.kpiTargets && DB.kpiTargets.provinces) || {};
+  return Object.assign({ contracts: 0, visits: 0 }, pt[provId] || {});
+}
+
+function saveProvKPITarget(provId, targets) {
+  if (!DB.kpiTargets) DB.kpiTargets = {};
+  if (!DB.kpiTargets.provinces) DB.kpiTargets.provinces = {};
+  DB.kpiTargets.provinces[provId] = targets;
+  saveDB();
+}
+
+function openProvTargetsModal() {
+  _buildPCCache();
+  var provinces = getAllProvinces();
+  var body = '<div style="max-height:60vh;overflow-y:auto">'
+    + '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+    + '<thead><tr style="background:var(--bg-raised)">'
+    + '<th style="padding:6px 8px;text-align:right">استان</th>'
+    + '<th style="padding:6px 8px;text-align:center">هدف قرارداد</th>'
+    + '<th style="padding:6px 8px;text-align:center">هدف ویزیت</th>'
+    + '<th style="padding:6px 8px;text-align:center">واقعی قرارداد</th>'
+    + '<th style="padding:6px 8px;text-align:center">پیشرفت</th>'
+    + '</tr></thead><tbody>'
+    + provinces.map(function(p) {
+      var t = getProvKPITarget(p.id);
+      var actualContracts = 0;
+      var rtype = p.id === 'tehran' ? 'center' : 'pc';
+      var arr = p.id === 'tehran' ? CENTERS : (_PC_CACHE[p.id] || []);
+      arr.forEach(function(c) {
+        var e = getE(rtype, c.id);
+        if (e.status === 'قرارداد بسته شد') actualContracts++;
+      });
+      var pct = t.contracts > 0 ? Math.min(100, Math.round(actualContracts / t.contracts * 100)) : 0;
+      var barColor = pct >= 100 ? '#22c55e' : pct >= 50 ? '#f59e0b' : '#3b82f6';
+      return '<tr style="border-bottom:1px solid var(--border)">'
+        + '<td style="padding:6px 8px;font-weight:600">' + esc(p.name) + '</td>'
+        + '<td style="padding:6px 8px;text-align:center"><input type="number" min="0" value="' + t.contracts + '" style="width:60px;padding:3px;border:1px solid var(--border-input);border-radius:4px;text-align:center;font-family:inherit;font-size:11px;background:var(--bg-input);color:var(--text-primary)" onchange="saveProvKPITarget(' + JSON.stringify(p.id) + ',Object.assign(getProvKPITarget(' + JSON.stringify(p.id) + '),{contracts:parseInt(this.value)||0}))"></td>'
+        + '<td style="padding:6px 8px;text-align:center"><input type="number" min="0" value="' + t.visits + '" style="width:60px;padding:3px;border:1px solid var(--border-input);border-radius:4px;text-align:center;font-family:inherit;font-size:11px;background:var(--bg-input);color:var(--text-primary)" onchange="saveProvKPITarget(' + JSON.stringify(p.id) + ',Object.assign(getProvKPITarget(' + JSON.stringify(p.id) + '),{visits:parseInt(this.value)||0}))"></td>'
+        + '<td style="padding:6px 8px;text-align:center;font-weight:700;color:' + (actualContracts > 0 ? '#22c55e' : 'var(--text-muted)') + '">' + actualContracts + '</td>'
+        + '<td style="padding:6px 8px"><div style="background:var(--bg-page);border-radius:10px;height:8px;overflow:hidden"><div style="height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:10px;transition:.3s"></div></div><div style="text-align:center;font-size:10px;margin-top:2px;color:var(--text-muted)">' + pct + '%</div></td>'
+        + '</tr>';
+    }).join('')
+    + '</tbody></table></div>';
+  openModal('provTargetsModal', '🎯 اهداف استانی', body, '<button class="btn-secondary" onclick="closeModal(\'provTargetsModal\')">بستن</button>');
+}
+
 function renderKPIPanel(){
   ensureKPIDB();
   if(!_kpiUser)_kpiUser=currentUser||Object.keys(USERS)[0];
@@ -5939,6 +6274,7 @@ function renderKPIPanel(){
     +'<select onchange="_kpiMonth=this.value;renderKPIPanel()" style="padding:5px 10px;border:1px solid var(--border-input);border-radius:6px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)">'+monthOpts+'</select>'
     +'<div style="margin-right:auto;display:flex;gap:8px">'
     +'<button style="background:#f0fdf4;color:#15803d;border:1px solid #86efac;border-radius:5px;font-size:11px;padding:5px 12px;cursor:pointer;font-weight:600" onclick="openTeamKPITargets()">🎯 تنظیم اهداف تیم</button>'
+    +(_isManager()?'<button style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:5px;font-size:11px;padding:5px 12px;cursor:pointer;font-weight:600;margin-right:6px" onclick="openProvTargetsModal()">🗺 اهداف استانی</button>':'')
     +'<button class="btn-primary" onclick="openKPILog(_kpiUser)" style="font-size:11px;padding:5px 12px">📝 ثبت فعالیت</button>'
     +'</div></div>';
 

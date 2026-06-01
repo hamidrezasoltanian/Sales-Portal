@@ -44,6 +44,9 @@ app.use('/api/data', require('./routes/data'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/distribution', require('./routes/distribution'));
 app.use('/api/ai', require('./routes/ai'));
+const { router: eventsRouter } = require('./routes/events');
+app.use('/api/events', eventsRouter);
+app.use('/api/audit', require('./routes/audit'));
 
 // Health check
 app.get('/api/health', function (req, res) {
