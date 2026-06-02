@@ -2399,7 +2399,7 @@ function getFiltered(){
   var fo=document.getElementById('fOwner').value;
   var ft=document.getElementById('fTag').value?parseInt(document.getElementById('fTag').value):0;
   var ftp=document.getElementById('fType')?document.getElementById('fType').value:'';
-  var effectiveOwner=fo||_globalOwnerFilter||(_isExpert()?currentUser:'');
+  var effectiveOwner=fo||_globalOwnerFilter||(_isExpert()&&_currentProvId!=='tehran'?currentUser:'');
   var provId=_currentProvId;
   var rtype=getProvType(provId);
   var rows=getProvCenters(provId);
@@ -2443,7 +2443,7 @@ function renderProvList(){
   var effectiveProvOwner=_plOwner||(_isExpert()?currentUser:'');
   var filtProvs=provs.filter(function(p){
     if(_plSearch){var n=fNorm(p.name);if(n.indexOf(fNorm(_plSearch))<0)return false;}
-    if(effectiveProvOwner){var e2=getE('pc',p.id);var ow=e2.owner||p.owner||'';if(ow!==effectiveProvOwner)return false;}
+    if(effectiveProvOwner&&p.id!=='tehran'){var e2=getE('pc',p.id);var ow=e2.owner||p.owner||'';if(ow!==effectiveProvOwner)return false;}
     return true;
   });
   var rows=filtProvs.map(function(p){
