@@ -3797,18 +3797,39 @@ function _doDeleteCenter(rtype,id){
     clearPCCache();_ALL_PROVS=null;renderTable();
     showToast('✅ مرکز حذف شد');return;
   }
-  idbGet('centersDB').then(function(data){
-    if(!data||!data.centers)return;
-    data.centers=data.centers.filter(function(c){
-      var cid=c.province_id==='tehran'?'c_'+c.row:c.province_id+'||'+c.row;
-      return cid!==id;
+  // حذف از حافظه (CENTERS یا PC_RAW) و ذخیره روی سرور
+  if(rtype==='center'){
+    for(var _ci=CENTERS.length-1;_ci>=0;_ci--){
+      var _cc=CENTERS[_ci];
+      var _cid='c_'+(_cc.row||_cc.id||'');
+      if(_cid===id||String(_cc.id)===String(id)){CENTERS.splice(_ci,1);break;}
+    }
+  }else{
+    var _provId=id.split('||')[0];
+    var _row=Number(id.split('||')[1]);
+    PROVINCES.forEach(function(p){
+      if(p.id===_provId){
+        var _pname=p.name.replace(/[ي]/g,'ی').replace(/[ك]/g,'ک');
+        if(PC_RAW[_pname]){PC_RAW[_pname]=PC_RAW[_pname].filter(function(r){return(Array.isArray(r)?r[0]:r.row)!==_row;});}
+        if(PC_RAW[p.id]){PC_RAW[p.id]=PC_RAW[p.id].filter(function(r){return(Array.isArray(r)?r[0]:r.row)!==_row;});}
+      }
     });
-    return saveMasterCenters(data.centers).then(function(){return loadMasterCenters();});
-  }).then(function(){
-    clearPCCache();_ALL_PROVS=null;_typeFilterBuilt=false;
+  }
+  clearPCCache();_ALL_PROVS=null;_typeFilterBuilt=false;
+  var _newCENTERS=CENTERS.slice();
+  var _newPC_RAW={};Object.keys(PC_RAW).forEach(function(k){_newPC_RAW[k]=PC_RAW[k];});
+  fetch('/api/data/centers/master',{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({CENTERS:_newCENTERS,PC_RAW:_newPC_RAW})
+  }).then(function(r){
+    if(!r.ok)console.error('[delete center] server save failed:',r.status);
     rebuildFilters();renderTable();
     closeModal('delCenterModal');
     showToast('✅ مرکز از دیتابیس حذف شد');
+  }).catch(function(e){
+    console.error('[delete center]',e.message);
+    rebuildFilters();renderTable();
+    closeModal('delCenterModal');
+    showToast('✅ مرکز حذف شد');
   });
 }
 
@@ -4306,6 +4327,7 @@ function renderWpFullCenterList() {
       var rtype = we.rtype||'center', rid = we.rid||'';
       var rk = we.recKey||(rtype+'_'+rid);
       inWeekMap[rk] = true;
+      inWeekMap[rtype+'_'+rid] = true;
       if (we.scheduledDate || we.done || rtype==='mtr') return;
       var owner = getCO(rtype, rid);
       if (!_isManager() && owner && owner !== currentUser) return;
@@ -4330,6 +4352,7 @@ function renderWpFullCenterList() {
       if (inWeekMap[rk]) return;
       var e = getE(tp, c.id);
       var owner = e.owner||c.owner||'';
+      if(!_isManager()&&owner&&owner!==currentUser)return;
       allCenters.push({
         id:c.id, rtype:tp, recKey:rk,
         name:c.name||'',
