@@ -2920,7 +2920,7 @@ function renderPipeline() {
         + '<div class="pipeline-col-body">'
         + items.slice(0, 50).map(function(item) {
           var owner = USERS[item.e.owner || item.r.owner || ''] || '';
-          return '<div class="pipeline-card" style="border-right-color:' + ST_COLORS[idx] + '" onclick="openCenterModal('' + rtype + '','' + item.r.id + '')">'
+          return '<div class="pipeline-card" style="border-right-color:' + ST_COLORS[idx] + '" onclick="openCenterModal(\'' + rtype + '\',\'' + item.r.id + '\')">'
             + '<div class="pc-name">' + esc(item.r.name) + '</div>'
             + '<div class="pc-meta">' + (owner ? '👤 ' + esc(owner) : '') + (item.e.followupDate ? ' 📅 ' + item.e.followupDate : '') + '</div>'
             + '</div>';
