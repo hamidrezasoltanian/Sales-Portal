@@ -1251,309 +1251,123 @@ var _UM_TAB = 'users';
 var _UM_COLORS = ['#0ea5e9','#8b5cf6','#22c55e','#f59e0b','#ef4444','#06b6d4','#ec4899','#f97316'];
 
 // ── Helpers ───────────────────────────────────────────────────
-function umGetMembers(){ return (DB.settings&&DB.settings.members)||JSON.parse(JSON.stringify(_DEFAULT_MEMBERS)); }
+function umGetMembers(){
+  // Always prefer server data when loaded
+  if(_DEFAULT_MEMBERS&&_DEFAULT_MEMBERS.length>0)return _DEFAULT_MEMBERS;
+  return (DB.settings&&DB.settings.members)||[];
+}
 function umGetActive(){ return umGetMembers().filter(function(m){return m.active!==false&&m.id!=='guest';}); }
 function umGetColor(userId){
-  var members=umGetMembers();
-  var m=members.find(function(x){return x.id===userId;});
+  var m=umGetMembers().find(function(x){return x.id===userId;});
   if(m&&m.color)return m.color;
-  var idx=members.findIndex(function(x){return x.id===userId;});
+  var idx=umGetMembers().findIndex(function(x){return x.id===userId;});
   return _UM_COLORS[Math.max(0,idx)%_UM_COLORS.length];
 }
 function umCountCenters(userId){
   var n=0;
-  try{getAllProvinces().forEach(function(p){
-    getProvCenters(p.id).forEach(function(ctr){
-      var e=getE(getProvType(p.id),ctr.id);
-      if((e.owner||ctr.owner||'')==userId)n++;
-    });
-  });}catch(e){}
+  if(typeof CENTERS!=='undefined')CENTERS.forEach(function(c){var e=getE('center',c.id);if((e.owner||c.owner||'')===userId)n++;});
+  if(typeof _PC_CACHE!=='undefined'&&_PC_CACHE){Object.values(_PC_CACHE).forEach(function(arr){(arr||[]).forEach(function(c){var e=getE('pc',c.id);if((e.owner||c.owner||'')===userId)n++;});});}
   return n;
 }
-function umGetMonthStats(userId){
-  var month=currentJMonth();
-  try{
-    var calls=getCallsMonth(userId,month)||{total:0};
-    var visits=getVisitsMonth(userId,month)||{total:0};
-    var sales=(getSalesMonth&&getSalesMonth(userId,month))||{count:0};
-    return {calls:calls.total||0, visits:visits.total||0, sales:sales.count||0};
-  }catch(e){return{calls:0,visits:0,sales:0};}
-}
 
-// ── Modal shell ───────────────────────────────────────────────
-function openUserMgmt(){
-  if(!_isManager()){showToast('⚠ فقط مدیران دسترسی دارند');return;}
-  _UM_TAB='users';
-  var foot='<button class="btn-secondary" onclick="closeModal(\'userMgmtModal\')">بستن</button>';
-  openModal('userMgmtModal','👥 مدیریت کاربران','<div id="umWrap">'+_umBody()+'</div>',foot,{lg:true});
-}
-function openBulkReassign(){_UM_TAB='bulk';openUserMgmt();}
-function umTab(t){_UM_TAB=t;var w=document.getElementById('umWrap');if(w)w.innerHTML=_umBody();}
-function _umTabs(){
-  var tabs=[['users','👤 کاربران'],['provinces','🗺 استان‌ها'],['bulk','🔀 جابجایی']];
-  return '<div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid var(--border)">'
-    +tabs.map(function(t){
-      var on=_UM_TAB===t[0];
-      return '<button onclick="umTab(\''+t[0]+'\')" style="padding:8px 18px;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:12.5px;font-weight:'+(on?700:400)+';color:'+(on?'var(--brand)':'var(--text-muted)')+';border-bottom:2.5px solid '+(on?'var(--brand)':'transparent')+';margin-bottom:-2px;transition:all .15s">'+t[1]+'</button>';
-    }).join('')+'</div>';
-}
-function _umBody(){
-  return _umTabs()+(_UM_TAB==='users'?_umUsers():_UM_TAB==='provinces'?_umProvinces():_umBulk());
-}
-
-// ── Tab 1: Users ──────────────────────────────────────────────
-function _umUsers(){
-  var members=umGetMembers().filter(function(m){return m.id!=='guest';});
-  var rows=members.map(function(m,i){
-    var active=m.active!==false;
-    var centers=umCountCenters(m.id);
-    var stats=umGetMonthStats(m.id);
-    var color=m.color||_UM_COLORS[i%_UM_COLORS.length];
-    var statusBg=active?'#dcfce7':'var(--bg-raised)';
-    var statusTxt=active?'#15803d':'var(--text-muted)';
-    var rowOp=active?1:.55;
-    var roles=['مدیر','کارشناس فروش','بازرگانی','مالی','IT','مهمان'];
-    return '<tr style="opacity:'+rowOp+';border-bottom:1px solid var(--border)">'
-      // Color dot (click to change)
-      +'<td style="padding:9px 8px;width:28px"><div id="umdot_'+m.id+'" style="width:16px;height:16px;border-radius:50%;background:'+color+';cursor:pointer;border:2px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,.15)" onclick="umPickColor(\''+m.id+'\',this)" title="تغییر رنگ"></div></td>'
-      // Name
-      +'<td style="padding:9px 6px"><input id="um_name_'+m.id+'" value="'+esc(m.name)+'" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 9px;font-size:12.5px;font-family:inherit;color:var(--text-primary);width:130px"></td>'
-      // Username
-      +'<td style="padding:9px 6px"><input id="um_id_'+m.id+'" value="'+esc(m.id)+'" dir="ltr" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 9px;font-size:12px;font-family:monospace;color:var(--text-primary);width:140px"></td>'
-      // Role
-      +'<td style="padding:9px 6px"><select id="um_role_'+m.id+'" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 7px;font-size:12px;font-family:inherit;color:var(--text-primary)">'
-        +roles.map(function(r){return'<option'+(m.role===r?' selected':'')+'>'+r+'</option>';}).join('')
-      +'</select></td>'
-      // Phone
-      +'<td style="padding:9px 6px"><input id="um_phone_'+m.id+'" value="'+esc(m.phone||'')+'" placeholder="09XXXXXXXXX" dir="ltr" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 8px;font-size:11px;font-family:monospace;color:var(--text-primary);width:115px"></td>'
-      // Stats (this month)
-      +'<td style="padding:9px 8px;text-align:center;min-width:90px">'
-        +'<span title="تماس این ماه" style="font-size:10.5px;color:var(--text-muted)">📞'+stats.calls+'</span> '
-        +'<span title="ویزیت این ماه" style="font-size:10.5px;color:var(--text-muted)">🚗'+stats.visits+'</span> '
-        +'<span title="مراکز" style="font-size:10.5px;color:var(--text-muted)">🏥'+centers+'</span>'
-      +'</td>'
-      // Status badge
-      +'<td style="padding:9px 8px;text-align:center">'
-        +'<span onclick="umToggleActive(\''+m.id+'\')" style="font-size:11px;background:'+statusBg+';color:'+statusTxt+';border-radius:20px;padding:3px 11px;cursor:pointer;font-weight:600;border:1px solid '+(active?'#86efac':'var(--border)')+'">'+( active?'● فعال':'○ غیرفعال')+'</span>'
-      +'</td>'
-      // Actions
-      +'<td style="padding:9px 6px;white-space:nowrap">'
-        +'<button onclick="umSaveUser(\''+m.id+'\')" title="ذخیره تغییرات" style="background:var(--brand-bg);color:var(--brand);border:1px solid var(--brand);border-radius:5px;padding:4px 10px;cursor:pointer;font-size:11px;font-family:inherit">💾 ذخیره</button> '
-        +'<button onclick="umResetPassword(\''+m.id+'\')" title="تغییر رمز" style="background:var(--bg-raised);color:var(--text-secondary);border:1px solid var(--border);border-radius:5px;padding:4px 8px;cursor:pointer;font-size:11px">🔑</button>'
-        +(centers>0?' <button onclick="umReassignAll(\''+m.id+'\')" title="جابجایی مراکز" style="background:#fef9c3;color:#854d0e;border:1px solid #fcd34d;border-radius:5px;padding:4px 8px;cursor:pointer;font-size:11px">🔀</button>':'')
-      +(m.phone?'<br><div style="display:flex;gap:4px;margin-top:5px">'
-        +'<a href="https://wa.me/'+m.phone.replace(/\D/g,'').replace(/^0/,'98')+'" target="_blank" title="واتساپ" style="background:#25d36620;color:#25d366;border:1px solid #25d36644;border-radius:5px;padding:3px 7px;font-size:10px;text-decoration:none">💬</a>'
-        +'<a href="https://t.me/+'+m.phone.replace(/\D/g,'').replace(/^0/,'98')+'" target="_blank" title="تلگرام" style="background:#2481cc20;color:#2481cc;border:1px solid #2481cc44;border-radius:5px;padding:3px 7px;font-size:10px;text-decoration:none">📱</a>'
-        +'<button onclick="mtrSendSMSToUser(\''+m.id+'\')" title="ارسال گزارش مطالبات" style="background:#0ea5e920;color:#0ea5e9;border:1px solid #0ea5e944;border-radius:5px;padding:3px 7px;font-size:10px;cursor:pointer;font-family:inherit">📨</button>'
-        +'</div>':'')
-      +'</td>'
-      +'</tr>';
-  }).join('');
-
-  return '<div style="background:var(--brand-bg);border:1px solid #bae6fd;border-radius:7px;padding:8px 14px;margin-bottom:12px;font-size:12px;color:var(--text-secondary)">'
-    +'💡 غیرفعال‌کردن کاربر داده‌هایش را حذف نمی‌کند. برای جانشینی از 🔀 استفاده کنید.</div>'
-    +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
-    +'<thead><tr style="background:var(--bg-raised)">'
-    +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600"></th>'
-    +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">نام</th>'
-    +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">کد ورود</th>'
-    +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">نقش</th>'+'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">موبایل</th>'
-    +'<th style="padding:8px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600">فعالیت ماه</th>'
-    +'<th style="padding:8px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600">وضعیت</th>'
-    +'<th style="padding:8px;font-size:11px;color:var(--text-muted);font-weight:600">عملیات</th>'
-    +'</tr></thead><tbody>'+rows+'</tbody></table></div>'
-    +'<div style="display:flex;gap:8px;margin-top:12px">'
-    +'<button onclick="umAddUser()" style="background:#f0fdf4;color:#15803d;border:1px solid #86efac;border-radius:6px;padding:7px 16px;cursor:pointer;font-size:12px;font-family:inherit">+ افزودن کاربر</button>'
-    +'</div>'
-    +_umTehranPanel();
-}
-
-function _umTehranPanel(){
-  var activeMembers=umGetActive();
-  var tehranCenters=getProvCenters('tehran');
-  var potColors=['','#16a34a','#0ea5e9','#f59e0b','#dc2626'];
-
-  var cards=activeMembers.map(function(m){
-    // centers owned by this expert
-    var myCenters=tehranCenters.filter(function(cc){
-      var e=getE('center',cc.id);
-      return (e.owner||cc.owner||'')===m.id;
-    });
-    var potCounts={1:0,2:0,3:0,4:0};
-    myCenters.forEach(function(cc){
-      var e=getE('center',cc.id);
-      var lvl=e.potential!==undefined?e.potential:cc.potential||1;
-      potCounts[lvl]=(potCounts[lvl]||0)+1;
-    });
-    var total=myCenters.length;
-    var color=umGetColor(m.id);
-
-    // bar chart rows
-    var bars=[1,2,3,4].map(function(lvl){
-      var n=potCounts[lvl]||0;
-      var pc=potColors[lvl];
-      var pct=total?Math.round(n/total*100):0;
-      return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'
-        +'<span style="font-size:9px;font-weight:700;color:'+pc+';width:18px;flex-shrink:0">P'+lvl+'</span>'
-        +'<div style="flex:1;height:8px;background:var(--border);border-radius:4px;overflow:hidden">'
-          +'<div style="height:100%;width:'+pct+'%;background:'+pc+';border-radius:4px;min-width:'+(n?3:0)+'px"></div>'
-        +'</div>'
-        +'<span style="font-size:9px;color:var(--text-muted);min-width:26px;text-align:left">'+n+'</span>'
-      +'</div>';
-    }).join('');
-
-    var potBadges=[1,2,3,4].filter(function(lvl){return potCounts[lvl]>0;})
-      .map(function(lvl){var pc=potColors[lvl];return'<span style="font-size:9px;background:'+pc+'20;color:'+pc+';border:1px solid '+pc+'44;border-radius:3px;padding:1px 5px">P'+lvl+':'+potCounts[lvl]+'</span>';}).join('');
-
-    return '<div style="flex:1;min-width:180px;background:var(--card);border:1.5px solid var(--border);border-radius:10px;overflow:hidden">'
-      +'<div style="background:'+color+'18;border-bottom:2px solid '+color+';padding:8px 12px">'
-        +'<div style="display:flex;align-items:center;gap:6px">'
-          +'<span style="width:10px;height:10px;border-radius:50%;background:'+color+';display:inline-block;flex-shrink:0"></span>'
-          +'<span style="font-weight:700;font-size:12px;color:var(--text-primary)">'+esc(m.name)+'</span>'
-          +'<span style="margin-right:auto;font-size:11px;font-weight:700;color:'+color+'">'+total+' مرکز</span>'
-        +'</div>'
-        +(potBadges?'<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:5px">'+potBadges+'</div>':'<div style="font-size:10px;color:var(--text-muted);margin-top:4px">بدون مرکز</div>')
-      +'</div>'
-      +'<div style="padding:8px 10px">'+(bars||'<div style="font-size:10px;color:var(--text-muted);padding:4px">—</div>')+'</div>'
-    +'</div>';
-  }).join('');
-
-  var unassigned=tehranCenters.filter(function(cc){var e=getE('center',cc.id);return!(e.owner||cc.owner||'');});
-
-  return '<div style="margin-top:18px;border-top:2px solid var(--border);padding-top:14px">'
-    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">'
-      +'<span style="font-size:13px;font-weight:700;color:var(--text-primary)">🏙 مراکز تهران — توزیع پتانسیل</span>'
-      +'<span style="font-size:11px;color:var(--text-muted)">'+tehranCenters.length+' مرکز'+(unassigned.length?' · <span style="color:#f59e0b">'+unassigned.length+' بدون مسئول</span>':'')+'</span>'
-    +'</div>'
-    +'<div style="display:flex;flex-wrap:wrap;gap:8px">'+cards+'</div>'
-  +'</div>';
-}
-
-function umSaveUser(oldId){
-  var nameEl=document.getElementById('um_name_'+oldId);
-  var idEl=document.getElementById('um_id_'+oldId);
-  var roleEl=document.getElementById('um_role_'+oldId);
-  if(!nameEl||!idEl)return;
+function umSaveUser(userId){
+  var nameEl=document.getElementById('um_name_'+userId);
+  var roleEl=document.getElementById('um_role_'+userId);
+  var phoneEl=document.getElementById('um_phone_'+userId);
+  var dot=document.getElementById('umdot_'+userId);
+  if(!nameEl)return;
   var newName=nameEl.value.trim();
-  var newId=idEl.value.trim().replace(/\s/g,'');
   var newRole=roleEl?roleEl.value:'کارشناس فروش';
-  if(!newName||!newId){showToast('⚠ نام و کد ورود اجباری‌اند');return;}
-  if(!/^[a-zA-Z0-9._\-]+$/.test(newId)){showToast('⚠ کد ورود: فقط حروف لاتین، عدد، نقطه');return;}
-  var members=umGetMembers();
-  var idx=members.findIndex(function(m){return m.id===oldId;});
-  if(idx===-1){showToast('⚠ کاربر یافت نشد');return;}
-  // Check duplicate ID
-  var dup=members.find(function(m,j){return m.id===newId&&j!==idx;});
-  if(dup){showToast('⚠ این کد کاربری قبلاً استفاده شده');return;}
-  var oldColor=members[idx].color||_UM_COLORS[idx%_UM_COLORS.length];
-  var newPhone=(document.getElementById('um_phone_'+oldId)||{}).value||'';
-  members[idx]=Object.assign({},members[idx],{name:newName,id:newId,role:newRole,color:oldColor,phone:newPhone});
-  if(newId!==oldId) _umRenameUserId(oldId,newId);
-  if(!DB.settings)DB.settings={};
-  DB.settings.members=members;
-  saveDB();buildUSERS();
-  fetch('/api/users/'+encodeURIComponent(newId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:newPhone})}).catch(function(){});
-  showToast('✅ «'+newName+'» ذخیره شد');
-  umTab('users');
-}
-
-function _umRenameUserId(oldId,newId){
-  Object.keys(DB.edits||{}).forEach(function(k){if(DB.edits[k].owner===oldId)DB.edits[k].owner=newId;});
-  Object.keys(DB.weekEntries||{}).forEach(function(k){
-    var we=DB.weekEntries[k];
-    if(we._owner===oldId)we._owner=newId;
-    if(we.addedBy===oldId)we.addedBy=newId;
-  });
-  ['visitLog','callLog','salesLog','missionLog'].forEach(function(lk){
-    (DB[lk]||[]).forEach(function(l){if(l.userId===oldId)l.userId=newId;});
-  });
-  if(currentUser===oldId){currentUser=newId;}
-  DB._lastUser=newId;
-  saveDB();
+  var newPhone=phoneEl?phoneEl.value.trim():'';
+  var newColor=dot?dot.style.background:'';
+  if(!newName){showToast('⚠ نام اجباری است');return;}
+  var payload={display_name:newName,role:newRole,phone:newPhone};
+  if(newColor)payload.color=newColor;
+  fetch('/api/users/'+encodeURIComponent(userId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+    .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||r.status);return d;});})
+    .then(function(){showToast('✅ «'+newName+'» ذخیره شد');buildUSERS();setTimeout(function(){umTab('users');},300);})
+    .catch(function(e){showToast('❌ خطا: '+e.message);});
 }
 
 function umAddUser(){
-  var members=umGetMembers();
-  members.push({id:'user'+(Date.now()%10000),name:'کاربر جدید',role:'کارشناس فروش',active:true,
-    color:_UM_COLORS[members.length%_UM_COLORS.length],password:'Pass@1234'});
-  if(!DB.settings)DB.settings={};
-  DB.settings.members=members;
-  saveDB();umTab('users');
-  setTimeout(function(){
-    var inputs=document.querySelectorAll('[id^="um_name_"]');
-    if(inputs.length)inputs[inputs.length-1].focus();
-  },80);
+  var roles=['کارشناس فروش','مدیر','سوپر ادمین','بازرگانی','مالی','مهمان'];
+  var body='<div style="display:flex;flex-direction:column;gap:12px">'
+    +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">نام نمایشی *</label>'
+    +'<input id="nu_name" class="ed-inp" style="width:100%;box-sizing:border-box" placeholder="نام کامل کارشناس"></div>'
+    +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">نام کاربری * (انگلیسی)</label>'
+    +'<input id="nu_id" class="ed-inp" dir="ltr" style="width:100%;box-sizing:border-box" placeholder="مثال: ali.ahmadi"></div>'
+    +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">نقش</label>'
+    +'<select id="nu_role" class="ed-inp" style="width:100%;box-sizing:border-box">'+roles.map(function(r){return'<option>'+r+'</option>';}).join('')+'</select></div>'
+    +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">موبایل</label>'
+    +'<input id="nu_phone" class="ed-inp" dir="ltr" style="width:100%;box-sizing:border-box" placeholder="09xxxxxxxxx"></div>'
+    +'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:8px 12px;font-size:11px;color:#15803d">'
+    +'🔑 رمز اولیه: نام‌کاربری + «123» (مثلاً ali.ahmadi123)</div>'
+    +'</div>';
+  var foot='<button class="btn-secondary" onclick="closeModal(\'addUserModal\')">لغو</button>'
+    +'<button class="btn-primary" onclick="_umDoAddUser()">✅ ایجاد کاربر</button>';
+  openModal('addUserModal','+ افزودن کاربر جدید',body,foot);
+  setTimeout(function(){var el=document.getElementById('nu_name');if(el)el.focus();},80);
+}
+
+function _umDoAddUser(){
+  var name=(document.getElementById('nu_name')||{}).value||'';
+  var id=(document.getElementById('nu_id')||{}).value||'';
+  var role=(document.getElementById('nu_role')||{}).value||'کارشناس فروش';
+  var phone=(document.getElementById('nu_phone')||{}).value||'';
+  name=name.trim();id=id.trim().replace(/\s/g,'');
+  if(!name||!id){showToast('⚠ نام و نام‌کاربری اجباری‌اند');return;}
+  if(!/^[a-zA-Z0-9._\-]+$/.test(id)){showToast('⚠ نام‌کاربری: فقط حروف لاتین، عدد، نقطه، خط‌تیره');return;}
+  fetch('/api/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:id,display_name:name,role:role,phone:phone})})
+    .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||r.status);return d;});})
+    .then(function(){
+      closeModal('addUserModal');
+      showToast('✅ کاربر «'+name+'» ایجاد شد · رمز: '+id+'123',4000);
+      buildUSERS();
+    })
+    .catch(function(e){showToast('❌ '+e.message);});
 }
 
 function umToggleActive(userId){
-  var members=umGetMembers();
-  var m=members.find(function(m){return m.id===userId;});
+  var m=umGetMembers().find(function(m){return m.id===userId;});
   if(!m)return;
-  var goingInactive=m.active!==false;
-  if(goingInactive){
-    var centers=umCountCenters(userId);
-    // Show a proper deactivation modal
-    umConfirmDeactivate(userId,m.name,centers);
+  if(m.active!==false){
+    umConfirmDeactivate(userId,m.name,umCountCenters(userId));
   } else {
-    m.active=true;
-    if(!DB.settings)DB.settings={};
-    DB.settings.members=members;
-    saveDB();buildUSERS();
-    showToast('✅ «'+m.name+'» فعال شد');
-    umTab('users');
+    fetch('/api/users/'+encodeURIComponent(userId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:true})})
+      .then(function(r){if(!r.ok)throw new Error(r.status);})
+      .then(function(){showToast('✅ «'+m.name+'» فعال شد');buildUSERS();setTimeout(function(){umTab('users');},300);})
+      .catch(function(e){showToast('❌ خطا: '+e.message);});
   }
 }
 
 function umConfirmDeactivate(userId,userName,centerCount){
   var activeOthers=umGetActive().filter(function(m){return m.id!==userId;});
-  var toOpts=activeOthers.map(function(m){
-    return '<option value="'+m.id+'">'+esc(m.name)+'</option>';
-  }).join('');
-  var hasOthers=activeOthers.length>0;
+  var toOpts=activeOthers.map(function(m){return'<option value="'+m.id+'">'+esc(m.name)+'</option>';}).join('');
   var body='<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:7px;padding:10px 14px;margin-bottom:14px">'
     +'<div style="font-size:13px;font-weight:700;color:#dc2626;margin-bottom:4px">🔒 غیرفعال‌کردن «'+esc(userName)+'»</div>'
-    +(centerCount>0
-      ?'<div style="font-size:12px;color:#7f1d1d">این کاربر مسئول <strong>'+centerCount+' مرکز</strong> است.</div>'
-      :'<div style="font-size:12px;color:#7f1d1d">این کاربر مراکز مستقیمی ندارد.</div>')
+    +(centerCount>0?'<div style="font-size:12px;color:#7f1d1d">این کاربر مسئول <strong>'+centerCount+' مرکز</strong> است.</div>':'<div style="font-size:12px;color:#7f1d1d">این کاربر مراکز مستقیمی ندارد.</div>')
     +'</div>'
-    +(centerCount>0&&hasOthers
-      ?'<div style="margin-bottom:14px">'
-        +'<label style="font-size:12px;font-weight:600;color:var(--text-primary);display:block;margin-bottom:6px">انتقال مراکز به (اختیاری):</label>'
-        +'<select id="deact_to" style="width:100%;padding:8px;border:1.5px solid var(--border-input);border-radius:6px;font-size:13px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)">'
-        +'<option value="">— بدون انتقال —</option>'+toOpts
-        +'</select></div>'
-      :'')
-    +'<div style="font-size:12px;color:var(--text-muted)">داده‌های کاربر (یادداشت، فعالیت، برنامه هفتگی) حفظ می‌شود.</div>';
+    +(centerCount>0&&activeOthers.length>0?'<div style="margin-bottom:14px"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px">انتقال مراکز به (اختیاری):</label>'
+    +'<select id="deact_to" style="width:100%;padding:8px;border:1.5px solid var(--border-input);border-radius:6px;font-size:13px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)"><option value="">— بدون انتقال —</option>'+toOpts+'</select></div>':'')
+    +'<div style="font-size:12px;color:var(--text-muted)">داده‌های کاربر حفظ می‌شود.</div>';
   var foot='<button class="btn-secondary" onclick="closeModal(\'deactModal\')">لغو</button>'
-    +'<button style="background:#dc2626;color:#fff;border:none;border-radius:5px;padding:7px 18px;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600" onclick="umExecuteDeactivate(\''+userId+'\')">غیرفعال کن</button>';
-  openModal('deactModal','🔒 غیرفعال‌کردن کاربر',body,foot);
+    +'<button style="background:#dc2626;color:#fff;border:none;border-radius:5px;padding:7px 18px;cursor:pointer;font-size:12px;font-family:inherit" onclick="_umDoDeactivate(\''+userId+'\')">🔒 غیرفعال کن</button>';
+  openModal('deactModal','غیرفعال‌کردن کاربر',body,foot);
 }
 
-function umExecuteDeactivate(userId){
-  var toSel=document.getElementById('deact_to');
-  var toId=toSel?toSel.value:'';
-  var members=umGetMembers();
-  var m=members.find(function(m){return m.id===userId;});
-  if(!m)return;
-  // If reassign selected, do it first
-  if(toId){
-    var count=0;
-    getAllProvinces().forEach(function(p){
-      var rtype=getProvType(p.id);
-      getProvCenters(p.id).forEach(function(ctr){
-        var e=getE(rtype,ctr.id);
-        if((e.owner||ctr.owner||'')==userId){setE(rtype,ctr.id,'owner',toId);count++;}
-      });
-    });
-    if(count)showToast('🔀 '+count+' مرکز به «'+esc(USERS[toId]||toId)+'» منتقل شد',3000);
-  }
-  m.active=false;
-  if(!DB.settings)DB.settings={};
-  DB.settings.members=members;
-  saveDB();buildUSERS();
-  closeModal('deactModal');
-  showToast('🔒 «'+m.name+'» غیرفعال شد');
-  umTab('users');
+function _umDoDeactivate(userId){
+  var toEl=document.getElementById('deact_to');
+  var toId=toEl?toEl.value:'';
+  if(toId)_umReassignCenters(userId,toId);
+  fetch('/api/users/'+encodeURIComponent(userId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:false})})
+    .then(function(r){if(!r.ok)throw new Error(r.status);})
+    .then(function(){
+      closeModal('deactModal');
+      var m=umGetMembers().find(function(m){return m.id===userId;});
+      showToast('🔒 «'+(m?m.name:userId)+'» غیرفعال شد');
+      buildUSERS();setTimeout(function(){umTab('users');},300);
+    })
+    .catch(function(e){showToast('❌ خطا: '+e.message);});
 }
 
 function umPickColor(userId,el){
@@ -1564,17 +1378,15 @@ function umPickColor(userId,el){
   document.body.appendChild(input);
   input.addEventListener('change',function(){
     el.style.background=input.value;
-    var members=umGetMembers();
-    var m=members.find(function(m){return m.id===userId;});
-    if(m){m.color=input.value;if(!DB.settings)DB.settings={};DB.settings.members=members;saveDB();}
+    fetch('/api/users/'+encodeURIComponent(userId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({color:input.value})})
+      .then(function(){buildUSERS();}).catch(function(){});
     input.remove();
   });
   input.click();
 }
 
 function umResetPassword(userId){
-  var members=umGetMembers();
-  var m=members.find(function(m){return m.id===userId;});
+  var m=umGetMembers().find(function(m){return m.id===userId;});
   if(!m)return;
   var body='<div style="margin-bottom:12px">'
     +'<label style="font-size:12px;font-weight:600;color:var(--text-primary);display:block;margin-bottom:5px">رمز جدید برای «'+esc(m.name)+'»</label>'
@@ -1592,15 +1404,10 @@ function umSavePassword(userId){
   if(!inp)return;
   var pw=inp.value.trim();
   if(pw.length<6){showToast('⚠ رمز باید حداقل ۶ کاراکتر باشد');return;}
-  var members=umGetMembers();
-  var m=members.find(function(m){return m.id===userId;});
-  if(!m)return;
-  m.password=pw;
-  if(!DB.settings)DB.settings={};
-  DB.settings.members=members;
-  saveDB();
-  closeModal('pwModal');
-  showToast('✅ رمز «'+m.name+'» تغییر کرد');
+  fetch('/api/users/'+encodeURIComponent(userId)+'/set-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})})
+    .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||r.status);return d;});})
+    .then(function(){closeModal('pwModal');showToast('✅ رمز «'+userId+'» تغییر کرد');})
+    .catch(function(e){showToast('❌ خطا: '+e.message);});
 }
 
 function umReassignAll(fromId){
@@ -1608,7 +1415,8 @@ function umReassignAll(fromId){
   var w=document.getElementById('umWrap');
   if(w){w.innerHTML=_umBody();}
   setTimeout(function(){
-    var sel=document.getElementById('brFrom');if(sel){sel.value=fromId;previewBulkReassign();}
+    var sel=document.getElementById('bulkFrom');
+    if(sel)sel.value=fromId;
   },50);
 }
 
