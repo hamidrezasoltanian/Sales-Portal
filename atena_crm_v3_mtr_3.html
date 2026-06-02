@@ -899,6 +899,20 @@ tr.row-contracted td{background:#f0fdf4!important}
   <select id="fType" onchange="renderTable()" style="display:none"><option value="">همه انواع</option></select>
   <span class="fl" id="lblTg" style="display:none">برچسب:</span>
   <select id="fTag" onchange="renderTable()" style="display:none"><option value="">همه</option></select>
+  <select id="sortSel" style="display:none;padding:4px 7px;border:1px solid var(--border-input);border-radius:5px;font-size:11px;background:var(--bg-input);color:var(--text-primary);font-family:inherit" onchange="setCenterSortFromSel(this.value)">
+    <option value="">⇅ مرتب‌سازی</option>
+    <option value="name_asc">نام ↑ (الف→ی)</option>
+    <option value="name_desc">نام ↓ (ی→الف)</option>
+    <option value="potential_asc">پتانسیل ↑</option>
+    <option value="potential_desc">پتانسیل ↓</option>
+    <option value="type_asc">نوع</option>
+    <option value="status_asc">وضعیت</option>
+    <option value="lead_asc">سرنخ</option>
+    <option value="owner_asc">مسئول</option>
+    <option value="followupDate_asc">پیگیری بعدی ↑</option>
+    <option value="followupDate_desc">پیگیری بعدی ↓</option>
+    <option value="lastActivity_desc">آخرین تماس ↓</option>
+  </select>
   <span class="view-sw" id="viewSw" style="display:none">
     <button class="vb active" id="vb_list" onclick="setViewMode('list')" title="لیست">📋</button>
     <button class="vb" id="vb_card" onclick="setViewMode('card')" title="کارت">🗂</button>
@@ -2012,7 +2026,7 @@ function openProvince(provId){
   var pb=document.getElementById('provBackBtn');if(pb)pb.style.display='';
   var ab=document.getElementById('addCenterBtn');if(ab)ab.style.display='';
   // نمایش filter controls
-  ['srch','fPot','lblPot','fStatus','lblSt','fLead','lblLd','fOwner','lblOw','fTag','lblTg','fType','lblTp','viewSw','csvBtn','printBtn','xlsBtn','savePresetBtn'].forEach(function(id){
+  ['srch','fPot','lblPot','fStatus','lblSt','fLead','lblLd','fOwner','lblOw','fTag','lblTg','fType','lblTp','viewSw','csvBtn','printBtn','xlsBtn','savePresetBtn','sortSel'].forEach(function(id){
     var el=document.getElementById(id);if(el)el.style.display='';
   });
   if(_isExpert()){['fOwner','lblOw'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});}
@@ -2029,7 +2043,7 @@ function backToProvinces(){
   var pb=document.getElementById('provBackBtn');if(pb)pb.style.display='none';
   var ab=document.getElementById('addCenterBtn');if(ab)ab.style.display='none';
   var hd=document.getElementById('provViewHead');if(hd)hd.textContent='';
-  ['srch','fPot','lblPot','fStatus','lblSt','fLead','lblLd','fOwner','lblOw','fTag','lblTg','viewSw','csvBtn','printBtn','hardToggleBtn','xlsBtn','savePresetBtn','filterPresetSel'].forEach(function(id){
+  ['srch','fPot','lblPot','fStatus','lblSt','fLead','lblLd','fOwner','lblOw','fTag','lblTg','viewSw','csvBtn','printBtn','hardToggleBtn','xlsBtn','savePresetBtn','filterPresetSel','sortSel'].forEach(function(id){
     var el=document.getElementById(id);if(el)el.style.display='none';
   });
   var qf=document.getElementById('quickFilters');if(qf)qf.style.display='none';
@@ -2399,7 +2413,7 @@ function getFiltered(){
   var fo=document.getElementById('fOwner').value;
   var ft=document.getElementById('fTag').value?parseInt(document.getElementById('fTag').value):0;
   var ftp=document.getElementById('fType')?document.getElementById('fType').value:'';
-  var effectiveOwner=fo||_globalOwnerFilter||(_isExpert()&&_currentProvId!=='tehran'?currentUser:'');
+  var effectiveOwner=fo||_globalOwnerFilter||(_isExpert()?currentUser:'');
   var provId=_currentProvId;
   var rtype=getProvType(provId);
   var rows=getProvCenters(provId);
@@ -2549,6 +2563,9 @@ function renderProvTable(){
       else if(_sortField==='status'){va=STATUS_LIST.indexOf(ea.status||'بدون تماس');vb=STATUS_LIST.indexOf(eb.status||'بدون تماس');}
       else if(_sortField==='followupDate'){va=ea.followupDate||'9999';vb=eb.followupDate||'9999';}
       else if(_sortField==='lastActivity'){va=ea._lastActivity||ea._ts||0;vb=eb._lastActivity||eb._ts||0;}
+      else if(_sortField==='type'){va=ea.type||a.type||'ω';vb=eb.type||b.type||'ω';}
+      else if(_sortField==='lead'){va=LEAD_LIST.indexOf(ea.lead||a.lead||'');vb=LEAD_LIST.indexOf(eb.lead||b.lead||'');if(va<0)va=999;if(vb<0)vb=999;}
+      else if(_sortField==='owner'){va=USERS[ea.owner||a.owner||'']||'ω';vb=USERS[eb.owner||b.owner||'']||'ω';}
       if(va<vb)return -_sortDir;if(va>vb)return _sortDir;return 0;
     });
   }
@@ -2562,11 +2579,11 @@ function renderProvTable(){
   }
   head.innerHTML='<tr><th><input type="checkbox" id="selectAllCb" onclick="toggleSelectAll(this)" style="width:14px;height:14px;cursor:pointer;accent-color:#2563eb"></th>'
     +_sortTh('name','نام مرکز')
-    +'<th>پتانسیل</th>'
-    +'<th>نوع</th>'
-    +'<th>سرنخ</th>'
-    +'<th>مسئول</th>'
-    +'<th>وضعیت</th>'
+    +_sortTh('potential','پتانسیل')
+    +_sortTh('type','نوع')
+    +_sortTh('lead','سرنخ')
+    +_sortTh('owner','مسئول')
+    +_sortTh('status','وضعیت')
     +_sortTh('followupDate','پیگیری بعدی')
     +'<th>یادداشت</th>'
     +'<th>هفته</th>'
@@ -2736,6 +2753,16 @@ function renderKanban(){
   kb.style.display='';
   var rtype=getProvType(_currentProvId);
   var data=getFiltered();
+  if(_sortField){var _rktype=rtype;data=data.slice().sort(function(a,b){
+    var ea=getE(_rktype,a.id),eb=getE(_rktype,b.id);var va,vb;
+    if(_sortField==='name'){va=a.name;vb=b.name;}
+    else if(_sortField==='potential'){va=parseInt(ea.potential||a.potential||9);vb=parseInt(eb.potential||b.potential||9);}
+    else if(_sortField==='type'){va=ea.type||a.type||'ω';vb=eb.type||b.type||'ω';}
+    else if(_sortField==='lead'){va=LEAD_LIST.indexOf(ea.lead||a.lead||'');vb=LEAD_LIST.indexOf(eb.lead||b.lead||'');if(va<0)va=999;if(vb<0)vb=999;}
+    else if(_sortField==='owner'){va=USERS[ea.owner||a.owner||'']||'ω';vb=USERS[eb.owner||b.owner||'']||'ω';}
+    else if(_sortField==='followupDate'){va=ea.followupDate||'9999';vb=eb.followupDate||'9999';}
+    if(va<vb)return -_sortDir;if(va>vb)return _sortDir;return 0;
+  });}
   var groups={};STATUS_LIST.forEach(function(s){groups[s]=[];});
   data.forEach(function(r){var st=getE(rtype,r.id).status||'بدون تماس';(groups[st]=groups[st]||[]).push(r);});
   kb.innerHTML='<div class="kanban-board">'+STATUS_LIST.map(function(st,idx){
@@ -2769,7 +2796,20 @@ function renderCards(){
   var cv=document.getElementById('cardView');if(!cv)return;
   cv.style.display='';
   var rtype=getProvType(_currentProvId);
-  var data=getFiltered();var today=todayStr();
+  var data=getFiltered();
+  if(_sortField){var _rtype2=rtype;data=data.slice().sort(function(a,b){
+    var ea=getE(_rtype2,a.id),eb=getE(_rtype2,b.id);var va,vb;
+    if(_sortField==='name'){va=a.name;vb=b.name;}
+    else if(_sortField==='potential'){va=parseInt(ea.potential||a.potential||9);vb=parseInt(eb.potential||b.potential||9);}
+    else if(_sortField==='status'){va=STATUS_LIST.indexOf(ea.status||'بدون تماس');vb=STATUS_LIST.indexOf(eb.status||'بدون تماس');}
+    else if(_sortField==='type'){va=ea.type||a.type||'ω';vb=eb.type||b.type||'ω';}
+    else if(_sortField==='lead'){va=LEAD_LIST.indexOf(ea.lead||a.lead||'');vb=LEAD_LIST.indexOf(eb.lead||b.lead||'');if(va<0)va=999;if(vb<0)vb=999;}
+    else if(_sortField==='owner'){va=USERS[ea.owner||a.owner||'']||'ω';vb=USERS[eb.owner||b.owner||'']||'ω';}
+    else if(_sortField==='followupDate'){va=ea.followupDate||'9999';vb=eb.followupDate||'9999';}
+    else if(_sortField==='lastActivity'){va=ea._lastActivity||ea._ts||0;vb=eb._lastActivity||eb._ts||0;}
+    if(va<vb)return -_sortDir;if(va>vb)return _sortDir;return 0;
+  });}
+  var today=todayStr();
   cv.innerHTML='<div class="card-grid">'+data.map(function(r){
     var e=getE(rtype,r.id);var st=e.status||'بدون تماس';var sc=stCls(st);
     var fd=e.followupDate||'';var lead=e.lead||r.lead||'';
@@ -10373,6 +10413,19 @@ function _renderCenterStatsBar(data,rtype){
 function setCenterSort(field){
   if(_sortField===field)_sortDir*=-1;
   else{_sortField=field;_sortDir=1;}
+  // sync sort select
+  var sel=document.getElementById('sortSel');if(sel){
+    var v=_sortField?(_sortField+(_sortDir===-1?'_desc':'_asc')):'';sel.value=v;
+  }
+  renderTable();
+}
+function setCenterSortFromSel(val){
+  if(!val){_sortField='';_sortDir=1;}
+  else{
+    var last=val.lastIndexOf('_');
+    _sortField=val.substring(0,last);
+    _sortDir=val.substring(last+1)==='desc'?-1:1;
+  }
   renderTable();
 }
 
