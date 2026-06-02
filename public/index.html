@@ -7897,33 +7897,64 @@ function unifiedRestore(ev){
   reader.onload = function(e){
     try{
       var data = JSON.parse(e.target.result);
-      // Support both old CRM format (ver:3) and new unified (ver:4)
       if(!data.db && !data.meta){ alert('فایل بک‌آپ معتبر نیست'); return; }
+      var cCount = data.centersDB&&data.centersDB.centers?data.centersDB.centers.length:0;
       var msg = 'بازیابی بک‌آپ «'+(data.date||'نامشخص')+'»?\nتمام داده‌های فعلی جایگزین می‌شوند.';
+      if(cCount) msg += '\n'+cCount+' مرکز بازیابی می‌شود.';
       if(data.mtrMeta) msg += '\nداده‌های مطالبات هم بازیابی می‌شود.'+(data.mtrData&&data.mtrData.rows?' ('+data.mtrData.rows.length+' ردیف اکسل)':'');
       if(!confirm(msg)) return;
-      // Restore CRM
+      // ── 1. CRM DB ──────────────────────────────────────────────
       if(data.db){ Object.assign(DB,data.db); saveDB(); }
+      // ── 2. Centers: convert flat array → {CENTERS, PC_RAW} ────
       var p = Promise.resolve();
-      if(data.centersDB&&data.centersDB.centers)
-        p = saveMasterCenters(data.centersDB.centers);
-      // Restore MTR META
+      if(data.centersDB&&data.centersDB.centers){
+        var flatCenters = data.centersDB.centers;
+        var newCENTERS = [];
+        var newPC_RAW  = {};
+        flatCenters.forEach(function(c){
+          var sid = String(c.id||'');
+          if(sid.indexOf('||')<0){
+            // Tehran center (id like c_1, c_42)
+            newCENTERS.push(c);
+          } else {
+            // Province center (id like p2||1)
+            var provId = c.province_id || sid.split('||')[0];
+            if(!newPC_RAW[provId]) newPC_RAW[provId]=[];
+            newPC_RAW[provId].push(c);
+          }
+        });
+        // Save to IndexedDB (offline fallback)
+        p = saveMasterCenters(flatCenters);
+        // Save to server (primary source) — update in-memory immediately too
+        p = p.then(function(){
+          CENTERS = newCENTERS;
+          Object.keys(PC_RAW).forEach(function(k){delete PC_RAW[k];});
+          Object.keys(newPC_RAW).forEach(function(k){PC_RAW[k]=newPC_RAW[k];});
+          clearPCCache(); _ALL_PROVS=null;
+          return fetch('/api/data/centers/master',{
+            method:'PUT',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({CENTERS:newCENTERS,PC_RAW:newPC_RAW})
+          }).then(function(r){
+            if(!r.ok) console.warn('[restore] server centers update failed:',r.status);
+            return true;
+          }).catch(function(e){ console.warn('[restore] server centers error:',e.message); return true; });
+        });
+      }
+      // ── 3. MTR ─────────────────────────────────────────────────
       if(data.mtrMeta){ META=data.mtrMeta; saveMeta(); }
       if(data.mtrUser&&data.mtrUser.name){ USER=data.mtrUser; saveUser(); }
-      // Restore MTR Excel data (ردیف‌های مطالبات)
       if(data.mtrData&&data.mtrData.rows&&data.mtrData.rows.length){
         DATA=data.mtrData.rows;
         saveData(DATA);
       }
-      // Restore forecast target date
       if(data.fcTarget){ FC_TARGET=data.fcTarget; }
-      // Restore merge log
       if(data.mergeLog&&Array.isArray(data.mergeLog)){ MERGE_LOG=data.mergeLog; saveMergeLog(); }
-      p.then(function(){ return loadMasterCenters(); }).then(function(){
+      // ── 4. Re-init UI ───────────────────────────────────────────
+      p.then(function(){
         clearPCCache(); _ALL_PROVS=null; _typeFilterBuilt=false;
         initSettings(); initTags(); initWeekTags(); initEvents();
-        rebuildFilters(); buildTypeFilter(); switchTab('provinces');
-        // Refresh MTR UI if data was restored
+        rebuildFilters(); buildTypeFilter(); renderTable(); switchTab('provinces');
         if(DATA&&DATA.length){
           var _tb2=document.getElementById('mtr-tabsBar');if(_tb2)_tb2.style.display='flex';
           var _pb=document.getElementById('mtr-printBtn');if(_pb)_pb.style.display='block';
@@ -7931,7 +7962,7 @@ function unifiedRestore(ev){
           if(typeof matchCentersToData==='function')setTimeout(matchCentersToData,200);
           if(typeof render==='function')setTimeout(render,300);
         }
-        showToast('✅ بک‌آپ بازیابی شد'+(DATA&&DATA.length?' · '+DATA.length+' ردیف مطالبات':''),3000);
+        showToast('✅ بک‌آپ بازیابی شد · '+cCount+' مرکز'+(DATA&&DATA.length?' · '+DATA.length+' ردیف مطالبات':''),4000);
         closeModal('unifiedBackupModal');
       });
     }catch(err){ alert('خطا در بازیابی: '+err.message); }
