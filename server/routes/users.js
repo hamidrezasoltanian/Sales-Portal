@@ -70,8 +70,8 @@ router.post('/', requireManager, async (req, res) => {
 router.put('/:username', requireAuth, async (req, res) => {
   const { username } = req.params;
 
-  // Only manager or self can update
-  if (req.user.role !== 'مدیر' && req.user.username !== username) {
+  const isAdmin = req.user.role === 'مدیر' || req.user.role === 'سوپر ادمین';
+  if (!isAdmin && req.user.username !== username) {
     return res.status(403).json({ error: 'دسترسی مجاز نیست' });
   }
 
@@ -92,8 +92,8 @@ router.put('/:username', requireAuth, async (req, res) => {
     if (color !== undefined) { updates.push(`color = $${idx++}`); params.push(color); }
     if (phone !== undefined) { updates.push(`phone = $${idx++}`); params.push(phone); }
 
-    // Only managers can change role/active
-    if (req.user.role === 'مدیر') {
+    // Only managers/superadmin can change role/active
+    if (isAdmin) {
       if (role !== undefined) { updates.push(`role = $${idx++}`); params.push(role); }
       if (active !== undefined) { updates.push(`active = $${idx++}`); params.push(active); }
     }
