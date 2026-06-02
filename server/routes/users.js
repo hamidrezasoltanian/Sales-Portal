@@ -75,7 +75,7 @@ router.put('/:username', requireAuth, async (req, res) => {
     return res.status(403).json({ error: 'دسترسی مجاز نیست' });
   }
 
-  const { display_name, role, color, phone, active } = req.body || {};
+  const { display_name, role, color, phone, active, new_username } = req.body || {};
 
   try {
     const existing = await query('SELECT username FROM app_users WHERE username = $1', [username]);
@@ -98,6 +98,21 @@ router.put('/:username', requireAuth, async (req, res) => {
       if (active !== undefined) { updates.push(`active = $${idx++}`); params.push(active); }
     }
 
+    // Only superadmin can rename username
+    let renamedUsername = null;
+    if (req.user.role === 'سوپر ادمین' && new_username && new_username !== username) {
+      if (!/^[a-zA-Z0-9._-]+$/.test(new_username)) {
+        return res.status(400).json({ error: 'نام کاربری فقط حروف انگلیسی، اعداد و نقطه/خط تیره مجاز است' });
+      }
+      const dup = await query('SELECT username FROM app_users WHERE username = $1', [new_username]);
+      if (dup.rows.length > 0) {
+        return res.status(400).json({ error: 'این نام کاربری قبلاً استفاده شده' });
+      }
+      updates.push(`username = $${idx++}`);
+      params.push(new_username);
+      renamedUsername = new_username;
+    }
+
     if (updates.length === 0) {
       return res.status(400).json({ error: 'هیچ فیلدی برای آپدیت وجود ندارد' });
     }
@@ -105,7 +120,7 @@ router.put('/:username', requireAuth, async (req, res) => {
     params.push(username);
     await query(`UPDATE app_users SET ${updates.join(', ')} WHERE username = $${idx}`, params);
 
-    return res.json({ ok: true });
+    return res.json({ ok: true, ...(renamedUsername ? { new_username: renamedUsername } : {}) });
   } catch (e) {
     console.error('[users PUT /:username]', e.message);
     return res.status(500).json({ error: 'خطای سرور' });

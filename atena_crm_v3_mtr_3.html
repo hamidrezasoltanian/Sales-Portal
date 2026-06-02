@@ -1209,7 +1209,9 @@ function _umUsers(){
     return '<tr style="opacity:'+rowOp+';border-bottom:1px solid var(--border)">'
       +'<td style="padding:9px 8px;width:28px"><div id="umdot_'+m.id+'" style="width:16px;height:16px;border-radius:50%;background:'+color+';cursor:pointer;border:2px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,.15)" onclick="umPickColor(\''+m.id+'\',this)" title="تغییر رنگ"></div></td>'
       +'<td style="padding:9px 6px"><input id="um_name_'+m.id+'" value="'+esc(m.name)+'" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 9px;font-size:12.5px;font-family:inherit;color:var(--text-primary);width:130px"></td>'
-      +'<td style="padding:9px 6px"><span dir="ltr" style="font-size:12px;font-family:monospace;color:var(--text-muted);padding:4px 8px;background:var(--bg-raised);border-radius:4px">'+esc(m.id)+'</span></td>'
+      +(_isSuperAdmin()
+        ? '<td style="padding:9px 6px"><input id="um_id_'+m.id+'" value="'+esc(m.id)+'" dir="ltr" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 8px;font-size:11px;font-family:monospace;color:var(--text-primary);width:130px" placeholder="نام کاربری"></td>'
+        : '<td style="padding:9px 6px"><span dir="ltr" style="font-size:12px;font-family:monospace;color:var(--text-muted);padding:4px 8px;background:var(--bg-raised);border-radius:4px">'+esc(m.id)+'</span></td>')
       +'<td style="padding:9px 6px"><select id="um_role_'+m.id+'" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 7px;font-size:12px;font-family:inherit;color:var(--text-primary)">'
         +roles.map(function(r){return'<option'+(m.role===r?' selected':'')+'>'+r+'</option>';}).join('')
       +'</select></td>'
@@ -1327,18 +1329,30 @@ function umSaveUser(userId){
   var nameEl=document.getElementById('um_name_'+userId);
   var roleEl=document.getElementById('um_role_'+userId);
   var phoneEl=document.getElementById('um_phone_'+userId);
+  var idEl=document.getElementById('um_id_'+userId);
   var dot=document.getElementById('umdot_'+userId);
   if(!nameEl)return;
   var newName=nameEl.value.trim();
   var newRole=roleEl?roleEl.value:'کارشناس فروش';
   var newPhone=phoneEl?phoneEl.value.trim():'';
   var newColor=dot?dot.style.background:'';
+  var newId=idEl?idEl.value.trim():'';
   if(!newName){showToast('⚠ نام اجباری است');return;}
+  if(newId&&newId!==userId&&!/^[a-zA-Z0-9._-]+$/.test(newId)){showToast('⚠ نام کاربری فقط حروف انگلیسی، اعداد و نقطه/خط تیره');return;}
   var payload={display_name:newName,role:newRole,phone:newPhone};
   if(newColor)payload.color=newColor;
+  if(newId&&newId!==userId)payload.new_username=newId;
   fetch('/api/users/'+encodeURIComponent(userId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
     .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||r.status);return d;});})
-    .then(function(){showToast('✅ «'+newName+'» ذخیره شد');buildUSERS();setTimeout(function(){umTab('users');},300);})
+    .then(function(d){
+      if(payload.new_username){
+        var nu=payload.new_username;
+        Object.keys(DB.edits).forEach(function(k){if(DB.edits[k].owner===userId)DB.edits[k].owner=nu;});
+        getAllProvinces().forEach(function(p){var e=getE(getProvType(p.id),p.id);if(e.owner===userId)setE(getProvType(p.id),p.id,'owner',nu);});
+        saveDB();
+      }
+      showToast('✅ «'+newName+'» ذخیره شد');buildUSERS();setTimeout(function(){umTab('users');},300);
+    })
     .catch(function(e){showToast('❌ خطا: '+e.message);});
 }
 
@@ -1963,6 +1977,7 @@ function switchTab(tab){
     if(!_currentProvId){
       var toShow=['srch','fOwner','lblOw','fType','fTag','lblTg'];
       toShow.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='';});
+      if(_isExpert()){['fOwner','lblOw'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});}
       var pg=document.getElementById('allCentersToggle');if(pg)pg.style.display='';
     }
     renderTable();
@@ -1998,6 +2013,7 @@ function openProvince(provId){
   ['srch','fPot','lblPot','fStatus','lblSt','fLead','lblLd','fOwner','lblOw','fTag','lblTg','fType','lblTp','viewSw','csvBtn','printBtn','xlsBtn','savePresetBtn'].forEach(function(id){
     var el=document.getElementById(id);if(el)el.style.display='';
   });
+  if(_isExpert()){['fOwner','lblOw'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});}
   var qf=document.getElementById('quickFilters');if(qf)qf.style.display='flex';
   ['srch','fPot','fStatus','fLead','fOwner','fTag'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
   rebuildFilters();
@@ -2345,7 +2361,7 @@ function getFiltered(){
   var fo=document.getElementById('fOwner').value;
   var ft=document.getElementById('fTag').value?parseInt(document.getElementById('fTag').value):0;
   var ftp=document.getElementById('fType')?document.getElementById('fType').value:'';
-  var effectiveOwner=fo||_globalOwnerFilter;
+  var effectiveOwner=fo||_globalOwnerFilter||(_isExpert()?currentUser:'');
   var provId=_currentProvId;
   var rtype=getProvType(provId);
   var rows=getProvCenters(provId);
@@ -2386,9 +2402,10 @@ function renderProvList(){
   // فیلتر search + owner روی province list
   var _plSearch=document.getElementById('srch')?document.getElementById('srch').value:'';
   var _plOwner=document.getElementById('fOwner')?document.getElementById('fOwner').value:_globalOwnerFilter;
+  var effectiveProvOwner=_plOwner||(_isExpert()?currentUser:'');
   var filtProvs=provs.filter(function(p){
     if(_plSearch){var n=fNorm(p.name);if(n.indexOf(fNorm(_plSearch))<0)return false;}
-    if(_plOwner){var e2=getE('pc',p.id);var ow=e2.owner||p.owner||'';if(ow&&ow!==_plOwner)return false;}
+    if(effectiveProvOwner){var e2=getE('pc',p.id);var ow=e2.owner||p.owner||'';if(ow!==effectiveProvOwner)return false;}
     return true;
   });
   var rows=filtProvs.map(function(p){
@@ -4005,6 +4022,12 @@ function _isManager(){
   var me=members.find(function(m){return m.id===currentUser;});
   return me&&(me.role==='مدیر'||me.role==='admin'||me.role==='manager'||me.role==='سوپر ادمین');
 }
+function _isSuperAdmin(){
+  var members=(DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS;
+  var me=members.find(function(m){return m.id===currentUser;});
+  return me&&me.role==='سوپر ادمین';
+}
+function _isExpert(){return !_isManager();}
 
 
 function wpShowAllUnsched(btn){
@@ -5945,7 +5968,7 @@ function renderAllCenters(viewMode){
   var fo=document.getElementById('fOwner').value;
   var ftp=document.getElementById('fType')?document.getElementById('fType').value:'';
   var ftg=document.getElementById('fTag').value?parseInt(document.getElementById('fTag').value):0;
-  var effectiveOwner=fo||_globalOwnerFilter;
+  var effectiveOwner=fo||_globalOwnerFilter||(_isExpert()?currentUser:'');
   var allRows=[];
   getAllProvinces().forEach(function(p){
     var tp=getProvType(p.id);
