@@ -1188,7 +1188,71 @@ async function downloadServerBackup(){
 // ════════════════════════ SETTINGS ════════════════════════════════════
 
 // ── جابجایی گروهی مراکز ──────────────────────────────────────
+function openUserMgmt(){
+  if(!_isManager()){showToast('⚠ فقط مدیران دسترسی دارند');return;}
+  _UM_TAB='users';
+  var foot='<button class="btn-secondary" onclick="closeModal(\'userMgmtModal\')">بستن</button>';
+  openModal('userMgmtModal','👥 مدیریت کاربران','<div id="umWrap">'+_umBody()+'</div>',foot,{lg:true});
+}
 function openBulkReassign(){_UM_TAB='bulk';openUserMgmt();}
+function umTab(t){_UM_TAB=t;var w=document.getElementById('umWrap');if(w)w.innerHTML=_umBody();}
+function _umTabs(){
+  var tabs=[['users','👤 کاربران'],['provinces','🗺 استان‌ها'],['bulk','🔀 جابجایی']];
+  return '<div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid var(--border)">'
+    +tabs.map(function(t){
+      var on=_UM_TAB===t[0];
+      return '<button onclick="umTab(\''+t[0]+'\')" style="padding:8px 18px;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:12.5px;font-weight:'+(on?700:400)+';color:'+(on?'var(--brand)':'var(--text-muted)')+';border-bottom:2.5px solid '+(on?'var(--brand)':'transparent')+';margin-bottom:-2px;transition:all .15s">'+t[1]+'</button>';
+    }).join('')+'</div>';
+}
+function _umBody(){
+  return _umTabs()+(_UM_TAB==='users'?_umUsers():_UM_TAB==='provinces'?_umProvinces():_umBulk());
+}
+function _umUsers(){
+  var members=umGetMembers().filter(function(m){return m.id!=='guest';});
+  var rows=members.map(function(m,i){
+    var active=m.active!==false;
+    var centers=umCountCenters(m.id);
+    var color=m.color||_UM_COLORS[i%_UM_COLORS.length];
+    var statusBg=active?'#dcfce7':'var(--bg-raised)';
+    var statusTxt=active?'#15803d':'var(--text-muted)';
+    var rowOp=active?1:.55;
+    var roles=['مدیر','کارشناس فروش','سوپر ادمین','بازرگانی','مالی','IT','مهمان'];
+    return '<tr style="opacity:'+rowOp+';border-bottom:1px solid var(--border)">'
+      +'<td style="padding:9px 8px;width:28px"><div id="umdot_'+m.id+'" style="width:16px;height:16px;border-radius:50%;background:'+color+';cursor:pointer;border:2px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,.15)" onclick="umPickColor(\''+m.id+'\',this)" title="تغییر رنگ"></div></td>'
+      +'<td style="padding:9px 6px"><input id="um_name_'+m.id+'" value="'+esc(m.name)+'" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 9px;font-size:12.5px;font-family:inherit;color:var(--text-primary);width:130px"></td>'
+      +'<td style="padding:9px 6px"><span dir="ltr" style="font-size:12px;font-family:monospace;color:var(--text-muted);padding:4px 8px;background:var(--bg-raised);border-radius:4px">'+esc(m.id)+'</span></td>'
+      +'<td style="padding:9px 6px"><select id="um_role_'+m.id+'" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 7px;font-size:12px;font-family:inherit;color:var(--text-primary)">'
+        +roles.map(function(r){return'<option'+(m.role===r?' selected':'')+'>'+r+'</option>';}).join('')
+      +'</select></td>'
+      +'<td style="padding:9px 6px"><input id="um_phone_'+m.id+'" value="'+esc(m.phone||'')+'" placeholder="09XXXXXXXXX" dir="ltr" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 8px;font-size:11px;font-family:monospace;color:var(--text-primary);width:115px"></td>'
+      +'<td style="padding:9px 8px;text-align:center"><span style="font-size:11px;color:var(--text-muted)">🏥'+centers+'</span></td>'
+      +'<td style="padding:9px 8px;text-align:center">'
+        +'<span onclick="umToggleActive(\''+m.id+'\')" style="font-size:11px;background:'+statusBg+';color:'+statusTxt+';border-radius:20px;padding:3px 11px;cursor:pointer;font-weight:600;border:1px solid '+(active?'#86efac':'var(--border)')+'">'+( active?'● فعال':'○ غیرفعال')+'</span>'
+      +'</td>'
+      +'<td style="padding:9px 6px;white-space:nowrap">'
+        +'<button onclick="umSaveUser(\''+m.id+'\')" title="ذخیره تغییرات" style="background:var(--brand-bg);color:var(--brand);border:1px solid var(--brand);border-radius:5px;padding:4px 10px;cursor:pointer;font-size:11px;font-family:inherit">💾 ذخیره</button> '
+        +'<button onclick="umResetPassword(\''+m.id+'\')" title="تغییر رمز" style="background:var(--bg-raised);color:var(--text-secondary);border:1px solid var(--border);border-radius:5px;padding:4px 8px;cursor:pointer;font-size:11px">🔑</button>'
+        +(centers>0?' <button onclick="umReassignAll(\''+m.id+'\')" title="جابجایی مراکز" style="background:#fef9c3;color:#854d0e;border:1px solid #fcd34d;border-radius:5px;padding:4px 8px;cursor:pointer;font-size:11px">🔀</button>':'')
+      +'</td>'
+    +'</tr>';
+  }).join('');
+  return '<div style="background:var(--brand-bg);border:1px solid #bae6fd;border-radius:7px;padding:8px 14px;margin-bottom:12px;font-size:12px;color:var(--text-secondary)">'
+    +'💡 غیرفعال‌کردن کاربر داده‌هایش را حذف نمی‌کند. برای جانشینی از 🔀 استفاده کنید.</div>'
+    +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+    +'<thead><tr style="background:var(--bg-raised)">'
+    +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600"></th>'
+    +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">نام</th>'
+    +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">کد ورود</th>'
+    +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">نقش</th>'
+    +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">موبایل</th>'
+    +'<th style="padding:8px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600">مراکز</th>'
+    +'<th style="padding:8px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600">وضعیت</th>'
+    +'<th style="padding:8px;font-size:11px;color:var(--text-muted);font-weight:600">عملیات</th>'
+    +'</tr></thead><tbody>'+rows+'</tbody></table></div>'
+    +'<div style="display:flex;gap:8px;margin-top:12px">'
+    +'<button onclick="umAddUser()" style="background:#f0fdf4;color:#15803d;border:1px solid #86efac;border-radius:6px;padding:7px 16px;cursor:pointer;font-size:12px;font-family:inherit">+ افزودن کاربر</button>'
+    +'</div>';
+}
 function _countCentersOf(userId){
   var n=0;
   getAllProvinces().forEach(function(p){
