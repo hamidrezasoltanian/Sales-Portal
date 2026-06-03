@@ -4667,7 +4667,7 @@ function renderWpItem(entry,weekId){
     + '<div class="wp-item-name" onclick="openCenterModal(\''+rtype+'\',\''+rid+'\')" style="cursor:pointer;text-decoration:underline dotted;color:var(--brand)">'+esc(name)+'</div>'
     + '<span style="font-size:9px; cursor:pointer; background:'+actBg+'; color:var(--text-primary); padding:2px 5px; border-radius:4px; white-space:nowrap;" onclick="toggleWpActionType(\''+k+'\')" title="تغییر نوع پیگیری با یک کلیک">'+actIcon+'</span>'
     + '</div>'
-    + (function(){var _ce=getE(rtype,rid);var _st=_ce.status||'بدون تماس';var _ow=USERS[_ce.owner||'']||'';var _fd=_ce.followupDate||'';return '<div class="wp-item-meta" style="font-size:9px;color:var(--text-muted)">'+_st+((_ow)?' | 👤 '+esc(_ow):'')+( (_fd)?' 📅 '+_fd:'')+' '+(done?'✓ '+entry.doneDate:'')+'</div>';})()
+    + (function(){var _ce=getE(rtype,rid);var _st=_ce.status||'بدون تماس';var _ow=USERS[_ce.owner||'']||'';var _fd=_ce.followupDate||'';var _owHtml=_ow?'<span style="display:inline-block;background:#dbeafe;color:#1e40af;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:600;margin-right:4px">👤 '+esc(_ow)+'</span>':'';return '<div class="wp-item-meta" style="margin-top:3px">'+_owHtml+'<span style="font-size:9px;color:var(--text-muted)">'+_st+( (_fd)?' 📅 '+_fd:'')+' '+(done?'✓ '+entry.doneDate:'')+'</span></div>';})()
     + '<div class="wp-item-actions">'
     + (done?'' : '<button class="wp-btn done-btn" onclick="wpMarkDoneKey(\''+ k +'\')">✓ انجام شد</button>')
     + '<button class="wp-btn move-btn" onclick="wpSetScheduleFromKey(\''+ k +'\')">📅 تنظیم</button>'
@@ -5005,8 +5005,11 @@ function collectCalItems(){
     getProvCenters(p.id).forEach(function(c){
       var e=getE(tp,c.id);var fd=e.followupDate||'';if(!fd)return;
       var st=e.status||'بدون تماس';if(st==='قرارداد بسته شد'||st==='غیرفعال')return;
+      if(_isExpert()){var _fow=e.owner||c.owner||'';if(_fow&&_fow!==currentUser)return;}
       var pts=fd.split('/').map(Number);if(pts.length!==3)return;
-      items.push({type:'followup',jDate:fd,jy:pts[0],jm:pts[1],jd:pts[2],time:null,title:c.name,color:'#f59e0b',rtype:tp,rid:c.id,sk:jMs(pts[0],pts[1],pts[2])});
+      var _owName=USERS[e.owner||c.owner||'']||'';
+      var _chipTitle=c.name+(_owName&&!_isExpert()?' ('+_owName+')':'');
+      items.push({type:'followup',jDate:fd,jy:pts[0],jm:pts[1],jd:pts[2],time:null,title:_chipTitle,color:'#f59e0b',rtype:tp,rid:c.id,sk:jMs(pts[0],pts[1],pts[2])});
     });
   });
   // week entries
@@ -5019,6 +5022,7 @@ function collectCalItems(){
 }
 
 function renderCalendar(){
+  try{
   if(!_calDate){var t=todayJ();_calDate=[t[0],t[1],t[2]];}
   var items=collectCalItems();
   var title=_calView==='month'?J_MONTHS[_calDate[1]-1]+' '+_calDate[0]:_calView==='week'?'هفته '+_calDate.join('/'):' ۳۰ روز از '+_calDate.join('/');
@@ -5028,6 +5032,11 @@ function renderCalendar(){
   if(_calView==='month')body.innerHTML=renderCalMonth(items);
   else if(_calView==='week')body.innerHTML=renderCalWeek(items);
   else body.innerHTML=renderCalList(items);
+  }catch(e){
+    console.error('[calendar]',e);
+    var body=document.getElementById('calBody');
+    if(body)body.innerHTML='<div style="text-align:center;padding:60px;color:#ef4444"><div style="font-size:28px">⚠</div><div style="font-size:13px;margin-top:8px">خطا در نمایش تقویم: '+esc(e.message)+'</div></div>';
+  }
 }
 
 function calChip(it){
