@@ -375,13 +375,18 @@ select.pot-3{background:#fef3c7;color:#854d0e}select.pot-4{background:#bbf7d0;co
 .cal-vb.active{background:var(--bg-card);color:#fff;border-color:var(--text-primary)}
 .cal-new-btn{background:#22c55e;color:#fff;border:none;border-radius:5px;padding:6px 12px;cursor:pointer;font-weight:600;font-size:12px}
 .cal-new-btn:hover{background:#16a34a}
+.cal-type-bar{display:flex;gap:6px;align-items:center;padding:6px 14px;background:var(--bg-raised);border-bottom:1px solid var(--border);flex-wrap:wrap}
+.cal-tf-btn{background:var(--bg-input);border:1px solid var(--border);border-radius:14px;padding:3px 12px;cursor:pointer;font-size:11px;color:var(--text-secondary);white-space:nowrap}
+.cal-tf-btn.active{background:#0ea5e9;color:#fff;border-color:#0284c7}
+.cal-list-item{display:flex;gap:10px;align-items:center;padding:9px 11px;background:var(--bg-raised);border-right:3px solid #0ea5e9;border-radius:5px;margin:4px 0;font-size:11px;cursor:pointer}
+.cal-list-item:hover{background:var(--bg-input)}
 .cal-month-grid{background:#fff}
 .cal-row{display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid #f1f5f9}
 .cal-row:last-child{border-bottom:none}
 .cal-head-row{background:var(--bg-raised)}
 .cal-day-head{padding:7px 3px;font-size:11px;font-weight:700;color:var(--text-muted);text-align:center;border-right:1px solid #f1f5f9}
 .cal-day-head:last-child{border-right:none}
-.cal-day{min-height:85px;padding:3px;border-right:1px solid #f1f5f9;background:#fff}
+.cal-day{min-height:110px;padding:3px;border-right:1px solid #f1f5f9;background:#fff;cursor:pointer}
 .cal-day:last-child{border-right:none}
 .cal-day:hover{background:var(--bg-raised)}
 .cal-day.empty{background:#fafbfc}
@@ -394,7 +399,7 @@ select.pot-3{background:#fef3c7;color:#854d0e}select.pot-4{background:#bbf7d0;co
 .cal-chip:hover{opacity:.85}
 .cal-chip-time{font-weight:700;flex-shrink:0}
 .cal-chip-text{overflow:hidden;text-overflow:ellipsis}
-.cal-more{font-size:10px;color:#0369a1;cursor:pointer;padding:1px 4px;font-weight:600}
+.cal-more{font-size:10px;color:#1e40af;cursor:pointer;padding:2px 6px;font-weight:700;background:#dbeafe;border-radius:4px;display:inline-block;margin-top:2px;text-align:center;width:calc(100% - 12px)}
 .cal-week-grid{background:var(--bg-input);padding:10px;display:grid;grid-template-columns:repeat(7,1fr);gap:7px}
 .cal-wk-day{border:1px solid var(--border);border-radius:6px;min-height:260px;display:flex;flex-direction:column}
 .cal-wk-day.today{border-color:#dc2626;border-width:2px}
@@ -1011,6 +1016,13 @@ tr.row-contracted td{background:#f0fdf4!important}
       <button class="cal-vb" id="calVb_list" onclick="calSetView('list')">لیست</button>
       <button class="cal-new-btn" onclick="openEvModal()">➕ رویداد جدید</button>
     </div>
+  </div>
+  <div class="cal-type-bar">
+    <span style="font-size:11px;color:var(--text-muted);font-weight:600">نمایش:</span>
+    <button class="cal-tf-btn active" id="calTf_" onclick="calSetTypeFilter('')">همه</button>
+    <button class="cal-tf-btn" id="calTf_event" onclick="calSetTypeFilter('event')">🗓 رویداد</button>
+    <button class="cal-tf-btn" id="calTf_followup" onclick="calSetTypeFilter('followup')">📅 پیگیری</button>
+    <button class="cal-tf-btn" id="calTf_week" onclick="calSetTypeFilter('week')">📋 برنامه هفته</button>
   </div>
   <div id="calBody"></div>
 </div>
@@ -5050,9 +5062,11 @@ function renderCalendar(){
 
 function calChip(it){
   var hnd='';
-  if(it.type==='event')hnd='onclick="openEvModal('+it.evId+')"';
-  else if(it.type==='followup')hnd='onclick="openCenterModal(\''+it.rtype+'\',\''+it.rid+'\')"';
+  if(it.type==='event')hnd='onclick="event.stopPropagation();openEvModal('+it.evId+')"';
+  else if(it.type==='followup')hnd='onclick="event.stopPropagation();openCenterModal(\''+it.rtype+'\',\''+it.rid+'\')"';
+  var icon=it.type==='event'?'🗓':it.type==='followup'?'📅':'📋';
   return'<div class="cal-chip" style="background:'+it.color+'" '+hnd+'>'
+    +'<span style="flex-shrink:0;font-size:9px">'+icon+'</span>'
     +(it.time?'<span class="cal-chip-time">'+it.time+'</span>':'')
     +'<span class="cal-chip-text">'+esc(it.title)+'</span></div>';
 }
@@ -5082,12 +5096,7 @@ function renderCalMonth(items){
       }else{
         var jd=day;var dStr=jy+'/'+p2(jm)+'/'+p2(jd);var isToday=dStr===today;
         var dayItems=(byDay[jd]||[]).slice().sort(function(a,b){return(a.sk||0)-(b.sk||0);});
-        html+='<div class="cal-day'+(isToday?' cal-today':'')+'" ondblclick="openEvModalDate(\''+dStr+'\')">'
-          +'<div class="cal-day-num">'+jd+'</div>'
-          +'<div class="cal-day-events">'
-          +dayItems.slice(0,3).map(calChip).join('')
-          +(dayItems.length>3?'<div class="cal-more">+'+(dayItems.length-3)+'</div>':'')
-          +'</div></div>';
+        html+='<div class="cal-day'+(isToday?' cal-today':'')+'" onclick="calDayClick(\''+dStr+'\')">'          +'<div class="cal-day-num">'+jd+'</div>'          +'<div class="cal-day-events">'          +dayItems.slice(0,4).map(calChip).join('')          +(dayItems.length>4?'<div class="cal-more" onclick="event.stopPropagation();calShowDay(\''+dStr+'\')">+'+(dayItems.length-4)+' بیشتر ▾</div>':'')          +'</div></div>';
         day++;
       }
     }
@@ -5114,21 +5123,65 @@ function renderCalWeek(items){
 
 function renderCalList(items){
   var today=todayStr();var tParts=today.split('/').map(Number);var tMs=jMs(tParts[0],tParts[1],tParts[2]);
-  var cutoff=tMs+30*86400000;
+  var cutoff=tMs+60*86400000;
   var future=items.filter(function(it){return it.sk&&it.sk>=tMs-86400000&&it.sk<=cutoff;}).sort(function(a,b){return a.sk-b.sk;});
-  if(!future.length)return'<div style="text-align:center;padding:60px;color:#94a3b8"><div style="font-size:36px">📭</div><div>در ۳۰ روز آینده رویدادی نیست</div></div>';
+  if(!future.length)return'<div style="text-align:center;padding:60px;color:#94a3b8"><div style="font-size:36px">📭</div><div style="margin-top:8px">رویدادی در ۶۰ روز آینده نیست</div></div>';
   var byDate={};future.forEach(function(it){if(!byDate[it.jDate])byDate[it.jDate]=[];byDate[it.jDate].push(it);});
   return'<div class="cal-list">'+Object.keys(byDate).sort().map(function(dk){
-    return'<div class="cal-list-day"><div class="cal-list-dh">'+(dk===today?'امروز':dk)+'</div>'
+    var isToday=dk===today;
+    return'<div class="cal-list-day">'
+      +'<div class="cal-list-dh" style="display:flex;align-items:center;gap:6px">'
+      +(isToday?'<span style="background:#dc2626;color:#fff;border-radius:10px;padding:1px 8px;font-size:10px;font-weight:700">امروز</span>':'')
+      +'<span>'+dk+'</span>'
+      +'<span style="font-size:10px;color:var(--text-muted);margin-right:auto">'+byDate[dk].length+' مورد</span>'
+      +'</div>'
       +byDate[dk].map(function(it){
-        return'<div class="cal-list-item" style="border-right-color:'+it.color+'">'
-          +'<span class="cal-list-time">'+(it.time||'تمام روز')+'</span>'
-          +'<span class="cal-list-title">'+esc(it.title)+'</span>'
-          +(it.type==='event'?'<button class="cal-list-btn" onclick="openEvModal('+it.evId+')">ویرایش</button>':'')
-          +(it.type==='event'?'<button class="cal-list-btn" style="background:#fee2e2;color:#991b1b" onclick="deleteEv('+it.evId+')">حذف</button>':'')
-          +'</div>';
+        var icon=it.type==='event'?'🗓':it.type==='followup'?'📅':'📋';
+        var typeName=it.type==='event'?'رویداد':it.type==='followup'?'پیگیری':'برنامه هفته';
+        var hnd='';
+        if(it.type==='event')hnd='onclick="openEvModal('+it.evId+')"';
+        else if(it.type==='followup')hnd='onclick="openCenterModal(\''+it.rtype+'\',\''+it.rid+'\')"';
+        return'<div class="cal-list-item" style="border-right-color:'+it.color+'" '+(hnd||'')+' >'
+          +'<span style="font-size:18px;flex-shrink:0">'+icon+'</span>'
+          +'<div style="flex:1;overflow:hidden">'
+            +'<div style="font-weight:600;font-size:12px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(it.title)+'</div>'
+            +'<div style="font-size:10px;color:var(--text-muted);margin-top:2px">'+typeName+(it.time?' · '+it.time:'')+'</div>'
+          +'</div>'
+          +(it.type==='event'?'<button class="cal-list-btn" onclick="event.stopPropagation();openEvModal('+it.evId+')">ویرایش</button><button class="cal-list-btn" style="background:#fee2e2;color:#991b1b" onclick="event.stopPropagation();deleteEv('+it.evId+')">حذف</button>':'')
+        +'</div>';
       }).join('')+'</div>';
   }).join('')+'</div>';
+}
+
+function calSetTypeFilter(t){_calTypeFilter=t;renderCalendar();}
+
+function calDayClick(dStr){
+  var allItems=collectCalItems().filter(function(it){return it.jDate===dStr;});
+  if(allItems.length)calShowDay(dStr);else openEvModalDate(dStr);
+}
+
+function calShowDay(dStr){
+  var allItems=collectCalItems().filter(function(it){return it.jDate===dStr;});
+  allItems.sort(function(a,b){return(a.sk||0)-(b.sk||0);});
+  var body='<div style="display:flex;flex-direction:column;gap:5px;max-height:65vh;overflow-y:auto;padding:2px">'
+    +allItems.map(function(it){
+      var icon=it.type==='event'?'🗓':it.type==='followup'?'📅':'📋';
+      var typeName=it.type==='event'?'رویداد':it.type==='followup'?'پیگیری':'برنامه هفته';
+      var hnd='';
+      if(it.type==='event')hnd='onclick="closeModal('calDayModal');openEvModal('+it.evId+')"';
+      else if(it.type==='followup')hnd='onclick="closeModal('calDayModal');openCenterModal(''+it.rtype+'',''+it.rid+'')"';
+      return'<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-right:3px solid '+it.color+';background:var(--bg-raised);border-radius:6px;'+(hnd?'cursor:pointer':'')+'" '+(hnd||'')+'>'
+        +'<span style="font-size:20px;flex-shrink:0">'+icon+'</span>'
+        +'<div style="flex:1;overflow:hidden">'
+          +'<div style="font-weight:600;font-size:13px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(it.title)+'</div>'
+          +'<div style="font-size:10px;color:var(--text-muted);margin-top:2px">'+typeName+(it.time?' · '+it.time:'')+'</div>'
+        +'</div>'
+        +(hnd?'<span style="font-size:13px;color:var(--brand)">←</span>':'')
+      +'</div>';
+    }).join('')+'</div>';
+  var foot='<button class="btn-secondary" onclick="closeModal('calDayModal')">بستن</button>'
+    +'<button class="btn-primary" onclick="closeModal('calDayModal');openEvModalDate(''+dStr+'')">➕ رویداد جدید</button>';
+  openModal('calDayModal','📅 '+dStr+' <span style="font-size:11px;font-weight:400;color:var(--text-muted)">— '+allItems.length+' مورد</span>',body,foot);
 }
 
 function calNav(delta){
