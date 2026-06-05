@@ -1129,6 +1129,7 @@ function wkStart(jy,jm,jd){var dow=jDow(jy,jm,jd);var g=j2g(jy,jm,jd);var d=new 
 
 // ════════════════════════ HELPERS ══════════════════════
 function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function _safeColor(c){return(typeof c==='string'&&(/^#[0-9a-fA-F]{3,8}$/.test(c)||/^rgb/.test(c)||/^hsl/.test(c)))?c:'#888888';}
 function fNorm(s){return(s||'').toString().toLowerCase().replace(/[ي]/g,'ی').replace(/[ك]/g,'ک').replace(/[أإآا]/g,'ا').replace(/[\u200c\u200d]/g,' ').replace(/[۰-۹]/g,function(d){return'0123456789'['۰۱۲۳۴۵۶۷۸۹'.indexOf(d)];}).replace(/\s+/g,' ').trim();}
 function fMatch(q,t){return!q||fNorm(t).indexOf(fNorm(q))>=0;}
 function nowTs(){return Date.now();}
@@ -1374,6 +1375,7 @@ function umSaveUser(userId){
   var newId=idEl?idEl.value.trim():'';
   if(!newName){showToast('⚠ نام اجباری است');return;}
   if(newId&&newId!==userId&&!/^[a-zA-Z0-9._-]+$/.test(newId)){showToast('⚠ نام کاربری فقط حروف انگلیسی، اعداد و نقطه/خط تیره');return;}
+  if(newId&&newId!==userId&&USERS[newId]){showToast('⚠ این نام کاربری قبلاً وجود دارد');return;}
   var payload={display_name:newName,role:newRole,phone:newPhone};
   if(newColor)payload.color=newColor;
   if(newId&&newId!==userId)payload.new_username=newId;
@@ -3160,7 +3162,7 @@ function initTags(){
 function renderTagCell(type,id){
   var tgs=rTags(type,id);
   return'<span class="tag-cell">'
-    +tgs.map(function(tid){var t=tagById(tid);return t?'<span class="tag-badge" style="background:'+t.color+'" title="'+esc(t.name)+'">'+esc(t.name)+'</span>':'';}).join('')
+    +tgs.map(function(tid){var t=tagById(tid);return t?'<span class="tag-badge" style="background:'+_safeColor(t.color)+'" title="'+esc(t.name)+'">'+esc(t.name)+'</span>':'';}).join('')
     +'<button class="tag-add-btn" onclick="event.stopPropagation();openTagMenu(event,\''+type+'\',\''+id+'\')">+</button>'
     +'</span>';
 }
@@ -3186,7 +3188,7 @@ function buildTagItems(type,id,assigned){
   return(DB.tags||[]).map(function(t){
     var sel=assigned.indexOf(t.id)!==-1;
     return'<div class="tag-item'+(sel?' sel':'')+'" onclick="toggleTag(\''+type+'\',\''+id+'\','+t.id+')">'
-      +'<span><span class="tag-col" style="background:'+t.color+'"></span>'+esc(t.name)+'</span>'
+      +'<span><span class="tag-col" style="background:'+_safeColor(t.color)+'"></span>'+esc(t.name)+'</span>'
       +(sel?'<span>✓</span>':'')+'</div>';
   }).join('');
 }
@@ -3198,7 +3200,7 @@ function filterTagMenu(q,type,id){
   el.innerHTML=(DB.tags||[]).filter(function(t){return fNorm(t.name).indexOf(nq)>=0;}).map(function(t){
     var sel=assigned.indexOf(t.id)!==-1;
     return'<div class="tag-item'+(sel?' sel':'')+'" onclick="toggleTag(''+type+'',''+id+'','+t.id+')">'
-      +'<span><span class="tag-col" style="background:'+t.color+'"></span>'+esc(t.name)+'</span>'
+      +'<span><span class="tag-col" style="background:'+_safeColor(t.color)+'"></span>'+esc(t.name)+'</span>'
       +(sel?'<span>✓</span>':'')+'</div>';
   }).join('');
 }
@@ -3946,7 +3948,7 @@ function openCenterModal(rtype,id){
     +'</div>'
     +'<label>برچسب‌ها</label>'
     +'<div id="tagArea_'+id+'" style="display:flex;flex-wrap:wrap;gap:4px;padding:7px;background:var(--bg-raised);border-radius:6px;min-height:30px;border:1px solid var(--border)">'
-    +tgs.map(function(tid){var t=tagById(tid);return t?'<span class="tag-badge" style="background:'+t.color+';display:inline-flex;align-items:center;gap:3px">'+esc(t.name)+'<button onclick="removeCenterTag(event,\''+rtype+'\',\''+r.id+'\',\''+tid+'\')" style="background:rgba(0,0,0,.2);border:none;color:var(--text-primary);width:14px;height:14px;border-radius:50%;cursor:pointer;font-size:9px;line-height:1;padding:0;display:inline-flex;align-items:center;justify-content:center">✕</button></span>':'';}).join('')
+    +tgs.map(function(tid){var t=tagById(tid);return t?'<span class="tag-badge" style="background:'+_safeColor(t.color)+';display:inline-flex;align-items:center;gap:3px">'+esc(t.name)+'<button onclick="removeCenterTag(event,\''+rtype+'\',\''+r.id+'\',\''+tid+'\')" style="background:rgba(0,0,0,.2);border:none;color:var(--text-primary);width:14px;height:14px;border-radius:50%;cursor:pointer;font-size:9px;line-height:1;padding:0;display:inline-flex;align-items:center;justify-content:center">✕</button></span>':'';}).join('')
     +'<button class="tag-add-btn" style="width:24px;height:24px;line-height:22px;font-size:14px" onclick="openTagMenu(event,\''+rtype+'\',\''+r.id+'\')">+</button>'
     +'</div>'
         // ── بخش اطلاعات تماس ──
@@ -4135,7 +4137,7 @@ function removeCenterTag(ev,rtype,id,tagId){
   var area=document.getElementById('tagArea_'+id);
   if(area){
     var tgs=rTags(rtype,id);
-    area.innerHTML=tgs.map(function(tid){var t=tagById(tid);return t?'<span class="tag-badge" style="background:'+t.color+';display:inline-flex;align-items:center;gap:3px">'+esc(t.name)+'<button onclick="removeCenterTag(event,\''+rtype+'\',\''+id+'\',\''+tid+'\')" style="background:rgba(0,0,0,.2);border:none;color:var(--text-primary);width:14px;height:14px;border-radius:50%;cursor:pointer;font-size:9px;line-height:1;padding:0;display:inline-flex;align-items:center;justify-content:center">✕</button></span>':'';}).join('')
+    area.innerHTML=tgs.map(function(tid){var t=tagById(tid);return t?'<span class="tag-badge" style="background:'+_safeColor(t.color)+';display:inline-flex;align-items:center;gap:3px">'+esc(t.name)+'<button onclick="removeCenterTag(event,\''+rtype+'\',\''+id+'\',\''+tid+'\')" style="background:rgba(0,0,0,.2);border:none;color:var(--text-primary);width:14px;height:14px;border-radius:50%;cursor:pointer;font-size:9px;line-height:1;padding:0;display:inline-flex;align-items:center;justify-content:center">✕</button></span>':'';}).join('')
       +'<button class="tag-add-btn" style="width:24px;height:24px;line-height:22px;font-size:14px" onclick="openTagMenu(event,\''+rtype+'\',\''+id+'\')">+</button>';
   }
 }
@@ -5376,7 +5378,7 @@ function calChip(it){
   if(it.type==='event')hnd='onclick="event.stopPropagation();openEvModal('+it.evId+')"';
   else if(it.type==='followup')hnd='onclick="event.stopPropagation();openCenterModal(\''+it.rtype+'\',\''+it.rid+'\')"';
   var icon=it.type==='event'?'🗓':it.type==='followup'?'📅':'📋';
-  return'<div class="cal-chip" style="background:'+it.color+'" '+hnd+'>'
+  return'<div class="cal-chip" style="background:'+_safeColor(it.color)+'" '+hnd+'>'
     +'<span style="flex-shrink:0;font-size:9px">'+icon+'</span>'
     +(it.time?'<span class="cal-chip-time">'+it.time+'</span>':'')
     +'<span class="cal-chip-text">'+esc(it.title)+'</span></div>';
@@ -5452,7 +5454,7 @@ function renderCalList(items){
         var hnd='';
         if(it.type==='event')hnd='onclick="openEvModal('+it.evId+')"';
         else if(it.type==='followup')hnd='onclick="openCenterModal(\''+it.rtype+'\',\''+it.rid+'\')"';
-        return'<div class="cal-list-item" style="border-right-color:'+it.color+'" '+(hnd||'')+' >'
+        return'<div class="cal-list-item" style="border-right-color:'+_safeColor(it.color)+'" '+(hnd||'')+' >'
           +'<span style="font-size:18px;flex-shrink:0">'+icon+'</span>'
           +'<div style="flex:1;overflow:hidden">'
             +'<div style="font-weight:600;font-size:12px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(it.title)+'</div>'
@@ -5481,7 +5483,7 @@ function calShowDay(dStr){
       var hnd='';
       if(it.type==='event')hnd='onclick="closeModal(\'calDayModal\');openEvModal('+it.evId+')"';
       else if(it.type==='followup')hnd='onclick="closeModal(\'calDayModal\');openCenterModal(\''+it.rtype+'\',\''+it.rid+'\')"';
-      return'<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-right:3px solid '+it.color+';background:var(--bg-raised);border-radius:6px;'+(hnd?'cursor:pointer':'')+'" '+(hnd||'')+'>'
+      return'<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-right:3px solid '+_safeColor(it.color)+';background:var(--bg-raised);border-radius:6px;'+(hnd?'cursor:pointer':'')+'" '+(hnd||'')+'>'
         +'<span style="font-size:20px;flex-shrink:0">'+icon+'</span>'
         +'<div style="flex:1;overflow:hidden">'
           +'<div style="font-weight:600;font-size:13px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(it.title)+'</div>'
