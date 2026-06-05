@@ -2061,7 +2061,7 @@ function backToProvinces(){
   });
   var qf=document.getElementById('quickFilters');if(qf)qf.style.display='none';
   var sb=document.getElementById('centerStatsBar');if(sb)sb.style.display='none';
-  _quickFilter='';_selectedCenters=new Set();
+  _quickFilter='';_globalOwnerFilter='';_selectedCenters=new Set();
   var bar=document.getElementById('centersBulkBar');if(bar)bar.classList.remove('active');
   // reset view
   _viewMode='list';
@@ -2419,12 +2419,12 @@ function bannerSnooze(rtype,id,ev){
 
 // ════════════════════════ TABLE RENDER ════════════════
 function getFiltered(){
-  var q=document.getElementById('srch').value;
-  var fp=document.getElementById('fPot').value;
-  var fs=document.getElementById('fStatus').value;
-  var fl=document.getElementById('fLead').value;
-  var fo=document.getElementById('fOwner').value;
-  var ft=document.getElementById('fTag').value?parseInt(document.getElementById('fTag').value):0;
+  var q=(document.getElementById('srch')||{}).value||'';
+  var fp=(document.getElementById('fPot')||{}).value||'';
+  var fs=(document.getElementById('fStatus')||{}).value||'';
+  var fl=(document.getElementById('fLead')||{}).value||'';
+  var fo=(document.getElementById('fOwner')||{}).value||'';
+  var _ftEl=document.getElementById('fTag');var ft=_ftEl&&_ftEl.value?parseInt(_ftEl.value):0;
   var ftp=document.getElementById('fType')?document.getElementById('fType').value:'';
   var effectiveOwner=fo||_globalOwnerFilter||(_isExpert()?currentUser:'');
   var provId=_currentProvId;
@@ -4795,9 +4795,11 @@ function wpDoBulkMove(targetWeekId){
     if(!DB.weekEntries[eKey]) return;
     var we = DB.weekEntries[eKey];
     var parsed = wpParseEntryKey(eKey);
+    var recKey = we.recKey||((parsed.rtype||we.rtype||'')+'_'+(parsed.rid||we.rid||''));
+    wpRemoveFromOtherWeeks(recKey, targetWeekId);
     var newKey = wpEntryKey(targetWeekId, parsed.rtype||we.rtype||'', parsed.rid||we.rid||'');
-    DB.weekEntries[newKey] = Object.assign({}, we, {scheduledDate:null, done:false, doneDate:null});
-    delete DB.weekEntries[eKey];
+    if(newKey !== eKey) DB.weekEntries[newKey] = Object.assign({}, we, {scheduledDate:null, done:false, doneDate:null});
+    if(newKey !== eKey) delete DB.weekEntries[eKey];
   });
   saveDB(); wpClearSelection(); closeModal('wpBulkMoveModal'); renderWeekPlan();
   showToast('↪ '+keys.length+' مورد منتقل شد',2500);
@@ -6190,14 +6192,15 @@ function renderAllCenters(viewMode){
   var cv=document.getElementById('cardView');
   // filter controls
   ['srch','fPot','fStatus','fLead','fOwner','fType','fTag'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='';});
+  rebuildFilters();
   // collect all centers
-  var q=document.getElementById('srch').value;
-  var fp=document.getElementById('fPot').value;
-  var fs=document.getElementById('fStatus').value;
-  var fl=document.getElementById('fLead').value;
-  var fo=document.getElementById('fOwner').value;
+  var q=(document.getElementById('srch')||{}).value||'';
+  var fp=(document.getElementById('fPot')||{}).value||'';
+  var fs=(document.getElementById('fStatus')||{}).value||'';
+  var fl=(document.getElementById('fLead')||{}).value||'';
+  var fo=(document.getElementById('fOwner')||{}).value||'';
   var ftp=document.getElementById('fType')?document.getElementById('fType').value:'';
-  var ftg=document.getElementById('fTag').value?parseInt(document.getElementById('fTag').value):0;
+  var _ftgEl=document.getElementById('fTag');var ftg=_ftgEl&&_ftgEl.value?parseInt(_ftgEl.value):0;
   var effectiveOwner=fo||_globalOwnerFilter||(_isExpert()?currentUser:'');
   var allRows=[];
   getAllProvinces().forEach(function(p){
