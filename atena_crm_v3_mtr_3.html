@@ -884,7 +884,7 @@ tr.row-contracted td{background:#f0fdf4!important}
 
 <!-- FILTERS -->
 <div class="filters-bar no-print" id="filtersBar">
-  <button class="btn-act btn-back" id="provBackBtn" style="display:none" onclick="backToProvinces()">◀ بازگشت</button>
+  <button class="btn-act btn-back" id="provBackBtn" style="display:none" onclick="appBack()">◀ بازگشت</button>
   <span id="provViewHead" style="font-weight:700;color:var(--text-primary)"></span>
   <span id="allCentersToggle" style="display:flex;gap:4px;align-items:center">
     <button id="viewProvBtn" class="vb active" onclick="setProvView('grid')" title="نمایش استان‌ها">🗺 استان‌ها</button>
@@ -1985,6 +1985,7 @@ function switchTab(tab){
   if(tab!=='provinces')_currentProvId=null;
   currentTab=tab;
   try{localStorage.setItem('_st',tab);}catch(e){}
+  _navPush(tab, null);
   ['provinces','weekplan','calendar','checklist','activity','manager','kpi','mtr','pricing'].forEach(function(t){
     var b=document.getElementById('tab_'+t);if(b)b.classList.toggle('active',t===tab);
   });
@@ -2024,6 +2025,7 @@ function switchTab(tab){
 function openProvince(provId){
   _currentProvId=provId;
   try{localStorage.setItem('_spid',provId);}catch(e){}
+  _navPush('provinces', provId);
   currentTab='provinces';
   var prov=getAllProvinces().find(function(p){return p.id===provId;});
   var provName=prov?prov.name:provId;
@@ -2070,6 +2072,49 @@ function backToProvinces(){
   var act=document.getElementById('allCentersToggle');if(act)act.style.display='';
   switchTab('provinces');
 }
+
+
+// ════════════════════════ BROWSER HISTORY NAVIGATION ══════════════
+var _navReady = false;   // set true after init completes
+var _poppingState = false; // suppress pushState during popstate handling
+
+function _navPush(tab, provId) {
+  if (!_navReady || _poppingState) return;
+  try {
+    history.pushState({v:1, tab:tab, provId:provId||null}, '',
+      window.location.pathname + window.location.search);
+  } catch(e) {}
+}
+
+// دکمه بازگشت برنامه — اگر تاریخچه مرورگر وجود دارد از آن استفاده می‌کند
+function appBack() {
+  if (_navReady && window.history.length > 1) {
+    history.back();
+  } else {
+    backToProvinces();
+  }
+}
+
+window.addEventListener('popstate', function(e) {
+  if (!_navReady) return;
+  var state = e.state;
+  _poppingState = true;
+  try {
+    if (!state || !state.v) {
+      // بدون state — برگشت به لیست استان‌ها
+      if (_currentProvId) backToProvinces();
+      else switchTab('provinces');
+    } else if (state.provId) {
+      // بازگشت به نمای استان
+      openProvince(state.provId);
+    } else {
+      // بازگشت به تب
+      if (state.tab === 'provinces' && _currentProvId) backToProvinces();
+      else switchTab(state.tab || 'provinces');
+    }
+  } catch(e2) { console.error('[nav] popstate error:', e2); }
+  _poppingState = false;
+});
 
 // ════════════════════════ DASHBOARD ═══════════════════
 
@@ -7029,6 +7074,9 @@ async function init(){
       if(_spid)_currentProvId=_spid;
     }catch(e){}
     switchTab(currentTab);
+    // بعد از اتمام init، history navigation فعال می‌شود
+    _navReady=true;
+    try{history.replaceState({v:1,tab:currentTab,provId:_currentProvId||null},'',window.location.pathname+window.location.search);}catch(e){}
     checkEmptyDB();
     // Build cache + populate CNC now that PC_RAW is ready
     _PC_CACHE=null;_buildPCCache();
