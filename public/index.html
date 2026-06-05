@@ -2723,7 +2723,6 @@ function renderProvList(){
     var isMyProv=(owner===currentUser);
     var dimmed=false; // پنهان نمی‌کنیم، فقط highlight می‌کنیم
     var tp=getProvType(p.id);
-    var centers=getProvCenters(p.id);
     // count از DB.edits بدون iterate همه مراکز
     var contracted=0,meetings=0,overdueCount=0;
     var today2=todayStr();
@@ -3792,7 +3791,7 @@ function prcLoadPriceList() {
         '<td class="num">' + pr(2) + '</td>' +
         '<td class="num">' + pr(3) + '</td></tr>';
     }).join('');
-    el.innerHTML = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">نسخه ' + list.version + ' — ' + (list.name||'') + ' — تاریخ: ' + (list.created_at?new Date(list.created_at).toLocaleDateString('fa-IR'):'') + '</div>' +
+    el.innerHTML = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">نسخه ' + esc(list.version) + ' — ' + esc(list.name||'') + ' — تاریخ: ' + (list.created_at?new Date(list.created_at).toLocaleDateString('fa-IR'):'') + '</div>' +
       '<div style="overflow-x:auto"><table class="prc-table">' +
       '<thead><tr><th>#</th><th>محصول</th>' +
       '<th>تا ۲۰ (ریال)</th><th>۲۱–۵۰ (ریال)</th><th>۵۱–۱۰۰ (ریال)</th><th>+۱۰۰ (ریال)</th>' +
@@ -7833,9 +7832,9 @@ function mgrDoneTask(recKey){
   }
   saveDB();
   showToast('✅ وظیفه انجام شد');
-  renderUserDashboard();
   if(currentTab==='kpi')renderKPIPanel();
   if(currentTab==='provinces')renderDashboard();
+  else renderUserDashboard();
 }
 
 function _renderManagerTasksWidget(){
