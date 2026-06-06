@@ -5303,6 +5303,16 @@ function wpDrop(event, targetDate) {
 function wpRemoveEntry(eKey){
   delete DB.weekEntries[eKey];saveDB();renderWeekPlan();
 }
+// حذف همه ورودی‌های یک مرکز در یک هفته خاص (برای رفع مشکل duplicate)
+function wpRemoveAllInWeek(weekId,recKey){
+  Object.keys(DB.weekEntries||{}).forEach(function(k){
+    if(k.split(':::')[0]!==weekId)return;
+    var we=DB.weekEntries[k];
+    var rk=we.recKey||(we.rtype+'_'+we.rid);
+    if(rk===recKey)delete DB.weekEntries[k];
+  });
+  saveDB();renderWeekPlan();
+}
 
 function wpMoveEntry(eKey,currentWeekId){
   if(!DB.weekEntries[eKey])return;
@@ -5417,12 +5427,13 @@ function openAssignWeekForCenter(rtype,id,name){
   shown.sort(function(a,b){return a.num-b.num;});
 
   // پیدا کردن هفته‌هایی که این مرکز در آن‌ها هست
+  // currentWeekKeys: weekId → [key1, key2, ...] — آرایه تا همه duplicate‌ها را نگه داریم
   var recKey=rtype+'_'+id;
   var currentWeekKeys={};
   Object.keys(DB.weekEntries||{}).forEach(function(k){
     var we=DB.weekEntries[k];
     var rk=we.recKey||(we.rtype+'_'+we.rid);
-    if(rk===recKey) currentWeekKeys[k.split(':::')[0]]=k;
+    if(rk===recKey){var wid=k.split(':::')[0];if(!currentWeekKeys[wid])currentWeekKeys[wid]=[];currentWeekKeys[wid].push(k);}
   });
   var inWeekIds=Object.keys(currentWeekKeys);
   var currentWeekLabel='';
@@ -5443,8 +5454,7 @@ function openAssignWeekForCenter(rtype,id,name){
     )
     +'<div style="display:flex;flex-direction:column;gap:5px;max-height:55vh;overflow-y:auto">'
     +shown.map(function(wt){
-      var isInThisWeek=!!currentWeekKeys[wt.id];
-      var eKey=currentWeekKeys[wt.id]||wpEntryKey(wt.id,rtype,id);
+      var isInThisWeek=!!(currentWeekKeys[wt.id]&&currentWeekKeys[wt.id].length);
       var rowBg=isInThisWeek?'#dbeafe':wt.isCurrent?'#fffbeb':'var(--bg-raised)';
       var rowBorder=isInThisWeek?'#93c5fd':wt.isCurrent?'#fcd34d':'var(--border)';
       return '<div style="display:flex;align-items:center;justify-content:space-between;padding:9px 10px;background:'+rowBg+';border-radius:6px;border:1px solid '+rowBorder+'">'
@@ -5454,7 +5464,7 @@ function openAssignWeekForCenter(rtype,id,name){
           +(isInThisWeek?'<span style="font-size:10px;color:#1e40af;font-weight:700"> · در برنامه</span>':'')
         +'</div>'
         +(isInThisWeek
-          ?'<button class="btn-danger" style="padding:3px 10px;font-size:11px" onclick="wpRemoveEntry(\''+eKey+'\');closeModal(\'awc_'+id+'\');openAssignWeekForCenter(\''+rtype+'\',\''+id+'\',\''+esc(name)+'\')">✕ حذف</button>'
+          ?'<button class="btn-danger" style="padding:3px 10px;font-size:11px" onclick="wpRemoveAllInWeek(\''+wt.id+'\',\''+recKey+'\');closeModal(\'awc_'+id+'\');openAssignWeekForCenter(\''+rtype+'\',\''+id+'\',\''+esc(name)+'\')">✕ حذف</button>'
           :'<button class="btn-primary" style="padding:3px 10px;font-size:11px;background:'+(inWeekIds.length?'#8b5cf6':'#0ea5e9')+';" onclick="var act=document.getElementById(\'wpActType\').value;addToWeekAuto(\''+wt.id+'\',\''+rtype+'\',\''+id+'\',\''+esc(name)+'\',act)">'
             +(inWeekIds.length?'↪ انتقال':'+ افزودن')
           +'</button>'
