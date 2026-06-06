@@ -984,6 +984,15 @@ tr.row-contracted td{background:#f0fdf4!important}
 .notif-item-msg{font-size:12px;color:var(--text-primary);line-height:1.5}
 .notif-item-time{font-size:10px;color:var(--text-muted);margin-top:3px}
 .notif-empty{padding:30px;text-align:center;color:var(--text-muted);font-size:13px}
+.notif-item-center{font-size:10px;color:var(--text-muted);margin-top:3px}
+.notif-center-link{color:var(--brand);cursor:pointer;text-decoration:underline dotted}
+.notif-item-actions{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.notif-act-btn{font-size:10px;padding:2px 9px;border-radius:5px;border:1px solid var(--border);background:var(--bg-raised);color:var(--text-primary);cursor:pointer;font-family:inherit;transition:background .15s}
+.notif-act-btn:hover{background:var(--brand);color:#fff;border-color:var(--brand)}
+.notif-ack-btn{border-color:#22c55e;color:#166534;background:#f0fdf4}
+.notif-ack-btn:hover{background:#22c55e;color:#fff;border-color:#22c55e}
+.notif-ack-badge{font-size:10px;color:#16a34a;font-weight:700;padding:2px 6px;background:#dcfce7;border-radius:5px;border:1px solid #86efac}
+.notif-acked{opacity:.75}
 
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" onerror="console.warn('XLSX CDN failed - only TSV format supported offline')"></script>
@@ -2104,7 +2113,7 @@ function setE(type,id,field,val){var k=recK(type,id);if(!DB.edits[k])DB.edits[k]
       }).catch(function(){});
     }
   }
-  DB.edits[k][field]=val;DB.edits[k]._ts=nowTs();if(field==='status'||field==='lead'||field==='potential')DB.edits[k]._lastActivity=nowTs();if(field==='status')DB.edits[k]._statusChangedTs=nowTs();if(field==='followupDate'&&val){(function(){var _p=(val+'').split('/').map(Number);if(_p.length!==3||isNaN(_p[0]))return;var _ndMs=jMs(_p[0],_p[1],_p[2]);Object.keys(DB.weekEntries||{}).forEach(function(_wk){var _we=DB.weekEntries[_wk];if(_we.rtype!==type||_we.rid!==id||_we.done)return;var _wId=_wk.split(':::')[0];var _mWk=(typeof wpGetWeeks==='function'?wpGetWeeks():[]).find(function(w){return w.id===_wId;});if(!_mWk)return;var _wsMs=jMs(_mWk.wsArr[0],_mWk.wsArr[1],_mWk.wsArr[2]);var _weMs=jMs(_mWk.weArr[0],_mWk.weArr[1],_mWk.weArr[2]);if(_ndMs>=_wsMs&&_ndMs<=_weMs)_we.scheduledDate=val;});})();}saveDB();flashRow(id);if(currentTab==='kpi'&&(field==='status'||field==='lead'||field==='owner'))setTimeout(renderKPIPanel,300);if(field==='followupDate'&&currentTab==='weekplan')setTimeout(renderWeekPlan,50);var _cFields=['contactName','contactTitle','phones','address','contacts'];if(_cFields.indexOf(field)>=0){  var _ce=DB.edits[k];  fetch('/api/contacts/'+encodeURIComponent(k),{method:'PUT',headers:{'Content-Type':'application/json'},    body:JSON.stringify({centerName:_getCenterName(type,id),      contacts:_ce.contacts||[],address:_ce.address||''})  }).catch(function(){});}}
+  DB.edits[k][field]=val;DB.edits[k]._ts=nowTs();if(field==='status'||field==='lead'||field==='potential')DB.edits[k]._lastActivity=nowTs();if(field==='status')DB.edits[k]._statusChangedTs=nowTs();if(field==='followupDate'&&val){(function(){var _p=(val+'').split('/').map(Number);if(_p.length!==3||isNaN(_p[0]))return;var _ndMs=jMs(_p[0],_p[1],_p[2]);Object.keys(DB.weekEntries||{}).forEach(function(_wk){var _we=DB.weekEntries[_wk];if(_we.rtype!==type||_we.rid!==id||_we.done)return;var _wId=_wk.split(':::')[0];var _mWk=(typeof wpGetWeeks==='function'?wpGetWeeks():[]).find(function(w){return w.id===_wId;});if(!_mWk)return;var _wsMs=jMs(_mWk.wsArr[0],_mWk.wsArr[1],_mWk.wsArr[2]);var _weMs=jMs(_mWk.weArr[0],_mWk.weArr[1],_mWk.weArr[2]);if(_ndMs>=_wsMs&&_ndMs<=_weMs)_we.scheduledDate=val;});})();}saveDB();flashRow(id);if(currentTab==='kpi'&&(field==='status'||field==='lead'||field==='owner'))setTimeout(renderKPIPanel,300);if(field==='followupDate'&&currentTab==='weekplan')setTimeout(renderWeekPlan,50);if(field==='owner'&&val&&typeof sendNotif==='function'){(function(){var _oldOwner=(DB.edits[k]||{})._prevOwner||'';if(val!==_oldOwner&&val!==currentUser){var _cn=_getCenterName(type,id);sendNotif(val,'مرکز "'+_cn+'" به شما واگذار شد',type+'_'+id);}DB.edits[k]._prevOwner=val;})();}var _cFields=['contactName','contactTitle','phones','address','contacts'];if(_cFields.indexOf(field)>=0){  var _ce=DB.edits[k];  fetch('/api/contacts/'+encodeURIComponent(k),{method:'PUT',headers:{'Content-Type':'application/json'},    body:JSON.stringify({centerName:_getCenterName(type,id),      contacts:_ce.contacts||[],address:_ce.address||''})  }).catch(function(){});}}
 function rTags(type,id){return DB.rTags[recK(type,id)]||[];}
 function tagById(id){return(DB.tags||[]).find(function(t){return t.id===id;});}
 function undoEdit(){
@@ -6059,7 +6068,7 @@ function toggleNotifPanel(){
   var panel=document.createElement('div');
   panel.id='notifPanel';panel.className='notif-panel';
   var unreadIds=myNotifs.filter(function(n){return !n.read;}).map(function(n){return n.id;});
-  var head='<div class="notif-panel-head"><span>\u{1F514} اعلان‌های من</span>'
+  var head='<div class="notif-panel-head"><span>🔔 اعلان‌های من</span>'
     +(unreadIds.length?'<button onclick="markAllNotifsRead()" style="font-size:10px;background:var(--bg-raised);border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer">همه خوانده شد</button>':'')
     +'</div>';
   var body='';
@@ -6069,8 +6078,19 @@ function toggleNotifPanel(){
     body=myNotifs.map(function(n){
       var timeAgo=_timeAgo(n.at);
       var nid=n.id;
-      return '<div class="notif-item'+(n.read?'':' unread')+'" onclick="markNotifRead(\''+nid+'\')">'
+      var hasCk=n.centerKey&&n.centerKey.indexOf('_')>0;
+      var ckParts=hasCk?n.centerKey.split('_'):[];
+      var ckRtype=ckParts[0]||'';var ckRid=ckParts.slice(1).join('_');
+      var cName=hasCk?_clGetName(n.centerKey):'';
+      return '<div class="notif-item'+(n.read?'':' unread')+(n.ack?' notif-acked':'')+'" data-nid="'+nid+'">'
         +'<div class="notif-item-msg">'+esc(n.message)+'</div>'
+        +(hasCk?'<div class="notif-item-center">📍 <span class="notif-center-link" onclick="goToNotifCenter(\''+nid+'\')">'+esc(cName)+'</span></div>':'')
+        +'<div class="notif-item-actions">'
+        +(hasCk?'<button class="notif-act-btn" onclick="goToNotifCenter(\''+nid+'\')">🔍 مشاهده مرکز</button>':'')
+        +(n.ack
+          ?'<span class="notif-ack-badge">✓ تأیید شده</span>'
+          :'<button class="notif-act-btn notif-ack-btn" onclick="ackNotif(\''+nid+'\')">✓ انجام دادم</button>')
+        +'</div>'
         +'<div class="notif-item-time">از: '+(USERS[n.from]||n.from)+' · '+timeAgo+'</div>'
         +'</div>';
     }).join('');
@@ -6089,10 +6109,46 @@ function toggleNotifPanel(){
   setTimeout(function(){
     document.addEventListener('click',function _nClose(ev){
       var p=document.getElementById('notifPanel');
-      if(p&&!p.contains(ev.target)&&ev.target.id!=='notifBell'){p.remove();_notifPanelOpen=false;}
+      var bell=document.getElementById('notifBell');
+      if(p&&!p.contains(ev.target)&&ev.target!==bell&&!bell.contains(ev.target)){p.remove();_notifPanelOpen=false;}
       document.removeEventListener('click',_nClose);
     });
   },100);
+}
+
+function goToNotifCenter(nid){
+  _initNotif();
+  var n=DB.notifications.find(function(x){return x.id===nid;});
+  if(!n||!n.centerKey)return;
+  markNotifRead(nid);
+  var p=document.getElementById('notifPanel');if(p)p.remove();_notifPanelOpen=false;
+  var parts=n.centerKey.split('_');
+  var rtype=parts[0];var rid=parts.slice(1).join('_');
+  if(currentTab!=='provinces'&&currentTab!=='weekplan')switchTab('provinces');
+  setTimeout(function(){openCenterModal(rtype,rid);},150);
+}
+
+function ackNotif(nid){
+  _initNotif();
+  var n=DB.notifications.find(function(x){return x.id===nid;});
+  if(!n||n.ack)return;
+  n.read=true;n.ack=true;n.ackAt=new Date().toISOString();
+  if(n.from&&n.from!==currentUser){
+    var cName=n.centerKey?_clGetName(n.centerKey):'';
+    var msg=(USERS[currentUser]||currentUser)+' تأیید کرد: '+(cName?'"'+cName+'" ':'')+'انجام شد ✓';
+    sendNotif(n.from,msg,n.centerKey||'');
+  }
+  saveDB();updateNotifBadge();
+  var p=document.getElementById('notifPanel');
+  if(p){
+    var el=p.querySelector('[data-nid="'+nid+'"]');
+    if(el){
+      el.classList.remove('unread');el.classList.add('notif-acked');
+      var btn=el.querySelector('.notif-ack-btn');
+      if(btn)btn.outerHTML='<span class="notif-ack-badge">✓ تأیید شده</span>';
+    }
+  }
+  showToast('✅ تأیید ثبت و به مدیر اطلاع داده شد',2000);
 }
 
 function markNotifRead(nid){
