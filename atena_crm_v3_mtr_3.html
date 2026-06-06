@@ -5568,6 +5568,17 @@ function renderWpItem(entry,weekId){
   var actBg = actType === 'visit' ? '#8b5cf6' : '#0ea5e9';
   var isSel2 = _wpSelected.has(k);
 
+  // نشانگر وضعیت (فقط مدیر): 🟠 بدون تاریخ | 🔴 معوق | 🟢 انجام شده | 🔴 امروز بدون گزارش
+  var _todayDot = '';
+  if(_isManager() && !done){
+    var _today2=todayStr(),_sd2=entry.scheduledDate||'',_dc='',_dt='';
+    var _chkAct=function(ds){return (DB.changeLog||[]).some(function(l){if(l.rkey!==rtype+'_'+rid||!l.at)return false;var _dp=l.at.slice(0,10).split('-').map(Number);if(_dp.length!==3)return false;var _jd=g2j(_dp[0],_dp[1],_dp[2]);return _jd[0]+'/'+p2(_jd[1])+'/'+p2(_jd[2])===ds;});};
+    if(!_sd2){_dc='#f59e0b';_dt='بدون تاریخ';}
+    else if(_sd2<_today2){var _had=_chkAct(_sd2);_dc=_had?'#22c55e':'#ef4444';_dt=_had?'انجام شد ('+_sd2+')':'سررسید گذشته — بدون گزارش ('+_sd2+')';}
+    else if(_sd2===_today2){var _has=_chkAct(_today2);_dc=_has?'#22c55e':'#ef4444';_dt=_has?'فعالیت ثبت شده':'امروز — بدون گزارش';}
+    if(_dc)_todayDot='<span title="'+_dt+'" style="width:8px;height:8px;border-radius:50%;background:'+_dc+';display:inline-block;flex-shrink:0;border:1px solid rgba(0,0,0,.15)"></span>';
+  }
+
   return '<div class="wp-item'+(done?' done':'')+(!done&&isSel2?' wp-selected':'')+'" data-ekey="'+k+'" draggable="true" ondragstart="event.stopPropagation();wpDragStart(event,\''+k+'\')" ondragend="wpDragEnd(event)">'
     + '<input type="checkbox" class="wp-item-cb" '+(isSel2?'checked':'')+' onclick="event.stopPropagation();wpToggleSelect(\''+(k)+'\')" title="انتخاب">'
     + '<div style="display:flex;justify-content:space-between;align-items:flex-start;padding-left:18px;">'
@@ -6456,53 +6467,123 @@ function _clValDisplay(field, val){
 
 // ════════════════════════ AUTO REMINDER TIMER ════════════════════
 var _autoReminderChecked = false;
+
 function _setupAutoReminder(){
+  // یادآوری ساعت ۳ برای مراکز امروز: هر ۶۰ ثانیه چک
   setInterval(function(){
     if(_autoReminderChecked) return;
     if(!_isManager()) return;
     var now = new Date();
-    if(now.getHours() < 15) return; // فقط بعد از ساعت ۳ بعدازظهر
+    if(now.getHours() < 15) return;
     var today = todayStr();
-    if((DB._lastAutoReminder||'') === today) return; // فقط یک بار در روز
+    if((DB._lastAutoReminder||'') === today) return;
     _autoReminderChecked = true;
     DB._lastAutoReminder = today;
     saveDB();
-    _runAutoReminders(today);
-  }, 60000); // هر ۶۰ ثانیه چک
+    _runTodayReminders(today);
+  }, 60000);
+
+  // یادآوری startup برای مراکز بدون تاریخ + سررسیدگذشته: یک بار در روز
+  setTimeout(function(){
+    if(!_isManager()) return;
+    var today = todayStr();
+    if((DB._lastStartupReminder||'') === today) return;
+    DB._lastStartupReminder = today;
+    saveDB();
+    _runOverdueAndUndatedReminders(today);
+  }, 8000);
 }
 
-function _runAutoReminders(today){
-  // گروه‌بندی مراکز بدون فعالیت امروز به ازای هر کارشناس
+// ── یادآوری ساعت ۳: مراکز امروز بدون گزارش ──
+function _runTodayReminders(today){
   var byExpert = {};
+  _buildPCCache();
   Object.keys(DB.weekEntries||{}).forEach(function(k){
     var we = DB.weekEntries[k];
     if(we.done || we.scheduledDate !== today || we.rtype === 'mtr') return;
-    var rtype = we.rtype||'center', rid = we.rid||'';
-    var e = getE(rtype,rid);
-    var owner = e.owner||'';
-    if(!owner){
-      if(rtype==='center'){var c=CENTERS.find(function(x){return x.id===rid;});if(c&&c.owner)owner=c.owner;}
-      else{_buildPCCache();var _pId=rid.split('||')[0];var _arr=_PC_CACHE[_pId]||[];var _c=_arr.find(function(x){return x.id===rid;});if(_c&&_c.owner)owner=_c.owner;}
-    }
+    var owner = _wpGetOwner(we);
     if(!owner) return;
-    var acts = _getTodayActivities(rtype,rid,today);
-    if(acts.length > 0) return; // این مرکز فعالیت داشته
+    var acts = _getTodayActivities(we.rtype||'center', we.rid||'', today);
+    if(acts.length > 0) return;
     if(!byExpert[owner]) byExpert[owner] = [];
-    byExpert[owner].push(we.centerName||getRecLabel(rtype+'_'+rid)||'?');
+    byExpert[owner].push({name: we.centerName||getRecLabel((we.rtype||'center')+'_'+(we.rid||'')), key: (we.rtype||'center')+'_'+(we.rid||'')});
   });
-  var expertCount = 0;
+  var cnt = 0;
   Object.keys(byExpert).forEach(function(exp){
-    var centers = byExpert[exp];
-    if(!centers.length) return;
-    expertCount++;
-    var msg = 'یادآوری خودکار ساعت ۱۵: لطفاً برای مراکز زیر گزارش وارد کنید: '
-      + centers.slice(0,5).join('، ')
-      + (centers.length>5?' و '+(centers.length-5)+' مرکز دیگر':'');
-    sendNotif(exp, msg, '');
+    var items = byExpert[exp]; if(!items.length) return; cnt++;
+    var msg = 'یادآوری ساعت ۱۵: این مراکز امروز گزارش نشده‌اند: '
+      + items.slice(0,5).map(function(x){return x.name;}).join('، ')
+      + (items.length>5?' و '+(items.length-5)+' مرکز دیگر':'');
+    sendNotif(exp, msg, items[0].key);
   });
-  if(expertCount > 0){
-    showToast('🔔 یادآوری خودکار برای '+expertCount+' کارشناس ارسال شد', 3000);
-  }
+  if(cnt>0) showToast('🔔 یادآوری ساعت ۱۵ برای '+cnt+' کارشناس ارسال شد', 3000);
+}
+
+// ── یادآوری روزانه: مراکز بدون تاریخ + سررسیدگذشته ──
+function _runOverdueAndUndatedReminders(today){
+  var byExpert = {}; // expert → {noDate:[], overdue:[]}
+  _buildPCCache();
+  Object.keys(DB.weekEntries||{}).forEach(function(k){
+    var we = DB.weekEntries[k];
+    if(we.done || we.rtype === 'mtr') return;
+    var owner = _wpGetOwner(we);
+    if(!owner) return;
+    if(!byExpert[owner]) byExpert[owner] = {noDate:[], overdue:[]};
+    var name = we.centerName||getRecLabel((we.rtype||'center')+'_'+(we.rid||''))||'?';
+    var ck = (we.rtype||'center')+'_'+(we.rid||'');
+    if(!we.scheduledDate){
+      // مرکز بدون تاریخ
+      byExpert[owner].noDate.push({name:name, key:ck});
+    } else if(we.scheduledDate < today){
+      // تاریخ گذشته: بررسی آیا گزارشی در اون روز داشته
+      var actOnDay = _getActivitiesOnDate(we.rtype||'center', we.rid||'', we.scheduledDate);
+      if(actOnDay.length === 0){
+        byExpert[owner].overdue.push({name:name, key:ck, date:we.scheduledDate});
+      }
+    }
+  });
+  var cnt = 0;
+  Object.keys(byExpert).forEach(function(exp){
+    var d = byExpert[exp];
+    var msgs = [];
+    if(d.noDate.length){
+      msgs.push('📅 '+d.noDate.length+' مرکز بدون تاریخ در برنامه هفته: '
+        + d.noDate.slice(0,4).map(function(x){return x.name;}).join('، ')
+        + (d.noDate.length>4?' و '+(d.noDate.length-4)+' مرکز دیگر':''));
+    }
+    if(d.overdue.length){
+      msgs.push('⚠ '+d.overdue.length+' مرکز با تاریخ گذشته بدون گزارش: '
+        + d.overdue.slice(0,4).map(function(x){return x.name+' ('+x.date+')';}).join('، ')
+        + (d.overdue.length>4?' و '+(d.overdue.length-4)+' مرکز دیگر':''));
+    }
+    if(!msgs.length) return;
+    cnt++;
+    var firstKey = (d.overdue[0]||d.noDate[0]||{}).key||'';
+    sendNotif(exp, msgs.join(' | '), firstKey);
+  });
+  if(cnt>0) showToast('🔔 یادآوری مراکز معوق برای '+cnt+' کارشناس ارسال شد', 3000);
+}
+
+// کمکی: پیدا کردن مسئول یک weekEntry
+function _wpGetOwner(we){
+  var rtype = we.rtype||'center', rid = we.rid||'';
+  var e = getE(rtype, rid);
+  if(e.owner) return e.owner;
+  if(rtype==='center'){var c=CENTERS.find(function(x){return x.id===rid;});if(c&&c.owner)return c.owner;}
+  else{var _pId=rid.split('||')[0];var _arr=_PC_CACHE[_pId]||[];var _c=_arr.find(function(x){return x.id===rid;});if(_c&&_c.owner)return _c.owner;}
+  return '';
+}
+
+// کمکی: فعالیت‌های یک مرکز در یک تاریخ جلالی مشخص
+function _getActivitiesOnDate(rtype, rid, jDateStr){
+  var rkey = rtype+'_'+rid;
+  return (DB.changeLog||[]).filter(function(l){
+    if(l.rkey !== rkey || !l.at) return false;
+    var dp = l.at.slice(0,10).split('-').map(Number);
+    if(dp.length!==3) return false;
+    var jd = g2j(dp[0],dp[1],dp[2]);
+    return jd[0]+'/'+p2(jd[1])+'/'+p2(jd[2]) === jDateStr;
+  });
 }
 
 // ════════════════════════ CALENDAR ════════════════════
