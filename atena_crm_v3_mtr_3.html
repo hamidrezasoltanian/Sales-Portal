@@ -4933,9 +4933,35 @@ function wpRemoveFromOtherWeeks(recKey, keepWeekId){
   Object.keys(DB.weekEntries||{}).forEach(function(k){
     if(keepWeekId && k.startsWith(keepWeekId+':::')) return;
     var we=DB.weekEntries[k];
+    if(!we||typeof we!=='object')return;
     var rk=we.recKey||(we.rtype+'_'+we.rid);
     if(rk===recKey) delete DB.weekEntries[k];
   });
+}
+
+function wpDeduplicateEntries(){
+  // یک مرکز فقط باید در یک هفته باشد — قدیمی‌ترین کپی‌ها حذف می‌شوند
+  var byCenter={};
+  Object.keys(DB.weekEntries||{}).forEach(function(k){
+    var we=DB.weekEntries[k];
+    if(!we||typeof we!=='object')return;
+    var rk=we.recKey||(we.rtype&&we.rid?we.rtype+'_'+we.rid:'');
+    if(!rk)return;
+    if(!byCenter[rk])byCenter[rk]=[];
+    byCenter[rk].push(k);
+  });
+  var removed=0;
+  Object.keys(byCenter).forEach(function(rk){
+    var keys=byCenter[rk];
+    if(keys.length<=1)return;
+    // نگه‌داشتن هفته جدیدترین (بزرگ‌ترین weekId بر اساس مرتب‌سازی رشته‌ای)
+    keys.sort();
+    var keep=keys[keys.length-1];
+    keys.forEach(function(k){
+      if(k!==keep){delete DB.weekEntries[k];removed++;}
+    });
+  });
+  return removed;
 }
 
 function wpPickSelect(row){
@@ -6873,6 +6899,7 @@ function openSettings(){
   }
   var foot='<button class="btn-secondary" onclick="closeModal(\'settingsModal\')">انصراف</button>'
     +'<button style="background:var(--bg-raised);color:var(--text-secondary);border:1px solid #fcd34d;border-radius:5px;padding:6px 12px;cursor:pointer;font-size:12px;font-family:inherit" onclick="cleanupOrphanedEntries(true);renderDashboard()">🧹 پاک‌سازی ورودی‌های منسوخ</button>'
+    +'<button style="background:var(--bg-raised);color:var(--text-secondary);border:1px solid #7dd3fc;border-radius:5px;padding:6px 12px;cursor:pointer;font-size:12px;font-family:inherit" onclick="var n=wpDeduplicateEntries();if(n>0){saveDBSync();renderWeekPlan();showToast(\'✅ \'+n+\' ورودی تکراری هفته حذف شد\',3000);}else{showToast(\'✅ هیچ تکراری یافت نشد\');}">📋 حذف تکراری‌های هفته</button>'
     +'<button class="btn-primary" onclick="saveSettings()">💾 ذخیره تنظیمات</button>';
   // Backup/Restore JSON section
   body += '<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">'
@@ -7272,6 +7299,7 @@ async function init(){
   loadMasterCenters().then(function(){
     _typeFilterBuilt=false;
     cleanupOrphanedEntries(false);
+    var _dedup=wpDeduplicateEntries();if(_dedup>0){saveDBSync();console.info('[wp] dedup removed',_dedup,'duplicate week entries');}
     rebuildFilters();buildTypeFilter();
     try{
       var _st=localStorage.getItem('_st');
