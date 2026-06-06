@@ -1197,6 +1197,7 @@ async function doLogin(){
   }
 }
 async function doLogout(){
+  saveDBSync();
   await fetch('/api/auth/logout',{method:'POST'}).catch(function(){});
   location.reload();
 }
@@ -5837,7 +5838,7 @@ function gSearchQuery(q){
   _gSearchSel=0;
   var el=document.getElementById('gSearchResults');
   if(!el)return;
-  if(!res.length){el.innerHTML='<div class="gs-empty">'+(q?'نتیجه‌ای یافت نشد':'برای جستجو تایپ کنید…')+'</div>';return;}
+  if(!res.length){el.innerHTML='<div class="gs-empty">'+(q?'نتیجه‌ای یافت نشد':'برای جستجو تایپ کنید…')+'</div>';el._results=[];return;}
   el.innerHTML=res.map(function(r,i){
     return'<div class="gs-item'+(i===0?' gs-sel':'')+'" data-idx="'+i+'" onmouseenter="gSearchHover('+i+')" onclick="gSearchExec('+i+')">'
       +'<span class="gs-icon">'+r.icon+'</span>'
