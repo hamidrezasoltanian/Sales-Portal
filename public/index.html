@@ -1940,6 +1940,7 @@ function saveMasterCenters(centers){
 function recK(type,id){return type+'_'+id;}
 function getE(type,id){return DB.edits[recK(type,id)]||{};}
 function _getCenterName(type,id){
+  var _over=(DB.edits[recK(type,id)]||{}).nameOverride;if(_over)return _over;
   if(type==='center'){var c=CENTERS.find(function(x){return x.id===id;});if(c)return c.name;}
   _buildPCCache();
   var provId=id.split('||')[0];
@@ -3029,7 +3030,7 @@ function renderProvTable(){
       +'<td><button class="note-btn'+(notes.length?' has':'')+'" onclick="openNotes(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')">📝'+(notes.length?' '+notes.length:'')+'</button>'
         +'<input style="margin-right:4px;width:100px;border:1px solid var(--border-input);border-radius:4px;padding:2px 5px;font-size:10px;direction:rtl" placeholder="یادداشت سریع" onkeydown="if(event.key===\'Enter\'&&this.value.trim()){addNote(\''+rtype+'\',\''+r.id+'\',this.value,this);}">'
         +notePreview+'</td>'
-      +(function(){var _rk2=rtype+'_'+r.id;var _inWk=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return (we.recKey||(we.rtype+'_'+we.rid))===_rk2;});return '<td><button class="btn-assignweek" style="'+(_inWk?'background:#7c3aed':'')+'" onclick="openAssignWeekForCenter(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')">'+(_inWk?'↪ در هفته':'📋 هفته')+'</button></td>';})()
+      +(function(){var _rk2=rtype+'_'+r.id;var _inWk=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk2;});return '<td><button class="btn-assignweek" style="'+(_inWk?'background:#7c3aed':'')+'" onclick="openAssignWeekForCenter(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')">'+(_inWk?'↪ در هفته':'📋 هفته')+'</button></td>';})()
       +'<td>'+lastContactHtml+'</td>'
       +'</tr>';
   }).join(''):'<tr><td colspan="12" style="text-align:center;padding:40px;color:#94a3b8">نتیجه‌ای یافت نشد</td></tr>';
@@ -4022,6 +4023,13 @@ function openCenterAudit(centerKey, centerName) {
     }).catch(function(){showToast('⚠ خطا در بارگذاری تاریخچه');});
 }
 
+function _updateExtraCenterProv(id,newProvId){
+  var idx=(DB.extra||[]).findIndex(function(x){return x.id===id;});
+  if(idx<0)return;
+  DB.extra[idx].province_id=newProvId;
+  clearPCCache();_ALL_PROVS=null;
+  saveDB();showToast('✅ استان به‌روز شد');
+}
 function openCenterModal(rtype,id){
   var prov=_currentProvId;
   if(!prov){
@@ -4049,8 +4057,27 @@ function openCenterModal(rtype,id){
   var notes=DB.notes[recK(rtype,r.id)]||[];
   var tgs=rTags(rtype,r.id);
   var wkEntries=Object.values(DB.weekEntries||{}).filter(function(we){return we.recKey===rtype+'_'+id;});
+  var displayName=e.nameOverride||r.name;
+  var isExtra=!!(DB.extra&&DB.extra.find(function(x){return x.id===r.id;}));
+  var provObj=getAllProvinces().find(function(p){return p.id===(prov||'tehran');});
+  var provName=provObj?provObj.name:'تهران';
+  var inpStyle='width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)';
 
-  var body='<div class="m-2col">'
+  var body='<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px">'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+    +'<div><label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">نام مرکز</label>'
+    +'<input type="text" value="'+esc(displayName)+'" style="'+inpStyle+'" '
+    +'onchange="setE(\''+rtype+'\',\''+r.id+'\',\'nameOverride\',this.value.trim());var _th=document.querySelector(\'#mo_cm_'+id+' .m-head span\');if(_th)_th.textContent=\'🏥 \'+(this.value.trim()||\''+esc(displayName)+'\')" placeholder="نام مرکز..."></div>'
+    +(isExtra
+      ?'<div><label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">استان</label>'
+        +'<select style="'+inpStyle+'" onchange="_updateExtraCenterProv(\''+r.id+'\',this.value)">'
+        +getAllProvinces().map(function(p){return'<option value="'+p.id+'"'+(p.id===(prov||'tehran')?' selected':'')+'>'+p.name+'</option>';}).join('')
+        +'</select></div>'
+      :'<div><label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">استان</label>'
+        +'<div style="'+inpStyle+';background:var(--bg-page);color:var(--text-muted)">'+esc(provName)+'</div></div>'
+    )
+    +'</div></div>'
+    +'<div class="m-2col">'
     +'<div><label>پتانسیل</label><select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'potential\',parseInt(this.value))">'
     +[1,2,3,4].map(function(v){return'<option value="'+v+'"'+(pot==v?' selected':'')+'>'+v+'</option>';}).join('')+'</select></div>'
     +'<div><label>مسئول</label>'
@@ -4125,7 +4152,7 @@ function openCenterModal(rtype,id){
     +'<label>یادداشت جدید</label>'
     +'<div style="display:flex;gap:5px">'
     +'<input id="mnote_'+id+'" type="text" placeholder="متن یادداشت..." style="flex:1">'
-    +'<button class="btn-primary" onclick="addNoteFromModal(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')">ثبت</button>'
+    +'<button class="btn-primary" onclick="addNoteFromModal(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">ثبت</button>'
     +'</div>'
     // یادداشت‌های اخیر
     +(notes.length?'<div style="margin-top:8px">'
@@ -4149,13 +4176,13 @@ function openCenterModal(rtype,id){
     }).join(''):'<div style="font-size:11px;color:var(--text-muted)">هنوز تغییری ثبت نشده</div>')
     +'</div>';
 
-  var foot='<button style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="closeModal(\'cm_'+id+'\');confirmDeleteCenter(\''+rtype+'\',\''+id+'\',\''+esc(r.name)+'\')">🗑 حذف</button>'
-    +'<button style="background:#f0f9ff;color:#0369a1;border:1px solid #7dd3fc;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openCenterAudit(\''+recK(rtype,r.id)+'\',\''+esc(r.name)+'\')">📋 تاریخچه</button>'
+  var foot='<button style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="closeModal(\'cm_'+id+'\');confirmDeleteCenter(\''+rtype+'\',\''+id+'\',\''+esc(displayName)+'\')">🗑 حذف</button>'
+    +'<button style="background:#f0f9ff;color:#0369a1;border:1px solid #7dd3fc;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openCenterAudit(\''+recK(rtype,r.id)+'\',\''+esc(displayName)+'\')">📋 تاریخچه</button>'
     +'<button class="btn-secondary" onclick="closeModal(\'cm_'+id+'\')">بستن</button>'
-    +'<button class="btn-primary" onclick="openAssignWeekForCenter(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')">📋 اضافه به هفته</button>';
+    +'<button class="btn-primary" onclick="openAssignWeekForCenter(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">📋 اضافه به هفته</button>';
   // ── مطالبات section ──
   if(typeof mtrCenterSection==='function') body+=mtrCenterSection(r.id);
-  openModal('cm_'+id,'🏥 '+esc(r.name),body,foot);
+  openModal('cm_'+id,'🏥 '+esc(displayName),body,foot);
   if(window.umGetColor){setTimeout(function(){document.querySelectorAll('.owner-dot[data-uid]').forEach(function(d){var u=decodeURIComponent(d.dataset.uid);if(u)d.style.background=umGetColor(u);});},0);}
   // ── قیمت‌گذاری ──
   (function(_rid,_rname){
@@ -4393,6 +4420,7 @@ function getRecLabel(recKey){
     return '📄 مطالبات: '+id;
   }
   if(tp==='center'){
+    var _no=(DB.edits[recKey]||{}).nameOverride;if(_no){_saveCNC(recKey,_no);return _no;}
     var c=CENTERS.find(function(x){return x.id===id;});
     if(c){_saveCNC(recKey,c.name);return c.name;}
     var ex=(DB.extra||[]).find(function(x){return x.id===id;});
@@ -4407,6 +4435,7 @@ function getRecLabel(recKey){
     return id;
   }
   if(tp==='pc'){
+    var _no2=(DB.edits[recKey]||{}).nameOverride;if(_no2){_saveCNC(recKey,_no2);return _no2;}
     _buildPCCache();
     var provId=id.split('||')[0];
     var arr=_PC_CACHE[provId]||[];
@@ -5809,7 +5838,20 @@ function renderActivity(){
       var name=we.recKey?we.recKey:'';
       if(we.rtype==='center'&&we.rid){var c=CENTERS.find(function(x){return x.id===we.rid;});if(c)name=c.name;}
       else if(we.recKey){name=we.recKey;}
-      entries.push({ts:ts,name:name,desc:'انجام شد ✓',icon:'✅',user:we.doneUser||''});
+      var actType=we.actionType||'call';
+      entries.push({ts:ts,name:name,desc:(actType==='visit'?'🚗 ویزیت انجام شد':'📞 تماس انجام شد')+' ✓',icon:'✅',user:we.doneUser||''});
+    });
+    // ۴. تماس‌های روزانه (callLog)
+    (DB.callLog||[]).forEach(function(l){
+      if(!l.date)return;
+      var ts=dateStrToTs(l.date);if(!ts)return;
+      entries.push({ts:ts,name:l.centerName||'',desc:'📞 '+l.count+' تماس'+(l.note?' — '+l.note:''),icon:'📞',user:l.userId||''});
+    });
+    // ۵. ویزیت‌های دستی (visitLog)
+    (DB.visitLog||[]).forEach(function(l){
+      if(!l.date)return;
+      var ts=dateStrToTs(l.date);if(!ts)return;
+      entries.push({ts:ts,name:l.centerName||'',desc:'🚗 '+(l.count>1?l.count+' بازدید':'بازدید')+(l.note?' — '+l.note:''),icon:'🚗',user:l.userId||''});
     });
   }catch(err){
     el.innerHTML='<div style="padding:20px;color:#dc2626">⚠ خطا در نمایش فعالیت‌ها: '+esc(err.message)+'</div>';
