@@ -942,6 +942,25 @@ tr.row-contracted td{background:#f0fdf4!important}
 .contact-popup-row a{color:#0369a1;text-decoration:none;direction:ltr}
 .contact-popup-row a:hover{text-decoration:underline}
 .qf-btn:hover,.qf-btn.active{background:#dbeafe;border-color:#3b82f6;color:#1e40af}
+/* ── Change Log ── */
+.cl-wrap{background:var(--bg-card);border-radius:10px;border:1px solid var(--border);overflow:hidden}
+.cl-head{padding:12px 16px;background:var(--bg-raised);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.cl-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;flex:1}
+.cl-filter{padding:5px 8px;border:1px solid var(--border-input);border-radius:5px;font-size:11px;background:var(--bg-card);color:var(--text-primary);font-family:inherit}
+.cl-stats{display:flex;gap:12px;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--bg-raised)}
+.cl-stat{text-align:center;padding:6px 14px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border)}
+.cl-stat-n{font-size:18px;font-weight:800;color:var(--brand)}
+.cl-stat-l{font-size:10px;color:var(--text-muted)}
+.cl-table{width:100%;border-collapse:collapse;font-size:12px}
+.cl-table th{padding:8px 12px;background:var(--bg-raised);border-bottom:2px solid var(--border);text-align:right;font-weight:700;font-size:11px;color:var(--text-secondary);white-space:nowrap}
+.cl-table td{padding:7px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
+.cl-table tr:hover td{background:var(--bg-raised)}
+.cl-field-badge{display:inline-block;padding:1px 7px;border-radius:8px;font-size:10px;font-weight:600;white-space:nowrap}
+.cl-val{font-size:11px;color:var(--text-secondary);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cl-center-link{color:var(--brand);cursor:pointer;text-decoration:underline dotted;font-weight:600}
+.cl-empty{padding:50px;text-align:center;color:var(--text-muted)}
+.cl-row-new{animation:cl-flash .6s ease}
+@keyframes cl-flash{0%{background:rgba(139,92,246,.15)}100%{background:transparent}}
 /* ── Notification Bell ── */
 .notif-bell-wrap{position:relative;display:inline-flex}
 #notifBell{background:rgba(245,158,11,.2);border-color:rgba(245,158,11,.5);font-size:14px}
@@ -1002,6 +1021,7 @@ tr.row-contracted td{background:#f0fdf4!important}
   <button class="tab-btn" id="tab_calendar" onclick="switchTab('calendar')">📅 تقویم</button>
   <button class="tab-btn" id="tab_checklist" onclick="switchTab('checklist')">✅ چک‌لیست روزانه</button>
   <button class="tab-btn" id="tab_activity" onclick="switchTab('activity')">📜 فعالیت‌ها</button>
+  <button class="tab-btn" id="tab_changelog" onclick="switchTab('changelog')" style="display:none;color:#7c3aed;font-weight:700">🗃 لاگ تغییرات</button>
   <button class="tab-btn" id="tab_kpi" onclick="switchTab('kpi')" style="color:#f59e0b">📊 KPI</button>
   <button class="tab-btn" id="tab_manager" onclick="switchTab('manager')" style="color:#8b5cf6">📊 بررسی مدیر</button>
   <button class="tab-btn" id="tab_mtr" onclick="switchTab('mtr')" style="color:#0ea5e9;font-weight:700"><span id="mtrBadge"></span>💰 مطالبات</button>
@@ -1192,6 +1212,9 @@ tr.row-contracted td{background:#f0fdf4!important}
 
 <!-- ACTIVITY PANEL -->
 <div id="actPanel" style="display:none"></div>
+
+<!-- CHANGELOG PANEL -->
+<div id="changelogPanel" style="display:none;padding:14px 16px;max-width:1200px;margin:0 auto"></div>
 
 <!-- MANAGER KPI PANEL -->
 <div id="kpiPanel" style="display:none;padding:16px;max-width:1100px;margin:0 auto"></div>
@@ -2193,7 +2216,7 @@ function switchTab(tab){
   currentTab=tab;
   try{localStorage.setItem('_st',tab);}catch(e){}
   _navPush(tab, null);
-  ['provinces','weekplan','calendar','checklist','activity','manager','kpi','mtr','pricing'].forEach(function(t){
+  ['provinces','weekplan','calendar','checklist','activity','changelog','manager','kpi','mtr','pricing'].forEach(function(t){
     var b=document.getElementById('tab_'+t);if(b)b.classList.toggle('active',t===tab);
   });
   document.getElementById('dash').style.display=(tab==='provinces')?'':'none';
@@ -2202,6 +2225,7 @@ function switchTab(tab){
   document.getElementById('filtersBar').style.display=(tab==='provinces')?'flex':'none';
   document.getElementById('tableArea').style.display=(tab==='provinces')?'':'none';
   document.getElementById('wpPanel').style.display=(tab==='weekplan')?'':'none';
+  var _clp=document.getElementById('changelogPanel');if(_clp)_clp.style.display=(tab==='changelog')?'':'none';
   document.getElementById('calPanel').style.display=(tab==='calendar')?'':'none';
   document.getElementById('ckPanel').style.display=(tab==='checklist')?'':'none';
   document.getElementById('actPanel').style.display=(tab==='activity')?'':'none';
@@ -2234,9 +2258,11 @@ function switchTab(tab){
     renderTable();
   }
   else if(tab==='weekplan'){var _dmb=document.getElementById('wpDailyMonBtn');if(_dmb)_dmb.style.display=_isManager()?'':'none';renderWeekPlan();}
+  var _clBtn=document.getElementById('tab_changelog');if(_clBtn)_clBtn.style.display=_isManager()?'':'none';
   else if(tab==='calendar')renderCalendar();
   else if(tab==='checklist')renderChecklist();
   else if(tab==='activity'){_actPage=0;renderActivity();}
+  else if(tab==='changelog')renderChangelog();
   else if(tab==='manager')renderManagerPanel();
   else if(tab==='kpi')renderKPIPanel();
 }
@@ -5536,7 +5562,7 @@ function renderWpItem(entry,weekId){
   return '<div class="wp-item'+(done?' done':'')+(!done&&isSel2?' wp-selected':'')+'" data-ekey="'+k+'" draggable="true" ondragstart="event.stopPropagation();wpDragStart(event,\''+k+'\')" ondragend="wpDragEnd(event)">'
     + '<input type="checkbox" class="wp-item-cb" '+(isSel2?'checked':'')+' onclick="event.stopPropagation();wpToggleSelect(\''+(k)+'\')" title="انتخاب">'
     + '<div style="display:flex;justify-content:space-between;align-items:flex-start;padding-left:18px;">'
-    + '<div class="wp-item-name" onclick="openCenterModal(\''+rtype+'\',\''+rid+'\')" style="cursor:pointer;text-decoration:underline dotted;color:var(--brand)">'+esc(name)+'</div>'
+    + '<div class="wp-item-name" onclick="openCenterModal(\''+rtype+'\',\''+rid+'\')" style="cursor:pointer;text-decoration:underline dotted;color:var(--brand);display:flex;align-items:center;gap:4px">'+_todayDot+esc(name)+'</div>'
     + '<span style="font-size:9px; cursor:pointer; background:'+actBg+'; color:var(--text-primary); padding:2px 5px; border-radius:4px; white-space:nowrap;" onclick="toggleWpActionType(\''+k+'\')" title="تغییر نوع پیگیری با یک کلیک">'+actIcon+'</span>'
     + '</div>'
     + (function(){var _ce=getE(rtype,rid);var _st=_ce.status||'بدون تماس';var _ow=USERS[_ce.owner||'']||'';var _fd=_ce.followupDate||'';var _owHtml=_ow?'<span style="display:inline-block;background:#dbeafe;color:#1e40af;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:600;margin-right:4px">👤 '+esc(_ow)+'</span>':'';return '<div class="wp-item-meta" style="margin-top:3px">'+_owHtml+'<span style="font-size:9px;color:var(--text-muted)">'+_st+( (_fd)?' 📅 '+_fd:'')+' '+(done?'✓ '+entry.doneDate:'')+'</span></div>';})()
@@ -6203,6 +6229,224 @@ function sendReminderToExpert(expertUser){
   if(!noActEntries.length){showToast('✅ این کارشناس برای همه مراکز گزارش داده است');return;}
   var msg='لطفاً برای مراکز زیر که امروز برنامه دارید گزارش وارد کنید: '+noActEntries.slice(0,5).join('، ')+(noActEntries.length>5?' و '+(noActEntries.length-5)+' مرکز دیگر':'');
   sendNotif(expertUser,msg,'');
+}
+
+
+// ════════════════════════ CHANGE LOG PAGE ════════════════════
+var _clFilters = {date:'today', owner:'', search:'', field:''};
+var _clAutoRefreshTimer = null;
+
+function renderChangelog(){
+  var el = document.getElementById('changelogPanel');
+  if(!el) return;
+  if(!_isManager()){
+    el.innerHTML = '<div style="text-align:center;padding:60px;color:var(--text-muted)">این بخش فقط برای مدیران است</div>';
+    return;
+  }
+  var today = todayStr();
+  var log = (DB.changeLog||[]).slice().reverse(); // newest first
+
+  // اعمال فیلترها
+  var filtered = log.filter(function(l){
+    if(!l.at || !l.rkey) return false;
+    // فیلتر تاریخ
+    var dp = l.at.slice(0,10).split('-').map(Number);
+    if(dp.length !== 3) return false;
+    var jd = g2j(dp[0],dp[1],dp[2]);
+    var jdStr = jd[0]+'/'+p2(jd[1])+'/'+p2(jd[2]);
+    if(_clFilters.date === 'today' && jdStr !== today) return false;
+    if(_clFilters.date === 'week'){
+      var jdMs = jMs(jd[0],jd[1],jd[2]);
+      var todayParts = today.split('/').map(Number);
+      var weekStart = jMs(todayParts[0],todayParts[1],todayParts[2]) - 6*86400*1000;
+      if(jdMs < weekStart) return false;
+    }
+    if(_clFilters.date === 'month'){
+      var todayP = today.split('/').map(Number);
+      if(jd[0] !== todayP[0] || jd[1] !== todayP[1]) return false;
+    }
+    // فیلتر کارشناس
+    if(_clFilters.owner && l.by !== _clFilters.owner) return false;
+    // فیلتر فیلد
+    if(_clFilters.field && l.field !== _clFilters.field) return false;
+    // فیلتر جستجو مرکز
+    if(_clFilters.search){
+      var cName = _clGetName(l.rkey);
+      if(fNorm(cName).indexOf(fNorm(_clFilters.search)) < 0) return false;
+    }
+    return true;
+  });
+
+  // آمار
+  var uniqueCenters = {};
+  var uniqueExperts = {};
+  filtered.forEach(function(l){ uniqueCenters[l.rkey]=true; if(l.by)uniqueExperts[l.by]=true; });
+  var cCount = Object.keys(uniqueCenters).length;
+  var eCount = Object.keys(uniqueExperts).length;
+
+  // ساخت HTML
+  var html = '<div class="cl-wrap">'
+    + '<div class="cl-head">'
+    + '<strong style="font-size:14px;white-space:nowrap">🗃 لاگ تغییرات</strong>'
+    + '<div class="cl-filters">'
+    + '<select class="cl-filter" onchange="_clFilters.date=this.value;renderChangelog()">'
+    + '<option value="today"'+(  _clFilters.date==='today'?' selected':'')+'>امروز</option>'
+    + '<option value="week"'+(_clFilters.date==='week'?' selected':'')+'>۷ روز اخیر</option>'
+    + '<option value="month"'+(_clFilters.date==='month'?' selected':'')+'>این ماه</option>'
+    + '<option value="all"'+(_clFilters.date==='all'?' selected':'')+'>همه</option>'
+    + '</select>'
+    + '<select class="cl-filter" onchange="_clFilters.owner=this.value;renderChangelog()">'
+    + '<option value="">همه کارشناسان</option>'
+    + Object.keys(USERS).filter(function(u){return u!=='guest';}).map(function(u){
+        return '<option value="'+u+'"'+(_clFilters.owner===u?' selected':'')+'>'+esc(USERS[u])+'</option>';
+      }).join('')
+    + '</select>'
+    + '<select class="cl-filter" onchange="_clFilters.field=this.value;renderChangelog()">'
+    + '<option value="">همه فیلدها</option>'
+    + ['status','lead','potential','followupDate','owner','contacts'].map(function(f){
+        return '<option value="'+f+'"'+(_clFilters.field===f?' selected':'')+'>'+_fieldLabel(f)+'</option>';
+      }).join('')
+    + '</select>'
+    + '<input type="text" class="cl-filter" placeholder="جستجو مرکز..." value="'+esc(_clFilters.search||'')+'" oninput="_clFilters.search=this.value;renderChangelog()" style="min-width:130px">'
+    + '</div>'
+    + '<button onclick="renderChangelog()" style="background:var(--bg-raised);border:1px solid var(--border);border-radius:5px;padding:4px 10px;cursor:pointer;font-size:11px;font-family:inherit" title="بروزرسانی">🔄</button>'
+    + '</div>'
+    // stats bar
+    + '<div class="cl-stats">'
+    + '<div class="cl-stat"><div class="cl-stat-n">'+filtered.length+'</div><div class="cl-stat-l">تغییر</div></div>'
+    + '<div class="cl-stat"><div class="cl-stat-n">'+cCount+'</div><div class="cl-stat-l">مرکز</div></div>'
+    + '<div class="cl-stat"><div class="cl-stat-n">'+eCount+'</div><div class="cl-stat-l">کارشناس</div></div>'
+    + '</div>';
+
+  if(!filtered.length){
+    html += '<div class="cl-empty"><div style="font-size:32px;margin-bottom:10px">📋</div>تغییری در این بازه ثبت نشده</div>';
+  } else {
+    html += '<div style="overflow-x:auto"><table class="cl-table"><thead><tr>'
+      + '<th>زمان</th><th>مرکز</th><th>کارشناس</th><th>فیلد</th><th>مقدار جدید</th>'
+      + '</tr></thead><tbody>'
+      + filtered.slice(0,300).map(function(l){
+          var cName = _clGetName(l.rkey);
+          var dp = l.at.slice(0,10).split('-').map(Number);
+          var jd = g2j(dp[0],dp[1],dp[2]);
+          var jdStr = jd[0]+'/'+p2(jd[1])+'/'+p2(jd[2]);
+          var timeStr = l.at.slice(11,16);
+          var rparts = l.rkey.split('_');
+          var rtype = rparts[0]; var rid = rparts.slice(1).join('_');
+          var fieldBadge = _clFieldBadge(l.field);
+          var valDisplay = _clValDisplay(l.field, l.val);
+          return '<tr><td style="white-space:nowrap;color:var(--text-muted);font-size:11px">'+jdStr+'<br><span style="font-size:10px">'+timeStr+'</span></td>'
+            + '<td><span class="cl-center-link" onclick="openCenterModal(\''+rtype+'\',\''+rid+'\')">'+esc(cName)+'</span></td>'
+            + '<td style="font-size:11px">'+esc(USERS[l.by]||l.by||'—')+'</td>'
+            + '<td>'+fieldBadge+'</td>'
+            + '<td class="cl-val" title="'+esc(String(l.val||''))+'">'+valDisplay+'</td>'
+            + '</tr>';
+        }).join('')
+      + '</tbody></table></div>';
+    if(filtered.length > 300){
+      html += '<div style="padding:10px 16px;text-align:center;font-size:12px;color:var(--text-muted)">نمایش ۳۰۰ مورد از '+filtered.length+' — فیلتر را محدودتر کنید</div>';
+    }
+  }
+  html += '</div>';
+  el.innerHTML = html;
+
+  // auto-refresh every 30s
+  clearTimeout(_clAutoRefreshTimer);
+  if(currentTab === 'changelog'){
+    _clAutoRefreshTimer = setTimeout(function(){if(currentTab==='changelog')renderChangelog();}, 30000);
+  }
+}
+
+function _clGetName(rkey){
+  if(!rkey) return '?';
+  var parts = rkey.split('_'); var tp = parts[0]; var id = parts.slice(1).join('_');
+  var ov = (DB.edits[rkey]||{}).nameOverride;
+  if(ov) return ov;
+  if(tp === 'center'){
+    var c = CENTERS.find(function(x){return x.id===id;}); if(c) return c.name;
+    var ex = (DB.extra||[]).find(function(x){return x.id===id;}); if(ex) return ex.name;
+  } else if(tp === 'pc'){
+    _buildPCCache();
+    var provId = id.split('||')[0];
+    var arr = _PC_CACHE[provId]||[];
+    var pc = arr.find(function(x){return x.id===id;}); if(pc) return pc.name;
+  }
+  return id;
+}
+
+function _clFieldBadge(field){
+  var map = {
+    status:   {label:'وضعیت',   bg:'#dbeafe',color:'#1e40af'},
+    lead:     {label:'سرنخ',    bg:'#fef3c7',color:'#92400e'},
+    potential:{label:'فرصت',    bg:'#f3e8ff',color:'#6b21a8'},
+    followupDate:{label:'پیگیری',bg:'#dcfce7',color:'#166534'},
+    owner:    {label:'مسئول',   bg:'#e0f2fe',color:'#0369a1'},
+    contacts: {label:'تماس',    bg:'#fce7f3',color:'#9d174d'},
+    notes:    {label:'یادداشت', bg:'#fff7ed',color:'#c2410c'},
+    tags:     {label:'برچسب',   bg:'#f0fdf4',color:'#15803d'}
+  };
+  var m = map[field] || {label:field, bg:'var(--bg-raised)', color:'var(--text-secondary)'};
+  return '<span class="cl-field-badge" style="background:'+m.bg+';color:'+m.color+'">'+m.label+'</span>';
+}
+
+function _clValDisplay(field, val){
+  if(val === null || val === undefined || val === '') return '<span style="color:var(--text-muted);font-style:italic">خالی</span>';
+  var s = String(val);
+  if(field === 'contacts'){
+    try{ var arr = JSON.parse(s); return esc(arr.length+' مخاطب'); }catch(e){}
+  }
+  if(s.length > 40) s = s.slice(0,40)+'…';
+  return esc(s);
+}
+
+// ════════════════════════ AUTO REMINDER TIMER ════════════════════
+var _autoReminderChecked = false;
+function _setupAutoReminder(){
+  setInterval(function(){
+    if(_autoReminderChecked) return;
+    if(!_isManager()) return;
+    var now = new Date();
+    if(now.getHours() < 15) return; // فقط بعد از ساعت ۳ بعدازظهر
+    var today = todayStr();
+    if((DB._lastAutoReminder||'') === today) return; // فقط یک بار در روز
+    _autoReminderChecked = true;
+    DB._lastAutoReminder = today;
+    saveDB();
+    _runAutoReminders(today);
+  }, 60000); // هر ۶۰ ثانیه چک
+}
+
+function _runAutoReminders(today){
+  // گروه‌بندی مراکز بدون فعالیت امروز به ازای هر کارشناس
+  var byExpert = {};
+  Object.keys(DB.weekEntries||{}).forEach(function(k){
+    var we = DB.weekEntries[k];
+    if(we.done || we.scheduledDate !== today || we.rtype === 'mtr') return;
+    var rtype = we.rtype||'center', rid = we.rid||'';
+    var e = getE(rtype,rid);
+    var owner = e.owner||'';
+    if(!owner){
+      if(rtype==='center'){var c=CENTERS.find(function(x){return x.id===rid;});if(c&&c.owner)owner=c.owner;}
+      else{_buildPCCache();var _pId=rid.split('||')[0];var _arr=_PC_CACHE[_pId]||[];var _c=_arr.find(function(x){return x.id===rid;});if(_c&&_c.owner)owner=_c.owner;}
+    }
+    if(!owner) return;
+    var acts = _getTodayActivities(rtype,rid,today);
+    if(acts.length > 0) return; // این مرکز فعالیت داشته
+    if(!byExpert[owner]) byExpert[owner] = [];
+    byExpert[owner].push(we.centerName||getRecLabel(rtype+'_'+rid)||'?');
+  });
+  var expertCount = 0;
+  Object.keys(byExpert).forEach(function(exp){
+    var centers = byExpert[exp];
+    if(!centers.length) return;
+    expertCount++;
+    var msg = 'یادآوری خودکار ساعت ۱۵: لطفاً برای مراکز زیر گزارش وارد کنید: '
+      + centers.slice(0,5).join('، ')
+      + (centers.length>5?' و '+(centers.length-5)+' مرکز دیگر':'');
+    sendNotif(exp, msg, '');
+  });
+  if(expertCount > 0){
+    showToast('🔔 یادآوری خودکار برای '+expertCount+' کارشناس ارسال شد', 3000);
+  }
 }
 
 // ════════════════════════ CALENDAR ════════════════════
@@ -8068,6 +8312,7 @@ async function init(){
   await loadDB();
   initSettings();initTags();initWeekTags();initEvents();_initNotif();
   buildUSERS();updateNotifBadge();
+  setTimeout(_setupAutoReminder,5000);
   loadMasterCenters().then(function(){
     _typeFilterBuilt=false;
     cleanupOrphanedEntries(false);
@@ -8082,6 +8327,7 @@ async function init(){
       if(_spid)_currentProvId=_spid;
     }catch(e){}
     switchTab(currentTab);
+    var _clbtn=document.getElementById('tab_changelog');if(_clbtn)_clbtn.style.display=_isManager()?'':'none';
     // بعد از اتمام init، history navigation فعال می‌شود
     _navReady=true;
     try{history.replaceState({v:1,tab:currentTab,provId:_currentProvId||null},'',window.location.pathname+window.location.search);}catch(e){}
