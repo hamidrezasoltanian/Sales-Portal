@@ -5424,7 +5424,7 @@ function wpMarkDoneKey(eKey){
     +'<div style="margin-bottom:10px;font-size:13px">آیا می‌خواهید تاریخ پیگیری بعدی تنظیم شود؟</div>'
     +'<label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">تاریخ پیگیری بعدی</label>'
     +'<input id="_mdk_nextdate" type="text" value="'+defNextStr+'" readonly class="fd-inp" style="cursor:pointer;width:100%;box-sizing:border-box" '
-    +'onclick="openJDP(this,function(v){document.getElementById('_mdk_nextdate').value=v;})">'
+    +'onclick="openJDP(this,function(v){document.getElementById(\'_mdk_nextdate\').value=v;})">'
     +'</div>';
   var footer='<button class="btn-primary" style="background:#16a34a;border-color:#16a34a" onclick="_wpFinishDone(''+eKey+'',true)">✅ ثبت + پیگیری بعدی</button>'
     +'<button class="btn-secondary" onclick="_wpFinishDone(''+eKey+'',false)">بدون پیگیری</button>'
