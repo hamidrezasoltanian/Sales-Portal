@@ -1168,7 +1168,7 @@ var _redoStack=[];
 var MAX_UNDO=50;
 var _undoSuppressed=false;
 var _actPage=0;
-var DB={edits:{},notes:{},tags:[],rTags:{},weekTags:[],weekEntries:{},events:[],checklist:{},extra:[],settings:null,kpiTargets:{},callLog:[],visitLog:[],salesLog:[],missionLog:[],provHistory:[],mtrFollower:{},mtrFollowerMap:{},changeLog:[]};
+var DB={edits:{},notes:{},tags:[],rTags:{},weekTags:[],weekEntries:{},events:[],checklist:{},extra:[],settings:null,kpiTargets:{},callLog:[],visitLog:[],salesLog:[],missionLog:[],provHistory:[],mtrFollower:{},mtrFollowerMap:{},changeLog:[],mtrTrend:[]};
 var _DEFAULT_MEMBERS=[]; // loaded from server via buildUSERS()
 
 // ── Login/Auth helpers ────────────────────────────────────────
@@ -1968,7 +1968,7 @@ function undoEdit(){
   var op=_undoStack.pop();
   var currVal=(getE(op.type,op.id)||{})[op.field];
   _redoStack.push({type:op.type,id:op.id,field:op.field,val:currVal});
-  _undoSuppressed=true;setE(op.type,op.id,op.field,op.val);_undoSuppressed=false;
+  _undoSuppressed=true;try{setE(op.type,op.id,op.field,op.val);}finally{_undoSuppressed=false;}
   showToast('↩ بازگشت انجام شد');
   if(currentTab==='provinces')renderDashboard();
 }
@@ -1977,7 +1977,7 @@ function redoEdit(){
   var op=_redoStack.pop();
   var currVal=(getE(op.type,op.id)||{})[op.field];
   _undoStack.push({type:op.type,id:op.id,field:op.field,val:currVal});
-  _undoSuppressed=true;setE(op.type,op.id,op.field,op.val);_undoSuppressed=false;
+  _undoSuppressed=true;try{setE(op.type,op.id,op.field,op.val);}finally{_undoSuppressed=false;}
   showToast('↪ تکرار انجام شد');
   if(currentTab==='provinces')renderDashboard();
 }
