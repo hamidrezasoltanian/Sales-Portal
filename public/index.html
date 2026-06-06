@@ -8940,11 +8940,7 @@ function _initOnboarding(){
 
 function _showOnboardingWidget(){
   if(document.getElementById('onboardingWidget')) return;
-  var day = _onboardingDay();
-  var stepIdx = day - 1;
-  if(stepIdx < 0) stepIdx = 0;
-  if(stepIdx > 6) stepIdx = 6;
-  _obCurrentStep = stepIdx;
+  _obCurrentStep = 0;
   _obRenderWidget();
 }
 
@@ -8967,7 +8963,7 @@ function _obRenderWidget(){
 
   var html = '<div id="onboardingWidget"'+(wasMinimized?' class="ob-minimized"':'')+'>'
     +'<div class="ob-header" onclick="_obToggleMinimize(event)">'
-    +'<div class="ob-header-title"><span>🎓</span><span>راهنمای آموزشی — روز '+day+'/۷</span></div>'
+    +'<div class="ob-header-title"><span>🎓</span><span>راهنمای آموزشی — '+(7-_onboardingDay()+1)+'/۷ روز باقی‌مانده</span></div>'
     +'<div class="ob-header-btns" onclick="event.stopPropagation()">'
     +'<button class="ob-mini-btn" onclick="_obToggleMinimize(event)" title="کوچک/بزرگ">⊟</button>'
     +'</div>'
