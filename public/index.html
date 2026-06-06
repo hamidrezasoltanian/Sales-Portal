@@ -2264,7 +2264,7 @@ function switchTab(tab){
   currentTab=tab;
   try{localStorage.setItem('_st',tab);}catch(e){}
   _navPush(tab, null);
-  ['provinces','weekplan','calendar','checklist','activity','changelog','manager','kpi','mtr','pricing'].forEach(function(t){
+  ['provinces','weekplan','calendar','checklist','activity','changelog','tasks','manager','kpi','mtr','pricing'].forEach(function(t){
     var b=document.getElementById('tab_'+t);if(b)b.classList.toggle('active',t===tab);
   });
   document.getElementById('dash').style.display=(tab==='provinces')?'':'none';
@@ -2307,8 +2307,6 @@ function switchTab(tab){
     renderTable();
   }
   else if(tab==='weekplan'){var _dmb=document.getElementById('wpDailyMonBtn');if(_dmb)_dmb.style.display=_isManager()?'':'none';renderWeekPlan();}
-  var _clBtn=document.getElementById('tab_changelog');if(_clBtn)_clBtn.style.display=_isManager()?'':'none';
-  var _tBtn=document.getElementById('tab_tasks');if(_tBtn)_tBtn.style.display='';
   else if(tab==='calendar')renderCalendar();
   else if(tab==='checklist')renderChecklist();
   else if(tab==='activity'){_actPage=0;renderActivity();}
@@ -2316,6 +2314,8 @@ function switchTab(tab){
   else if(tab==='tasks')renderTasksPanel();
   else if(tab==='manager')renderManagerPanel();
   else if(tab==='kpi')renderKPIPanel();
+  var _clBtn=document.getElementById('tab_changelog');if(_clBtn)_clBtn.style.display=_isManager()?'':'none';
+  var _tBtn=document.getElementById('tab_tasks');if(_tBtn)_tBtn.style.display='';
 }
 
 // ════════════════════════ PROVINCE VIEW ═══════════════
