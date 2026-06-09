@@ -1,0 +1,15 @@
+[Unit]
+Description=Atena CRM Sales Portal
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/atena-crm
+ExecStart=/usr/bin/node server/index.js
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=/opt/atena-crm/.env
+
+[Install]
+WantedBy=multi-user.target
