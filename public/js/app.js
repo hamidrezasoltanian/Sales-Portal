@@ -3483,17 +3483,19 @@ function openCenterModal(rtype,id){
         +'<span style="font-size:9px;background:#e2e8f0;color:var(--text-primary);padding:2px 5px;border-radius:4px">'+actIcon+'</span>'
         +(we.done?'<span style="color:#16a34a;font-weight:bold">✓ '+we.doneDate+'</span>':'')
         +'</div>';}).join('')+'</div>':'')
-    // یادداشت جدید
-    +'<label>یادداشت جدید</label>'
-    +'<div style="display:flex;gap:5px">'
-    +'<input id="mnote_'+id+'" type="text" placeholder="متن یادداشت..." style="flex:1">'
-    +'<button class="btn-primary" onclick="addNoteFromModal(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">ثبت</button>'
+    // ── یادداشت / گزارش ──
+    +'<div style="margin-top:10px;background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:10px 12px">'
+    +'<div style="font-size:11px;font-weight:700;color:#0369a1;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">'
+    +'<span>📝 یادداشت / گزارش</span>'
+    +'<span style="font-size:9px;font-weight:400;color:var(--text-muted)">Enter = ثبت &nbsp; Shift+Enter = خط جدید</span>'
     +'</div>'
-    // یادداشت‌های اخیر
-    +(notes.length?'<div style="margin-top:8px">'
-    +notes.slice().reverse().slice(0,4).map(function(n){
-      return'<div class="note-item">'+esc(n.text)+'<div class="note-meta"><span>'+esc(n.user)+'</span><span>'+n.date+'</span></div></div>';
-    }).join('')+'</div>':'');
+    +'<textarea id="mnote_'+id+'" rows="3" placeholder="گزارش تماس، نتیجه ویزیت، توضیحات..." style="width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--border-input);border-radius:6px;font-family:inherit;font-size:12px;resize:vertical;line-height:1.6" onkeydown="_noteKeydown(event,\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')"></textarea>'
+    +'<div style="display:flex;justify-content:flex-end;margin-top:6px">'
+    +'<button class="btn-primary" onclick="addNoteFromModal(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">✓ ثبت</button>'
+    +'</div>'
+    +'<div id="mNotesList_'+id+'" style="margin-top:10px">'
+    +_renderNotesList(notes)
+    +'</div></div>';
 
   // ── change history section ──
   var rkey=rtype+'_'+r.id;
@@ -3616,18 +3618,34 @@ function _cleanCenterData(rtype,id){
   saveDB();
 }
 
+function _noteKeydown(ev,type,id,name){
+  if(ev.key==='Enter'&&!ev.shiftKey){ev.preventDefault();addNoteFromModal(type,id,name);}
+}
+
+function _renderNotesList(notes){
+  if(!notes||!notes.length) return '<div style="text-align:center;padding:10px;font-size:11px;color:var(--text-muted)">هنوز یادداشتی ثبت نشده</div>';
+  return notes.slice().reverse().map(function(n,i){
+    var lines=esc(n.text||'').replace(/\n/g,'<br>');
+    var isFirst=i===0;
+    return '<div class="note-item" style="'+(isFirst?'border-right:3px solid #6366f1;':'')+'padding-right:8px;margin-bottom:8px">'
+      +'<div style="font-size:12px;line-height:1.6;color:var(--text-primary)">'+lines+'</div>'
+      +'<div class="note-meta" style="margin-top:3px"><span style="font-weight:600">'+esc(n.user||'')+'</span>'
+      +'<span style="margin-right:6px">'+esc(n.date||'')+'</span></div></div>';
+  }).join('');
+}
+
 function addNoteFromModal(type,id,name){
-  var inp=document.getElementById('mnote_'+id);if(!inp||!inp.value.trim())return;
+  var inp=document.getElementById('mnote_'+id);
+  if(!inp||!inp.value.trim())return;
   addNote(type,id,inp.value.trim(),null);
   inp.value='';
-  // refresh notes section
-  var notesDiv=inp.closest('.m-body').querySelector('[style*="margin-top:8px"]');
-  if(notesDiv){
-    var notes=DB.notes[recK(type,id)]||[];
-    notesDiv.innerHTML=notes.slice().reverse().slice(0,4).map(function(n){
-      return'<div class="note-item">'+esc(n.text)+'<div class="note-meta"><span>'+esc(n.user)+'</span><span>'+n.date+'</span></div></div>';
-    }).join('');
-  }
+  inp.style.height='auto';
+  var nl=document.getElementById('mNotesList_'+id);
+  if(nl) nl.innerHTML=_renderNotesList(DB.notes[recK(type,id)]||[]);
+  // refresh audit modal if open
+  var k=recK(type,id);
+  var auditNl=document.getElementById('auNotes_'+k);
+  if(auditNl) auditNl.innerHTML=_renderNotesList(DB.notes[k]||[]);
 }
 
 // ── برچسب مرکز ─────────────────────────────────────────────────
