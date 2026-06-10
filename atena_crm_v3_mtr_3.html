@@ -4166,7 +4166,7 @@ function plEditCell(prodIdx,field,isText){
   var cur=field==='name'?_plP[prodIdx].name:(field==='buyPrice'?_plP[prodIdx].buyPrice:(_plP[prodIdx].channels[field]||''));
   var inp='<input class="pl-cell-inp'+(isText?' wide':'')+'" type="'+(isText?'text':'number')+'" value="'+esc(String(cur))+'" min="0" '
     +'onblur="plSaveCell('+prodIdx+',\''+field+'\',this.value)" '
-    +'onkeydown="if(event.key==='Enter')this.blur();if(event.key==='Escape'){event.preventDefault();plRenderOverview();}">';
+    +'onkeydown="if(event.key===\'Enter\')this.blur();if(event.key===\'Escape\'){event.preventDefault();plRenderOverview();}">';
   td.innerHTML=inp;
   var el=td.querySelector('input');if(el){el.focus();el.select();}
 }
