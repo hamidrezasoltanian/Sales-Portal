@@ -3295,6 +3295,7 @@ function openCenterModal(rtype,id){
     +'<input id="mfd_'+id+'" type="text" value="'+fd+'" readonly class="fd-inp'+(fd&&fd<today?' ov':'')+'" style="cursor:pointer;flex:1" '
     +'onclick="openJDP(this,function(v){var _in=document.getElementById(\'mfd_'+id+'\');if(_in){_in.value=v;_in.className=\'fd-inp\'+(v&&v<todayStr()?\'ov\':\'\');}setE(\''+rtype+'\',\''+r.id+'\',\'followupDate\',v);renderBanner();if(currentTab===\'provinces\'&&_currentProvId)renderTable();if(currentTab===\'weekplan\')setTimeout(renderWeekPlan,80);})">'
     +(fd?'<button onclick="setE(\''+rtype+'\',\''+r.id+'\',\'followupDate\',\'\');document.getElementById(\'mfd_'+id+'\').value=\'\';document.getElementById(\'mfd_'+id+'\').className=\'fd-inp\';renderBanner();if(currentTab===\'provinces\'&&_currentProvId)renderTable();if(currentTab===\'weekplan\')setTimeout(renderWeekPlan,80);" title="حذف تاریخ" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:4px;cursor:pointer;padding:3px 8px;font-size:11px;white-space:nowrap">✕ حذف</button>':'')
+    +'<button onclick="convertFollowupToTask(\'"+rtype+"\',\'"+r.id+"\')" title="تبدیل به وظیفه" style="background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;border-radius:4px;cursor:pointer;padding:3px 8px;font-size:11px;white-space:nowrap">📌 وظیفه</button>'
     +'</div>'
     +'<label>برچسب‌ها</label>'
     +'<div id="tagArea_'+id+'" style="display:flex;flex-wrap:wrap;gap:4px;padding:7px;background:var(--bg-raised);border-radius:6px;min-height:30px;border:1px solid var(--border)">'
@@ -3842,6 +3843,7 @@ function renderWeekPlan(){
   if(typeof _wpSelected!=='undefined'){_wpSelected.clear();var _bar=document.getElementById('wpBulkBar');if(_bar)_bar.classList.remove('active');}
   var wpSearchQ=(document.getElementById('wpSearch')||{}).value||'';
   var wpOwnerF=(document.getElementById('wpOwnerFilter')||{}).value||'';
+  _wpFclFilters.owner = wpOwnerF;
   var sel = document.getElementById('wpSel');
   var weekId = sel && sel.value ? sel.value : null;
   var daysEl = document.getElementById('wpDays');
@@ -5378,6 +5380,47 @@ var _TK_STATUSES=[
   {id:'done',label:'انجام شد',color:'#22c55e'}
 ];
 
+function _getTkStatuses(){
+  if(!DB.settings)DB.settings={};
+  var custom=DB.settings.taskColumns&&DB.settings.taskColumns[currentUser];
+  if(custom&&custom.length)return custom;
+  return _TK_STATUSES;
+}
+
+function openTkColumnsModal(){
+  if(!DB.settings)DB.settings={};
+  if(!DB.settings.taskColumns)DB.settings.taskColumns={};
+  var cols=JSON.parse(JSON.stringify(DB.settings.taskColumns[currentUser]||_TK_STATUSES));
+  var inpS='width:100%;box-sizing:border-box;padding:5px 8px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)';
+  var renderRows=function(){
+    return window._tkColsPending.map(function(c,i){
+      return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">'
+        +'<input type="color" value="'+(c.color||'#64748b')+'" onchange="_tkColsEdit('+i+',\'color\',this.value)" style="width:32px;height:28px;border:none;background:none;cursor:pointer;padding:0">'
+        +'<input type="text" value="'+esc(c.label||'')+'" onchange="_tkColsEdit('+i+',\'label\',this.value)" placeholder="عنوان ستون..." style="'+inpS+';flex:1">'
+        +(i>0&&i<cols.length-1?'<button onclick="_tkColsRemove('+i+')" style="padding:4px 8px;background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:4px;cursor:pointer;font-size:11px">حذف</button>':'<span style="width:54px"></span>')
+        +'</div>';
+    }).join('');
+  };
+  window._tkColsPending = cols;
+  window._tkColsEdit=function(i,field,val){window._tkColsPending[i][field]=val;document.getElementById('tkColsRows').innerHTML=renderRows();};
+  window._tkColsRemove=function(i){window._tkColsPending.splice(i,1);document.getElementById('tkColsRows').innerHTML=renderRows();};
+  window._tkColsAdd=function(){
+    window._tkColsPending.splice(window._tkColsPending.length-1,0,{id:'custom_'+Date.now(),label:'ستون جدید',color:'#8b5cf6'});
+    document.getElementById('tkColsRows').innerHTML=renderRows();
+  };
+  var body='<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">ستون اول و آخر ثابت هستند. ستون‌های میانی قابل حذف هستند.</div>'
+    +'<div id="tkColsRows">'+renderRows()+'</div>'
+    +'<button onclick="_tkColsAdd()" style="margin-top:8px;padding:5px 14px;background:var(--bg-raised);border:1px solid var(--border);border-radius:5px;cursor:pointer;font-size:11px;font-family:inherit">+ افزودن ستون</button>';
+  var footer='<button class="btn-primary" onclick="'
+    +'if(!DB.settings.taskColumns)DB.settings.taskColumns={};'
+    +'DB.settings.taskColumns[currentUser]=JSON.parse(JSON.stringify(window._tkColsPending));'
+    +"saveDB();closeModal('tkColsMgr');showToast('ستون\u200cها ذخیره شد \u2705');renderTasksPanel();"
+    +'">ذخیره</button>'
+    +'<button onclick="if(confirm(\'\u0628ازگشت به پیشفرض?\')){'+'delete DB.settings.taskColumns[currentUser];saveDB();closeModal(\'tkColsMgr\');showToast(\'\u0628ازگشت شد\');renderTasksPanel();}" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit">بازگشت پیشفرض</button>'
+    +'<button class="btn-secondary" onclick="closeModal(\'tkColsMgr\')">بستن</button>';
+  openModal('tkColsMgr','⚙️ مدیریت ستون‌های وظایف',body,footer,{lg:false});
+}
+
 function _ensureTasks(){
   if(!DB.tasks)DB.tasks=[];
   // migrate: add status + subtasks to old tasks
@@ -5440,11 +5483,12 @@ function renderTasksPanel(){
       return'<button class="task-filter-btn'+(_taskFilter===f[0]?' active':'')+'" onclick="_taskFilter=\''+f[0]+'\';renderTasksPanel()">'+f[1]+'</button>';
     }).join('')
     +'<button class="btn-primary" style="margin-right:auto;font-size:12px;padding:6px 16px" onclick="openTaskModal()">+ وظیفه جدید</button>'
+    +'<button onclick="openTkColumnsModal()" style="font-size:11px;padding:5px 12px;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-family:inherit;color:var(--text-secondary)">⚙️ ستون‌ها</button>'
     +'</div>';
 
   if(_taskView==='kanban'){
     html+='<div class="tk-board">';
-    _TK_STATUSES.forEach(function(st){
+    _getTkStatuses().forEach(function(st){
       var colTasks=tasks.filter(function(t){return (t.status||'todo')===st.id;});
       colTasks.sort(function(a,b){var pa=a.priority||2,pb=b.priority||2;if(pa!==pb)return pa-pb;return (a.dueDate||'9999')<(b.dueDate||'9999')?-1:1;});
       html+='<div class="tk-col" data-status="'+st.id+'" ondragover="event.preventDefault();this.classList.add(\'tk-drop-over\')" ondragleave="this.classList.remove(\'tk-drop-over\')" ondrop="tkDrop(event,\''+st.id+'\')">'
@@ -5460,8 +5504,8 @@ function renderTasksPanel(){
   } else {
     // list view
     var sorted=tasks.slice().sort(function(a,b){
-      var sa=_TK_STATUSES.findIndex(function(s){return s.id===(a.status||'todo');});
-      var sb=_TK_STATUSES.findIndex(function(s){return s.id===(b.status||'todo');});
+      var sa=_getTkStatuses().findIndex(function(s){return s.id===(a.status||'todo');});
+      var sb=_getTkStatuses().findIndex(function(s){return s.id===(b.status||'todo');});
       if(sa!==sb)return sa-sb;
       var pa=a.priority||2,pb=b.priority||2;if(pa!==pb)return pa-pb;
       return (a.dueDate||'9999')<(b.dueDate||'9999')?-1:1;
@@ -5470,7 +5514,7 @@ function renderTasksPanel(){
       html+='<div style="text-align:center;padding:30px;color:var(--text-muted);font-size:13px">هیچ وظیفه‌ای یافت نشد</div>';
     } else {
       sorted.forEach(function(t){
-        var st=_TK_STATUSES.find(function(s){return s.id===(t.status||'todo');})||_TK_STATUSES[0];
+        var st=_getTkStatuses().find(function(s){return s.id===(t.status||'todo');})||_getTkStatuses()[0];
         html+=_tkRenderCard(t,st,true);
       });
     }
@@ -5525,10 +5569,10 @@ function tkDrop(ev,statusId){
 }
 
 // ── Task detail / create modal ──────────────────────────────
-function openTaskModal(tid){
+function openTaskModal(tid, prefill){
   _ensureTasks();
   var isNew=!tid;
-  var t=isNew?{id:'',title:'',owner:currentUser,dueDate:'',priority:2,status:'todo',centerKey:'',note:'',subtasks:[]}:_tkFindTask(tid);
+  var t=isNew?{id:'',title:(prefill&&prefill.title)||'',owner:(prefill&&prefill.owner)||currentUser,dueDate:(prefill&&prefill.dueDate)||'',priority:(prefill&&prefill.priority)||2,status:'todo',centerKey:(prefill&&prefill.centerKey)||'',note:'',subtasks:[]}:_tkFindTask(tid);
   if(!t){showToast('وظیفه یافت نشد');return;}
   var members=(DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS;
   var mid='taskDetail';
@@ -5539,7 +5583,7 @@ function openTaskModal(tid){
     +'<input id="tkd_title" type="text" value="'+esc(t.title)+'" placeholder="عنوان وظیفه..." style="'+inpS+'"></div>'
     +'<div><label style="font-size:11px;display:block;margin-bottom:3px;font-weight:600">وضعیت</label>'
     +'<select id="tkd_status" style="'+inpS+'">'
-    +_TK_STATUSES.map(function(s){return'<option value="'+s.id+'"'+((t.status||'todo')===s.id?' selected':'')+'>'+s.label+'</option>';}).join('')
+    +_getTkStatuses().map(function(s){return'<option value="'+s.id+'"'+((t.status||'todo')===s.id?' selected':'')+'>'+s.label+'</option>';}).join('')
     +'</select></div>'
     +'<div><label style="font-size:11px;display:block;margin-bottom:3px;font-weight:600">اولویت</label>'
     +'<select id="tkd_pri" style="'+inpS+'">'
@@ -5582,7 +5626,7 @@ function _tkRenderSubTree(tid,subs,depth){
     return '<div class="tk-sub-node" style="margin-right:'+(depth*18)+'px">'
       +'<div class="tk-sub-row">'
       +'<input type="checkbox" '+(s.done?'checked':'')+' onchange="tkToggleSub(\''+tid+'\',\''+s.id+'\')" style="cursor:pointer;accent-color:var(--brand,#6366f1)">'
-      +'<span class="tk-sub-title'+(s.done?' tk-sub-done':'')+'" onclick="tkEditSubTitle(\''+tid+'\',\''+s.id+'\')" title="کلیک برای ویرایش">'+esc(s.title||'—')+'</span>'
+      +'<span class="tk-sub-title'+(s.done?' tk-sub-done':'')+'" data-sid="'+s.id+'" onclick="tkEditSubTitle(\''+tid+'\',\''+s.id+'\')" title="کلیک برای ویرایش">'+esc(s.title||'—')+'</span>'
       +(depth<2?'<button onclick="tkAddSub(\''+tid+'\',\''+s.id+'\')" title="افزودن زیروظیفه" class="tk-sub-btn">+</button>':'')
       +'<button onclick="tkDelSub(\''+tid+'\',\''+s.id+'\')" title="حذف" class="tk-sub-btn tk-sub-del">✕</button>'
       +'</div>'
@@ -5634,9 +5678,38 @@ function tkDeleteTask(tid){
 
 function tkAddSub(tid,parentSid){
   var t=_tkFindTask(tid);if(!t)return;
-  var title=prompt('عنوان زیروظیفه:');
-  if(!title||!title.trim())return;
-  var node={id:Date.now()+'_'+Math.random().toString(36).slice(2,5),title:title.trim(),done:false,subtasks:[]};
+  var formId='tkAddSubForm';
+  var existing=document.getElementById(formId);
+  if(existing){existing.remove();return;}
+  var tree=document.getElementById('tkSubTree');
+  if(!tree)return;
+  var inpId='tkAddSubInp_'+Date.now();
+  var div=document.createElement('div');
+  div.id=formId;
+  div.style.cssText='display:flex;gap:5px;padding:6px 0;animation:fadeIn .15s';
+  div.innerHTML='<input id="'+inpId+'" type="text" placeholder="عنوان زیروظیفه..." '
+    +'style="flex:1;padding:5px 8px;border:1px solid var(--brand,#6366f1);border-radius:5px;font-size:11px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)">'
+    +'<button onclick="tkSubmitNewSub(\''+tid+'\',\''+parentSid+'\',\''+inpId+'\');" '
+    +'style="padding:4px 12px;background:var(--brand,#6366f1);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-family:inherit">افزودن</button>'
+    +'<button onclick="document.getElementById(\''+formId+'\').remove()" '
+    +'style="padding:4px 10px;background:var(--bg-raised);border:1px solid var(--border);border-radius:5px;cursor:pointer;font-size:11px">انصراف</button>';
+  tree.appendChild(div);
+  var inp=document.getElementById(inpId);
+  if(inp){
+    inp.focus();
+    inp.addEventListener('keydown',function(e){
+      if(e.key==='Enter')tkSubmitNewSub(tid,parentSid,inpId);
+      if(e.key==='Escape'){var f=document.getElementById(formId);if(f)f.remove();}
+    });
+  }
+}
+
+function tkSubmitNewSub(tid,parentSid,inpId){
+  var inp=document.getElementById(inpId);if(!inp)return;
+  var title=inp.value.trim();
+  if(!title){inp.focus();return;}
+  var t=_tkFindTask(tid);if(!t)return;
+  var node={id:Date.now()+'_'+Math.random().toString(36).slice(2,5),title:title,done:false,subtasks:[]};
   if(parentSid){
     var parent=_tkFindSub(t.subtasks,parentSid);
     if(!parent)return;
@@ -5646,6 +5719,7 @@ function tkAddSub(tid,parentSid){
     t.subtasks.push(node);
   }
   saveDB();
+  var form=document.getElementById('tkAddSubForm');if(form)form.remove();
   var tree=document.getElementById('tkSubTree');
   if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
 }
@@ -5662,12 +5736,33 @@ function tkToggleSub(tid,sid){
 function tkEditSubTitle(tid,sid){
   var t=_tkFindTask(tid);if(!t)return;
   var s=_tkFindSub(t.subtasks,sid);if(!s)return;
-  var nv=prompt('ویرایش عنوان:',s.title||'');
-  if(nv===null)return;
-  s.title=nv.trim()||s.title;
-  saveDB();
-  var tree=document.getElementById('tkSubTree');
-  if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
+  var spans=document.querySelectorAll('.tk-sub-title[data-sid]');
+  var targetSpan=null;
+  for(var i=0;i<spans.length;i++){if(spans[i].getAttribute('data-sid')===String(sid)){targetSpan=spans[i];break;}}
+  if(!targetSpan){
+    var nv=prompt('ویرایش عنوان:',s.title||'');
+    if(nv===null)return;
+    s.title=nv.trim()||s.title;
+    saveDB();
+    var tree=document.getElementById('tkSubTree');if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
+    return;
+  }
+  var inp=document.createElement('input');
+  inp.type='text';inp.value=s.title||'';
+  inp.style.cssText='padding:3px 7px;border:1px solid var(--brand,#6366f1);border-radius:4px;font-size:11px;font-family:inherit;width:150px;background:var(--bg-input);color:var(--text-primary)';
+  var saved=false;
+  var save=function(){
+    if(saved)return;saved=true;
+    s.title=inp.value.trim()||s.title;saveDB();
+    var tree=document.getElementById('tkSubTree');if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
+  };
+  inp.addEventListener('blur',save);
+  inp.addEventListener('keydown',function(e){
+    if(e.key==='Enter'){inp.blur();}
+    if(e.key==='Escape'){saved=true;var tree=document.getElementById('tkSubTree');if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);}
+  });
+  targetSpan.replaceWith(inp);
+  inp.select();
 }
 
 function _tkDelSubFrom(subs,sid){
@@ -5881,6 +5976,20 @@ function _runOverdueAndUndatedReminders(today){
     }
   });
   if(cnt>0) showToast('🔔 یادآوری مراکز معوق برای '+cnt+' کارشناس ارسال شد', 3000);
+}
+
+// تبدیل پیگیری به وظیفه
+function convertFollowupToTask(rtype, rid){
+  var e = getE(rtype, rid);
+  var name = typeof _getCenterName==='function' ? _getCenterName(rtype, rid) : (rtype+'_'+rid);
+  var fd = e.followupDate || '';
+  openTaskModal(null, {
+    title: 'پیگیری: ' + name,
+    owner: e.owner || currentUser,
+    dueDate: fd,
+    priority: 1,
+    centerKey: rtype + '_' + rid
+  });
 }
 
 // کمکی: پیدا کردن مسئول یک weekEntry
@@ -7556,11 +7665,11 @@ function renderManagerPanel(){
     {n:total.contracted,l:'قرارداد بسته شد ✓',c:'#22c55e'},
     {n:total.meetings,l:'ملاقات انجام شد',c:'#f59e0b'},
     {n:total.proposals,l:'پیشنهاد ارسال',c:'#0284c7'},
-    {n:total.overdue,l:'پیگیری معوق 🔴',c:'#dc2626'},
+    {n:total.overdue,l:'پیگیری معوق 🔴',c:'#dc2626',click:'openOverdueList()'},
     {n:total.followupToday,l:'پیگیری امروز 📅',c:'#f59e0b'},
     {n:total.stalled,l:'راکد +۳۰روز 🟠',c:'#ea580c'},
   ].forEach(function(k){
-    html+='<div class="kpi-card" style="border-right-color:'+k.c+'">'
+    html+='<div class="kpi-card" style="border-right-color:'+k.c+(k.click?';cursor:pointer':'')+'"'+(k.click?' onclick="'+k.click+'"':'')+'>'
       +'<div class="kpi-num" style="font-size:28px">'+k.n+'</div>'
       +'<div class="kpi-label">'+k.l+'</div></div>';
   });
@@ -7588,13 +7697,13 @@ function renderManagerPanel(){
     var conv=s.totalAssigned>0?Math.round((s.contracted/s.totalAssigned)*100):0;
     var bg=i%2===0?'var(--bg-card)':'var(--bg-raised)';
     html+='<tr style="background:'+bg+';border-bottom:1px solid #f1f5f9">'
-      +'<td style="padding:8px 10px;font-weight:600"><span style="display:inline-flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:'+(window.umGetColor?umGetColor(m.id):'#94a3b8')+'"></span>'+esc(m.name)+'</span><br><span style="font-size:10px;color:var(--text-muted);font-weight:400">'+esc(m.role)+'</span></td>'
+      +'<td style="padding:8px 10px;font-weight:600;cursor:pointer" onclick="openManagerDrilldown(\''+m.id+'\')" title="کلیک برای جزئیات"><span style="display:inline-flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:'+(window.umGetColor?umGetColor(m.id):'#94a3b8')+'"></span>'+esc(m.name)+'</span><br><span style="font-size:10px;color:var(--text-muted);font-weight:400">'+esc(m.role)+'</span></td>'
       +'<td style="text-align:center;padding:8px">'+s.totalAssigned+'</td>'
       +'<td style="text-align:center;padding:8px;font-weight:700;color:#16a34a">'+s.contracted+'</td>'
       +'<td style="text-align:center;padding:8px;color:#854d0e">'+s.meetings+'</td>'
       +'<td style="text-align:center;padding:8px;color:#0369a1">'+s.proposals+'</td>'
       +'<td style="text-align:center;padding:8px;color:var(--text-secondary)">'+s.firstContact+'</td>'
-      +'<td style="text-align:center;padding:8px;color:#dc2626;font-weight:600">'+s.overdue+'</td>'
+      +'<td style="text-align:center;padding:8px;color:#dc2626;font-weight:600;cursor:pointer" onclick="openOverdueList(\''+m.id+'\')">'+s.overdue+(s.overdue>0?' 🔴':'')+'</td>'
       +'<td style="text-align:center;padding:8px;color:#854d0e">'+s.followupToday+'</td>'
       +'<td style="text-align:center;padding:8px;color:#ea580c">'+s.stalled+'</td>'
       +'<td style="text-align:center;padding:8px">'
@@ -7733,6 +7842,129 @@ function renderManagerPanel(){
     +'</div></div>';
 
   el.innerHTML=html;
+}
+
+// ════════════════════════ MANAGER DRILLDOWN ════════════════════
+function openManagerDrilldown(memberId){
+  _buildPCCache();
+  var allMem=(DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS;
+  var m=allMem.find(function(x){return x.id===memberId;});
+  if(!m)return;
+  var today=todayStr();
+  var centers=[];
+  getAllProvinces().forEach(function(p){
+    var rt=getProvType(p.id);
+    getProvCenters(p.id).forEach(function(c){
+      var e=getE(rt,c.id);
+      if((e.owner||c.owner||'')!==memberId)return;
+      var rkey=rt+'_'+c.id;
+      var fd=e.followupDate||'';
+      var isOverdue=fd&&fd<today&&e.status!=='قرارداد بسته شد'&&e.status!=='غیرفعال';
+      var noteArr=(DB.notes&&DB.notes[rkey])||[];
+      var recentLog=(DB.changeLog||[]).filter(function(l){return l.rkey===rkey;}).slice(-5);
+      centers.push({rtype:rt,id:c.id,name:e.nameOverride||c.name||'?',status:e.status||'بدون تماس',followupDate:fd,isOverdue:isOverdue,potential:e.potential||c.potential||4,noteArr:noteArr,recentLog:recentLog,rkey:rkey});
+    });
+  });
+  centers.sort(function(a,b){
+    if(a.isOverdue&&!b.isOverdue)return -1;
+    if(!a.isOverdue&&b.isOverdue)return 1;
+    if(a.followupDate&&b.followupDate)return a.followupDate<b.followupDate?-1:1;
+    if(a.followupDate)return -1;
+    if(b.followupDate)return 1;
+    return 0;
+  });
+  var stColors={'بدون تماس':'#94a3b8','تماس اولیه':'#0ea5e9','ملاقات انجام شد':'#f59e0b','پیشنهاد ارسال شد':'#0284c7','قرارداد بسته شد':'#22c55e','غیرفعال':'#dc2626'};
+  var grouped={};
+  centers.forEach(function(c){grouped[c.status]=(grouped[c.status]||0)+1;});
+  var body='<div style="font-size:12px">';
+  body+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">';
+  Object.keys(grouped).forEach(function(st){
+    body+='<span style="padding:3px 10px;border-radius:20px;font-size:11px;background:'+(stColors[st]||'#e2e8f0')+'22;color:'+(stColors[st]||'#555')+';border:1px solid '+(stColors[st]||'#e2e8f0')+'44">'+esc(st)+': '+grouped[st]+'</span>';
+  });
+  body+='</div>';
+  if(!centers.length){
+    body+='<div style="text-align:center;padding:30px;color:var(--text-muted)">مرکزی تخصیص داده نشده</div>';
+  } else {
+    body+='<div style="max-height:60vh;overflow-y:auto;padding-bottom:4px">';
+    centers.forEach(function(c,i){
+      var fdStyle=c.isOverdue?'color:#dc2626;font-weight:700':'color:var(--text-secondary)';
+      var stColor=stColors[c.status]||'#94a3b8';
+      var lastNote=c.noteArr.length?c.noteArr[c.noteArr.length-1]:null;
+      var lastAct=c.recentLog.length?c.recentLog[c.recentLog.length-1]:null;
+      var noteText=lastNote?(typeof lastNote==='string'?lastNote:(lastNote.text||lastNote.body||JSON.stringify(lastNote))):'';
+      var fmtDate=function(isoAt){if(!isoAt)return'';var dp=isoAt.slice(0,10).split('-').map(Number);if(dp.length!==3)return'';var jd=g2j(dp[0],dp[1],dp[2]);return jd[0]+'/'+p2(jd[1])+'/'+p2(jd[2]);};
+      body+='<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden">'
+        +'<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;background:var(--bg-card);flex-wrap:wrap" '
+        +'onclick="var d=document.getElementById(\'mdr_\'+i+\'\');if(d){d.style.display=d.style.display===\'none\'?\'block\':\'none\';}">'
+        +'<span style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:'+stColor+'"></span>'
+        +'<span style="font-weight:600;flex:1;min-width:80px">'+esc(c.name)+'</span>'
+        +'<span style="font-size:10px;padding:2px 7px;border-radius:9px;background:'+stColor+'22;color:'+stColor+'">'+esc(c.status)+'</span>'
+        +(c.followupDate?'<span style="font-size:11px;'+fdStyle+'">'+c.followupDate+(c.isOverdue?' 🔴':'')+'</span>':'')
+        +'<span style="font-size:10px;color:var(--text-muted)">P'+c.potential+'</span>'
+        +'<button onclick="event.stopPropagation();closeModal(\'mgrDrilldown\');setTimeout(function(){openCenterModal(\''+c.rtype+'\',\''+c.id+'\');},100)" style="padding:2px 8px;background:var(--bg-raised);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:10px;font-family:inherit">باز کردن</button>'
+        +'</div>'
+        +'<div id="mdr_'+i+'" style="display:none;padding:10px 12px;border-top:1px solid var(--border);background:var(--bg-raised)">';
+      if(noteText){
+        body+='<div style="margin-bottom:6px;font-size:11px"><span style="font-weight:700;color:#0369a1">آخرین یادداشت:</span> '+esc(noteText)+'</div>';
+      }
+      if(lastAct){
+        body+='<div style="font-size:11px"><span style="font-weight:700;color:#7c3aed">آخرین تغییر:</span> '+esc(lastAct.field||'')+' → '+esc(String(lastAct.val||''))+'<span style="color:var(--text-muted);margin-right:6px">('+fmtDate(lastAct.at)+' - '+esc(lastAct.by||'')+')</span></div>';
+      }
+      if(c.recentLog.length>1){
+        body+='<div style="margin-top:6px;border-top:1px solid var(--border);padding-top:4px">';
+        c.recentLog.slice(0,-1).reverse().slice(0,4).forEach(function(l){
+          body+='<div style="font-size:10px;color:var(--text-muted);padding:1px 0">'+fmtDate(l.at)+' — '+esc(l.field||'')+': '+esc(String(l.val||''))+'</div>';
+        });
+        body+='</div>';
+      }
+      if(!noteText&&!lastAct){
+        body+='<div style="font-size:11px;color:var(--text-muted)">فعالیتی ثبت نشده</div>';
+      }
+      body+='</div></div>';
+    });
+    body+='</div>';
+  }
+  body+='</div>';
+  openModal('mgrDrilldown','🔍 جزئیات: '+esc(m.name)+' (مجموعه '+centers.length+' مرکز)',body,'<button class="btn-secondary" onclick="closeModal(\'mgrDrilldown\')">بستن</button>',{lg:true});
+}
+
+function openOverdueList(memberId){
+  _buildPCCache();
+  var today=todayStr();
+  var allMem=(DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS;
+  var items=[];
+  getAllProvinces().forEach(function(p){
+    var rt=getProvType(p.id);
+    getProvCenters(p.id).forEach(function(c){
+      var e=getE(rt,c.id);
+      var owner=e.owner||c.owner||'';
+      if(memberId&&owner!==memberId)return;
+      var fd=e.followupDate||'';
+      if(!fd||fd>=today||e.status==='قرارداد بسته شد'||e.status==='غیرفعال')return;
+      var mObj=allMem.find(function(x){return x.id===owner;});
+      items.push({rtype:rt,id:c.id,name:e.nameOverride||c.name||'?',followupDate:fd,status:e.status||'بدون تماس',ownerName:mObj?mObj.name:(owner||'بدون مسئول'),potential:e.potential||c.potential||4});
+    });
+  });
+  items.sort(function(a,b){return a.followupDate<b.followupDate?-1:1;});
+  var body='<div style="font-size:12px">'
+    +'<div style="color:var(--text-muted);margin-bottom:10px">مراکزی که تاریخ پیگیری آن‌ها گذشته و هنوز پیگیری نشده است</div>'
+    +'<div style="max-height:60vh;overflow-y:auto">';
+  if(!items.length){
+    body+='<div style="text-align:center;padding:30px;color:#16a34a;font-weight:700">🎉 هیچ پیگیری معوقی وجود ندارد!</div>';
+  } else {
+    items.forEach(function(c){
+      var daysAgo=Math.round((new Date()-new Date(c.followupDate.split('/').join('-')))/86400000);
+      body+='<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--border);border-radius:6px;margin-bottom:4px;background:var(--bg-card)">'
+        +'<span style="color:#dc2626;font-size:11px;min-width:60px;font-weight:700">'+c.followupDate+'</span>'
+        +'<span style="font-size:10px;background:#fee2e2;color:#dc2626;padding:2px 6px;border-radius:9px;min-width:44px;text-align:center">'+daysAgo+' روز</span>'
+        +'<span style="flex:1;font-weight:600">'+esc(c.name)+'</span>'
+        +'<span style="font-size:10px;color:var(--text-muted)">'+esc(c.ownerName)+'</span>'
+        +'<button onclick="closeModal(\'overdueList\');setTimeout(function(){openCenterModal(\''+c.rtype+'\',\''+c.id+'\');},100)" style="padding:3px 9px;background:var(--brand,#6366f1);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:10px;font-family:inherit">پیگیری</button>'
+        +'</div>';
+    });
+  }
+  body+='</div></div>';
+  openModal('overdueList','🔴 پیگیری‌های معوق ('+items.length+')',body,'<button class="btn-secondary" onclick="closeModal(\'overdueList\')">بستن</button>',{lg:true});
 }
 
 // ════════════════════════ EXCEL EXPORT (مراکز) ════════════════════
