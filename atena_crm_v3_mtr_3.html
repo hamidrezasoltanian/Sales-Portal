@@ -1018,6 +1018,27 @@ tr.row-contracted td{background:#f0fdf4!important}
 #onboardingWidget .ob-btn-dismiss{font-size:10px;padding:4px 8px;border-radius:5px;border:1px solid #fca5a5;background:#fee2e220;color:#dc2626;cursor:pointer;font-family:inherit;white-space:nowrap}
 #onboardingWidget .ob-btn-dismiss:hover{background:#fee2e2}
 
+
+/* ── Task Management ── */
+.task-wrap{padding:14px}
+.task-filters{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
+.task-filter-btn{padding:5px 12px;border-radius:16px;border:1px solid var(--border);background:var(--bg-raised);color:var(--text-secondary);cursor:pointer;font-size:11px;font-family:inherit}
+.task-filter-btn.active{background:#7c3aed;color:#fff;border-color:#7c3aed}
+.task-item{background:var(--bg-card);border-radius:8px;padding:10px 12px;margin-bottom:8px;border:1px solid var(--border);display:flex;gap:10px;align-items:flex-start}
+.task-item.done-task{opacity:.6}
+.task-check{width:18px;height:18px;border-radius:50%;border:2px solid #7c3aed;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;margin-top:1px;background:transparent}
+.task-item.done-task .task-check{background:#22c55e;border-color:#22c55e;color:#fff}
+.task-body{flex:1;min-width:0}
+.task-title{font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:3px}
+.task-item.done-task .task-title{text-decoration:line-through;color:var(--text-muted)}
+.task-meta{font-size:10px;color:var(--text-muted);display:flex;gap:8px;flex-wrap:wrap}
+.task-pri{display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700}
+.task-pri-1{background:#fef3c7;color:#92400e}
+.task-pri-2{background:#e0f2fe;color:#075985}
+.task-pri-3{background:#f1f5f9;color:#64748b}
+.task-del-btn{padding:3px 8px;border:none;border-radius:4px;background:#fee2e2;color:#dc2626;cursor:pointer;font-size:11px;font-family:inherit;flex-shrink:0}
+.task-add-form{background:var(--bg-raised);border-radius:8px;padding:12px;margin-bottom:14px;border:1px solid var(--border)}
+.task-add-form input,.task-add-form select,.task-add-form textarea{width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary);margin-bottom:6px}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" onerror="console.warn('XLSX CDN failed - only TSV format supported offline')"></script>
 </head>
@@ -9552,7 +9573,8 @@ function exportKPIReport() {
     '<style>body{font-family:Vazirmatn,Tahoma,sans-serif;padding:20px;direction:rtl;background:#fff;color:#1e293b}' +
     'table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #e2e8f0;padding:10px 14px;text-align:right}' +
     'th{background:#f1f5f9;font-weight:700}.score-big{font-size:48px;font-weight:900;text-align:center;padding:20px}' +
-    '.green{color:#16a34a}.red{color:#dc2626}.orange{color:#f59e0b}h1{font-size:20px;border-bottom:2px solid #e2e8f0;padding-bottom:10px}</style></head><body>';
+    '.green{color:#16a34a}.red{color:#dc2626}.orange{color:#f59e0b}h1{font-size:20px;border-bottom:2px solid #e2e8f0;padding-bottom:10px}' +
+    '</style></head><body>';
   html += '<h1>📊 گزارش عملکرد KPI — ' + (USERS[_kpiUser]||_kpiUser) + ' — ' + jMonthLabel(_kpiMonth) + '</h1>';
   var ov = data.overall;
   var oc = ov>=80?'green':ov>=50?'orange':'red';
@@ -9577,28 +9599,7 @@ function exportKPIReport() {
     'table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #e2e8f0;padding:10px 14px;text-align:right}' +
     'th{background:#f1f5f9;font-weight:700}.score-big{font-size:48px;font-weight:900;text-align:center;padding:20px}' +
     '.green{color:#16a34a}.red{color:#dc2626}.orange{color:#f59e0b}h1{font-size:20px;border-bottom:2px solid #e2e8f0;padding-bottom:10px}' +
-    '
-/* ── Task Management ── */
-.task-wrap{padding:14px}
-.task-filters{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
-.task-filter-btn{padding:5px 12px;border-radius:16px;border:1px solid var(--border);background:var(--bg-raised);color:var(--text-secondary);cursor:pointer;font-size:11px;font-family:inherit}
-.task-filter-btn.active{background:#7c3aed;color:#fff;border-color:#7c3aed}
-.task-item{background:var(--bg-card);border-radius:8px;padding:10px 12px;margin-bottom:8px;border:1px solid var(--border);display:flex;gap:10px;align-items:flex-start}
-.task-item.done-task{opacity:.6}
-.task-check{width:18px;height:18px;border-radius:50%;border:2px solid #7c3aed;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;margin-top:1px;background:transparent}
-.task-item.done-task .task-check{background:#22c55e;border-color:#22c55e;color:#fff}
-.task-body{flex:1;min-width:0}
-.task-title{font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:3px}
-.task-item.done-task .task-title{text-decoration:line-through;color:var(--text-muted)}
-.task-meta{font-size:10px;color:var(--text-muted);display:flex;gap:8px;flex-wrap:wrap}
-.task-pri{display:inline-block;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700}
-.task-pri-1{background:#fef3c7;color:#92400e}
-.task-pri-2{background:#e0f2fe;color:#075985}
-.task-pri-3{background:#f1f5f9;color:#64748b}
-.task-del-btn{padding:3px 8px;border:none;border-radius:4px;background:#fee2e2;color:#dc2626;cursor:pointer;font-size:11px;font-family:inherit;flex-shrink:0}
-.task-add-form{background:var(--bg-raised);border-radius:8px;padding:12px;margin-bottom:14px;border:1px solid var(--border)}
-.task-add-form input,.task-add-form select,.task-add-form textarea{width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary);margin-bottom:6px}
-</style></head><body>';
+    '</style></head><body>';
   html += '<h1>📊 گزارش عملکرد KPI — ' + (USERS[_kpiUser]||_kpiUser) + ' — ' + jMonthLabel(_kpiMonth) + '</h1>';
   var ov = data.overall;
   var oc = ov>=80?'green':ov>=50?'orange':'red';
