@@ -5368,147 +5368,344 @@ function renderChangelog(){
 }
 
 // ════════════════════════ TASK MANAGEMENT ════════════════════════
-var _taskFilter='all'; // all | mine | overdue | done
+// ════════════════════════ TASK MANAGEMENT (Monday-style) ════════════════════════
+var _taskFilter='all'; // all | mine | overdue
+var _taskView='kanban'; // kanban | list
+var _TK_STATUSES=[
+  {id:'todo',label:'انجام نشده',color:'#64748b'},
+  {id:'doing',label:'در حال انجام',color:'#6366f1'},
+  {id:'waiting',label:'در انتظار',color:'#f59e0b'},
+  {id:'done',label:'انجام شد',color:'#22c55e'}
+];
 
-function _ensureTasks(){if(!DB.tasks)DB.tasks=[];}
+function _ensureTasks(){
+  if(!DB.tasks)DB.tasks=[];
+  // migrate: add status + subtasks to old tasks
+  DB.tasks.forEach(function(t){
+    if(!t.status)t.status=t.done?'done':'todo';
+    if(!t.subtasks)t.subtasks=[];
+  });
+}
+
+function _tkCountSubs(subs){
+  var total=0,done=0;
+  (subs||[]).forEach(function(s){
+    if(s.subtasks&&s.subtasks.length){
+      var r=_tkCountSubs(s.subtasks);
+      total+=r.total;done+=r.done;
+    } else {
+      total++;if(s.done)done++;
+    }
+  });
+  return {total:total,done:done};
+}
+
+function _tkFindTask(tid){
+  _ensureTasks();
+  return DB.tasks.find(function(x){return String(x.id)===String(tid);});
+}
+
+function _tkFindSub(subs,sid){
+  for(var i=0;i<(subs||[]).length;i++){
+    if(String(subs[i].id)===String(sid))return subs[i];
+    var f=_tkFindSub(subs[i].subtasks,sid);
+    if(f)return f;
+  }
+  return null;
+}
+
+function _tkFilteredTasks(){
+  _ensureTasks();
+  var today=todayStr();
+  return DB.tasks.filter(function(t){
+    if(_taskFilter==='mine')return t.owner===currentUser;
+    if(_taskFilter==='overdue')return t.status!=='done'&&t.dueDate&&t.dueDate<today;
+    return true;
+  });
+}
 
 function renderTasksPanel(){
   var el=document.getElementById('tasksPanel');if(!el)return;
   _ensureTasks();
-  var today=todayStr();
-  var members=(DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS;
-  var allCenters=[];
-  getAllProvinces().forEach(function(p){
-    var rt=getProvType(p.id);
-    getProvCenters(p.id).forEach(function(c){
-      var e=getE(rt,c.id);
-      allCenters.push({rtype:rt,id:c.id,name:e.nameOverride||c.name,key:rt+'_'+c.id});
-    });
-  });
-  var tasks=DB.tasks.filter(function(t){
-    if(_taskFilter==='mine')return t.owner===currentUser;
-    if(_taskFilter==='overdue')return !t.done&&t.dueDate&&t.dueDate<today;
-    if(_taskFilter==='done')return t.done;
-    return !t.done;
-  });
+  var tasks=_tkFilteredTasks();
 
   var html='<div class="task-wrap">';
-  // Add task form
-  html+='<div class="task-add-form">'
-    +'<div style="font-weight:700;font-size:13px;margin-bottom:8px;color:#7c3aed">+ افزودن وظیفه جدید</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
-    +'<div><label style="font-size:11px;display:block;margin-bottom:3px">عنوان وظیفه</label>'
-    +'<input id="nt_title" type="text" placeholder="عنوان وظیفه..."></div>'
-    +'<div><label style="font-size:11px;display:block;margin-bottom:3px">مسئول</label>'
-    +'<select id="nt_owner"><option value="">—</option>'
-    +members.filter(function(m){return m.id!=='guest';}).map(function(m){return'<option value="'+m.id+'"'+(m.id===currentUser?' selected':'')+'>'+esc(m.name)+'</option>';}).join('')
-    +'</select></div>'
-    +'<div><label style="font-size:11px;display:block;margin-bottom:3px">تاریخ سررسید</label>'
-    +'<input id="nt_due" type="text" readonly class="fd-inp" style="cursor:pointer" onclick="openJDP(this,function(v){document.getElementById(\'nt_due\').value=v;})"></div>'
-    +'<div><label style="font-size:11px;display:block;margin-bottom:3px">اولویت</label>'
-    +'<select id="nt_pri"><option value="2">معمولی</option><option value="1">بالا</option><option value="3">پایین</option></select></div>'
-    +'</div>'
-    +'<div style="margin-top:6px"><label style="font-size:11px;display:block;margin-bottom:3px">مرکز مرتبط (اختیاری)</label>'
-    +'<select id="nt_center" style=""><option value="">—</option>'
-    +allCenters.map(function(c){return'<option value="'+esc(c.key)+'">'+esc(c.name)+'</option>';}).join('')
-    +'</select></div>'
-    +'<div style="margin-top:6px"><label style="font-size:11px;display:block;margin-bottom:3px">یادداشت</label>'
-    +'<textarea id="nt_note" rows="2" placeholder="توضیحات..."></textarea></div>'
-    +'<button class="btn-primary" style="margin-top:4px" onclick="_addTask()">+ ثبت وظیفه</button>'
-    +'</div>';
-
-  // Filter buttons
+  // toolbar
   html+='<div class="task-filters">'
-    +'<span style="font-size:12px;font-weight:700;color:var(--text-secondary)">نمایش:</span>'
-    +[['all','فعال'],['mine','وظایف من'],['overdue','سررسید گذشته'],['done','انجام شده']].map(function(f){
+    +'<span style="display:inline-flex;gap:2px;background:var(--bg-raised);border-radius:8px;padding:3px;border:1px solid var(--border)">'
+    +'<button onclick="_taskView=\'kanban\';renderTasksPanel()" style="font-size:11px;border:none;border-radius:6px;padding:4px 12px;cursor:pointer;font-family:inherit;background:'+(_taskView==='kanban'?'var(--brand,#6366f1)':'transparent')+';color:'+(_taskView==='kanban'?'#fff':'var(--text-secondary)')+'">▦ کانبان</button>'
+    +'<button onclick="_taskView=\'list\';renderTasksPanel()" style="font-size:11px;border:none;border-radius:6px;padding:4px 12px;cursor:pointer;font-family:inherit;background:'+(_taskView==='list'?'var(--brand,#6366f1)':'transparent')+';color:'+(_taskView==='list'?'#fff':'var(--text-secondary)')+'">☰ لیست</button>'
+    +'</span>'
+    +[['all','همه'],['mine','وظایف من'],['overdue','سررسید گذشته']].map(function(f){
       return'<button class="task-filter-btn'+(_taskFilter===f[0]?' active':'')+'" onclick="_taskFilter=\''+f[0]+'\';renderTasksPanel()">'+f[1]+'</button>';
     }).join('')
-    +'<span style="margin-right:auto;font-size:11px;color:var(--text-muted)">'+tasks.length+' وظیفه</span>'
+    +'<button class="btn-primary" style="margin-right:auto;font-size:12px;padding:6px 16px" onclick="openTaskModal()">+ وظیفه جدید</button>'
     +'</div>';
 
-  if(!tasks.length){
-    html+='<div style="text-align:center;padding:30px;color:var(--text-muted);font-size:13px">هیچ وظیفه‌ای یافت نشد</div>';
+  if(_taskView==='kanban'){
+    html+='<div class="tk-board">';
+    _TK_STATUSES.forEach(function(st){
+      var colTasks=tasks.filter(function(t){return (t.status||'todo')===st.id;});
+      colTasks.sort(function(a,b){var pa=a.priority||2,pb=b.priority||2;if(pa!==pb)return pa-pb;return (a.dueDate||'9999')<(b.dueDate||'9999')?-1:1;});
+      html+='<div class="tk-col" data-status="'+st.id+'" ondragover="event.preventDefault();this.classList.add(\'tk-drop-over\')" ondragleave="this.classList.remove(\'tk-drop-over\')" ondrop="tkDrop(event,\''+st.id+'\')">'
+        +'<div class="tk-col-head" style="border-top:3px solid '+st.color+'">'
+        +'<span style="color:'+st.color+'">'+st.label+'</span>'
+        +'<span class="tk-col-cnt">'+colTasks.length+'</span>'
+        +'</div>'
+        +'<div class="tk-col-body">'
+        +(colTasks.length?colTasks.map(function(t){return _tkRenderCard(t,st);}).join(''):'<div class="tk-col-empty">—</div>')
+        +'</div></div>';
+    });
+    html+='</div>';
   } else {
-    tasks.sort(function(a,b){
-      if(a.done!==b.done)return a.done?1:-1;
+    // list view
+    var sorted=tasks.slice().sort(function(a,b){
+      var sa=_TK_STATUSES.findIndex(function(s){return s.id===(a.status||'todo');});
+      var sb=_TK_STATUSES.findIndex(function(s){return s.id===(b.status||'todo');});
+      if(sa!==sb)return sa-sb;
       var pa=a.priority||2,pb=b.priority||2;if(pa!==pb)return pa-pb;
-      if(a.dueDate&&b.dueDate)return a.dueDate<b.dueDate?-1:1;
-      return 0;
+      return (a.dueDate||'9999')<(b.dueDate||'9999')?-1:1;
     });
-    tasks.forEach(function(t){
-      var overdue=!t.done&&t.dueDate&&t.dueDate<today;
-      var owner=members.find(function(m){return m.id===t.owner;});
-      var priLabel=['','بالا','معمولی','پایین'][t.priority||2]||'معمولی';
-      var priCls=['','task-pri-1','task-pri-2','task-pri-3'][t.priority||2]||'task-pri-2';
-      html+='<div class="task-item'+(t.done?' done-task':'')+'">'
-        +'<div class="task-check" onclick="_toggleTask(\''+t.id+'\')">'+(t.done?'✓':'')+'</div>'
-        +'<div class="task-body">'
-        +'<div class="task-title">'+esc(t.title||'—')+'</div>'
-        +'<div class="task-meta">'
-        +(t.dueDate?'<span style="color:'+(overdue?'#dc2626':'var(--text-muted)')+'">📅 '+t.dueDate+(overdue?' (سررسید گذشته)':'')+'</span>':'')
-        +(owner?'<span>👤 '+esc(owner.name)+'</span>':'')
-        +'<span class="task-pri '+priCls+'">'+priLabel+'</span>'
-        +(t.centerKey?'<span style="color:#0ea5e9;cursor:pointer" onclick="openCenterModal(\''+t.centerKey.split('_')[0]+'\',\''+t.centerKey.split('_').slice(1).join('_')+'\')">🏥 '+esc(_getTaskCenterName(t.centerKey))+'</span>':'')
-        +'</div>'
-        +(t.note?'<div style="font-size:11px;color:var(--text-muted);margin-top:3px">'+esc(t.note)+'</div>':'')
-        +(t.done&&t.doneAt?'<div style="font-size:10px;color:#22c55e;margin-top:2px">✅ انجام شد: '+t.doneAt+'</div>':'')
-        +'</div>'
-        +'<button class="task-del-btn" onclick="_deleteTask(\''+t.id+'\')">🗑</button>'
-        +'</div>';
-    });
+    if(!sorted.length){
+      html+='<div style="text-align:center;padding:30px;color:var(--text-muted);font-size:13px">هیچ وظیفه‌ای یافت نشد</div>';
+    } else {
+      sorted.forEach(function(t){
+        var st=_TK_STATUSES.find(function(s){return s.id===(t.status||'todo');})||_TK_STATUSES[0];
+        html+=_tkRenderCard(t,st,true);
+      });
+    }
   }
   html+='</div>';
   el.innerHTML=html;
 }
 
-function _getTaskCenterName(centerKey){
-  if(!centerKey)return '';
-  var parts=centerKey.split('_');
-  if(parts.length<2)return centerKey;
-  var c=getCenterById(parts[0],parts[1]);
-  if(c){var e=getE(parts[0],parts[1]);return e.nameOverride||c.name||centerKey;}
-  return centerKey;
+function _tkRenderCard(t,st,isList){
+  var today=todayStr();
+  var overdue=t.status!=='done'&&t.dueDate&&t.dueDate<today;
+  var owner=USERS[t.owner]||t.owner||'';
+  var priLabel=['','بالا','معمولی','پایین'][t.priority||2]||'معمولی';
+  var priCls=['','task-pri-1','task-pri-2','task-pri-3'][t.priority||2]||'task-pri-2';
+  var subC=_tkCountSubs(t.subtasks);
+  var subBadge=subC.total?'<span class="tk-sub-badge'+(subC.done===subC.total?' all-done':'')+'">'+subC.done+'/'+subC.total+' ✓</span>':'';
+  return '<div class="tk-card'+(t.status==='done'?' tk-done':'')+(isList?' tk-card-list':'')+'" draggable="true" '
+    +'ondragstart="tkDragStart(event,\''+t.id+'\')" ondragend="tkDragEnd(event)" '
+    +'onclick="openTaskModal(\''+t.id+'\')">'
+    +'<div class="tk-card-title">'+esc(t.title||'—')+'</div>'
+    +'<div class="tk-card-meta">'
+    +'<span class="task-pri '+priCls+'">'+priLabel+'</span>'
+    +(owner?'<span class="tk-owner"><span class="tk-owner-dot" style="background:'+(window.umGetColor?umGetColor(t.owner):'#94a3b8')+'"></span>'+esc(owner)+'</span>':'')
+    +(t.dueDate?'<span style="color:'+(overdue?'#ef4444':'var(--text-muted)')+';font-size:10px">📅 '+t.dueDate+'</span>':'')
+    +subBadge
+    +(t.centerKey?'<span class="tk-center-chip" onclick="event.stopPropagation();openCenterModal(\''+t.centerKey.split('_')[0]+'\',\''+t.centerKey.split('_').slice(1).join('_')+'\')">🏥 '+esc(_getTaskCenterName(t.centerKey).substring(0,20))+'</span>':'')
+    +'</div>'
+    +'</div>';
 }
 
-function _addTask(){
-  _ensureTasks();
-  var title=(document.getElementById('nt_title')||{}).value||'';
-  if(!title.trim()){showToast('عنوان وظیفه را وارد کنید');return;}
-  var task={
-    id:Date.now()+'_'+Math.random().toString(36).slice(2,6),
-    title:title.trim(),
-    owner:(document.getElementById('nt_owner')||{}).value||currentUser,
-    dueDate:(document.getElementById('nt_due')||{}).value||'',
-    priority:parseInt((document.getElementById('nt_pri')||{}).value)||2,
-    centerKey:(document.getElementById('nt_center')||{}).value||'',
-    note:(document.getElementById('nt_note')||{}).value||'',
-    done:false,
-    doneAt:'',
-    createdBy:currentUser,
-    createdAt:new Date().toISOString()
-  };
-  DB.tasks.push(task);
-  saveDB();
-  showToast('✅ وظیفه ثبت شد');
-  renderTasksPanel();
+var _tkDragging=null;
+function tkDragStart(ev,tid){
+  _tkDragging=tid;
+  ev.dataTransfer.effectAllowed='move';
+  ev.dataTransfer.setData('text/plain',tid);
 }
-
-function _toggleTask(tid){
-  _ensureTasks();
-  var t=DB.tasks.find(function(x){return x.id==tid;});
+function tkDragEnd(ev){
+  _tkDragging=null;
+  document.querySelectorAll('.tk-col.tk-drop-over').forEach(function(el){el.classList.remove('tk-drop-over');});
+}
+function tkDrop(ev,statusId){
+  ev.preventDefault();
+  document.querySelectorAll('.tk-col.tk-drop-over').forEach(function(el){el.classList.remove('tk-drop-over');});
+  var tid=_tkDragging||ev.dataTransfer.getData('text/plain');
+  var t=_tkFindTask(tid);
   if(!t)return;
-  t.done=!t.done;
+  t.status=statusId;
+  t.done=(statusId==='done');
   t.doneAt=t.done?todayStr():'';
   saveDB();
   renderTasksPanel();
 }
 
-function _deleteTask(tid){
+// ── Task detail / create modal ──────────────────────────────
+function openTaskModal(tid){
   _ensureTasks();
-  DB.tasks=DB.tasks.filter(function(x){return x.id!=tid;});
+  var isNew=!tid;
+  var t=isNew?{id:'',title:'',owner:currentUser,dueDate:'',priority:2,status:'todo',centerKey:'',note:'',subtasks:[]}:_tkFindTask(tid);
+  if(!t){showToast('وظیفه یافت نشد');return;}
+  var members=(DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS;
+  var mid='taskDetail';
+  var inpS='width:100%;box-sizing:border-box;padding:6px 9px;border:1px solid var(--border-input);border-radius:6px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)';
+
+  var body='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+    +'<div style="grid-column:1/-1"><label style="font-size:11px;display:block;margin-bottom:3px;font-weight:600">عنوان</label>'
+    +'<input id="tkd_title" type="text" value="'+esc(t.title)+'" placeholder="عنوان وظیفه..." style="'+inpS+'"></div>'
+    +'<div><label style="font-size:11px;display:block;margin-bottom:3px;font-weight:600">وضعیت</label>'
+    +'<select id="tkd_status" style="'+inpS+'">'
+    +_TK_STATUSES.map(function(s){return'<option value="'+s.id+'"'+((t.status||'todo')===s.id?' selected':'')+'>'+s.label+'</option>';}).join('')
+    +'</select></div>'
+    +'<div><label style="font-size:11px;display:block;margin-bottom:3px;font-weight:600">اولویت</label>'
+    +'<select id="tkd_pri" style="'+inpS+'">'
+    +[[1,'بالا'],[2,'معمولی'],[3,'پایین']].map(function(p){return'<option value="'+p[0]+'"'+((t.priority||2)===p[0]?' selected':'')+'>'+p[1]+'</option>';}).join('')
+    +'</select></div>'
+    +'<div><label style="font-size:11px;display:block;margin-bottom:3px;font-weight:600">مسئول</label>'
+    +'<select id="tkd_owner" style="'+inpS+'"><option value="">—</option>'
+    +members.filter(function(m){return m.id!=='guest';}).map(function(m){return'<option value="'+m.id+'"'+(t.owner===m.id?' selected':'')+'>'+esc(m.name)+'</option>';}).join('')
+    +'</select></div>'
+    +'<div><label style="font-size:11px;display:block;margin-bottom:3px;font-weight:600">سررسید</label>'
+    +'<input id="tkd_due" type="text" value="'+esc(t.dueDate||'')+'" readonly class="fd-inp" style="cursor:pointer;'+inpS+'" onclick="openJDP(this,function(v){document.getElementById(\'tkd_due\').value=v;})"></div>'
+    +'<div style="grid-column:1/-1"><label style="font-size:11px;display:block;margin-bottom:3px;font-weight:600">یادداشت</label>'
+    +'<textarea id="tkd_note" rows="2" style="'+inpS+';resize:vertical">'+esc(t.note||'')+'</textarea></div>'
+    +'</div>';
+
+  // subtask tree (only for existing tasks)
+  if(!isNew){
+    body+='<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+      +'<span style="font-size:12px;font-weight:700">زیروظیفه‌ها</span>'
+      +'<button onclick="tkAddSub(\''+t.id+'\',\'\')" style="font-size:11px;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:3px 10px;cursor:pointer;font-family:inherit">+ زیروظیفه</button>'
+      +'</div>'
+      +'<div id="tkSubTree">'+_tkRenderSubTree(t.id,t.subtasks,0)+'</div>'
+      +'</div>';
+  }
+
+  var footer=(isNew
+    ?'<button class="btn-primary" onclick="tkSaveTask(\'\')">+ ایجاد وظیفه</button>'
+    :'<button class="btn-primary" onclick="tkSaveTask(\''+t.id+'\')">💾 ذخیره</button>'
+      +'<button style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="tkDeleteTask(\''+t.id+'\')">🗑 حذف</button>')
+    +'<button class="btn-secondary" onclick="closeModal(\''+mid+'\')">بستن</button>';
+
+  openModal(mid,(isNew?'➕ وظیفه جدید':'📌 '+esc(t.title||'وظیفه')),body,footer,{lg:true});
+}
+
+function _tkRenderSubTree(tid,subs,depth){
+  if(!subs||!subs.length)return depth===0?'<div style="font-size:11px;color:var(--text-muted);padding:6px 0">زیروظیفه‌ای ندارد</div>':'';
+  return subs.map(function(s){
+    var kids=_tkRenderSubTree(tid,s.subtasks,depth+1);
+    return '<div class="tk-sub-node" style="margin-right:'+(depth*18)+'px">'
+      +'<div class="tk-sub-row">'
+      +'<input type="checkbox" '+(s.done?'checked':'')+' onchange="tkToggleSub(\''+tid+'\',\''+s.id+'\')" style="cursor:pointer;accent-color:var(--brand,#6366f1)">'
+      +'<span class="tk-sub-title'+(s.done?' tk-sub-done':'')+'" onclick="tkEditSubTitle(\''+tid+'\',\''+s.id+'\')" title="کلیک برای ویرایش">'+esc(s.title||'—')+'</span>'
+      +(depth<2?'<button onclick="tkAddSub(\''+tid+'\',\''+s.id+'\')" title="افزودن زیروظیفه" class="tk-sub-btn">+</button>':'')
+      +'<button onclick="tkDelSub(\''+tid+'\',\''+s.id+'\')" title="حذف" class="tk-sub-btn tk-sub-del">✕</button>'
+      +'</div>'
+      +kids
+      +'</div>';
+  }).join('');
+}
+
+function tkSaveTask(tid){
+  _ensureTasks();
+  var title=(document.getElementById('tkd_title')||{}).value||'';
+  if(!title.trim()){showToast('عنوان وظیفه را وارد کنید');return;}
+  var status=(document.getElementById('tkd_status')||{}).value||'todo';
+  var t;
+  if(!tid){
+    t={id:Date.now()+'_'+Math.random().toString(36).slice(2,6),subtasks:[],createdBy:currentUser,createdAt:new Date().toISOString()};
+    DB.tasks.push(t);
+  } else {
+    t=_tkFindTask(tid);
+    if(!t)return;
+  }
+  t.title=title.trim();
+  t.owner=(document.getElementById('tkd_owner')||{}).value||'';
+  t.dueDate=(document.getElementById('tkd_due')||{}).value||'';
+  t.priority=parseInt((document.getElementById('tkd_pri')||{}).value)||2;
+  t.status=status;
+  t.done=(status==='done');
+  t.doneAt=t.done?(t.doneAt||todayStr()):'';
+  t.note=(document.getElementById('tkd_note')||{}).value||'';
+  // notify new owner
+  if(t.owner&&t.owner!==currentUser&&typeof sendNotif==='function'&&t._notifiedOwner!==t.owner){
+    sendNotif(t.owner,'وظیفه «'+t.title+'» به شما واگذار شد',t.centerKey||'');
+    t._notifiedOwner=t.owner;
+  }
   saveDB();
+  closeModal('taskDetail');
+  showToast(tid?'💾 ذخیره شد':'✅ وظیفه ایجاد شد');
   renderTasksPanel();
 }
+
+function tkDeleteTask(tid){
+  _ensureTasks();
+  DB.tasks=DB.tasks.filter(function(x){return String(x.id)!==String(tid);});
+  saveDB();
+  closeModal('taskDetail');
+  showToast('🗑 وظیفه حذف شد');
+  renderTasksPanel();
+}
+
+function tkAddSub(tid,parentSid){
+  var t=_tkFindTask(tid);if(!t)return;
+  var title=prompt('عنوان زیروظیفه:');
+  if(!title||!title.trim())return;
+  var node={id:Date.now()+'_'+Math.random().toString(36).slice(2,5),title:title.trim(),done:false,subtasks:[]};
+  if(parentSid){
+    var parent=_tkFindSub(t.subtasks,parentSid);
+    if(!parent)return;
+    if(!parent.subtasks)parent.subtasks=[];
+    parent.subtasks.push(node);
+  } else {
+    t.subtasks.push(node);
+  }
+  saveDB();
+  var tree=document.getElementById('tkSubTree');
+  if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
+}
+
+function tkToggleSub(tid,sid){
+  var t=_tkFindTask(tid);if(!t)return;
+  var s=_tkFindSub(t.subtasks,sid);if(!s)return;
+  s.done=!s.done;
+  saveDB();
+  var tree=document.getElementById('tkSubTree');
+  if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
+}
+
+function tkEditSubTitle(tid,sid){
+  var t=_tkFindTask(tid);if(!t)return;
+  var s=_tkFindSub(t.subtasks,sid);if(!s)return;
+  var nv=prompt('ویرایش عنوان:',s.title||'');
+  if(nv===null)return;
+  s.title=nv.trim()||s.title;
+  saveDB();
+  var tree=document.getElementById('tkSubTree');
+  if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
+}
+
+function _tkDelSubFrom(subs,sid){
+  for(var i=0;i<(subs||[]).length;i++){
+    if(String(subs[i].id)===String(sid)){subs.splice(i,1);return true;}
+    if(_tkDelSubFrom(subs[i].subtasks,sid))return true;
+  }
+  return false;
+}
+
+function tkDelSub(tid,sid){
+  var t=_tkFindTask(tid);if(!t)return;
+  _tkDelSubFrom(t.subtasks,sid);
+  saveDB();
+  var tree=document.getElementById('tkSubTree');
+  if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
+}
+
+// backward compat aliases (center timeline etc.)
+function _addTask(){openTaskModal();}
+function _toggleTask(tid){
+  var t=_tkFindTask(tid);if(!t)return;
+  t.status=(t.status==='done')?'todo':'done';
+  t.done=(t.status==='done');
+  t.doneAt=t.done?todayStr():'';
+  saveDB();renderTasksPanel();
+}
+function _deleteTask(tid){tkDeleteTask(tid);}
+
+function _getTaskCenterName(centerKey){
+  if(!centerKey)return '';
+  var parts=centerKey.split('_');
+  if(parts.length<2)return centerKey;
+  var c=getCenterById(parts[0],parts.slice(1).join('_'));
+  if(c){var e=getE(parts[0],parts.slice(1).join('_'));return e.nameOverride||c.name||centerKey;}
+  return centerKey;
+}
+
 
 
 function _clGetName(rkey){
