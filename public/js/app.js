@@ -3886,7 +3886,7 @@ function renderWeekPlan(){
     var rtype = we.rtype; var rid = we.rid;
     var owner = '';
     if(rtype && rid){
-      owner = getCenterOwner(rtype, rid);
+      owner = getCenterOwner(rtype, rid) || we.addedBy || '';
       // اعمال محدودیت نمایش برای کاربران غیر مدیر
       var addedBy=we.addedBy||'';
       // نمایش بر اساس مسئول مرکز (نه اضافه‌کننده)
@@ -4405,7 +4405,7 @@ function renderWpItem(entry,weekId){
     + '<div class="wp-item-name" onclick="openCenterModal(\''+rtype+'\',\''+rid+'\')" style="cursor:pointer;text-decoration:underline dotted;color:var(--brand);display:flex;align-items:center;gap:4px">'+_todayDot+esc(name)+'</div>'
     + '<span style="font-size:9px; cursor:pointer; background:'+actBg+'; color:var(--text-primary); padding:2px 5px; border-radius:4px; white-space:nowrap;" onclick="toggleWpActionType(\''+k+'\')" title="تغییر نوع پیگیری با یک کلیک">'+actIcon+'</span>'
     + '</div>'
-    + (function(){var _ce=getE(rtype,rid);var _st=_ce.status||'بدون تماس';var _ow=USERS[_ce.owner||'']||'';var _fd=_ce.followupDate||'';var _owHtml=_ow?'<span style="display:inline-block;background:#dbeafe;color:#1e40af;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:600;margin-right:4px">👤 '+esc(_ow)+'</span>':'';return '<div class="wp-item-meta" style="margin-top:3px">'+_owHtml+'<span style="font-size:9px;color:var(--text-muted)">'+_st+( (_fd)?' 📅 '+_fd:'')+' '+(done?'✓ '+entry.doneDate:'')+'</span></div>';})()
+    + (function(){var _ce=getE(rtype,rid);var _st=_ce.status||'بدون تماس';var _owId=_wpGetOwner(entry);var _ow=USERS[_owId]||_owId||'';var _fd=_ce.followupDate||'';var _owHtml=_ow?'<span style="display:inline-block;background:#dbeafe;color:#1e40af;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:600;margin-right:4px">👤 '+esc(_ow)+'</span>':'';return '<div class="wp-item-meta" style="margin-top:3px">'+_owHtml+'<span style="font-size:9px;color:var(--text-muted)">'+_st+( (_fd)?' 📅 '+_fd:'')+' '+(done?'✓ '+entry.doneDate:'')+'</span></div>';})()
     + '<div class="wp-item-actions">'
     + (done?'' : '<button class="wp-btn done-btn" onclick="wpMarkDoneKey(\''+ k +'\')">✓ انجام شد</button>')
     + '<button class="wp-btn move-btn" onclick="wpSetScheduleFromKey(\''+ k +'\')">📅 تنظیم</button>'
@@ -4901,17 +4901,38 @@ function updateNotifBadge(){
 }
 
 var _notifPanelOpen=false;
+var _notifViewAll=false;
+function setNotifView(all){
+  _notifViewAll=!!all;
+  var p=document.getElementById('notifPanel');
+  if(p){p.remove();_notifPanelOpen=false;}
+  toggleNotifPanel();
+}
 function toggleNotifPanel(){
   var existing=document.getElementById('notifPanel');
   if(existing){existing.remove();_notifPanelOpen=false;return;}
   _notifPanelOpen=true;
   _initNotif();
-  var myNotifs=DB.notifications.filter(function(n){return n.to===currentUser;}).slice().reverse();
+  var viewAll=_notifViewAll&&_isManager();
+  var myNotifs=(viewAll
+    ?DB.notifications.slice()
+    :DB.notifications.filter(function(n){return n.to===currentUser;})
+  ).slice().reverse().slice(0,100);
   var panel=document.createElement('div');
   panel.id='notifPanel';panel.className='notif-panel';
-  var unreadIds=myNotifs.filter(function(n){return !n.read;}).map(function(n){return n.id;});
-  var head='<div class="notif-panel-head"><span>🔔 اعلان‌های من</span>'
+  var unreadIds=viewAll?[]:myNotifs.filter(function(n){return !n.read;}).map(function(n){return n.id;});
+  var _tglBtn='';
+  if(_isManager()){
+    _tglBtn='<span style="display:inline-flex;gap:2px;background:var(--bg-raised);border-radius:6px;padding:2px;border:1px solid var(--border)">'
+      +'<button onclick="setNotifView(false)" style="font-size:10px;border:none;border-radius:4px;padding:2px 8px;cursor:pointer;background:'+(viewAll?'transparent':'var(--brand,#6366f1)')+';color:'+(viewAll?'var(--text-secondary)':'#fff')+'">من</button>'
+      +'<button onclick="setNotifView(true)" style="font-size:10px;border:none;border-radius:4px;padding:2px 8px;cursor:pointer;background:'+(viewAll?'var(--brand,#6366f1)':'transparent')+';color:'+(viewAll?'#fff':'var(--text-secondary)')+'">همه</button>'
+      +'</span>';
+  }
+  var head='<div class="notif-panel-head"><span>🔔 '+(viewAll?'همه اعلان‌ها':'اعلان‌های من')+'</span>'
+    +'<span style="display:inline-flex;gap:6px;align-items:center">'
+    +_tglBtn
     +(unreadIds.length?'<button onclick="markAllNotifsRead()" style="font-size:10px;background:var(--bg-raised);border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer">همه خوانده شد</button>':'')
+    +'</span>'
     +'</div>';
   var body='';
   if(!myNotifs.length){
@@ -4929,17 +4950,20 @@ function toggleNotifPanel(){
         +(hasCk?'<div class="notif-item-center">📍 <span class="notif-center-link" onclick="goToNotifCenter(\''+nid+'\')">'+esc(cName)+'</span></div>':'')
         +'<div class="notif-item-actions">'
         +(hasCk?'<button class="notif-act-btn" onclick="goToNotifCenter(\''+nid+'\')">🔍 مشاهده مرکز</button>':'')
-        +(n.ack
-          ?'<span class="notif-ack-badge">✓ تأیید شده</span>'
-          :'<button class="notif-act-btn notif-ack-btn" onclick="ackNotif(\''+nid+'\')">✓ انجام دادم</button>')
+        +(viewAll
+          ?(n.ack?'<span class="notif-ack-badge">✓ تأیید شده</span>':'')
+          :(n.ack
+            ?'<span class="notif-ack-badge">✓ تأیید شده</span>'
+            :'<button class="notif-act-btn notif-ack-btn" onclick="ackNotif(\''+nid+'\')">✓ انجام دادم</button>'))
         +'</div>'
-        +'<div class="notif-item-time">از: '+(USERS[n.from]||n.from)+' · '+timeAgo+'</div>'
+        +'<div class="notif-item-time">'+(viewAll?'به: <b>'+esc(USERS[n.to]||n.to)+'</b> · ':'')+'از: '+(USERS[n.from]||n.from)+' · '+timeAgo+(viewAll&&!n.read?' · <span style="color:#f59e0b">خوانده نشده</span>':'')+'</div>'
         +'</div>';
     }).join('');
   }
   panel.innerHTML=head+body;
   document.body.appendChild(panel);
   setTimeout(function(){
+    if(viewAll)return; // در نمای «همه»، اعلان‌های دیگران خوانده نمی‌شود
     unreadIds.forEach(function(id){
       var nx=DB.notifications.find(function(x){return x.id===id;});
       if(nx)nx.read=true;
@@ -5668,8 +5692,10 @@ function _wpGetOwner(we){
   var e = getE(rtype, rid);
   if(e.owner) return e.owner;
   if(rtype==='center'){var c=CENTERS.find(function(x){return x.id===rid;});if(c&&c.owner)return c.owner;}
-  else{var _pId=rid.split('||')[0];var _arr=_PC_CACHE[_pId]||[];var _c=_arr.find(function(x){return x.id===rid;});if(_c&&_c.owner)return _c.owner;}
-  return '';
+  else{var _pId=(rid+'').split('||')[0];var _arr=_PC_CACHE[_pId]||[];var _c=_arr.find(function(x){return x.id===rid;});if(_c&&_c.owner)return _c.owner;}
+  var ex=(DB.extra||[]).find(function(x){return x.id===rid;});
+  if(ex&&ex.owner) return ex.owner;
+  return we.addedBy||'';
 }
 
 // کمکی: فعالیت‌های یک مرکز در یک تاریخ جلالی مشخص
@@ -8537,7 +8563,8 @@ function calcCenterRecommendations() {
   allCenters.forEach(function(c) {
     var k = c.rtype + '_' + c.id;
     var e = DB.edits[k] || {};
-    var pot = parseInt(e.potential||1);
+    var pot = parseInt(e.potential!==undefined&&e.potential!==''?e.potential:(c.potential||4))||4;
+    if(pot > 2) return; // فقط مراکز P1 و P2 پیشنهاد می‌شوند (۱=بیشترین ارزش)
     var status = e.status || STATUS_LIST[0];
     var lead = e.lead || '';
     var lastAct = e._lastActivity || e._ts || 0;
@@ -8548,8 +8575,8 @@ function calcCenterRecommendations() {
     var reasons = [];
     var action = '';
     var urgency = 'low';
-    if(pot >= 3 && daysSince > 14) {
-      score += pot * 10;
+    if(daysSince > 14) {
+      score += (3 - pot) * 15; // P1 امتیاز بیشتر از P2
       reasons.push('پتانسیل ' + pot + '⭐ — ' + daysSince + ' روز بدون تماس');
       action = action || 'تماس برای پیگیری';
     }
@@ -8565,7 +8592,7 @@ function calcCenterRecommendations() {
       action = 'پیگیری پیشنهاد';
       urgency = 'high';
     }
-    if(lead === 'مشتری' && pot >= 3 && daysSince > 30) {
+    if(lead === 'مشتری' && daysSince > 30) {
       score += 20;
       reasons.push('مشتری فعال — ' + daysSince + ' روز بدون ارتباط');
       action = action || 'تماس حفظ ارتباط';
@@ -8583,8 +8610,8 @@ function calcCenterRecommendations() {
       action = action || 'برنامه‌ریزی ملاقات';
       urgency = urgency === 'low' ? 'medium' : urgency;
     }
-    if(status === STATUS_LIST[0] && pot >= 3) {
-      score += pot * 8;
+    if(status === STATUS_LIST[0]) {
+      score += (3 - pot) * 12;
       reasons.push('مرکز با پتانسیل بالا — هنوز تماسی نشده');
       action = action || 'شروع ارتباط';
     }
@@ -8606,7 +8633,7 @@ function calcCenterRecommendations() {
       });
     }
   });
-  recs.sort(function(a,b){ return b.score - a.score; });
+  recs.sort(function(a,b){ if(a.pot!==b.pot)return a.pot-b.pot; return b.score-a.score; }); // P1 اول، سپس امتیاز
   return recs.slice(0, 15);
 }
 
