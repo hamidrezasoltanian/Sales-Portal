@@ -2131,7 +2131,7 @@ function renderProvTable(){
     var pinBtn='<button onclick="event.stopPropagation();togglePin(\''+rtype+'\',\''+r.id+'\')" title="'+(pinned?'رفع پین':'پین')+'" style="background:none;border:none;cursor:pointer;font-size:12px;padding:0 2px;opacity:'+(pinned?'1':'.3')+'" class="pin-btn">⭐</button>';
     // Phone
     var firstPhone=e.phones&&e.phones.length?e.phones[0]:'';
-    var phoneHtml=firstPhone?'<a href="tel:'+esc(firstPhone)+'" style="display:block;font-size:9px;color:#0369a1;direction:ltr;text-decoration:none;margin-top:1px" onclick="event.stopPropagation()">📞 '+esc(firstPhone)+'</a>':'';
+    var phoneHtml=firstPhone?'<a href="'+_phoneHref(firstPhone)+'" title="'+_phoneTitle()+'" style="display:block;font-size:9px;color:#0369a1;direction:ltr;text-decoration:none;margin-top:1px" onclick="event.stopPropagation()">📞 '+esc(firstPhone)+'</a>':'';
     // Last contact
     var lastTs=e._lastActivity||e._ts||0;
     var daysSince=lastTs?Math.floor((nowTs()-lastTs)/86400000):null;
@@ -2621,7 +2621,7 @@ function showContactPopup(ev, rtype, id) {
       if(contacts.length>1) html += '<div style="font-size:10px;font-weight:700;color:var(--text-secondary);margin-top:'+(ci>0?'8':'0')+'px;margin-bottom:3px">'+(c.name||'مخاطب '+(ci+1))+(c.title?' — '+c.title:'')+'</div>';
       else if(c.name||c.title) html += '<div class="contact-popup-row" style="font-weight:600;font-size:12px">'+(c.name||'')+(c.title?' ('+c.title+')':'')+'</div>';
       (c.phones||[]).forEach(function(p){
-        if(p) html += '<div class="contact-popup-row"><a href="tel:'+esc(p)+'" onclick="event.stopPropagation()" style="color:#0369a1;text-decoration:none;direction:ltr;display:block">📞 '+esc(p)+'</a></div>';
+        if(p) html += '<div class="contact-popup-row"><a href="'+_phoneHref(p)+'" title="'+_phoneTitle()+'" onclick="event.stopPropagation()" style="color:#0369a1;text-decoration:none;direction:ltr;display:block">📞 '+esc(p)+'</a></div>';
       });
     }
   });
@@ -3690,6 +3690,17 @@ function _cleanCenterData(rtype,id){
 
 // Note pending tags: {modalId: [tagId,...]}
 var _notePendingTags = {};
+// ── VoIP / SIP helper ────────────────────────────────────────────────────────
+function _sipDomain(){ return (DB.settings&&DB.settings.sipDomain)||''; }
+function _phoneHref(num){
+  if(!num)return'tel:';
+  var clean=String(num).replace(/\s/g,'');
+  var sip=_sipDomain();
+  if(sip) return 'sip:'+clean+'@'+sip;
+  return 'tel:'+clean;
+}
+function _phoneTitle(){ return _sipDomain()?'تماس VoIP (Linphone)':'تماس تلفنی'; }
+
 
 function _noteToggleTag(modalId, tagId){
   if(!_notePendingTags[modalId])_notePendingTags[modalId]=[];
@@ -3794,7 +3805,7 @@ function _buildContactsHTML(rtype,rid,domId){
   return contacts.map(function(c,ci){
     var phonesHtml=(c.phones||[]).map(function(ph,pi){
       return'<div style="display:flex;gap:5px;align-items:center;margin-bottom:3px">'
-        +'<a href="tel:'+esc(ph)+'" style="font-size:13px;text-decoration:none;flex-shrink:0" title="تماس" onclick="event.stopPropagation()">📞</a>'
+        +'<a href="'+_phoneHref(ph)+'" style="font-size:13px;text-decoration:none;flex-shrink:0" title="'+_phoneTitle()+'" onclick="event.stopPropagation()">📞</a>'
         +'<input type="text" value="'+esc(ph)+'" style="flex:1;direction:ltr;font-size:12px;padding:4px 7px;border:1px solid var(--border-input);border-radius:5px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)" '
         +'onchange="updateContactPhone(\''+rtype+'\',\''+rid+'\','+ci+','+pi+',this.value)">'
         +'<button onclick="removeContactPhone(\''+rtype+'\',\''+rid+'\','+ci+','+pi+',\''+domId+'\'" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:5px;cursor:pointer;padding:3px 7px;font-size:11px;flex-shrink:0">✕</button>'
@@ -7699,6 +7710,7 @@ function openSettings(){
   var members=s.members||_DEFAULT_MEMBERS;
   var companyName=s.companyName||'آتنا زیست درمان';
   var companyInfo=s.companyInfo||'';
+  var sipDomain=s.sipDomain||'';
   var ckItems=s.ckItems||CK_ITEMS_DEFAULT;
 
   var membersHtml=members.map(function(m,i){
@@ -7718,11 +7730,15 @@ function openSettings(){
       +'</div>';
   }).join('');
 
-  var body='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">'
+  var body='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px">'
     +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">نام شرکت</label>'
     +'<input id="stgCompanyName" class="ed-inp" style="width:100%" value="'+esc(companyName)+'" placeholder="نام شرکت"></div>'
     +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">توضیحات/اطلاعات شرکت</label>'
     +'<input id="stgCompanyInfo" class="ed-inp" style="width:100%" value="'+esc(companyInfo)+'" placeholder="توضیحات اختیاری"></div>'
+    +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">📞 آدرس سرور SIP (VoIP)</label>'
+    +'<input id="stgSipDomain" class="ed-inp" style="width:100%" value="'+esc(sipDomain)+'" placeholder="مثلاً: pbx.company.com">'
+    +'<div style="font-size:10px;color:var(--text-muted);margin-top:3px">برای تماس با Linphone — خالی = tel:</div>'
+    +'</div>'
     +'</div>'
     +'<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between">'
     +'<div>'
@@ -7856,6 +7872,8 @@ function saveSettings(){
   if(!DB.settings)DB.settings={};
   DB.settings.companyName=companyName;
   DB.settings.companyInfo=companyInfo;
+  var _sipDomRaw=(document.getElementById('stgSipDomain')||{}).value||'';
+  DB.settings.sipDomain=_sipDomRaw.trim().replace(/^\/+|\/+$/g,'');
   DB.settings.members=members;
   DB.settings.ckItems=ckItems;
   // ذخیره برچسب‌های ویرایش‌شده
