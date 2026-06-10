@@ -9584,6 +9584,8 @@ var _kpiMonth=null;
 var _trendOpen=true;
 var _teamOpen=true;
 var _recsOpen=true;
+var _discOpen=false;
+var _discoveredCenters=null;
 
 
 // ── مدیریت اهداف تیم ─────────────────────────────────────────
@@ -9776,6 +9778,89 @@ function exportKPIReport() {
   html += '</table></body></html>';
   var w = window.open('','_blank');
   if(w){w.document.write(html);w.document.close();setTimeout(function(){w.print();},400);}
+}
+
+
+// ── Center discovery (online biopsy potential) ─────────────────────────
+function _loadDiscoveredCenters(force) {
+  if(_discoveredCenters !== null && !force) {
+    _renderDiscoverySection();
+    return;
+  }
+  fetch('/api/discovery')
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      _discoveredCenters = Array.isArray(data) ? data : [];
+      _renderDiscoverySection();
+    })
+    .catch(function(){ _discoveredCenters = []; _renderDiscoverySection(); });
+}
+
+function _renderDiscoverySection() {
+  var el = document.getElementById('discoverySection');
+  if(el) el.innerHTML = _buildDiscoveryHtml(_discoveredCenters || []);
+}
+
+function _buildDiscoveryHtml(centers) {
+  var items = centers.filter(function(c){ return c.status === 'new'; });
+  if(items.length === 0) {
+    return '<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:12px">'
+      + 'داده‌ای یافت نشد.<br><span style="font-size:11px">اسکریپت discover_centers.py را اجرا کنید</span></div>';
+  }
+  var html = '';
+  items.forEach(function(c) {
+    var sc = parseInt(c.score) || 0;
+    var scColor = sc >= 10 ? '#dc2626' : sc >= 7 ? '#ea580c' : '#ca8a04';
+    var docs = (c.doctors || []).map(function(d){ return esc(d.label) + ': ' + esc(d.name); }).join(' &nbsp;|&nbsp; ');
+    var reasons = (c.reasons || []).map(function(r){ return esc(r); }).join(' &nbsp;•&nbsp; ');
+    var srcUrl = (c.source_urls || [])[0] || '';
+    html += '<div style="background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;padding:10px 14px;margin-bottom:8px">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">'
+      + '<div style="font-size:13px;font-weight:700;color:var(--text-primary)">' + esc(c.name)
+      + (c.city ? ' <span style="font-weight:400;color:var(--text-muted);font-size:11px">— ' + esc(c.city) + '</span>' : '')
+      + '</div>'
+      + '<span style="background:' + scColor + ';color:#fff;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:700;white-space:nowrap">امتیاز ' + sc + '</span>'
+      + '</div>'
+      + (docs ? '<div style="font-size:11px;color:#1d4ed8;margin-top:4px">👨‍⚕️ ' + docs + '</div>' : '')
+      + (c.biopsy_mentions > 0
+          ? '<div style="font-size:11px;color:#7c3aed;margin-top:3px">💬 ' + c.biopsy_mentions + ' نظر با کلیدواژه بیوپسی</div>'
+          : '')
+      + '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">'
+      + '<button onclick="_discImport(\'' + c.id + '\')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:5px;font-size:11px;padding:3px 10px;cursor:pointer">➕ افزودن به CRM</button>'
+      + '<button onclick="_discIgnore(\'' + c.id + '\')" style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:5px;font-size:11px;padding:3px 10px;cursor:pointer">نادیده گرفتن</button>'
+      + (srcUrl ? '<a href="' + esc(srcUrl) + '" target="_blank" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;border-radius:5px;font-size:11px;padding:3px 10px;text-decoration:none">🔗 منبع</a>' : '')
+      + '</div></div>';
+  });
+  return html;
+}
+
+function _discImport(cid) {
+  var c = (_discoveredCenters||[]).find(function(x){ return x.id===cid; });
+  if(!c) return;
+  if(!DB.extra) DB.extra = [];
+  var newId = 'disc_' + cid;
+  if(!DB.extra.find(function(x){ return x.id===newId; })) {
+    DB.extra.push({
+      id: newId,
+      name: c.name,
+      province: c.city || '',
+      type: 'خصوصی',
+      potential: 2,
+      biopsyScore: c.score,
+      biopsyDoctors: (c.doctors||[]).map(function(d){ return d.label+': '+d.name; }).join(', '),
+    });
+    saveDB();
+  }
+  fetch('/api/discovery/' + cid, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'imported'})});
+  _discoveredCenters = (_discoveredCenters||[]).map(function(x){ return x.id===cid ? Object.assign({},x,{status:'imported'}) : x; });
+  _renderDiscoverySection();
+  showToast('✅ اضافه شد: ' + c.name, 2500);
+}
+
+function _discIgnore(cid) {
+  fetch('/api/discovery/' + cid, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'ignored'})});
+  _discoveredCenters = (_discoveredCenters||[]).map(function(x){ return x.id===cid ? Object.assign({},x,{status:'ignored'}) : x; });
+  _renderDiscoverySection();
 }
 
 function calcCenterRecommendations() {
@@ -10232,6 +10317,38 @@ function renderKPIPanel(){
             + '</div></div></div>';
         });
       }
+    }
+    html += '</div>';
+  }
+
+
+  // ── discovered centers from web (manager only)
+  if(_isManager()) {
+    var discNew = (_discoveredCenters||[]).filter(function(c){ return c.status==='new'; }).length;
+    html += '<div style="background:var(--bg-card);border-radius:12px;border:1px solid var(--border);padding:14px 16px;margin-top:12px">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+    html += '<div>'
+      + '<span style="font-size:13px;font-weight:700;color:var(--text-primary)">&#127758; مراکز کشف‌شده از وب</span>'
+      + '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">رادیولوژیست / اینترونشنال / اورولوژیست — nobat.ir &amp; doctorto.ir</div>'
+      + '</div>';
+    html += '<div style="display:flex;gap:6px;align-items:center">';
+    if(discNew > 0) {
+      html += '<span style="background:#7c3aed;color:#fff;border-radius:10px;padding:2px 8px;font-size:10px;font-weight:700">' + discNew + ' مرکز جدید</span>';
+    }
+    html += '<button onclick="if(!_discOpen){_loadDiscoveredCenters();}  _discOpen=!_discOpen;renderKPIPanel();" style="background:none;border:none;cursor:pointer;font-size:12px;color:var(--text-muted)">'
+      + (_discOpen ? '&#9650; جمع' : '&#9660; باز') + '</button>';
+    html += '</div></div>';
+    if(_discOpen) {
+      html += '<div id="discoverySection">';
+      if(_discoveredCenters === null) {
+        html += '<div style="text-align:center;padding:12px;color:var(--text-muted);font-size:12px">در حال بارگذاری...</div>';
+      } else {
+        html += _buildDiscoveryHtml(_discoveredCenters);
+      }
+      html += '</div>';
+      html += '<div style="text-align:left;margin-top:8px">'
+        + '<button onclick="_loadDiscoveredCenters(true)" style="background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:5px;font-size:11px;padding:3px 10px;cursor:pointer">&#128257; بازخوانی از سرور</button>'
+        + '</div>';
     }
     html += '</div>';
   }
