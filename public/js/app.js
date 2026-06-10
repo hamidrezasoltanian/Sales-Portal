@@ -5545,7 +5545,10 @@ function openDailyMonitor(){
       var bg=idx%2===0?'var(--bg-card)':'var(--bg-raised)';
       body+='<tr style="background:'+bg+';border-bottom:1px solid #f1f5f9">'
         +'<td style="padding:8px 10px;font-weight:600"><span style="display:inline-flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:'+owColor+'"></span>'+esc(owName)+'</span></td>'
-        +'<td style="text-align:center;padding:8px">'+entries.length+'</td>'
+        +'<td style="padding:8px 10px;text-align:center">'
+      +'<button onclick="event.stopPropagation();openExpertReport(\''+m.id+'\')" style="font-size:10px;padding:2px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:5px;cursor:pointer;font-family:inherit">📊 گزارش</button>'
+      +'</td>'
+      +'<td style="text-align:center;padding:8px">'+entries.length+'</td>'
         +'<td style="text-align:center;padding:8px"><span style="background:#dcfce7;color:#166534;border-radius:10px;padding:2px 8px;font-weight:700">'+owDone+'</span></td>'
         +'<td style="text-align:center;padding:8px"><span style="background:#fee2e2;color:#991b1b;border-radius:10px;padding:2px 8px;font-weight:700">'+owNotDone+'</span></td>'
         +'<td style="text-align:center;padding:8px"><span style="background:#fef3c7;color:#92400e;border-radius:10px;padding:2px 8px;font-weight:700">'+owOverdue+'</span></td>'
@@ -5819,6 +5822,7 @@ function openTkColumnsModal(){
       return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">'
         +'<input type="color" value="'+(c.color||'#64748b')+'" onchange="_tkColsEdit('+i+',\'color\',this.value)" style="width:32px;height:28px;border:none;background:none;cursor:pointer;padding:0">'
         +'<input type="text" value="'+esc(c.label||'')+'" onchange="_tkColsEdit('+i+',\'label\',this.value)" placeholder="عنوان ستون..." style="'+inpS+';flex:1">'
+        +'<input type="number" min="1" max="99" value="'+(c.wip||'')+'" oninput="_tkColsEdit('+i+',\'wip\',this.value?parseInt(this.value):null)" placeholder="WIP" title="حداکثر کارت" style="width:52px;padding:4px 6px;border:1px solid var(--border-input);border-radius:5px;font-size:11px;font-family:inherit;text-align:center">'
         +(i>0&&i<cols.length-1?'<button onclick="_tkColsRemove('+i+')" style="padding:4px 8px;background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:4px;cursor:pointer;font-size:11px">حذف</button>':'<span style="width:54px"></span>')
         +'</div>';
     }).join('');
@@ -5850,7 +5854,27 @@ function _ensureTasks(){
     if(!t.status)t.status=t.done?'done':'todo';
     if(!t.subtasks)t.subtasks=[];
     if(!t.activity)t.activity=[];
+    if(!t.recurring)t.recurring='none';
   });
+  // auto-regenerate recurring tasks that are done and have no pending next instance
+  var _today=todayStr();
+  var _toAdd=[];
+  DB.tasks.filter(function(t){return t.recurring&&t.recurring!=='none'&&!t.recurringParentId&&t.done;}).forEach(function(t){
+    var hasNext=DB.tasks.some(function(x){return x.recurringParentId===String(t.id)&&!x.done;});
+    if(hasNext)return;
+    var dp=(t.dueDate||_today).split('/').map(Number);
+    var g=j2g(dp[0],dp[1],dp[2]);
+    var days=t.recurring==='weekly'?7:30;
+    var nd=new Date(g[0],g[1]-1,g[2]+days);
+    var nj=g2j(nd.getFullYear(),nd.getMonth()+1,nd.getDate());
+    var newDate=nj[0]+'/'+p2(nj[1])+'/'+p2(nj[2]);
+    if(newDate<=_today)return;
+    _toAdd.push({id:Date.now()+'_r'+Math.random().toString(36).slice(2,5),title:t.title,owner:t.owner,
+      dueDate:newDate,priority:t.priority||2,status:'todo',done:false,doneAt:'',
+      note:t.note||'',subtasks:[],activity:[{type:'created',text:'وظیفه تکرارشونده ایجاد شد',by:'system',at:new Date().toISOString()}],
+      recurring:t.recurring,recurringParentId:String(t.id),centerKey:t.centerKey||'',createdBy:'system',createdAt:new Date().toISOString()});
+  });
+  if(_toAdd.length){_toAdd.forEach(function(t){DB.tasks.push(t);});saveDB();}
 }
 
 function _tkCountSubs(subs){
@@ -5924,13 +5948,13 @@ function renderTasksPanel(){
       var colTasks=tasks.filter(function(t){return (t.status||'todo')===st.id;});
       colTasks.sort(function(a,b){var pa=a.priority||2,pb=b.priority||2;if(pa!==pb)return pa-pb;return (a.dueDate||'9999')<(b.dueDate||'9999')?-1:1;});
       html+='<div class="tk-col" data-status="'+st.id+'" ondragover="event.preventDefault();this.classList.add(\'tk-drop-over\')" ondragleave="this.classList.remove(\'tk-drop-over\')" ondrop="tkDrop(event,\''+st.id+'\')">'
-        +'<div class="tk-col-head" style="border-top:3px solid '+st.color+'" draggable="true"'
+        +'<div class="tk-col-head" style="border-top:3px solid '+(st.wip&&colTasks.length>st.wip?'#dc2626':st.color)+'" draggable="true"'
         +' ondragstart="tkColDragStart(event,\''+st.id+'\')"'
         +' ondragover="event.preventDefault();this.closest(\'.tk-col\').classList.add(\'tk-drop-over\')"'
         +' ondragleave="this.closest(\'.tk-col\').classList.remove(\'tk-drop-over\')"'
         +' ondrop="tkColDrop(event,\''+st.id+'\')" title="بکش برای تغییر ترتیب ستون">'
         +'<span style="display:flex;align-items:center;gap:5px;color:'+st.color+'">'+'⠿'+'<span>'+st.label+'</span></span>'
-        +'<span class="tk-col-cnt">'+colTasks.length+'</span>'
+        +'<span class="tk-col-cnt" style="'+(st.wip&&colTasks.length>st.wip?'background:#fee2e2;color:#dc2626;border-color:#fca5a5':'')+'">'+(st.wip?(colTasks.length+'/'+st.wip):colTasks.length)+'</span>'
         +'</div>'
         +'<div class="tk-col-body">'
         +(colTasks.length?colTasks.map(function(t){return _tkRenderCard(t,st);}).join(''):'<div class="tk-col-empty">—</div>')
@@ -5967,6 +5991,7 @@ function _tkRenderCard(t,st,isList){
   var priCls=['','task-pri-1','task-pri-2','task-pri-3'][t.priority||2]||'task-pri-2';
   var subC=_tkCountSubs(t.subtasks);
   var subBadge=subC.total?'<span class="tk-sub-badge'+(subC.done===subC.total?' all-done':'')+'">'+subC.done+'/'+subC.total+' ✓</span>':'';
+  var recurBadge=(t.recurring&&t.recurring!=='none')?'<span style="font-size:9px;background:#f0fdf4;color:#16a34a;border:1px solid #86efac;border-radius:6px;padding:1px 5px">🔁 '+(t.recurring==='weekly'?'هفتگی':'ماهانه')+'</span>':'';
   return '<div class="tk-card'+(t.status==='done'?' tk-done':'')+(isList?' tk-card-list':'')+'" draggable="true" '
     +'ondragstart="tkDragStart(event,\''+t.id+'\')" ondragend="tkDragEnd(event)" '
     +'onclick="openTaskModal(\''+t.id+'\')">'
@@ -5979,6 +6004,7 @@ function _tkRenderCard(t,st,isList){
     +(owner?'<span class="tk-owner"><span class="tk-owner-dot" style="background:'+(window.umGetColor?umGetColor(t.owner):'#94a3b8')+'"></span>'+esc(owner)+'</span>':'')
     +(t.dueDate?'<span style="color:'+(overdue?'#ef4444':'var(--text-muted)')+';font-size:10px">📅 '+t.dueDate+'</span>':'')
     +subBadge
+    +recurBadge
     +(t.centerKey?'<span class="tk-center-chip" onclick="event.stopPropagation();openCenterModal(\''+t.centerKey.split('_')[0]+'\',\''+t.centerKey.split('_').slice(1).join('_')+'\')">🏥 '+esc(_getTaskCenterName(t.centerKey).substring(0,20))+'</span>':'')
     +'</div>'
     +'</div>';
@@ -6078,6 +6104,10 @@ function openTaskModal(tid, prefill){
     +'<input id="tkd_due" type="text" value="'+esc(t.dueDate||'')+'" readonly class="fd-inp" style="cursor:pointer;'+inpS+'" onclick="openJDP(this,function(v){document.getElementById(\'tkd_due\').value=v;})"></div>'
     +'<div style="grid-column:1/-1"><label style="font-size:11px;display:block;margin-bottom:3px;font-weight:600">یادداشت</label>'
     +'<textarea id="tkd_note" rows="2" style="'+inpS+';resize:vertical">'+esc(t.note||'')+'</textarea></div>'
+    +'<div><label style="font-size:11px;display:block;margin-bottom:3px;font-weight:600">تکرار 🔁</label>'
+    +'<select id="tkd_recurring" style="'+inpS+'">'
+    +[['none','بدون تکرار'],['weekly','هفتگی'],['monthly','ماهانه']].map(function(r){return'<option value="'+r[0]+'"'+((t.recurring||'none')===r[0]?' selected':'')+'>'+r[1]+'</option>';}).join('')
+    +'</select></div>'
     +'</div>';
 
   // subtask tree (only for existing tasks)
@@ -6163,6 +6193,7 @@ function tkSaveTask(tid){
   t.done=(status==='done');
   t.doneAt=t.done?(t.doneAt||todayStr()):'';
   t.note=(document.getElementById('tkd_note')||{}).value||'';
+  t.recurring=(document.getElementById('tkd_recurring')||{}).value||'none';
   if(!t.activity)t.activity=[];
   if(tid&&_prevStatus!==status){
     var _statuses=_getTkStatuses();
@@ -8584,6 +8615,21 @@ function openManagerDrilldown(memberId){
   openModal('mgrDrilldown','🔍 جزئیات: '+esc(m.name)+' (مجموعه '+centers.length+' مرکز)',body,'<button class="btn-secondary" onclick="closeModal(\'mgrDrilldown\')">بستن</button>',{lg:true});
 }
 
+function overdueSnooze(rtype,id,days,listMemberId){
+  var e=getE(rtype,id);
+  var fd=e.followupDate||todayStr();
+  var parts=fd.split('/').map(Number);
+  var gDate=j2g(parts[0],parts[1],parts[2]);
+  var d=new Date(gDate[0],gDate[1]-1,gDate[2]+days);
+  var nj=g2j(d.getFullYear(),d.getMonth()+1,d.getDate());
+  var newDate=nj[0]+'/'+p2(nj[1])+'/'+p2(nj[2]);
+  setE(rtype,id,'followupDate',newDate);
+  renderBanner();
+  showToast('⏰ تعویق تا '+newDate,2000);
+  closeModal('overdueList');
+  setTimeout(function(){openOverdueList(listMemberId||undefined);},150);
+}
+
 function openOverdueList(memberId){
   _buildPCCache();
   var today=todayStr();
@@ -8615,12 +8661,86 @@ function openOverdueList(memberId){
         +'<span style="font-size:10px;background:#fee2e2;color:#dc2626;padding:2px 6px;border-radius:9px;min-width:44px;text-align:center">'+daysAgo+' روز</span>'
         +'<span style="flex:1;font-weight:600">'+esc(c.name)+'</span>'
         +'<span style="font-size:10px;color:var(--text-muted)">'+esc(c.ownerName)+'</span>'
+        +'<button onclick="overdueSnooze(\''+c.rtype+'\',\''+c.id+'\',3,\''+(!memberId?'':memberId)+'\')" style="padding:3px 7px;background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:5px;cursor:pointer;font-size:10px;font-family:inherit" title="تعویق ۳ روز">+۳</button>'
+        +'<button onclick="overdueSnooze(\''+c.rtype+'\',\''+c.id+'\',7,\''+(!memberId?'':memberId)+'\')" style="padding:3px 7px;background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:5px;cursor:pointer;font-size:10px;font-family:inherit" title="تعویق ۷ روز">+۷</button>'
         +'<button onclick="closeModal(\'overdueList\');setTimeout(function(){openCenterModal(\''+c.rtype+'\',\''+c.id+'\');},100)" style="padding:3px 9px;background:var(--brand,#6366f1);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:10px;font-family:inherit">پیگیری</button>'
         +'</div>';
     });
   }
   body+='</div></div>';
   openModal('overdueList','🔴 پیگیری‌های معوق ('+items.length+')',body,'<button class="btn-secondary" onclick="closeModal(\'overdueList\')">بستن</button>',{lg:true});
+}
+
+// ════════════════════════ EXPERT REPORT ════════════════════
+function openExpertReport(memberId){
+  _buildPCCache();
+  var allMem=(DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS;
+  var m=allMem.find(function(x){return x.id===memberId;});
+  if(!m)return;
+  var mon=currentJMonth();
+  // Compute default date range: first and last day of current month
+  var monParts=mon.split('/');
+  var fromDefault=monParts[0]+'/'+monParts[1]+'/01';
+  var lastDay=jMonthDays(parseInt(monParts[0]),parseInt(monParts[1]));
+  var toDefault=monParts[0]+'/'+monParts[1]+'/'+p2(lastDay);
+  function buildReport(fromDate,toDate){
+    var entries=Object.keys(DB.weekEntries||{}).map(function(k){return DB.weekEntries[k];})
+      .filter(function(we){
+        var own=_wpGetOwner(we)||'';
+        return own===memberId&&we.done&&we.doneDate&&we.doneDate>=fromDate&&we.doneDate<=toDate;
+      })
+      .sort(function(a,b){return (a.doneDate||'')<(b.doneDate||'')?-1:1;});
+    var totalAmount=entries.reduce(function(s,e){return s+(e.doneAmount||0);},0);
+    var calls=entries.filter(function(e){return (e.actionType||'call')==='call';}).length;
+    var visits=entries.filter(function(e){return e.actionType==='visit';}).length;
+    var body='<div style="font-size:12px">';
+    body+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">';
+    body+='<label style="font-size:11px">از: <input type="text" id="rptFrom" value="'+fromDate+'" readonly class="fd-inp" style="cursor:pointer;padding:4px 8px;border:1px solid var(--border-input);border-radius:5px;font-family:inherit;font-size:11px"></label>';
+    body+='<label style="font-size:11px">تا: <input type="text" id="rptTo" value="'+toDate+'" readonly class="fd-inp" style="cursor:pointer;padding:4px 8px;border:1px solid var(--border-input);border-radius:5px;font-family:inherit;font-size:11px"></label>';
+    body+='<button onclick="var f=document.getElementById(\'rptFrom\').value,t=document.getElementById(\'rptTo\').value;document.getElementById(\'rptBody\').innerHTML=buildExpertReportHtml(\''+memberId+'\',f,t)" style="padding:4px 12px;background:var(--brand,#6366f1);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-family:inherit">🔍 فیلتر</button>';
+    body+='</div>';
+    body+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">';
+    body+='<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#1d4ed8">'+calls+'</div><div style="font-size:11px;color:#1d4ed8">تماس</div></div>';
+    body+='<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#16a34a">'+visits+'</div><div style="font-size:11px;color:#16a34a">ملاقات</div></div>';
+    body+='<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#92400e">'+(totalAmount?totalAmount+'M':'—')+'</div><div style="font-size:11px;color:#92400e">مبلغ (M)</div></div>';
+    body+='</div>';
+    body+='<div id="rptBody">'+buildExpertReportHtml(memberId,fromDate,toDate)+'</div>';
+    body+='</div>';
+    openModal('expertReport','📊 گزارش '+esc(m.name)+' — '+fromDate+' تا '+toDate,body,'<button class="btn-secondary" onclick="closeModal(\'expertReport\')">بستن</button>',{lg:true});
+    // init date pickers after modal is open
+    setTimeout(function(){
+      var fi=document.getElementById('rptFrom');if(fi)openJDP(fi,function(v){fi.value=v;});
+      var ti=document.getElementById('rptTo');if(ti)openJDP(ti,function(v){ti.value=v;});
+    },100);
+  }
+  buildReport(fromDefault,toDefault);
+}
+function buildExpertReportHtml(memberId,fromDate,toDate){
+  var entries=Object.keys(DB.weekEntries||{}).map(function(k){return DB.weekEntries[k];})
+    .filter(function(we){
+      var own=_wpGetOwner(we)||'';
+      return own===memberId&&we.done&&we.doneDate&&we.doneDate>=fromDate&&we.doneDate<=toDate;
+    })
+    .sort(function(a,b){return (a.doneDate||'')<(b.doneDate||'')?-1:1;});
+  if(!entries.length)return '<div style="text-align:center;padding:20px;color:var(--text-muted)">فعالیتی در این بازه ثبت نشده</div>';
+  var html='<div style="max-height:50vh;overflow-y:auto">';
+  html+='<table style="width:100%;border-collapse:collapse;font-size:11px">';
+  html+='<thead><tr style="background:var(--bg-raised)"><th style="padding:6px 8px;text-align:right">تاریخ</th><th style="padding:6px 8px;text-align:right">مرکز</th><th style="padding:6px 8px">نوع</th><th style="padding:6px 8px;text-align:right">نتیجه</th><th style="padding:6px 8px;text-align:right">یادداشت</th><th style="padding:6px 8px;text-align:right">مانع</th><th style="padding:6px 8px">مبلغ</th></tr></thead><tbody>';
+  entries.forEach(function(we,i){
+    var bg=i%2===0?'var(--bg-card)':'var(--bg-raised)';
+    var typeLabel=(we.actionType==='visit')?'🤝 ملاقات':'📞 تماس';
+    html+='<tr style="background:'+bg+';border-bottom:1px solid var(--border)">';
+    html+='<td style="padding:5px 8px;white-space:nowrap">'+esc(we.doneDate||'')+'</td>';
+    html+='<td style="padding:5px 8px">'+esc(we.centerName||'')+'</td>';
+    html+='<td style="padding:5px 8px;text-align:center">'+typeLabel+'</td>';
+    html+='<td style="padding:5px 8px">'+esc(we.doneResult||'—')+'</td>';
+    html+='<td style="padding:5px 8px">'+esc(we.doneNote||'—')+'</td>';
+    html+='<td style="padding:5px 8px;color:#dc2626">'+esc(we.doneObstacle||'—')+'</td>';
+    html+='<td style="padding:5px 8px;text-align:center;color:#16a34a">'+((we.doneAmount)?we.doneAmount+'M':'—')+'</td>';
+    html+='</tr>';
+  });
+  html+='</tbody></table></div>';
+  return html;
 }
 
 // ════════════════════════ EXCEL EXPORT (مراکز) ════════════════════
@@ -8781,6 +8901,33 @@ function applyStoredTheme(){
   if(btn)btn.textContent=t==='dark'?'☀️ لایت':'🌙 دارک';
 }
 
+function _sendWeeklyDigest(){
+  if(!_isManager())return;
+  var lastSent=DB.settings&&DB.settings.lastWeeklyDigest||'';
+  var today=todayStr();
+  if(lastSent){
+    var lp=lastSent.split('/').map(Number),tp=today.split('/').map(Number);
+    var daysDiff=Math.round((jMs(tp[0],tp[1],tp[2])-jMs(lp[0],lp[1],lp[2]))/86400000);
+    if(daysDiff<7)return;
+  }
+  var members=(DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS;
+  var mon=currentJMonth();
+  var lines=[];
+  members.filter(function(m){return m.active!==false&&m.role!=='مهمان'&&m.role!=='سوپر ادمین'&&m.role!=='مدیر';}).forEach(function(m){
+    try{
+      var calls=getCallsMonth(m.id,mon).reduce(function(s,l){return s+(l.count||0);},0);
+      var visits=(getVisitsMonth(m.id,mon).total||0);
+      lines.push(m.name+': '+calls+' تماس، '+visits+' ملاقات');
+    }catch(e){}
+  });
+  if(!lines.length)return;
+  var msg='📊 خلاصه هفتگی '+mon+':\n'+lines.join(' | ');
+  sendNotif(currentUser,msg,'');
+  if(!DB.settings)DB.settings={};
+  DB.settings.lastWeeklyDigest=today;
+  saveDB();
+}
+
 async function init(){
   applyStoredTheme(); // early so no flash
   try{
@@ -8795,6 +8942,7 @@ async function init(){
   await loadDB();
   initSettings();initTags();initWeekTags();initEvents();_initNotif();
   _initBrowserNotif();
+  setTimeout(_sendWeeklyDigest,3000);
   buildUSERS();updateNotifBadge();
   setTimeout(_setupAutoReminder,5000);
   loadMasterCenters().then(function(){
