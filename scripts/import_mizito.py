@@ -104,12 +104,60 @@ def detect_province_id(address):
     """Detect province id from address string. Returns (provId, isTehran)."""
     if not address:
         return None, False
-    # Tehran city is separate from province list
-    if re.search(r'تهران\s+تهران|استان تهران|ایران تهران', address):
+    # Tehran patterns (city of Tehran → separate CENTERS list)
+    if re.search(r'تهران\s+تهران|استان تهران|ایران تهران|ایران IR تهران|^تهران[،\s\-]', address):
         return 'tehran', True
+    # Province name lookup (including common misspellings in Mizito data)
+    ALIASES = {
+        'کهکیلویه و بویر احمد': 'p29',
+        'کهگیلویه و بویراحمد': 'p29',
+        'کهکیلویه': 'p29',
+        'بویراحمد': 'p29',
+        'یاسوج': 'p29',
+    }
+    for alias, pid in ALIASES.items():
+        if alias in address:
+            return pid, False
     for prov_name, prov_id in PROVINCE_MAP.items():
         if prov_name in address:
             return prov_id, False
+    # City-name fallback (when address has no province name)
+    CITY_TO_PROV = {
+        'ارومیه': 'p22', 'اورمیه': 'p22',
+        'ساری': 'p4', 'بابل': 'p4', 'آمل': 'p4', 'نوشهر': 'p4',
+        'رشت': 'p17', 'لاهیجان': 'p17', 'انزلی': 'p17',
+        'اهواز': 'p20', 'دزفول': 'p20', 'آبادان': 'p20',
+        'تبریز': 'p5',
+        'شیراز': 'p1',
+        'مشهد': 'p12',
+        'اصفهان': 'p2',
+        'کرمانشاه': 'p21',
+        'اراک': 'p16',
+        'قم': 'p14',
+        'کرج': 'p24',
+        'زنجان': 'p15',
+        'سنندج': 'p27',
+        'همدان': 'p25',
+        'قزوین': 'p26',
+        'یزد': 'p13',
+        'بندرعباس': 'p28',
+        'کرمان': 'p23',
+        'بوشهر': 'p7',
+        'گرگان': 'p8', 'گنبد': 'p8',
+        'بیرجند': 'p9',
+        'شهرکرد': 'p10',
+        'اردبیل': 'p11',
+        'خرم آباد': 'p6', 'خرم‌آباد': 'p6',
+        'ایلام': 'p19',
+        'زاهدان': 'p3',
+        'سمنان': 'p30',
+    }
+    for city, pid in CITY_TO_PROV.items():
+        if city in address:
+            return pid, False
+    # If starts with تهران → Tehran
+    if address.startswith('تهران'):
+        return 'tehran', True
     return None, False
 
 
@@ -160,10 +208,10 @@ def parse_mht(filepath):
     for i, m in enumerate(cust_matches):
         rowspan_s, rownum_s, name, brand, phone_fix, phone_mob, email, address, tags_raw = m.groups()
 
-        # Validate row number
+        # Validate row number (accept any positive integer — file has up to 5285 rows)
         try:
             rownum = int(rownum_s)
-            if rownum < 1 or rownum > 5000:
+            if rownum < 1:
                 continue
         except Exception:
             continue
