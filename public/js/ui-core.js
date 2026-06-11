@@ -53,8 +53,15 @@ function switchTab(tab){
   if(tab==='pricing'&&typeof pricingLazyInit==='function')pricingLazyInit();
   // update mobile nav
   (function(){var tabs=['home','provinces','weekplan','calendar','checklist','activity','mtr'];document.querySelectorAll('.mob-tab').forEach(function(btn,i){btn.classList.toggle('active',tabs[i]===tab);});})();
+  function _safeRender(fn, tabName) {
+    try { fn(); } catch(err) {
+      console.error('[switchTab] خطا در رندر تب '+tabName+':', err);
+      var panel = document.getElementById(tabName+'Panel') || document.getElementById('dash');
+      if(panel) panel.innerHTML = '<div style="padding:32px;text-align:center;color:#ef4444;font-size:14px">⚠ خطا در بارگذاری این بخش — لطفاً صفحه را رفرش کنید<br><small style="color:#94a3b8;font-size:11px">' + esc(err.message||String(err)) + '</small></div>';
+    }
+  }
   if(tab==='provinces'){
-    renderDashboard();renderBanner();
+    _safeRender(function(){renderDashboard();renderBanner();},'provinces');
     if(!_currentProvId){
       var toShow=['srch','fOwner','lblOw','fType','fTag','lblTg'];
       toShow.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='';});
@@ -71,17 +78,17 @@ function switchTab(tab){
       if(_isExpert()){['fOwner','lblOw'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});}
       var _qf=document.getElementById('quickFilters');if(_qf)_qf.style.display='flex';
     }
-    renderTable();
+    _safeRender(renderTable,'provinces');
   }
-  else if(tab==='weekplan'){var _dmb=document.getElementById('wpDailyMonBtn');if(_dmb)_dmb.style.display=_isManager()?'':'none';renderWeekPlan();}
-  else if(tab==='calendar')renderCalendar();
-  else if(tab==='checklist')renderChecklist();
-  else if(tab==='activity'){_actPage=0;renderActivity();}
-  else if(tab==='changelog')renderChangelog();
-  else if(tab==='tasks')renderTasksPanel();
-  else if(tab==='manager')renderManagerPanel();
-  else if(tab==='kpi')renderKPIPanel();
-  else if(tab==='home')renderHome();
+  else if(tab==='weekplan'){var _dmb=document.getElementById('wpDailyMonBtn');if(_dmb)_dmb.style.display=_isManager()?'':'none';_safeRender(renderWeekPlan,'weekplan');}
+  else if(tab==='calendar')_safeRender(renderCalendar,'cal');
+  else if(tab==='checklist')_safeRender(renderChecklist,'ck');
+  else if(tab==='activity'){_actPage=0;_safeRender(renderActivity,'act');}
+  else if(tab==='changelog')_safeRender(renderChangelog,'changelog');
+  else if(tab==='tasks')_safeRender(renderTasksPanel,'tasks');
+  else if(tab==='manager')_safeRender(renderManagerPanel,'manager');
+  else if(tab==='kpi')_safeRender(renderKPIPanel,'kpi');
+  else if(tab==='home')_safeRender(renderHome,'home');
   var _clBtn=document.getElementById('tab_changelog');if(_clBtn)_clBtn.style.display=_isManager()?'':'none';
   var _tBtn=document.getElementById('tab_tasks');if(_tBtn)_tBtn.style.display='';
 }

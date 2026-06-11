@@ -118,14 +118,18 @@ async function doLogout(){
 // ── Server sync state ─────────────────────────────────────────
 var _serverSynced=false;
 var _saveDebounceTimer=null;
+var _dbServerTs=null; // tracks server updated_at for conflict detection
 
 async function loadDB(){
+  var _spinner=document.getElementById('loadingSpinner');
+  if(_spinner)_spinner.style.display='flex';
   try{
     var r=await fetch('/api/data/db');
-    if(r.status===401){showLoginOverlay();return;}
+    if(r.status===401){if(_spinner)_spinner.style.display='none';showLoginOverlay();return;}
     var d=await r.json();
     if(d&&typeof d==='object'){
-      Object.keys(DB).forEach(function(k){if(d[k]!==undefined)DB[k]=d[k];});
+      _dbServerTs=d._serverTs||null;
+      Object.keys(DB).forEach(function(k){if(k!=='_serverTs'&&d[k]!==undefined)DB[k]=d[k];});
     }
     // migrate legacy single-contact fields to contacts[] array
     var _migrated=false;
@@ -141,10 +145,25 @@ async function loadDB(){
     _serverSynced=true;
   }catch(e){
     console.warn('Server fetch failed, using empty DB:',e.message);
+  }finally{
+    var _sp2=document.getElementById('loadingSpinner');if(_sp2)_sp2.style.display='none';
   }
 }
 function _saveDBNow(){
-  fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(DB)}).catch(function(e){console.warn('saveDB sync failed:',e.message);});
+  var payload=JSON.parse(JSON.stringify(DB));
+  if(_dbServerTs)payload._clientTs=_dbServerTs;
+  fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+    .then(function(r){
+      if(r.status===409){
+        showToast('⚠ کاربر دیگری تغییراتی ذخیره کرده — صفحه بارگذاری می‌شود',5000);
+        setTimeout(function(){location.reload();},5500);
+        return;
+      }
+      return r.json().then(function(result){
+        if(result&&result._serverTs)_dbServerTs=result._serverTs;
+      });
+    })
+    .catch(function(e){console.warn('saveDB sync failed:',e.message);});
 }
 function saveDB(){
   clearTimeout(_saveDebounceTimer);

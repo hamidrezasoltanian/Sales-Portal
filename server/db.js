@@ -245,6 +245,18 @@ async function initSchema() {
   `);
   await query(`CREATE INDEX IF NOT EXISTS idx_product_files_prod ON product_files(prod_id)`);
 
+  // Auto-save history for app_data (keeps last 30 versions per key)
+  await query(`
+    CREATE TABLE IF NOT EXISTS app_data_history (
+      id SERIAL PRIMARY KEY,
+      key VARCHAR(100) NOT NULL,
+      value JSONB NOT NULL,
+      saved_at TIMESTAMPTZ DEFAULT NOW(),
+      saved_by VARCHAR(100)
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_adh_key_at ON app_data_history(key, saved_at DESC)`);
+
   // Seed products and initial price list if products table is empty
   const prodCount = await query('SELECT COUNT(*) FROM products');
   if (parseInt(prodCount.rows[0].count) === 0) {

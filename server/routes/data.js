@@ -14,19 +14,20 @@ router.use(requireAuth);
 // GET /api/data/db
 router.get('/db', async (req, res) => {
   try {
-    const result = await query("SELECT value FROM app_data WHERE key = 'main'");
+    const result = await query("SELECT value, updated_at FROM app_data WHERE key = 'main'");
     if (result.rows.length === 0) {
       return res.json({});
     }
     const data = result.rows[0].value;
+    const _serverTs = result.rows[0].updated_at ? result.rows[0].updated_at.toISOString() : null;
     // Strip server-side secrets before sending to client
+    let safe = data;
     if (data && data.settings && data.settings.anthropicKey) {
-      const safe = Object.assign({}, data, {
+      safe = Object.assign({}, data, {
         settings: Object.assign({}, data.settings, { anthropicKey: '***' }),
       });
-      return res.json(safe);
     }
-    return res.json(data);
+    return res.json(Object.assign({}, safe, { _serverTs }));
   } catch (e) {
     console.error('[data/db GET]', e.message);
     return res.status(500).json({ error: 'خطای سرور' });
@@ -41,20 +42,46 @@ router.put('/db', async (req, res) => {
   }
 
   try {
+    // Conflict detection: if client sent _clientTs, verify no one else saved in the meantime
+    const _clientTs = body._clientTs || null;
+    if (_clientTs) {
+      const cur = await query("SELECT updated_at FROM app_data WHERE key = 'main'");
+      if (cur.rows.length > 0 && cur.rows[0].updated_at) {
+        const serverTs = cur.rows[0].updated_at.toISOString();
+        if (serverTs !== _clientTs) {
+          return res.status(409).json({ error: 'تغییرات توسط کاربر دیگری ذخیره شده — صفحه بارگذاری می‌شود' });
+        }
+      }
+    }
+
+    // Strip client-only meta fields before storing
+    let mainData = Object.assign({}, body);
+    delete mainData._clientTs;
+    delete mainData._serverTs;
+
     // If body has _mtr key, store separately
-    let mainData = body;
-    if (body._mtr) {
-      const mtrData = body._mtr;
+    if (mainData._mtr) {
+      const mtrData = mainData._mtr;
       await query(
         `INSERT INTO app_data (key, value, updated_at, updated_by)
          VALUES ('mtr', $1, NOW(), $2)
          ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
         [JSON.stringify(mtrData), req.user.username]
       );
-      // Remove _mtr from main data
-      mainData = Object.assign({}, body);
       delete mainData._mtr;
     }
+
+    // Save current version to history before overwriting (keeps last 30)
+    await query(
+      `INSERT INTO app_data_history (key, value, saved_by)
+       SELECT 'main', value, $1 FROM app_data WHERE key = 'main'`,
+      [req.user.username]
+    ).catch(function() {}); // ignore if history table not ready yet
+    await query(
+      `DELETE FROM app_data_history WHERE key = 'main' AND id NOT IN (
+         SELECT id FROM app_data_history WHERE key = 'main' ORDER BY saved_at DESC LIMIT 30
+       )`
+    ).catch(function() {});
 
     await query(
       `INSERT INTO app_data (key, value, updated_at, updated_by)
@@ -63,10 +90,46 @@ router.put('/db', async (req, res) => {
       [JSON.stringify(mainData), req.user.username]
     );
 
+    // Return new server timestamp so client can track version
+    const saved = await query("SELECT updated_at FROM app_data WHERE key = 'main'");
+    const _serverTs = saved.rows.length ? saved.rows[0].updated_at.toISOString() : null;
+
     try { if (_broadcast) _broadcast('db-updated', { by: req.user.username, at: Date.now() }, req.user.username); } catch(e) {}
-    return res.json({ ok: true });
+    return res.json({ ok: true, _serverTs });
   } catch (e) {
     console.error('[data/db PUT]', e.message);
+    return res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+// GET /api/data/history — list last 30 save snapshots (manager only)
+router.get('/history', requireManager, async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT id, saved_at, saved_by FROM app_data_history WHERE key = 'main' ORDER BY saved_at DESC LIMIT 30`
+    );
+    return res.json(result.rows);
+  } catch (e) {
+    console.error('[data/history GET]', e.message);
+    return res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+// POST /api/data/history/:id/restore — restore a snapshot (manager only)
+router.post('/history/:id/restore', requireManager, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'شناسه نامعتبر' });
+  try {
+    const hist = await query('SELECT value FROM app_data_history WHERE id = $1 AND key = $2', [id, 'main']);
+    if (!hist.rows.length) return res.status(404).json({ error: 'نسخه یافت نشد' });
+    await query(
+      `INSERT INTO app_data (key, value, updated_at, updated_by) VALUES ('main', $1, NOW(), $2)
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
+      [JSON.stringify(hist.rows[0].value), req.user.username]
+    );
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('[data/history restore]', e.message);
     return res.status(500).json({ error: 'خطای سرور' });
   }
 });
