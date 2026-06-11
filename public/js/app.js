@@ -6261,6 +6261,7 @@ function openTaskModal(tid, prefill){
     +'<select id="tkd_recurring" style="'+inpS+'">'
     +[['none','بدون تکرار'],['weekly','هفتگی'],['monthly','ماهانه']].map(function(r){return'<option value="'+r[0]+'"'+((t.recurring||'none')===r[0]?' selected':'')+'>'+r[1]+'</option>';}).join('')
     +'</select></div>'
+    +'<input type="hidden" id="tkd_centerKey" value="'+esc(t.centerKey||'')+'">'
     +'</div>';
 
   // subtask tree (only for existing tasks)
@@ -6347,6 +6348,7 @@ function tkSaveTask(tid){
   t.doneAt=t.done?(t.doneAt||todayStr()):'';
   t.note=(document.getElementById('tkd_note')||{}).value||'';
   t.recurring=(document.getElementById('tkd_recurring')||{}).value||'none';
+  if(!tid) t.centerKey=(document.getElementById('tkd_centerKey')||{}).value||'';
   if(!t.activity)t.activity=[];
   if(tid&&_prevStatus!==status){
     var _statuses=_getTkStatuses();
