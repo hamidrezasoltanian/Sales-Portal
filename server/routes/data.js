@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { query } = require('../db');
+const { query, pool } = require('../db');
 const { requireAuth, requireManager } = require('../auth');
 let _broadcast = null;
 try { _broadcast = require('./events').broadcast; } catch(e) {}
@@ -41,14 +41,19 @@ router.put('/db', async (req, res) => {
     return res.status(400).json({ error: 'داده نامعتبر' });
   }
 
+  // Use a transaction + FOR UPDATE to make conflict check atomic (fixes TOCTOU race)
+  const client = await pool.connect();
   try {
-    // Conflict detection: if client sent _clientTs, verify no one else saved in the meantime
+    await client.query('BEGIN');
+
     const _clientTs = body._clientTs || null;
     if (_clientTs) {
-      const cur = await query("SELECT updated_at FROM app_data WHERE key = 'main'");
+      // Lock the row so no concurrent write can slip between check and upsert
+      const cur = await client.query("SELECT updated_at FROM app_data WHERE key = 'main' FOR UPDATE");
       if (cur.rows.length > 0 && cur.rows[0].updated_at) {
         const serverTs = cur.rows[0].updated_at.toISOString();
         if (serverTs !== _clientTs) {
+          await client.query('ROLLBACK');
           return res.status(409).json({ error: 'تغییرات توسط کاربر دیگری ذخیره شده — صفحه بارگذاری می‌شود' });
         }
       }
@@ -62,7 +67,7 @@ router.put('/db', async (req, res) => {
     // If body has _mtr key, store separately
     if (mainData._mtr) {
       const mtrData = mainData._mtr;
-      await query(
+      await client.query(
         `INSERT INTO app_data (key, value, updated_at, updated_by)
          VALUES ('mtr', $1, NOW(), $2)
          ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
@@ -72,33 +77,37 @@ router.put('/db', async (req, res) => {
     }
 
     // Save current version to history before overwriting (keeps last 30)
-    await query(
+    await client.query(
       `INSERT INTO app_data_history (key, value, saved_by)
        SELECT 'main', value, $1 FROM app_data WHERE key = 'main'`,
       [req.user.username]
-    ).catch(function() {}); // ignore if history table not ready yet
-    await query(
+    ).catch(function() {});
+    await client.query(
       `DELETE FROM app_data_history WHERE key = 'main' AND id NOT IN (
          SELECT id FROM app_data_history WHERE key = 'main' ORDER BY saved_at DESC LIMIT 30
        )`
     ).catch(function() {});
 
-    await query(
+    // Use RETURNING to get exact timestamp written — avoids post-upsert SELECT race
+    const upserted = await client.query(
       `INSERT INTO app_data (key, value, updated_at, updated_by)
        VALUES ('main', $1, NOW(), $2)
-       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2
+       RETURNING updated_at`,
       [JSON.stringify(mainData), req.user.username]
     );
 
-    // Return new server timestamp so client can track version
-    const saved = await query("SELECT updated_at FROM app_data WHERE key = 'main'");
-    const _serverTs = saved.rows.length ? saved.rows[0].updated_at.toISOString() : null;
+    await client.query('COMMIT');
 
+    const _serverTs = upserted.rows[0].updated_at.toISOString();
     try { if (_broadcast) _broadcast('db-updated', { by: req.user.username, at: Date.now() }, req.user.username); } catch(e) {}
     return res.json({ ok: true, _serverTs });
   } catch (e) {
+    await client.query('ROLLBACK').catch(function() {});
     console.error('[data/db PUT]', e.message);
     return res.status(500).json({ error: 'خطای سرور' });
+  } finally {
+    client.release();
   }
 });
 

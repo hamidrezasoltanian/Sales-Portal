@@ -110,7 +110,7 @@ async function doLogin(){
   }
 }
 async function doLogout(){
-  saveDBSync();
+  try{await saveDBSync();}catch(e){}
   await fetch('/api/auth/logout',{method:'POST'}).catch(function(){});
   location.reload();
 }
@@ -119,6 +119,7 @@ async function doLogout(){
 var _serverSynced=false;
 var _saveDebounceTimer=null;
 var _dbServerTs=null; // tracks server updated_at for conflict detection
+var _saveSeq=0; // sequence counter to ignore out-of-order fetch responses
 
 async function loadDB(){
   var _spinner=document.getElementById('loadingSpinner');
@@ -152,7 +153,8 @@ async function loadDB(){
 function _saveDBNow(){
   var payload=JSON.parse(JSON.stringify(DB));
   if(_dbServerTs)payload._clientTs=_dbServerTs;
-  fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+  var seq=++_saveSeq; // capture sequence; ignore late-resolving responses
+  return fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
     .then(function(r){
       if(r.status===409){
         showToast('⚠ کاربر دیگری تغییراتی ذخیره کرده — صفحه بارگذاری می‌شود',5000);
@@ -160,7 +162,7 @@ function _saveDBNow(){
         return;
       }
       return r.json().then(function(result){
-        if(result&&result._serverTs)_dbServerTs=result._serverTs;
+        if(result&&result._serverTs&&seq===_saveSeq)_dbServerTs=result._serverTs;
       });
     })
     .catch(function(e){console.warn('saveDB sync failed:',e.message);});
@@ -169,7 +171,7 @@ function saveDB(){
   clearTimeout(_saveDebounceTimer);
   _saveDebounceTimer=setTimeout(function(){_saveDBNow();},300);
 }
-function saveDBSync(){clearTimeout(_saveDebounceTimer);_saveDBNow();}
+function saveDBSync(){clearTimeout(_saveDebounceTimer);return _saveDBNow();}
 
 function exportDBJson(){
   var data=JSON.stringify({version:2,exportedAt:new Date().toISOString(),db:DB},null,2);

@@ -1216,3 +1216,266 @@ tr.row-upcoming td{background:var(--warning-bg)!important}
   table td{padding:4px 3px}
   .biopsy-badge{display:none}
 }
+
+/* ══════════════════════════════════════════════════════════════
+   UI POLISH v2 — جامع‌ترین بهبودهای بصری
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Smooth scroll ─────────────────────────────────────────── */
+html{scroll-behavior:smooth}
+
+/* ── Custom scrollbar ──────────────────────────────────────── */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:10px}
+::-webkit-scrollbar-thumb:hover{background:var(--brand-light)}
+
+/* ── Focus ring (accessibility + polish) ───────────────────── */
+:focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:4px}
+
+/* ── Body background — subtle mesh ─────────────────────────── */
+html:not([data-theme="dark"]) body{
+  background:
+    radial-gradient(ellipse at 20% 0%,rgba(99,102,241,.07) 0%,transparent 60%),
+    radial-gradient(ellipse at 80% 100%,rgba(139,92,246,.06) 0%,transparent 60%),
+    linear-gradient(150deg,#eef2ff 0%,#f1f5f9 60%,#f0f0ff 100%) fixed;
+}
+
+/* ── Top bar — glass shimmer ────────────────────────────────── */
+.top-bar::after{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(180deg,rgba(255,255,255,.07) 0%,transparent 100%);
+  pointer-events:none
+}
+.top-bar{position:relative;overflow:hidden}
+
+/* ── Tab bar — pill active indicator ───────────────────────── */
+.tab-btn{position:relative;transition:color .2s,background .2s}
+.tab-btn.active{
+  background:linear-gradient(180deg,var(--brand-bg) 0%,transparent 100%);
+  border-radius:8px 8px 0 0
+}
+.tab-btn::after{
+  content:'';position:absolute;bottom:0;right:15%;left:15%;
+  height:2px;background:var(--brand);border-radius:2px 2px 0 0;
+  transform:scaleX(0);transition:transform .2s cubic-bezier(.34,1.56,.64,1)
+}
+.tab-btn.active::after{transform:scaleX(1)}
+.tab-btn:hover::after{transform:scaleX(.6)}
+.tab-btn.active:hover::after{transform:scaleX(1)}
+
+/* ── Province cards — richer hover ─────────────────────────── */
+.prov-card{
+  transition:box-shadow .25s cubic-bezier(.4,0,.2,1),
+             transform .25s cubic-bezier(.34,1.56,.64,1),
+             border-color .2s;
+  overflow:hidden;position:relative
+}
+.prov-card::before{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(135deg,rgba(99,102,241,.03) 0%,transparent 60%);
+  opacity:0;transition:opacity .25s
+}
+.prov-card:hover::before{opacity:1}
+.prov-card:hover{transform:translateY(-3px) scale(1.01)}
+
+/* ── Kanban / pipeline cards ────────────────────────────────── */
+.kanban-card{
+  transition:box-shadow .2s,transform .2s cubic-bezier(.34,1.56,.64,1),border-color .15s
+}
+.kanban-card:hover{transform:translateY(-2px) scale(1.005);border-color:var(--brand-light)}
+.pipeline-card{transition:box-shadow .2s,transform .2s}
+.pipeline-card:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(0,0,0,.12)}
+
+/* ── Buttons — global polish ────────────────────────────────── */
+.btn-primary{
+  position:relative;overflow:hidden;
+  box-shadow:0 2px 8px rgba(99,102,241,.2)
+}
+.btn-primary::after{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(180deg,rgba(255,255,255,.12) 0%,transparent 100%);
+  pointer-events:none
+}
+.btn-primary:hover{box-shadow:0 4px 16px rgba(99,102,241,.35)}
+.btn-primary:active{transform:translateY(0)!important;box-shadow:0 1px 4px rgba(99,102,241,.2)}
+
+/* ── Quick filter buttons ───────────────────────────────────── */
+.qf-btn{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:4px 11px;border-radius:20px;
+  border:1px solid var(--border-input);background:var(--bg-card);
+  color:var(--text-secondary);font-family:inherit;font-size:11px;
+  cursor:pointer;transition:all .18s;white-space:nowrap;font-weight:500
+}
+.qf-btn:hover{
+  background:var(--brand-bg);border-color:var(--brand);
+  color:var(--brand);transform:translateY(-1px);
+  box-shadow:0 2px 8px rgba(99,102,241,.18)
+}
+.qf-btn.active{
+  background:var(--brand);border-color:var(--brand);
+  color:#fff;font-weight:700;
+  box-shadow:0 3px 10px rgba(99,102,241,.3)
+}
+
+/* ── Bulk toolbar ───────────────────────────────────────────── */
+.bulk-toolbar{
+  background:linear-gradient(135deg,#1e1b4b 0%,var(--brand) 100%);
+  color:#fff;padding:8px 14px;display:none;
+  align-items:center;gap:8px;flex-wrap:wrap;
+  font-size:12px;font-weight:600;
+  box-shadow:0 4px 20px rgba(99,102,241,.4);
+  position:relative;overflow:hidden
+}
+.bulk-toolbar::before{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(90deg,rgba(255,255,255,.05) 0%,transparent 100%);
+  pointer-events:none
+}
+.bulk-toolbar.active{display:flex}
+
+/* ── Week plan items ─────────────────────────────────────────── */
+.wp-item{
+  transition:background .15s,border-color .15s,transform .15s,box-shadow .15s
+}
+.wp-item:hover{
+  transform:translateX(-2px);
+  box-shadow:2px 2px 8px rgba(99,102,241,.12)
+}
+.wp-day{transition:border-color .2s,box-shadow .2s}
+.wp-day:not(.today):hover{
+  border-color:var(--brand-light);
+  box-shadow:0 2px 12px rgba(99,102,241,.1)
+}
+
+/* ── Notification bell — pulse ──────────────────────────────── */
+.notif-bell-wrap{position:relative;display:inline-flex;align-items:center}
+.notif-badge{
+  position:absolute;top:-4px;right:-4px;
+  background:#ef4444;color:#fff;border-radius:10px;
+  font-size:10px;font-weight:700;padding:1px 5px;
+  min-width:16px;text-align:center;
+  border:2px solid transparent;
+  animation:notif-pulse 2s ease-in-out infinite
+}
+@keyframes notif-pulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.4)}
+  50%{box-shadow:0 0 0 4px rgba(239,68,68,0)}
+}
+
+/* ── Modal — refined ────────────────────────────────────────── */
+.m-box{
+  animation:modal-in .25s cubic-bezier(.34,1.56,.64,1) both
+}
+@keyframes modal-in{
+  from{transform:translateY(12px) scale(.97);opacity:0}
+  to{transform:translateY(0) scale(1);opacity:1}
+}
+.m-overlay{animation:overlay-in .2s ease both}
+@keyframes overlay-in{from{opacity:0}to{opacity:1}}
+
+/* ── Toast — improved ───────────────────────────────────────── */
+.toast{
+  min-width:220px;max-width:420px;
+  box-shadow:0 12px 40px rgba(0,0,0,.45),0 4px 12px rgba(0,0,0,.2),
+             inset 0 1px 0 rgba(255,255,255,.08);
+  gap:10px
+}
+
+/* ── Table — alternating rows + hover glow ──────────────────── */
+tbody tr:nth-child(even) td{background:var(--bg-stripe)}
+tbody tr:hover td{
+  background:var(--bg-hover)!important;
+  transition:background .12s
+}
+th{
+  letter-spacing:.3px;
+  border-right:1px solid var(--border);
+  background:linear-gradient(180deg,var(--th-bg) 0%,rgba(241,245,249,.6) 100%)
+}
+[data-theme="dark"] th{
+  background:linear-gradient(180deg,var(--th-bg) 0%,rgba(22,32,50,.6) 100%)
+}
+
+/* ── Input/Select — refined focus glow ──────────────────────── */
+.filters-bar select:focus,.filters-bar input[type=text]:focus,
+.m-body input[type=text]:focus,.m-body textarea:focus,.m-body select:focus,
+.wp-toolbar select:focus,
+input[type=text]:focus,select:focus,textarea:focus{
+  box-shadow:0 0 0 3px rgba(99,102,241,.12);
+  border-color:var(--brand)!important
+}
+
+/* ── KPI cards — gradient accent bar ────────────────────────── */
+.kpi-card{
+  position:relative;overflow:hidden;
+  transition:transform .2s cubic-bezier(.34,1.56,.64,1),box-shadow .2s
+}
+.kpi-card::after{
+  content:'';position:absolute;top:0;right:0;width:4px;height:100%;
+  background:linear-gradient(180deg,var(--brand) 0%,var(--brand-light) 100%)
+}
+.kpi-card:hover{transform:translateY(-3px)}
+
+/* ── Rec cards — hover lift ─────────────────────────────────── */
+.rec-card{transition:box-shadow .2s,transform .2s}
+.rec-card:hover{
+  box-shadow:0 6px 20px rgba(0,0,0,.1);
+  transform:translateX(-2px)
+}
+
+/* ── Province grid — entrance animation ─────────────────────── */
+.prov-grid{animation:fade-in .3s ease both}
+@keyframes fade-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── Badge chips — micro shadow ─────────────────────────────── */
+.pot-badge,.tag-badge,.lead-cust,.lead-opp,.lead-lid,.lead-srnkh{
+  box-shadow:0 1px 3px rgba(0,0,0,.08)
+}
+
+/* ── Card grid — entrance ────────────────────────────────────── */
+.card-grid{animation:fade-in .3s ease both}
+.data-card{
+  transition:box-shadow .25s cubic-bezier(.4,0,.2,1),
+             transform .25s cubic-bezier(.34,1.56,.64,1),
+             border-color .2s
+}
+.data-card:hover{transform:translateY(-3px) scale(1.005)}
+
+/* ── Today banner — subtle gradient ─────────────────────────── */
+.today-banner{
+  background:linear-gradient(135deg,#fffbeb 0%,#fef3c7 100%)!important;
+  box-shadow:0 2px 12px rgba(245,158,11,.1)
+}
+[data-theme="dark"] .today-banner{
+  background:linear-gradient(135deg,#1c1a0a 0%,#1a1500 100%)!important
+}
+
+/* ── Global button — active press ───────────────────────────── */
+button:active:not(:disabled){transform:scale(.97)}
+.tab-btn:active{transform:none}
+
+/* ── Loading spinner dark mode ──────────────────────────────── */
+[data-theme="dark"] #loadingSpinner{background:rgba(15,23,42,.96)!important}
+[data-theme="dark"] #loadingSpinner>div:first-child{
+  border-color:#1e293b!important;border-top-color:#818cf8!important
+}
+[data-theme="dark"] #loadingSpinner>div:last-child{color:#818cf8!important}
+
+/* ── Checklist items — better done state ────────────────────── */
+.ck-item{transition:background .15s,opacity .15s}
+.ck-item.done{opacity:.45;text-decoration:line-through}
+
+/* ── Activity log — striped ──────────────────────────────────── */
+.act-item:nth-child(even){background:var(--bg-stripe)}
+.act-item{transition:background .12s;border-radius:6px}
+.act-item:hover{background:var(--bg-hover)!important}
+
+/* ── Center stats bar ─────────────────────────────────────────── */
+#centerStatsBar{
+  display:flex!important;
+  background:linear-gradient(90deg,var(--brand-bg) 0%,transparent 100%);
+  border-radius:8px;border:1px solid rgba(99,102,241,.15);
+  font-weight:600
+}
