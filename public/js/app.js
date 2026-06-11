@@ -2751,7 +2751,7 @@ function openModal(id,titleHTML,bodyHTML,footHTML,opts){
   overlay.addEventListener('click',function(e){if(e.target===overlay)closeModal(id);});
   var box=document.createElement('div');
   box.className='m-box'+(opts&&opts.lg?' lg':'')+(opts&&opts.xl?' xl':'');
-  box.addEventListener('click',function(e){e.stopPropagation();});
+  box.addEventListener('click',function(e){if(typeof closeTagMenu==='function')closeTagMenu();e.stopPropagation();});
   var head=document.createElement('div');head.className='m-head';
   head.innerHTML='<span>'+titleHTML+'</span><button class="m-close" onclick="closeModal(\''+id+'\')">✕</button>';
   var body=document.createElement('div');body.className='m-body';body.innerHTML=bodyHTML;
@@ -5440,9 +5440,9 @@ document.addEventListener('visibilitychange',function(){
   }
 });
 
-function sendNotif(toUser,message,centerKey){
+function sendNotif(toUser,message,centerKey,centerKeys){
   _initNotif();
-  var n={id:Date.now()+'_'+Math.random().toString(36).slice(2),to:toUser,from:currentUser,at:new Date().toISOString(),message:message,centerKey:centerKey||'',read:false};
+  var n={id:Date.now()+'_'+Math.random().toString(36).slice(2),to:toUser,from:currentUser,at:new Date().toISOString(),message:message,centerKey:centerKey||'',centerKeys:centerKeys||null,read:false};
   DB.notifications.push(n);
   if(DB.notifications.length>300)DB.notifications=DB.notifications.slice(-300);
   saveDB();
@@ -5499,14 +5499,15 @@ function toggleNotifPanel(){
       var timeAgo=_timeAgo(n.at);
       var nid=n.id;
       var hasCk=n.centerKey&&n.centerKey.indexOf('_')>0;
+      var hasMultiCk=n.centerKeys&&n.centerKeys.length>1;
       var ckParts=hasCk?n.centerKey.split('_'):[];
       var ckRtype=ckParts[0]||'';var ckRid=ckParts.slice(1).join('_');
       var cName=hasCk?_clGetName(n.centerKey):'';
       return '<div class="notif-item'+(n.read?'':' unread')+(n.ack?' notif-acked':'')+'" data-nid="'+nid+'">'
         +'<div class="notif-item-msg">'+esc(n.message)+'</div>'
-        +(hasCk?'<div class="notif-item-center">📍 <span class="notif-center-link" onclick="goToNotifCenter(\''+nid+'\')">'+esc(cName)+'</span></div>':'')
+        +((hasCk||hasMultiCk)?'<div class="notif-item-center">📍 <span class="notif-center-link" onclick="goToNotifCenter(\''+nid+'\')">'+( hasMultiCk?(n.centerKeys.length+' مرکز'):esc(cName))+'</span></div>':'')
         +'<div class="notif-item-actions">'
-        +(hasCk?'<button class="notif-act-btn" onclick="goToNotifCenter(\''+nid+'\')">🔍 مشاهده مرکز</button>':'')
+        +((hasCk||hasMultiCk)?'<button class="notif-act-btn" onclick="goToNotifCenter(\''+nid+'\')">🔍 '+(hasMultiCk?'مشاهده مراکز':'مشاهده مرکز')+'</button>':'')
         +(viewAll
           ?(n.ack?'<span class="notif-ack-badge">✓ تأیید شده</span>':'')
           :(n.ack
@@ -5517,7 +5518,7 @@ function toggleNotifPanel(){
         +'</div>';
     }).join('');
   }
-  panel.innerHTML=head+body;
+  panel.innerHTML=head+'<div class="notif-body-scroll">'+body+'</div>';
   document.body.appendChild(panel);
   setTimeout(function(){
     if(viewAll)return; // در نمای «همه»، اعلان‌های دیگران خوانده نمی‌شود
@@ -5542,13 +5543,25 @@ function toggleNotifPanel(){
 function goToNotifCenter(nid){
   _initNotif();
   var n=DB.notifications.find(function(x){return x.id===nid;});
-  if(!n||!n.centerKey)return;
+  if(!n||(!(n.centerKey&&n.centerKey.indexOf('_')>0)&&!(n.centerKeys&&n.centerKeys.length)))return;
   markNotifRead(nid);
   var p=document.getElementById('notifPanel');if(p)p.remove();_notifPanelOpen=false;
-  var parts=n.centerKey.split('_');
-  var rtype=parts[0];var rid=parts.slice(1).join('_');
-  if(currentTab!=='provinces'&&currentTab!=='weekplan')switchTab('provinces');
-  setTimeout(function(){openCenterModal(rtype,rid);},150);
+  var keys=n.centerKeys&&n.centerKeys.length?n.centerKeys:[n.centerKey];
+  if(keys.length===1){
+    var parts=keys[0].split('_');var rtype=parts[0];var rid=parts.slice(1).join('_');
+    if(currentTab!=='provinces'&&currentTab!=='weekplan')switchTab('provinces');
+    setTimeout(function(){openCenterModal(rtype,rid);},150);
+    return;
+  }
+  // multiple centers: show list modal
+  var listHtml='<div style="display:flex;flex-direction:column;gap:6px;padding:4px 0">';
+  keys.forEach(function(ck){
+    var cname=_clGetName(ck);
+    var cparts=ck.split('_');var crt=cparts[0];var crid=cparts.slice(1).join('_');
+    listHtml+='<button onclick="closeModal(\'notifCkList\');if(currentTab!==\'provinces\'&&currentTab!==\'weekplan\')switchTab(\'provinces\');setTimeout(function(){openCenterModal(\''+crt+'\',\''+crid+'\');},150)" style="text-align:right;padding:8px 12px;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px;cursor:pointer">'+esc(cname)+'</button>';
+  });
+  listHtml+='</div>';
+  openModal('notifCkList','📍 مراکز مرتبط با این اعلان',listHtml,'<button class="btn-secondary" onclick="closeModal(\'notifCkList\')">بستن</button>');
 }
 
 function ackNotif(nid){
@@ -5680,7 +5693,7 @@ function openDailyMonitor(){
       body+='<tr style="background:'+bg+';border-bottom:1px solid #f1f5f9">'
         +'<td style="padding:8px 10px;font-weight:600"><span style="display:inline-flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:'+owColor+'"></span>'+esc(owName)+'</span></td>'
         +'<td style="padding:8px 10px;text-align:center">'
-      +'<button onclick="event.stopPropagation();openExpertReport(\''+m.id+'\')" style="font-size:10px;padding:2px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:5px;cursor:pointer;font-family:inherit">📊 گزارش</button>'
+      +'<button onclick="event.stopPropagation();openExpertReport(\''+ow+'\')" style="font-size:10px;padding:2px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:5px;cursor:pointer;font-family:inherit">📊 گزارش</button>'
       +'</td>'
       +'<td style="text-align:center;padding:8px">'+entries.length+'</td>'
         +'<td style="text-align:center;padding:8px"><span style="background:#dcfce7;color:#166534;border-radius:10px;padding:2px 8px;font-weight:700">'+owDone+'</span></td>'
@@ -6638,7 +6651,7 @@ function _runTodayReminders(today){
       + items.slice(0,5).map(function(x){return x.name;}).join('\n• ')
       + (items.length>5?'\nو '+(items.length-5)+' مورد دیگر':'')
       + '\nوارد برنامه هفته شوید.';
-    sendNotif(exp, msg, items[0].key);
+    sendNotif(exp, msg, items[0].key, items.map(function(x){return x.key;}));
   });
   if(cnt>0) showToast('🔔 یادآوری ساعت ۱۵ برای '+cnt+' کارشناس ارسال شد', 3000);
 }
@@ -6673,7 +6686,7 @@ function _runOverdueAndUndatedReminders(today){
         + d.overdue.slice(0,5).map(function(x){return x.name+' (تاریخ: '+x.date+')';}).join('\n• ')
         + (d.overdue.length>5?'\nو '+(d.overdue.length-5)+' مورد دیگر':'')
         + '\nلطفاً گزارش ثبت کنید.';
-      sendNotif(exp, msg, d.overdue[0].key);
+      sendNotif(exp, msg, d.overdue[0].key, d.overdue.map(function(x){return x.key;}));
       cnt++;
     }
     if(d.noDate.length){
@@ -6681,7 +6694,7 @@ function _runOverdueAndUndatedReminders(today){
         + d.noDate.slice(0,5).map(function(x){return x.name;}).join('\n• ')
         + (d.noDate.length>5?'\nو '+(d.noDate.length-5)+' مورد دیگر':'')
         + '\nبرای هر مرکز تاریخ تنظیم کنید.';
-      sendNotif(exp, msg2, d.noDate[0].key);
+      sendNotif(exp, msg2, d.noDate[0].key, d.noDate.map(function(x){return x.key;}));
       if(!d.overdue.length) cnt++;
     }
   });
@@ -8851,7 +8864,11 @@ function openExpertReport(memberId){
     body+='</div>';
     body+='<div id="rptBody">'+buildExpertReportHtml(memberId,fromDate,toDate)+'</div>';
     body+='</div>';
-    openModal('expertReport','📊 گزارش '+esc(m.name)+' — '+fromDate+' تا '+toDate,body,'<button class="btn-secondary" onclick="closeModal(\'expertReport\')">بستن</button>',{lg:true});
+    var notifFoot='<button class="btn-secondary" onclick="closeModal(\'expertReport\')">بستن</button>';
+    if(typeof _isManager==='function'&&_isManager()){
+      notifFoot='<button style="background:#faf5ff;color:#7c3aed;border:1px solid #d8b4fe;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="_sendReportNotif(\''+memberId+'\',\''+esc(m.name)+'\')">📨 ارسال اعلان</button>'+notifFoot;
+    }
+    openModal('expertReport','📊 گزارش '+esc(m.name)+' — '+fromDate+' تا '+toDate,body,notifFoot,{lg:true});
     // init date pickers after modal is open
     setTimeout(function(){
       var fi=document.getElementById('rptFrom');if(fi)openJDP(fi,function(v){fi.value=v;});
@@ -8859,6 +8876,17 @@ function openExpertReport(memberId){
     },100);
   }
   buildReport(fromDefault,toDefault);
+}
+function _sendReportNotif(memberId,memberName){
+  var body='<div style="font-size:12px">'
+    +'<label style="display:block;margin-bottom:6px;font-weight:600">متن پیام به '+esc(memberName)+':</label>'
+    +'<textarea id="rptNotifMsg" rows="4" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--border-input);border-radius:6px;font-family:inherit;font-size:12px;resize:vertical;background:var(--bg-input);color:var(--text-primary)" placeholder="مثال: عملکرد این هفته خوب بود، لطفاً گزارش مراکز P1 را تکمیل کنید..."></textarea>'
+    +'</div>';
+  openModal('rptNotifCompose','📨 ارسال اعلان به '+esc(memberName),body,
+    '<button class="btn-secondary" onclick="closeModal(\'rptNotifCompose\')">لغو</button>'
+    +'<button class="btn-primary" onclick="(function(){var msg=document.getElementById(\'rptNotifMsg\').value.trim();if(!msg){showToast(\'⚠ متن پیام خالی است\');return;}sendNotif(\''+memberId+'\',msg,\'\');closeModal(\'rptNotifCompose\');})()">ارسال 📨</button>'
+  );
+  setTimeout(function(){var t=document.getElementById('rptNotifMsg');if(t)t.focus();},100);
 }
 function buildExpertReportHtml(memberId,fromDate,toDate){
   var entries=Object.keys(DB.weekEntries||{}).map(function(k){return DB.weekEntries[k];})

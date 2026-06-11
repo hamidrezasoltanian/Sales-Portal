@@ -1016,6 +1016,7 @@ tr.row-contracted td{background:#f0fdf4!important}
 .dm-changes-list{font-size:10px;color:var(--text-secondary);flex:100%}
 /* ── Notification Panel ── */
 .notif-panel{position:fixed;top:56px;left:10px;width:320px;max-height:450px;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.25);z-index:3000;display:flex;flex-direction:column;overflow:hidden}
+.notif-body-scroll{overflow-y:auto;flex:1;max-height:390px}
 .notif-panel-head{padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700;font-size:13px;display:flex;justify-content:space-between;align-items:center}
 .notif-item{padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .2s}
 .notif-item:hover{background:var(--bg-raised)}
