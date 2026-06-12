@@ -938,7 +938,7 @@ function openOverdueList(memberId){
       var fd=e.followupDate||'';
       if(!fd||fd>=today||e.status==='قرارداد بسته شد'||e.status==='غیرفعال')return;
       var mObj=allMem.find(function(x){return x.id===owner;});
-      var daysAgo=Math.round((new Date()-new Date(fd.split('/').join('-')))/86400000);
+      var _fdp2=fd.split('/').map(Number);var _fdg2=j2g(_fdp2[0],_fdp2[1],_fdp2[2]);var daysAgo=Math.round((new Date()-new Date(_fdg2[0],_fdg2[1]-1,_fdg2[2]))/86400000);
       items.push({rtype:rt,id:c.id,name:e.nameOverride||c.name||'?',followupDate:fd,
         status:e.status||'بدون تماس',ownerName:mObj?mObj.name:(owner||'بدون مسئول'),
         potential:e.potential||c.potential||4,daysAgo:daysAgo});
@@ -962,7 +962,7 @@ function openOverdueList(memberId){
   var buckets=[
     {label:'🔴 این هفته',sub:'۱–۷ روز',min:1,max:7,clr:'#dc2626',items:[]},
     {label:'🟠 این ماه',sub:'۸–۳۰ روز',min:8,max:30,clr:'#ea580c',items:[]},
-    {label:'⚫ قدیمی',sub:'بیش از ۳۰ روز',min:31,max:9999,clr:'#64748b',items:[]}
+    {label:'⚫ قدیمی',sub:'بیش از ۳۰ روز',min:31,max:999999,clr:'#64748b',items:[]}
   ];
   items.forEach(function(c){
     for(var bi=0;bi<buckets.length;bi++){

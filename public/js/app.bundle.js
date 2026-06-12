@@ -2140,7 +2140,7 @@ function renderHome(){
       } else {
         boxContent='<div style="display:flex;flex-direction:column;gap:4px">';
         overdueItems.slice(0,6).forEach(function(it){
-          var daysAgo=Math.floor((new Date()-new Date(it.fd.replace(/\//g,'-')))/86400000);
+          var _fdp=it.fd.split('/').map(Number);var _fdg=j2g(_fdp[0],_fdp[1],_fdp[2]);var daysAgo=Math.floor((new Date()-new Date(_fdg[0],_fdg[1]-1,_fdg[2]))/86400000);
           var clr=daysAgo>30?'#dc2626':daysAgo>7?'#f59e0b':'#6366f1';
           boxContent+='<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background:var(--bg-raised);border-radius:6px;font-size:12px">'
             +'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b>'+esc(it.name)+'</b></span>'
@@ -9581,7 +9581,7 @@ function openOverdueList(memberId){
       var fd=e.followupDate||'';
       if(!fd||fd>=today||e.status==='قرارداد بسته شد'||e.status==='غیرفعال')return;
       var mObj=allMem.find(function(x){return x.id===owner;});
-      var daysAgo=Math.round((new Date()-new Date(fd.split('/').join('-')))/86400000);
+      var _fdp2=fd.split('/').map(Number);var _fdg2=j2g(_fdp2[0],_fdp2[1],_fdp2[2]);var daysAgo=Math.round((new Date()-new Date(_fdg2[0],_fdg2[1]-1,_fdg2[2]))/86400000);
       items.push({rtype:rt,id:c.id,name:e.nameOverride||c.name||'?',followupDate:fd,
         status:e.status||'بدون تماس',ownerName:mObj?mObj.name:(owner||'بدون مسئول'),
         potential:e.potential||c.potential||4,daysAgo:daysAgo});
@@ -9605,7 +9605,7 @@ function openOverdueList(memberId){
   var buckets=[
     {label:'🔴 این هفته',sub:'۱–۷ روز',min:1,max:7,clr:'#dc2626',items:[]},
     {label:'🟠 این ماه',sub:'۸–۳۰ روز',min:8,max:30,clr:'#ea580c',items:[]},
-    {label:'⚫ قدیمی',sub:'بیش از ۳۰ روز',min:31,max:9999,clr:'#64748b',items:[]}
+    {label:'⚫ قدیمی',sub:'بیش از ۳۰ روز',min:31,max:999999,clr:'#64748b',items:[]}
   ];
   items.forEach(function(c){
     for(var bi=0;bi<buckets.length;bi++){

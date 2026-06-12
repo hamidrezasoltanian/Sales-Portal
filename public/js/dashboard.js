@@ -897,7 +897,7 @@ function renderHome(){
       } else {
         boxContent='<div style="display:flex;flex-direction:column;gap:4px">';
         overdueItems.slice(0,6).forEach(function(it){
-          var daysAgo=Math.floor((new Date()-new Date(it.fd.replace(/\//g,'-')))/86400000);
+          var _fdp=it.fd.split('/').map(Number);var _fdg=j2g(_fdp[0],_fdp[1],_fdp[2]);var daysAgo=Math.floor((new Date()-new Date(_fdg[0],_fdg[1]-1,_fdg[2]))/86400000);
           var clr=daysAgo>30?'#dc2626':daysAgo>7?'#f59e0b':'#6366f1';
           boxContent+='<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background:var(--bg-raised);border-radius:6px;font-size:12px">'
             +'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b>'+esc(it.name)+'</b></span>'
