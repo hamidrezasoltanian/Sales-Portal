@@ -12,8 +12,19 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB per file
 });
 
+// Multer error handler — catches LIMIT_FILE_SIZE and returns 413 instead of 500
+function handleUpload(req, res, next) {
+  upload.single('file')(req, res, function(err) {
+    if (err && err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: 'حجم فایل بیش از ۱۰ مگابایت است' });
+    }
+    if (err) return res.status(400).json({ error: 'خطا در آپلود فایل' });
+    next();
+  });
+}
+
 // POST /api/missions/files — upload one file for a mission expense
-router.post('/files', requireAuth, upload.single('file'), async (req, res) => {
+router.post('/files', requireAuth, handleUpload, async (req, res) => {
   const { missionId, expenseId } = req.body;
   if (!missionId) return res.status(400).json({ error: 'missionId الزامی است' });
   if (!req.file) return res.status(400).json({ error: 'فایلی ارسال نشده' });
@@ -35,10 +46,12 @@ router.post('/files', requireAuth, upload.single('file'), async (req, res) => {
 // GET /api/missions/files/list/:missionId — list files for a mission
 // Must be registered BEFORE /files/:id to avoid route shadowing
 router.get('/files/list/:missionId', requireAuth, async (req, res) => {
+  const missionId = req.params.missionId;
+  if (!missionId || missionId.trim() === '') return res.status(400).json({ error: 'missionId الزامی است' });
   try {
     const r = await query(
       'SELECT id, expense_id, filename, mime_type, file_size, uploaded_by, created_at FROM mission_files WHERE mission_id = $1 ORDER BY created_at ASC',
-      [req.params.missionId]
+      [missionId]
     );
     res.json({ files: r.rows });
   } catch (e) {

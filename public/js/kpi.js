@@ -889,9 +889,9 @@ function _msBuildInfoTab() {
     + '<div><label style="' + lbl + '">شهر / مقصد</label>'
     + '<input id="ms_city" style="' + inp + '" placeholder="تهران، شیراز..." value="' + esc(ms.city || '') + '"></div>'
     + '<div><label style="' + lbl + '">تاریخ شروع</label>'
-    + '<input id="ms_startDate" style="' + inp + '" placeholder="YYYY/MM/DD" value="' + esc(ms.startDate || '') + '" onfocus="openJDP(this,function(v){this.value=v})"></div>'
+    + '<input id="ms_startDate" style="' + inp + '" placeholder="YYYY/MM/DD" value="' + esc(ms.startDate || '') + '" onfocus="(function(el){openJDP(el,function(v){el.value=v;})})(this)"></div>'
     + '<div><label style="' + lbl + '">تاریخ پایان</label>'
-    + '<input id="ms_endDate" style="' + inp + '" placeholder="YYYY/MM/DD" value="' + esc(ms.endDate || '') + '" onfocus="openJDP(this,function(v){this.value=v})"></div>'
+    + '<input id="ms_endDate" style="' + inp + '" placeholder="YYYY/MM/DD" value="' + esc(ms.endDate || '') + '" onfocus="(function(el){openJDP(el,function(v){el.value=v;})})(this)"></div>'
     + '</div>'
     + '<div style="margin-bottom:14px"><label style="' + lbl + '">توضیحات / هدف ماموریت</label>'
     + '<textarea id="ms_note" style="' + inp + ';height:70px;resize:vertical" placeholder="هدف سفر، نتیجه کلی...">' + esc(ms.note || '') + '</textarea></div>'
@@ -1248,7 +1248,7 @@ function _msSave(done) {
   var ms = _msCurrent.ms;
   ms.done = done;
   ensureKPIDB();
-  DB.missionLog = DB.missionLog.filter(function(l) { return !(l.userId === ms.userId && l.month === ms.month); });
+  DB.missionLog = DB.missionLog.filter(function(l) { return !(l.userId === ms.userId && l.month === _msCurrent.month); });
   DB.missionLog.push(ms);
   saveDB();
   showToast(done ? '✅ ماموریت انجام‌شده ثبت شد' : '⏳ ماموریت برنامه‌ریزی شد');
