@@ -11561,18 +11561,11 @@ function openKPILog(userId){
     +'</div><button onclick="_saveSaleLog(\''+userId+'\')" style="'+btnBase+';background:#f59e0b;color:var(--text-primary);margin-top:8px">ثبت فروش</button></div>'
     // ماموریت
     +'<div style="'+sectionStyle+'">'
-    +'<div style="font-size:12px;font-weight:700;color:#6b21a8;margin-bottom:10px">✈️ ماموریت ماهانه</div>'
-    +'<div style="display:grid;grid-template-columns:150px 1fr;gap:8px;margin-bottom:8px">'
-    +'<div><label style="'+labelStyle+'">ماه</label><select id="lm_month" style="'+inputStyle+'">'
-    +prevJMonths(3).map(function(m){return'<option value="'+m+'"'+(_kpiMonth===m?' selected':'')+'>'+jMonthLabel(m)+'</option>';}).join('')
-    +'</select></div>'
-    +'<div><label style="'+labelStyle+'">یادداشت / شهر ماموریت</label><input id="lm_note" placeholder="تهران، شیراز..." style="'+inputStyle+'" value="'+(ms&&ms.note?esc(ms.note):'')+'"></div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+    +'<div style="font-size:12px;font-weight:700;color:#6b21a8">✈️ ماموریت بین‌شهری</div>'
+    +(ms?'<span style="padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;background:'+(ms.done?'#d1fae5':'#fef3c7')+';color:'+(ms.done?'#065f46':'#92400e')+'">'+(ms.done?'✅ انجام شد':'⏳ برنامه‌ریزی')+'</span>':'<span style="padding:3px 10px;border-radius:12px;font-size:11px;background:#ede9fe;color:#6b21a8">ثبت نشده</span>')
     +'</div>'
-    +'<div style="display:flex;gap:8px">'
-    +'<button onclick="_saveMissionLog(\''+userId+'\',true)" style="'+btnBase+';background:#8b5cf6;color:var(--text-primary)">✅ انجام شد</button>'
-    +'<button onclick="_saveMissionLog(\''+userId+'\',false)" style="'+btnBase+';background:#e2e8f0;color:var(--text-primary)">⏳ برنامه‌ریزی</button>'
-    +(ms?'<button onclick="_delMissionLog(\''+userId+'\')" style="'+btnBase+';background:#fee2e2;color:#dc2626">حذف</button>':'')
-    +'</div></div>';
+    +'<button onclick="openMissionDetail(\''+userId+'\',\''+(_kpiMonth||currentJMonth())+'\')" style="width:100%;padding:12px;border:none;border-radius:8px;background:linear-gradient(135deg,#7c3aed,#a855f7);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">✈️ ثبت / ویرایش ماموریت — مراکز، هزینه‌ها، گزارش</button></div>';
 
   openModal('kpiLogModal','📝 ثبت فعالیت KPI — '+USERS[userId],body,'<button class="btn-secondary" onclick="closeModal(\'kpiLogModal\')">بستن</button>',{lg:true});
 }

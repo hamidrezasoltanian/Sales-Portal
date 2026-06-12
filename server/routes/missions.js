@@ -1,0 +1,83 @@
+'use strict';
+
+const express = require('express');
+const multer  = require('multer');
+const { query } = require('../db');
+const { requireAuth } = require('../auth');
+
+const router = express.Router();
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB per file
+});
+
+// POST /api/missions/files — upload files for a mission expense
+router.post('/files', requireAuth, upload.array('files', 10), async (req, res) => {
+  const { missionId, expenseId } = req.body;
+  if (!missionId) return res.status(400).json({ error: 'missionId الزامی است' });
+  if (!req.files || !req.files.length) return res.status(400).json({ error: 'فایلی ارسال نشده' });
+  try {
+    const inserted = [];
+    for (const f of req.files) {
+      const r = await query(
+        `INSERT INTO mission_files (mission_id, expense_id, filename, mime_type, file_size, data, uploaded_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, filename, mime_type, file_size, uploaded_by, created_at`,
+        [String(missionId), String(expenseId || ''), f.originalname, f.mimetype, f.size, f.buffer, req.user.username]
+      );
+      inserted.push(r.rows[0]);
+    }
+    res.json({ ok: true, files: inserted });
+  } catch (e) {
+    console.error('[missions/upload]', e.message);
+    res.status(500).json({ error: 'خطای ذخیره فایل' });
+  }
+});
+
+// GET /api/missions/files/:id — retrieve file
+router.get('/files/:id', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: 'شناسه نامعتبر' });
+  try {
+    const r = await query('SELECT filename, mime_type, data FROM mission_files WHERE id = $1', [id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'فایل یافت نشد' });
+    const { filename, mime_type, data } = r.rows[0];
+    const dl = req.query.dl === '1';
+    res.setHeader('Content-Type', mime_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition',
+      (dl ? 'attachment' : 'inline') + '; filename*=UTF-8\'\'' + encodeURIComponent(filename));
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(data);
+  } catch (e) {
+    console.error('[missions/get]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+// DELETE /api/missions/files/:id
+router.delete('/files/:id', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ error: 'شناسه نامعتبر' });
+  try {
+    await query('DELETE FROM mission_files WHERE id = $1', [id]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+// GET /api/missions/files/list/:missionId — list files for a mission
+router.get('/files/list/:missionId', requireAuth, async (req, res) => {
+  try {
+    const r = await query(
+      'SELECT id, expense_id, filename, mime_type, file_size, uploaded_by, created_at FROM mission_files WHERE mission_id = $1 ORDER BY created_at ASC',
+      [req.params.missionId]
+    );
+    res.json({ files: r.rows });
+  } catch (e) {
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+module.exports = router;

@@ -807,5 +807,396 @@ function calcCenterRecommendations() {
   return recs.slice(0, 15);
 }
 
+// ─── Mission Detail Modal ──────────────────────────────────────────────────
+var _msCurrent = null; // {userId, month, ms, tab}
 
+function openMissionDetail(userId, month) {
+  userId = userId || (typeof _kpiUser !== 'undefined' ? _kpiUser : '') || currentUser;
+  month = month || (typeof _kpiMonth !== 'undefined' ? _kpiMonth : '') || currentJMonth();
+  ensureKPIDB();
+  var existing = getMissionMonth(userId, month);
+  var ms = existing
+    ? JSON.parse(JSON.stringify(existing))
+    : {id: Date.now(), userId: userId, month: month, done: false, note: '', city: '', startDate: '', endDate: '', centers: [], expenses: []};
+  if (!ms.centers) ms.centers = [];
+  if (!ms.expenses) ms.expenses = [];
+  _msCurrent = {userId: userId, month: month, ms: ms, tab: 'info'};
+  _msRenderModal();
+}
+
+function _msRenderModal() {
+  if (!_msCurrent) return;
+  var m = _msCurrent;
+  var hasSaved = !!getMissionMonth(m.userId, m.month);
+  var body = _msBuildTabs() + _msGetTabContent();
+  var foot = '<button class="btn-primary" onclick="_msSave(true)" style="background:#7c3aed;border-color:#7c3aed">'
+    + (m.ms.done ? '✅ بروزرسانی (انجام شد)' : '✅ انجام شد') + '</button>'
+    + ' <button class="btn-secondary" onclick="_msSave(false)">⏳ برنامه‌ریزی</button>'
+    + (hasSaved ? ' <button class="btn-secondary" style="background:#fee2e2;color:#dc2626;border-color:#fca5a5" onclick="_msDelete()">حذف</button>' : '')
+    + ' <button class="btn-secondary" onclick="closeModal(\'missionDetailModal\')">بستن</button>';
+  openModal('missionDetailModal', '✈️ ماموریت — ' + jMonthLabel(m.month) + ' — ' + (USERS[m.userId] || m.userId), body, foot, {lg: true});
+}
+
+function _msBuildTabs() {
+  var tabs = [
+    {id: 'info', label: '📋 اطلاعات'},
+    {id: 'centers', label: '🏥 مراکز (' + (_msCurrent.ms.centers.length) + ')'},
+    {id: 'expenses', label: '💰 هزینه‌ها (' + (_msCurrent.ms.expenses.length) + ')'},
+    {id: 'report', label: '📊 گزارش'}
+  ];
+  return '<div style="display:flex;gap:4px;margin-bottom:14px;border-bottom:2px solid var(--border);padding-bottom:0">'
+    + tabs.map(function(t) {
+        var active = _msCurrent.tab === t.id;
+        return '<button onclick="_msSwitchTab(\'' + t.id + '\')" style="border:none;background:' + (active ? '#7c3aed' : 'transparent')
+          + ';color:' + (active ? '#fff' : 'var(--text-secondary)') + ';padding:7px 13px;border-radius:6px 6px 0 0;cursor:pointer;font-size:12px;font-family:inherit;font-weight:600;transition:background 0.15s">'
+          + t.label + '</button>';
+      }).join('')
+    + '</div>';
+}
+
+function _msSwitchTab(tab) {
+  if (!_msCurrent) return;
+  _msCollectFormData();
+  _msCurrent.tab = tab;
+  var modal = document.getElementById('missionDetailModal');
+  if (!modal) return;
+  var body = modal.querySelector('.m-body');
+  if (!body) return;
+  body.innerHTML = _msBuildTabs() + _msGetTabContent();
+}
+
+function _msGetTabContent() {
+  var t = _msCurrent.tab;
+  if (t === 'info') return _msBuildInfoTab();
+  if (t === 'centers') return _msBuildCentersTab();
+  if (t === 'expenses') return _msBuildExpensesTab();
+  if (t === 'report') return _msBuildReportTab();
+  return '';
+}
+
+function _msBuildInfoTab() {
+  var ms = _msCurrent.ms;
+  var inp = 'width:100%;padding:7px 10px;border:1px solid var(--border-input);border-radius:6px;font-size:13px;font-family:inherit;box-sizing:border-box';
+  var lbl = 'font-size:11px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:4px';
+  var months = prevJMonths(6);
+  return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">'
+    + '<div><label style="' + lbl + '">ماه ماموریت</label>'
+    + '<select id="ms_month" style="' + inp + '">'
+    + months.map(function(m) {
+        return '<option value="' + m + '"' + (ms.month === m ? ' selected' : '') + '>' + jMonthLabel(m) + '</option>';
+      }).join('')
+    + '</select></div>'
+    + '<div><label style="' + lbl + '">شهر / مقصد</label>'
+    + '<input id="ms_city" style="' + inp + '" placeholder="تهران، شیراز..." value="' + esc(ms.city || '') + '"></div>'
+    + '<div><label style="' + lbl + '">تاریخ شروع</label>'
+    + '<input id="ms_startDate" style="' + inp + '" placeholder="YYYY/MM/DD" value="' + esc(ms.startDate || '') + '" onfocus="openJDP(this,function(v){this.value=v})"></div>'
+    + '<div><label style="' + lbl + '">تاریخ پایان</label>'
+    + '<input id="ms_endDate" style="' + inp + '" placeholder="YYYY/MM/DD" value="' + esc(ms.endDate || '') + '" onfocus="openJDP(this,function(v){this.value=v})"></div>'
+    + '</div>'
+    + '<div style="margin-bottom:14px"><label style="' + lbl + '">توضیحات / هدف ماموریت</label>'
+    + '<textarea id="ms_note" style="' + inp + ';height:70px;resize:vertical" placeholder="هدف سفر، نتیجه کلی...">' + esc(ms.note || '') + '</textarea></div>'
+    + '<div style="display:flex;gap:8px;align-items:center;padding:10px;background:var(--bg-raised);border-radius:8px">'
+    + '<span style="font-size:12px;font-weight:600;color:var(--text-secondary)">وضعیت:</span>'
+    + '<span style="padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700;background:' + (ms.done ? '#d1fae5' : '#fef3c7') + ';color:' + (ms.done ? '#065f46' : '#92400e') + '">'
+    + (ms.done ? '✅ انجام شد' : '⏳ برنامه‌ریزی') + '</span>'
+    + '<span style="font-size:11px;color:var(--text-muted)">(از دکمه‌های پایین تغییر دهید)</span>'
+    + '</div>';
+}
+
+function _msBuildCentersTab() {
+  var ms = _msCurrent.ms;
+  var inp = 'padding:7px 10px;border:1px solid var(--border-input);border-radius:6px;font-size:12px;font-family:inherit';
+  var html = '<div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">'
+    + '<input id="ms_ctr_q" style="' + inp + ';flex:1" placeholder="🔍 جستجوی مرکز..." oninput="_msCtrSearch(this.value)">'
+    + '</div>'
+    + '<div id="ms_ctr_results" style="margin-bottom:14px;max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;display:none"></div>';
+  if (ms.centers.length) {
+    html += '<div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">مراکز این ماموریت (' + ms.centers.length + '):</div>'
+      + '<div style="display:flex;flex-direction:column;gap:6px">';
+    ms.centers.forEach(function(c, i) {
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg-raised);border-radius:6px;border:1px solid var(--border)">'
+        + '<span style="flex:1;font-size:12px;font-weight:600">' + esc(c.name) + '</span>'
+        + '<span style="font-size:11px;color:var(--text-muted)">' + esc(c.date || '') + '</span>'
+        + '<button onclick="_msRemCenter(' + i + ')" style="border:none;background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px">حذف</button>'
+        + '</div>';
+    });
+    html += '</div>';
+  } else {
+    html += '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:12px;background:var(--bg-raised);border-radius:8px">هنوز مرکزی اضافه نشده. از جستجو بالا مرکز اضافه کنید.</div>';
+  }
+  return html;
+}
+
+function _msCtrSearch(q) {
+  var el = document.getElementById('ms_ctr_results');
+  if (!el) return;
+  if (!q || q.length < 2) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  var norm = fNorm(q);
+  var results = [];
+  var today = todayStr();
+  // search Tehran centers
+  if (typeof CENTERS !== 'undefined') {
+    CENTERS.forEach(function(c) {
+      if (fNorm(c.name).indexOf(norm) >= 0) results.push({rtype: 'center', id: c.id, name: c.name, date: today});
+    });
+  }
+  // search PC centers
+  if (typeof _PC_CACHE !== 'undefined') {
+    Object.keys(_PC_CACHE).forEach(function(pid) {
+      (_PC_CACHE[pid] || []).forEach(function(c) {
+        if (fNorm(c.name).indexOf(norm) >= 0) results.push({rtype: 'pc', id: c.id, name: c.name, date: today});
+      });
+    });
+  }
+  results = results.slice(0, 12);
+  if (!results.length) { el.innerHTML = '<div style="padding:8px 12px;font-size:12px;color:var(--text-muted)">نتیجه‌ای یافت نشد</div>'; el.style.display = 'block'; return; }
+  el.innerHTML = results.map(function(r) {
+    var nm = esc(r.name).replace(new RegExp('(' + esc(q) + ')', 'i'), '<strong>$1</strong>');
+    return '<div onclick="_msAddCenter(\'' + r.rtype + '\',\'' + r.id + '\',\'' + esc(r.name).replace(/'/g, "\\'") + '\')" '
+      + 'style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border)" '
+      + 'onmouseover="this.style.background=\'var(--bg-hover)\'" onmouseout="this.style.background=\'\'">'
+      + nm + '</div>';
+  }).join('');
+  el.style.display = 'block';
+}
+
+function _msAddCenter(rtype, id, name) {
+  if (!_msCurrent) return;
+  var ms = _msCurrent.ms;
+  var already = ms.centers.some(function(c) { return c.rtype === rtype && c.id === id; });
+  if (already) { showToast('این مرکز قبلاً اضافه شده'); return; }
+  ms.centers.push({rtype: rtype, id: id, name: name, date: todayStr()});
+  _msCurrent.tab = 'centers';
+  var modal = document.getElementById('missionDetailModal');
+  if (modal) {
+    var body = modal.querySelector('.m-body');
+    if (body) body.innerHTML = _msBuildTabs() + _msGetTabContent();
+  }
+}
+
+function _msRemCenter(idx) {
+  if (!_msCurrent) return;
+  _msCurrent.ms.centers.splice(idx, 1);
+  var modal = document.getElementById('missionDetailModal');
+  if (modal) {
+    var body = modal.querySelector('.m-body');
+    if (body) body.innerHTML = _msBuildTabs() + _msGetTabContent();
+  }
+}
+
+function _msBuildExpensesTab() {
+  var ms = _msCurrent.ms;
+  var cats = ['ایاب و ذهاب', 'اقامت', 'غذا', 'نمایندگی', 'سایر'];
+  var inp = 'padding:6px 8px;border:1px solid var(--border-input);border-radius:5px;font-size:11px;font-family:inherit;width:100%;box-sizing:border-box';
+  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+    + '<span style="font-size:12px;font-weight:700;color:var(--text-primary)">ردیف‌های هزینه</span>'
+    + '<button onclick="_msAddExpense()" style="border:none;background:#7c3aed;color:#fff;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px;font-family:inherit;font-weight:600">+ افزودن ردیف</button>'
+    + '</div>';
+  if (!ms.expenses.length) {
+    html += '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:12px;background:var(--bg-raised);border-radius:8px">هنوز هزینه‌ای ثبت نشده.</div>';
+  } else {
+    var total = ms.expenses.reduce(function(s, e) { return s + (parseFloat(e.amount) || 0); }, 0);
+    html += '<div style="display:flex;flex-direction:column;gap:8px">';
+    ms.expenses.forEach(function(ex, i) {
+      html += '<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:10px">'
+        + '<div style="display:grid;grid-template-columns:1fr 1fr 120px auto;gap:6px;margin-bottom:6px;align-items:end">'
+        + '<div><label style="font-size:10px;color:var(--text-muted)">عنوان</label><input style="' + inp + '" value="' + esc(ex.title || '') + '" oninput="_msExpField(' + i + ',\'title\',this.value)"></div>'
+        + '<div><label style="font-size:10px;color:var(--text-muted)">مبلغ (ریال)</label><input type="number" style="' + inp + '" value="' + (ex.amount || 0) + '" oninput="_msExpField(' + i + ',\'amount\',this.value)"></div>'
+        + '<div><label style="font-size:10px;color:var(--text-muted)">دسته</label><select style="' + inp + '" onchange="_msExpField(' + i + ',\'cat\',this.value)">'
+        + cats.map(function(c) { return '<option' + (ex.cat === c ? ' selected' : '') + '>' + c + '</option>'; }).join('')
+        + '</select></div>'
+        + '<div style="display:flex;align-items:flex-end"><button onclick="_msDelExpense(' + i + ')" style="border:none;background:#fee2e2;color:#dc2626;padding:6px 8px;border-radius:5px;cursor:pointer;font-size:11px">حذف</button></div>'
+        + '</div>'
+        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">'
+        + '<div><label style="font-size:10px;color:var(--text-muted)">تاریخ</label><input style="' + inp + '" value="' + esc(ex.date || '') + '" placeholder="YYYY/MM/DD" oninput="_msExpField(' + i + ',\'date\',this.value)"></div>'
+        + '<div><label style="font-size:10px;color:var(--text-muted)">توضیح</label><input style="' + inp + '" value="' + esc(ex.note || '') + '" oninput="_msExpField(' + i + ',\'note\',this.value)"></div>'
+        + '</div>'
+        + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
+      if (ex.files && ex.files.length) {
+        ex.files.forEach(function(f, fi) {
+          html += '<span style="display:inline-flex;align-items:center;gap:4px;background:#e0e7ff;padding:2px 8px;border-radius:12px;font-size:11px">'
+            + '📎 ' + esc(f.name)
+            + '<button onclick="_msDelExpFile(' + i + ',' + fi + ')" style="border:none;background:transparent;color:#dc2626;cursor:pointer;font-size:10px;padding:0 2px">×</button>'
+            + '</span>';
+        });
+      }
+      html += '<label style="cursor:pointer;background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:3px 10px;border-radius:12px;font-size:11px">'
+        + '📎 پیوست فایل<input type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none" onchange="_msUploadFile(' + i + ',this)">'
+        + '</label>'
+        + '</div></div>';
+    });
+    html += '</div>'
+      + '<div style="margin-top:12px;padding:10px;background:#f0fdf4;border-radius:6px;display:flex;justify-content:space-between;align-items:center">'
+      + '<span style="font-size:12px;font-weight:600;color:var(--text-secondary)">جمع کل هزینه‌ها:</span>'
+      + '<span style="font-size:14px;font-weight:700;color:#065f46">' + new Intl.NumberFormat('fa-IR').format(total) + ' ریال</span>'
+      + '</div>';
+  }
+  return html;
+}
+
+function _msAddExpense() {
+  if (!_msCurrent) return;
+  _msCollectFormData();
+  _msCurrent.ms.expenses.push({id: Date.now(), title: '', amount: 0, cat: 'سایر', date: todayStr(), note: '', files: []});
+  _msCurrent.tab = 'expenses';
+  var modal = document.getElementById('missionDetailModal');
+  if (modal) { var body = modal.querySelector('.m-body'); if (body) body.innerHTML = _msBuildTabs() + _msGetTabContent(); }
+}
+
+function _msDelExpense(idx) {
+  if (!_msCurrent) return;
+  _msCurrent.ms.expenses.splice(idx, 1);
+  var modal = document.getElementById('missionDetailModal');
+  if (modal) { var body = modal.querySelector('.m-body'); if (body) body.innerHTML = _msBuildTabs() + _msGetTabContent(); }
+}
+
+function _msExpField(idx, field, val) {
+  if (!_msCurrent || !_msCurrent.ms.expenses[idx]) return;
+  _msCurrent.ms.expenses[idx][field] = field === 'amount' ? parseFloat(val) || 0 : val;
+}
+
+function _msUploadFile(expIdx, input) {
+  if (!input.files || !input.files.length || !_msCurrent) return;
+  var file = input.files[0];
+  if (file.size > 10 * 1024 * 1024) { showToast('حداکثر حجم فایل ۱۰ مگابایت است'); return; }
+  _msCollectFormData();
+  var ms = _msCurrent.ms;
+  var missionId = ms.userId + '_' + ms.month.replace('/', '-');
+  var expId = ms.expenses[expIdx] ? String(ms.expenses[expIdx].id) : String(expIdx);
+  var fd = new FormData();
+  fd.append('file', file);
+  fd.append('missionId', missionId);
+  fd.append('expenseId', expId);
+  fetch('/api/missions/files', {method: 'POST', body: fd, credentials: 'include'})
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.id) { showToast('خطا در آپلود فایل'); return; }
+      if (!ms.expenses[expIdx].files) ms.expenses[expIdx].files = [];
+      ms.expenses[expIdx].files.push({fileId: data.id, name: file.name});
+      var modal = document.getElementById('missionDetailModal');
+      if (modal) { var body = modal.querySelector('.m-body'); if (body) body.innerHTML = _msBuildTabs() + _msGetTabContent(); }
+      showToast('✅ فایل آپلود شد');
+    })
+    .catch(function() { showToast('خطا در آپلود فایل'); });
+}
+
+function _msDelExpFile(expIdx, fileIdx) {
+  if (!_msCurrent) return;
+  var ex = _msCurrent.ms.expenses[expIdx];
+  if (!ex || !ex.files) return;
+  var f = ex.files[fileIdx];
+  if (f && f.fileId) {
+    fetch('/api/missions/files/' + f.fileId, {method: 'DELETE', credentials: 'include'}).catch(function(){});
+  }
+  ex.files.splice(fileIdx, 1);
+  var modal = document.getElementById('missionDetailModal');
+  if (modal) { var body = modal.querySelector('.m-body'); if (body) body.innerHTML = _msBuildTabs() + _msGetTabContent(); }
+}
+
+function _msBuildReportTab() {
+  var ms = _msCurrent.ms;
+  var ctrs = ms.centers || [];
+  var exps = ms.expenses || [];
+  var total = exps.reduce(function(s, e) { return s + (parseFloat(e.amount) || 0); }, 0);
+  var bycat = {};
+  exps.forEach(function(e) {
+    bycat[e.cat || 'سایر'] = (bycat[e.cat || 'سایر'] || 0) + (parseFloat(e.amount) || 0);
+  });
+  // effectiveness: centers that changed status or got new notes in the month
+  var mBounds = jMonthBounds(ms.month);
+  var effectiveCtr = 0;
+  ctrs.forEach(function(c) {
+    var hasActivity = (DB.changeLog || []).some(function(ch) {
+      var ts = new Date(ch.at).getTime();
+      return ch.rkey === c.rtype + '_' + c.id && ts >= mBounds.startTs && ts <= mBounds.endTs;
+    });
+    if (hasActivity) effectiveCtr++;
+  });
+  var costPerCenter = ctrs.length ? Math.round(total / ctrs.length) : 0;
+  var html = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
+    + _msStatCard('🏥 مراکز ویزیت', ctrs.length, '')
+    + _msStatCard('✅ مراکز با فعالیت', effectiveCtr, '')
+    + _msStatCard('💰 هزینه کل', new Intl.NumberFormat('fa-IR').format(total), 'ریال')
+    + _msStatCard('💳 هزینه/مرکز', new Intl.NumberFormat('fa-IR').format(costPerCenter), 'ریال')
+    + _msStatCard('📎 فایل‌های پیوست', exps.reduce(function(s,e){return s+(e.files?e.files.length:0);},0), '')
+    + _msStatCard('📅 مدت', (ms.startDate && ms.endDate ? (ms.endDate > ms.startDate ? '— روز' : '۱ روز') : '—'), '')
+    + '</div>';
+  if (Object.keys(bycat).length) {
+    html += '<div style="margin-bottom:14px"><div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:8px">تفکیک هزینه بر اساس دسته:</div>';
+    Object.keys(bycat).forEach(function(cat) {
+      var pct = total > 0 ? Math.round(bycat[cat] / total * 100) : 0;
+      html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
+        + '<span style="font-size:11px;min-width:80px;color:var(--text-secondary)">' + esc(cat) + '</span>'
+        + '<div style="flex:1;background:var(--border);border-radius:4px;height:8px"><div style="width:' + pct + '%;background:#7c3aed;height:100%;border-radius:4px"></div></div>'
+        + '<span style="font-size:11px;min-width:40px;text-align:left;color:var(--text-primary)">' + pct + '%</span>'
+        + '<span style="font-size:11px;color:var(--text-muted)">' + new Intl.NumberFormat('fa-IR').format(bycat[cat]) + '</span>'
+        + '</div>';
+    });
+    html += '</div>';
+  }
+  if (ctrs.length) {
+    html += '<div><div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:8px">مراکز ویزیت‌شده:</div>'
+      + '<div style="display:flex;flex-wrap:wrap;gap:6px">'
+      + ctrs.map(function(c) {
+          var act = (DB.changeLog || []).some(function(ch) {
+            var ts = new Date(ch.at).getTime();
+            return ch.rkey === c.rtype + '_' + c.id && ts >= mBounds.startTs && ts <= mBounds.endTs;
+          });
+          return '<span style="padding:3px 10px;border-radius:12px;font-size:11px;background:' + (act ? '#d1fae5' : '#f0f0f0') + ';color:' + (act ? '#065f46' : 'var(--text-secondary)') + '">' + esc(c.name) + (act ? ' ✅' : '') + '</span>';
+        }).join('')
+      + '</div></div>';
+  }
+  return html;
+}
+
+function _msStatCard(label, value, unit) {
+  return '<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:12px;text-align:center">'
+    + '<div style="font-size:20px;font-weight:700;color:#7c3aed">' + value + (unit ? '<span style="font-size:11px;color:var(--text-muted);margin-right:2px">' + unit + '</span>' : '') + '</div>'
+    + '<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">' + label + '</div>'
+    + '</div>';
+}
+
+function _msCollectFormData() {
+  if (!_msCurrent) return;
+  var ms = _msCurrent.ms;
+  var f = function(id) { var el = document.getElementById(id); return el ? el.value : null; };
+  if (f('ms_month')) ms.month = f('ms_month');
+  if (f('ms_city') !== null) ms.city = f('ms_city');
+  if (f('ms_startDate') !== null) ms.startDate = f('ms_startDate');
+  if (f('ms_endDate') !== null) ms.endDate = f('ms_endDate');
+  if (f('ms_note') !== null) ms.note = f('ms_note');
+  // collect expense fields live if on expenses tab
+  if (_msCurrent.tab === 'expenses') {
+    (ms.expenses || []).forEach(function(ex, i) {
+      ['title','amount','cat','date','note'].forEach(function(field) {
+        // fields are bound via oninput so already current
+      });
+    });
+  }
+}
+
+function _msSave(done) {
+  if (!_msCurrent) return;
+  _msCollectFormData();
+  var ms = _msCurrent.ms;
+  ms.done = done;
+  ensureKPIDB();
+  DB.missionLog = DB.missionLog.filter(function(l) { return !(l.userId === ms.userId && l.month === ms.month); });
+  DB.missionLog.push(ms);
+  saveDB();
+  showToast(done ? '✅ ماموریت انجام‌شده ثبت شد' : '⏳ ماموریت برنامه‌ریزی شد');
+  closeModal('missionDetailModal');
+  if (typeof renderKPIPanel === 'function') renderKPIPanel();
+}
+
+function _msDelete() {
+  if (!_msCurrent) return;
+  var m = _msCurrent;
+  ensureKPIDB();
+  DB.missionLog = DB.missionLog.filter(function(l) { return !(l.userId === m.userId && l.month === m.month); });
+  saveDB();
+  showToast('ماموریت حذف شد');
+  closeModal('missionDetailModal');
+  if (typeof renderKPIPanel === 'function') renderKPIPanel();
+}
 

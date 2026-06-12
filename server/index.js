@@ -51,6 +51,7 @@ app.use('/api/contacts', require('./routes/contacts'));
 app.use('/api/pricing', require('./routes/pricing'));
 app.use('/api/files', require('./routes/files'));
 app.use('/api/discovery', require('./routes/discovery'));
+app.use('/api/missions', require('./routes/missions'));
 
 // Health check
 app.get('/api/health', function (req, res) {

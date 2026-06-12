@@ -245,6 +245,21 @@ async function initSchema() {
   `);
   await query(`CREATE INDEX IF NOT EXISTS idx_product_files_prod ON product_files(prod_id)`);
 
+  await query(`
+    CREATE TABLE IF NOT EXISTS mission_files (
+      id SERIAL PRIMARY KEY,
+      mission_id TEXT NOT NULL,
+      expense_id TEXT DEFAULT '',
+      filename TEXT NOT NULL,
+      mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+      file_size INTEGER DEFAULT 0,
+      data BYTEA NOT NULL,
+      uploaded_by VARCHAR(100),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_mission_files_mid ON mission_files(mission_id)`);
+
   // Auto-save history for app_data (keeps last 30 versions per key)
   await query(`
     CREATE TABLE IF NOT EXISTS app_data_history (
