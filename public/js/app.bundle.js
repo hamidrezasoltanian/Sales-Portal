@@ -11474,49 +11474,120 @@ function _msRemCenter(idx) {
 function _msBuildExpensesTab() {
   var ms = _msCurrent.ms;
   var cats = ['ایاب و ذهاب', 'اقامت', 'غذا', 'نمایندگی', 'سایر'];
-  var inp = 'padding:6px 8px;border:1px solid var(--border-input);border-radius:5px;font-size:11px;font-family:inherit;width:100%;box-sizing:border-box';
-  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
-    + '<span style="font-size:12px;font-weight:700;color:var(--text-primary)">ردیف‌های هزینه</span>'
-    + '<button onclick="_msAddExpense()" style="border:none;background:#7c3aed;color:#fff;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:12px;font-family:inherit;font-weight:600">+ افزودن ردیف</button>'
+  var inp  = 'padding:6px 8px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;width:100%;box-sizing:border-box;text-align:left;direction:ltr';
+  var lbl  = 'font-size:10px;font-weight:600;display:block;margin-bottom:3px';
+
+  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
+    + '<span style="font-size:13px;font-weight:700;color:var(--text-primary)">ردیف‌های هزینه</span>'
+    + '<button onclick="_msAddExpense()" style="border:none;background:#7c3aed;color:#fff;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;font-weight:700">+ افزودن ردیف</button>'
+    + '</div>'
+    // legend
+    + '<div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
+    + '<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#5b21b6"><span style="width:10px;height:10px;border-radius:50%;background:#7c3aed;display:inline-block"></span>از تنخواه</span>'
+    + '<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#065f46"><span style="width:10px;height:10px;border-radius:50%;background:#10b981;display:inline-block"></span>پرداخت شرکت</span>'
+    + '<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#b45309"><span style="width:10px;height:10px;border-radius:50%;background:#f59e0b;display:inline-block"></span>از جیب کارشناس</span>'
     + '</div>';
+
   if (!ms.expenses.length) {
-    html += '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:12px;background:var(--bg-raised);border-radius:8px">هنوز هزینه‌ای ثبت نشده.</div>';
+    html += '<div style="text-align:center;padding:28px;color:var(--text-muted);font-size:12px;background:var(--bg-raised);border-radius:8px">هنوز هزینه‌ای ثبت نشده. با دکمه «+ افزودن ردیف» شروع کنید.</div>';
   } else {
-    var total = ms.expenses.reduce(function(s, e) { return s + (parseFloat(e.amount) || 0); }, 0);
-    html += '<div style="display:flex;flex-direction:column;gap:8px">';
+    html += '<div style="display:flex;flex-direction:column;gap:10px">';
     ms.expenses.forEach(function(ex, i) {
-      html += '<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:10px">'
-        + '<div style="display:grid;grid-template-columns:1fr 1fr 120px auto;gap:6px;margin-bottom:6px;align-items:end">'
-        + '<div><label style="font-size:10px;color:var(--text-muted)">عنوان</label><input style="' + inp + '" value="' + esc(ex.title || '') + '" oninput="_msExpField(' + i + ',\'title\',this.value)"></div>'
-        + '<div><label style="font-size:10px;color:var(--text-muted)">مبلغ (ریال)</label><input type="number" style="' + inp + '" value="' + (ex.amount || 0) + '" oninput="_msExpField(' + i + ',\'amount\',this.value)"></div>'
-        + '<div><label style="font-size:10px;color:var(--text-muted)">دسته</label><select style="' + inp + '" onchange="_msExpField(' + i + ',\'cat\',this.value)">'
-        + cats.map(function(c) { return '<option' + (ex.cat === c ? ' selected' : '') + '>' + c + '</option>'; }).join('')
+      var rowTotal = (parseFloat(ex.tankhah)||0) + (parseFloat(ex.company)||0) + (parseFloat(ex.self)||0);
+      // backward compat: if old record with only amount, show it in tankhah
+      if (!rowTotal && ex.amount) rowTotal = parseFloat(ex.amount)||0;
+      html += '<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:10px;overflow:hidden">'
+        // ── row header ──
+        + '<div style="display:grid;grid-template-columns:1fr 120px 140px auto;gap:6px;padding:8px 10px;background:var(--bg-card);border-bottom:1px solid var(--border);align-items:end">'
+        + '<div><label style="' + lbl + 'color:var(--text-secondary)">عنوان هزینه</label>'
+        + '<input style="' + inp.replace('direction:ltr','direction:rtl') + ';font-size:12px" value="' + esc(ex.title||'') + '" placeholder="شرح هزینه..." oninput="_msExpField(' + i + ',\'title\',this.value)"></div>'
+        + '<div><label style="' + lbl + 'color:var(--text-secondary)">دسته‌بندی</label>'
+        + '<select style="' + inp.replace('direction:ltr','direction:rtl') + '" onchange="_msExpField(' + i + ',\'cat\',this.value)">'
+        + cats.map(function(c){return '<option'+(ex.cat===c?' selected':'')+'>'+c+'</option>';}).join('')
         + '</select></div>'
-        + '<div style="display:flex;align-items:flex-end"><button onclick="_msDelExpense(' + i + ')" style="border:none;background:#fee2e2;color:#dc2626;padding:6px 8px;border-radius:5px;cursor:pointer;font-size:11px">حذف</button></div>'
+        + '<div><label style="' + lbl + 'color:var(--text-secondary)">تاریخ</label>'
+        + '<input style="' + inp + '" value="' + esc(ex.date||'') + '" placeholder="YYYY/MM/DD" oninput="_msExpField(' + i + ',\'date\',this.value)"></div>'
+        + '<div style="display:flex;align-items:flex-end">'
+        + '<button onclick="_msDelExpense(' + i + ')" style="border:none;background:#fee2e2;color:#dc2626;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px;white-space:nowrap">🗑 حذف</button>'
         + '</div>'
-        + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">'
-        + '<div><label style="font-size:10px;color:var(--text-muted)">تاریخ</label><input style="' + inp + '" value="' + esc(ex.date || '') + '" placeholder="YYYY/MM/DD" oninput="_msExpField(' + i + ',\'date\',this.value)"></div>'
-        + '<div><label style="font-size:10px;color:var(--text-muted)">توضیح</label><input style="' + inp + '" value="' + esc(ex.note || '') + '" oninput="_msExpField(' + i + ',\'note\',this.value)"></div>'
         + '</div>'
-        + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
+        // ── 3 payment columns ──
+        + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:1px solid var(--border)">'
+        // tankhah
+        + '<div style="padding:10px;border-left:1px solid var(--border)">'
+        + '<div style="display:flex;align-items:center;gap:5px;margin-bottom:5px">'
+        + '<span style="width:8px;height:8px;border-radius:50%;background:#7c3aed;display:inline-block"></span>'
+        + '<span style="font-size:11px;font-weight:700;color:#5b21b6">از تنخواه</span></div>'
+        + '<input type="number" min="0" style="' + inp + ';background:#faf5ff;border-color:#c4b5fd" value="' + (ex.tankhah||0) + '" oninput="_msExpField(' + i + ',\'tankhah\',this.value)" placeholder="0">'
+        + '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">مبلغ تنخواه مصرف‌شده</div>'
+        + '</div>'
+        // company
+        + '<div style="padding:10px;border-left:1px solid var(--border)">'
+        + '<div style="display:flex;align-items:center;gap:5px;margin-bottom:5px">'
+        + '<span style="width:8px;height:8px;border-radius:50%;background:#10b981;display:inline-block"></span>'
+        + '<span style="font-size:11px;font-weight:700;color:#065f46">پرداخت شرکت</span></div>'
+        + '<input type="number" min="0" style="' + inp + ';background:#f0fdf4;border-color:#86efac" value="' + (ex.company||0) + '" oninput="_msExpField(' + i + ',\'company\',this.value)" placeholder="0">'
+        + '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">پرداخت مستقیم شرکت</div>'
+        + '</div>'
+        // self
+        + '<div style="padding:10px">'
+        + '<div style="display:flex;align-items:center;gap:5px;margin-bottom:5px">'
+        + '<span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block"></span>'
+        + '<span style="font-size:11px;font-weight:700;color:#b45309">از جیب کارشناس</span></div>'
+        + '<input type="number" min="0" style="' + inp + ';background:#fffbeb;border-color:#fcd34d" value="' + (ex.self||0) + '" oninput="_msExpField(' + i + ',\'self\',this.value)" placeholder="0">'
+        + '<div style="font-size:10px;color:var(--text-muted);margin-top:3px">پرداخت شخصی (قابل تسویه)</div>'
+        + '</div>'
+        + '</div>'
+        // ── row footer: total + note + files ──
+        + '<div style="padding:8px 10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+        + '<span style="font-size:12px;font-weight:700;color:var(--text-primary)">جمع ردیف: '
+        + '<span style="color:#7c3aed">' + new Intl.NumberFormat('fa-IR').format(rowTotal) + ' ریال</span></span>'
+        + '<div style="flex:1;min-width:140px"><input style="' + inp.replace('direction:ltr','direction:rtl') + ';font-size:11px" value="' + esc(ex.note||'') + '" placeholder="توضیح اختیاری..." oninput="_msExpField(' + i + ',\'note\',this.value)"></div>';
       if (ex.files && ex.files.length) {
-        ex.files.forEach(function(f, fi) {
+        ex.files.forEach(function(f,fi){
           html += '<span style="display:inline-flex;align-items:center;gap:4px;background:#e0e7ff;padding:2px 8px;border-radius:12px;font-size:11px">'
             + '📎 ' + esc(f.name)
-            + '<button onclick="_msDelExpFile(' + i + ',' + fi + ')" style="border:none;background:transparent;color:#dc2626;cursor:pointer;font-size:10px;padding:0 2px">×</button>'
+            + '<button onclick="_msDelExpFile('+i+','+fi+')" style="border:none;background:transparent;color:#dc2626;cursor:pointer;font-size:10px;padding:0 2px">×</button>'
             + '</span>';
         });
       }
-      html += '<label style="cursor:pointer;background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:3px 10px;border-radius:12px;font-size:11px">'
-        + '📎 پیوست فایل<input type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none" onchange="_msUploadFile(' + i + ',this)">'
-        + '</label>'
+      html += '<label style="cursor:pointer;background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:3px 10px;border-radius:12px;font-size:11px;white-space:nowrap">'
+        + '📎 پیوست<input type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none" onchange="_msUploadFile('+i+',this)"></label>'
         + '</div></div>';
     });
-    html += '</div>'
-      + '<div style="margin-top:12px;padding:10px;background:#f0fdf4;border-radius:6px;display:flex;justify-content:space-between;align-items:center">'
-      + '<span style="font-size:12px;font-weight:600;color:var(--text-secondary)">جمع کل هزینه‌ها:</span>'
-      + '<span style="font-size:14px;font-weight:700;color:#065f46">' + new Intl.NumberFormat('fa-IR').format(total) + ' ریال</span>'
-      + '</div>';
+    html += '</div>';
+
+    // ── grand summary ──
+    var totTankhah = ms.expenses.reduce(function(s,e){return s+(parseFloat(e.tankhah)||0);},0);
+    var totCompany = ms.expenses.reduce(function(s,e){return s+(parseFloat(e.company)||0);},0);
+    var totSelf    = ms.expenses.reduce(function(s,e){return s+(parseFloat(e.self)||0);},0);
+    // backward compat: old records with only amount
+    ms.expenses.forEach(function(e){
+      if (!e.tankhah && !e.company && !e.self && e.amount) totTankhah += parseFloat(e.amount)||0;
+    });
+    var grandTotal = totTankhah + totCompany + totSelf;
+    var fmt = function(n){ return new Intl.NumberFormat('fa-IR').format(n); };
+
+    html += '<div style="margin-top:14px;border-radius:10px;overflow:hidden;border:2px solid #7c3aed">'
+      + '<div style="background:#7c3aed;color:#fff;padding:8px 14px;font-size:12px;font-weight:700">📊 خلاصه مالی ماموریت</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;background:var(--bg-card)">'
+      + '<div style="padding:12px;border-left:1px solid var(--border);text-align:center">'
+      + '<div style="font-size:10px;color:#5b21b6;font-weight:600;margin-bottom:4px">💜 از تنخواه</div>'
+      + '<div style="font-size:15px;font-weight:700;color:#5b21b6">' + fmt(totTankhah) + '</div>'
+      + '<div style="font-size:10px;color:var(--text-muted)">ریال</div></div>'
+      + '<div style="padding:12px;border-left:1px solid var(--border);text-align:center">'
+      + '<div style="font-size:10px;color:#065f46;font-weight:600;margin-bottom:4px">💚 پرداخت شرکت</div>'
+      + '<div style="font-size:15px;font-weight:700;color:#065f46">' + fmt(totCompany) + '</div>'
+      + '<div style="font-size:10px;color:var(--text-muted)">ریال</div></div>'
+      + '<div style="padding:12px;text-align:center">'
+      + '<div style="font-size:10px;color:#b45309;font-weight:600;margin-bottom:4px">🟡 از جیب کارشناس</div>'
+      + '<div style="font-size:15px;font-weight:700;color:#b45309">' + fmt(totSelf) + '</div>'
+      + '<div style="font-size:10px;color:var(--text-muted)">ریال (قابل تسویه)</div></div>'
+      + '</div>'
+      + '<div style="background:#f5f3ff;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;border-top:1px solid #ddd6fe">'
+      + '<span style="font-size:12px;font-weight:600;color:var(--text-secondary)">جمع کل هزینه‌های ماموریت</span>'
+      + '<span style="font-size:16px;font-weight:700;color:#4c1d95">' + fmt(grandTotal) + ' <span style="font-size:12px;font-weight:500">ریال</span></span>'
+      + '</div></div>';
   }
   return html;
 }
@@ -11524,7 +11595,7 @@ function _msBuildExpensesTab() {
 function _msAddExpense() {
   if (!_msCurrent) return;
   _msCollectFormData();
-  _msCurrent.ms.expenses.push({id: Date.now(), title: '', amount: 0, cat: 'سایر', date: todayStr(), note: '', files: []});
+  _msCurrent.ms.expenses.push({id: Date.now(), title: '', tankhah: 0, company: 0, self: 0, cat: 'سایر', date: todayStr(), note: '', files: []});
   _msCurrent.tab = 'expenses';
   var modal = document.getElementById('missionDetailModal');
   if (modal) { var body = modal.querySelector('.m-body'); if (body) body.innerHTML = _msBuildTabs() + _msGetTabContent(); }
@@ -11539,9 +11610,9 @@ function _msDelExpense(idx) {
 
 function _msExpField(idx, field, val) {
   if (!_msCurrent || !_msCurrent.ms.expenses[idx]) return;
-  _msCurrent.ms.expenses[idx][field] = field === 'amount' ? parseFloat(val) || 0 : val;
+  var numFields = ['tankhah','company','self','amount'];
+  _msCurrent.ms.expenses[idx][field] = numFields.indexOf(field) >= 0 ? parseFloat(val)||0 : val;
 }
-
 function _msUploadFile(expIdx, input) {
   if (!input.files || !input.files.length || !_msCurrent) return;
   var file = input.files[0];
@@ -11584,10 +11655,14 @@ function _msBuildReportTab() {
   var ms = _msCurrent.ms;
   var ctrs = ms.centers || [];
   var exps = ms.expenses || [];
-  var total = exps.reduce(function(s, e) { return s + (parseFloat(e.amount) || 0); }, 0);
+  var _expAmt = function(e){ return (parseFloat(e.tankhah)||0)+(parseFloat(e.company)||0)+(parseFloat(e.self)||0) || (parseFloat(e.amount)||0); };
+  var total = exps.reduce(function(s, e) { return s + _expAmt(e); }, 0);
+  var totTankhah = exps.reduce(function(s,e){return s+(parseFloat(e.tankhah)||0);},0);
+  var totCompany = exps.reduce(function(s,e){return s+(parseFloat(e.company)||0);},0);
+  var totSelf    = exps.reduce(function(s,e){return s+(parseFloat(e.self)||0);},0);
   var bycat = {};
   exps.forEach(function(e) {
-    bycat[e.cat || 'سایر'] = (bycat[e.cat || 'سایر'] || 0) + (parseFloat(e.amount) || 0);
+    bycat[e.cat || 'سایر'] = (bycat[e.cat || 'سایر'] || 0) + _expAmt(e);
   });
   // effectiveness: centers that changed status or got new notes in the month
   var mBounds = jMonthBounds(ms.month);
@@ -11602,11 +11677,11 @@ function _msBuildReportTab() {
   var costPerCenter = ctrs.length ? Math.round(total / ctrs.length) : 0;
   var html = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
     + _msStatCard('🏥 مراکز ویزیت', ctrs.length, '')
-    + _msStatCard('✅ مراکز با فعالیت', effectiveCtr, '')
+    + _msStatCard('✅ با فعالیت', effectiveCtr, '')
     + _msStatCard('💰 هزینه کل', new Intl.NumberFormat('fa-IR').format(total), 'ریال')
-    + _msStatCard('💳 هزینه/مرکز', new Intl.NumberFormat('fa-IR').format(costPerCenter), 'ریال')
-    + _msStatCard('📎 فایل‌های پیوست', exps.reduce(function(s,e){return s+(e.files?e.files.length:0);},0), '')
-    + _msStatCard('📅 مدت', (ms.startDate && ms.endDate ? (ms.endDate > ms.startDate ? '— روز' : '۱ روز') : '—'), '')
+    + _msStatCard('💜 از تنخواه', new Intl.NumberFormat('fa-IR').format(totTankhah), 'ریال')
+    + _msStatCard('💚 پرداخت شرکت', new Intl.NumberFormat('fa-IR').format(totCompany), 'ریال')
+    + _msStatCard('🟡 از جیب کارشناس', new Intl.NumberFormat('fa-IR').format(totSelf), 'ریال')
     + '</div>';
   if (Object.keys(bycat).length) {
     html += '<div style="margin-bottom:14px"><div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:8px">تفکیک هزینه بر اساس دسته:</div>';
