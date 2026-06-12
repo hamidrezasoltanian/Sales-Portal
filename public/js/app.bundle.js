@@ -2700,6 +2700,14 @@ function renderProvTable(){
   var data=getFiltered();
   var today=todayStr();
   clearCenterSelection();
+  // Mobile: show card list instead of table
+  if(window.innerWidth<640){
+    var _mt=document.getElementById('mainTable');if(_mt)_mt.style.display='none';
+    var _ml=document.getElementById('mobCtrList');if(_ml)_ml.style.display='';
+    renderMobileList(data,rtype,today);return;
+  } else {
+    var _ml2=document.getElementById('mobCtrList');if(_ml2)_ml2.style.display='none';
+  }
   // Recent centers quick access bar
   (function(){var wrap=tbl?tbl.parentElement:null;if(wrap)_renderRecentCenters(wrap);})();
   // Pin sort: pinned at top, then apply _sortField within each group
@@ -3116,6 +3124,64 @@ function toggleTag(type,id,tagId){
 }
 function closeTagMenu(){var m=document.getElementById('tagMenu');if(m)m.remove();document.removeEventListener('click',closeTagMenuOutside);}
 function closeTagMenuOutside(e){var m=document.getElementById('tagMenu');if(m&&!m.contains(e.target))closeTagMenu();}
+
+function renderMobileList(data,rtype,today){
+  var el=document.getElementById('mobCtrList');
+  if(!el)return;
+  var tbl=document.getElementById('mainTable');
+  var wrap=tbl?tbl.parentElement:null;
+  if(wrap)_renderRecentCenters(wrap);
+  if(!data.length){el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8;font-size:14px">نتیجه‌ای یافت نشد</div>';return;}
+  el.innerHTML=data.map(function(r){
+    var e=getE(rtype,r.id);
+    var st=e.status||'بدون تماس';var sc=stCls(st);
+    var pot=e.potential!==undefined?e.potential:r.potential;
+    var fd=e.followupDate||'';
+    var fdCls='mob-fd-inp'+(fd&&fd<today?' ov':fd&&fd===today?' today':'');
+    var rowCls='mob-ctr-card';
+    if(st==='قرارداد بسته شد')rowCls+=' row-contracted';
+    else if(isOverdue(rtype,r.id))rowCls+=' row-overdue';
+    else if(fd&&fd<=addDaysToJalali(today,3))rowCls+=' row-upcoming';
+    else if(isStalled(rtype,r.id))rowCls+=' row-stalled';
+    var ownerName=USERS[e.owner||r.owner||'']||e.owner||r.owner||'';
+    var ownerColor=window.umGetColor?umGetColor(e.owner||r.owner||''):'#e2e8f0';
+    var notes=DB.notes[recK(rtype,r.id)]||[];
+    var lastTs=e._lastActivity||e._ts||0;
+    var daysSince=lastTs?Math.floor((nowTs()-lastTs)/86400000):null;
+    var lastCls=daysSince===null?'color:var(--text-muted)':daysSince===0?'color:#16a34a;font-weight:600':daysSince<=7?'color:#0ea5e9':daysSince<=30?'color:#f59e0b':'color:#dc2626;font-weight:600';
+    var lastLbl=daysSince===null?'—':daysSince===0?'امروز':daysSince+' روز پیش';
+    var firstPhone=e.phones&&e.phones.length?e.phones[0]:'';
+    return'<div class="'+rowCls+'" data-rowid="'+r.id+'">'
+      +'<div class="mob-ctr-r1">'
+        +'<button class="mob-ctr-name" onclick="openCenterModal(\''+rtype+'\',\''+r.id+'\')" title="باز کردن مرکز">'+esc(r.name)+'</button>'
+        +(e.competitor?'<span title="رقیب: '+esc(e.competitor)+'" style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:9px;padding:1px 6px;font-size:10px;font-weight:700;margin-right:4px">🤖</span>':'')
+        +(isOverdue(rtype,r.id)?'<span title="پیگیری معوق" style="font-size:11px">🟠</span>':'')
+        +(isStalled(rtype,r.id)&&st!=='قرارداد بسته شد'?'<span title="۳۰+ روز بدون فعالیت" style="font-size:11px">🔴</span>':'')
+        +(e.biopsyScore?'<span title="امتیاز بیوپسی" style="background:#ecfdf5;color:#065f46;border:1px solid #6ee7b7;border-radius:9px;padding:1px 6px;font-size:10px;font-weight:700">🔬 '+e.biopsyScore+'</span>':'')
+        +'<span class="mob-pot pot-'+pot+'">P'+pot+'</span>'
+      +'</div>'
+      +'<div class="mob-ctr-r2">'
+        +'<select class="mob-st-sel '+sc+'" onchange="onStatus(\''+rtype+'\',\''+r.id+'\',this);this.closest(\'.mob-ctr-card\').className=\'mob-ctr-card\'+(this.value===\'قرارداد بسته شد\'?\' row-contracted\':\'\')">'
+          +STATUS_LIST.map(function(s,i){return'<option class="'+STATUS_CLS[i]+'"'+(s===st?' selected':'')+'>'+s+'</option>';}).join('')+'</select>'
+        +(ownerName?'<span class="mob-owner-pill" style="background:'+ownerColor+'">'+esc(ownerName)+'</span>':'')
+      +'</div>'
+      +'<div class="mob-ctr-r3">'
+        +'<input type="text" class="'+fdCls+'" value="'+fd+'" readonly placeholder="تاریخ پیگیری" onclick="openJDP(this,function(v){setE(\''+rtype+'\',\''+r.id+'\',\'followupDate\',v);this.value=v;renderBanner();renderMobileList(getFiltered(),\''+rtype+'\',todayStr());}.bind(this))" style="cursor:pointer">'
+        +(firstPhone?'<a href="'+_phoneHref(firstPhone)+'" title="'+_phoneTitle()+'" onclick="event.stopPropagation()" class="mob-act-btn" style="text-decoration:none">📞</a>':'')
+        +'<button class="mob-act-btn" onclick="openPreCallBrief(\''+rtype+'\',\''+r.id+'\')" title="خلاصه قبل تماس">🎯</button>'
+        +'<button class="mob-act-btn'+(notes.length?' primary':'')+'" onclick="openNotes(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')" title="یادداشت‌ها">📝'+(notes.length?' '+notes.length:'')+'</button>'
+        +'<button class="mob-act-btn" onclick="quickCallLog(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')" title="ثبت سریع تماس">📋</button>'
+        +(function(){var _rk2=rtype+'_'+r.id;var _inWk=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk2;});return '<button class="mob-act-btn'+(_inWk?' primary':'')+'" onclick="openAssignWeekForCenter(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')" title="افزودن به برنامه هفته">'+(_inWk?'↪':'📅')+'</button>';}())
+        +'<span style="font-size:10px;'+lastCls+';margin-right:auto;padding-right:4px">'+lastLbl+'</span>'
+      +'</div>'
+    +'</div>';
+  }).join('');
+  rebuildFilters();
+  buildPresetSelector();
+  _renderCenterStatsBar(data,rtype);
+  var _rc=document.getElementById('rowCount');if(_rc)_rc.textContent='نمایش '+data.length+' مرکز';
+}
+
 function createTagPrompt(){
   closeTagMenu();
   var name=prompt('نام برچسب جدید:');if(!name||!name.trim())return;
