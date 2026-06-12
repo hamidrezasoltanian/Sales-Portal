@@ -7,7 +7,8 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "setup": "node server/setup.js",
-    "migrate": "node server/migrate.js"
+    "migrate": "node server/migrate.js",
+    "test": "node tests/behavioral.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

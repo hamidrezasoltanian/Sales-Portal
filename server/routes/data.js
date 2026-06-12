@@ -16,7 +16,7 @@ router.get('/db', async (req, res) => {
   try {
     const result = await query("SELECT value, updated_at FROM app_data WHERE key = 'main'");
     if (result.rows.length === 0) {
-      return res.json({});
+      return res.json({ _serverTs: null });
     }
     const data = result.rows[0].value;
     const _serverTs = result.rows[0].updated_at ? result.rows[0].updated_at.toISOString() : null;
