@@ -23,7 +23,7 @@ router.post('/files', requireAuth, upload.single('file'), async (req, res) => {
       `INSERT INTO mission_files (mission_id, expense_id, filename, mime_type, file_size, data, uploaded_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id, filename, mime_type, file_size, uploaded_by, created_at`,
-      [String(missionId), String(expenseId || ''), f.originalname, f.mimetype, f.size, f.buffer, req.user.username]
+      [String(missionId), expenseId ? String(expenseId) : null, f.originalname, f.mimetype, f.size, f.buffer, req.user.username]
     );
     res.json({ ok: true, id: r.rows[0].id, file: r.rows[0] });
   } catch (e) {
@@ -89,6 +89,7 @@ router.delete('/files/:id', requireAuth, async (req, res) => {
     if (!deleted)  return res.status(403).json({ error: 'دسترسی مجاز نیست' });
     res.json({ ok: true });
   } catch (e) {
+    console.error('[missions/delete]', e.message);
     res.status(500).json({ error: 'خطای سرور' });
   }
 });
