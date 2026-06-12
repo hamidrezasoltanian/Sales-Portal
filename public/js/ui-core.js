@@ -106,6 +106,8 @@ function openProvince(provId){
   var act=document.getElementById('allCentersToggle');if(act)act.style.display='none';
   document.getElementById('dash').style.display='none';
   document.getElementById('banner').style.display='none';
+  var _udp=document.getElementById('userDashPanel');if(_udp)_udp.style.display='none';
+  window.scrollTo(0,0);
   document.getElementById('filtersBar').style.display='flex';
   document.getElementById('tableArea').style.display='';
   // مطمئن شو table-wrap مخفی نیست
