@@ -4022,11 +4022,11 @@ function openCenterAudit(centerKey, centerName) {
   });
   // notes
   (DB.notes[rtype+'_'+rid]||[]).forEach(function(n){
-    var dp=n.date?n.date.split('/').map(Number):null;
+    var dp=n.date?n.date.split('/').map(Number):(n.at?(function(){var _nd=new Date(n.at);return g2j(_nd.getFullYear(),_nd.getMonth()+1,_nd.getDate());}()):null);
     var g=dp?j2g(dp[0],dp[1],dp[2]):[2000,1,1];
     var ts=dp?new Date(g[0],g[1]-1,g[2]).getTime():0;
     events.push({ts:ts,type:'note',icon:'📝',color:'#0ea5e9',
-      title:'یادداشت',detail:String(n.text||'').substring(0,60),by:n.user,at:null,dateStr:n.date||''});
+      title:'یادداشت',detail:String(n.text||'').substring(0,60),by:n.by||n.user,at:null,dateStr:n.date||(n.at?fmtDate(n.at):'')||''});
   });
   // weekEntries done
   Object.values(DB.weekEntries||{}).filter(function(we){return we.recKey===centerKey&&we.done;}).forEach(function(we){
@@ -4418,8 +4418,8 @@ function _renderNotesList(notes){
     return '<div class="note-item" style="'+(isFirst?'border-right:3px solid #6366f1;':'')+'padding-right:8px;margin-bottom:8px">'
       +'<div style="font-size:12px;line-height:1.6;color:var(--text-primary)">'+lines+'</div>'
       +tagBadges
-      +'<div class="note-meta" style="margin-top:3px"><span style="font-weight:600">'+esc(n.user||'')+'</span>'
-      +'<span style="margin-right:6px">'+esc(n.date||'')+'</span></div></div>';
+      +'<div class="note-meta" style="margin-top:3px"><span style="font-weight:600">'+esc(n.by||n.user||'')+'</span>'
+      +'<span style="margin-right:6px">'+esc(n.date||(n.at?fmtDate(n.at):'')||'')+'</span></div></div>';
   }).join('');
 }
 
@@ -4591,7 +4591,7 @@ function renderNotesList(type,id){
   return notes.slice().reverse().map(function(n,i){
     var realIdx=notes.length-1-i;
     return'<div class="note-item">'+esc(n.text)
-      +'<div class="note-meta"><span>'+esc(n.user)+'</span><span>'+n.date+'</span>'
+      +'<div class="note-meta"><span>'+esc(n.by||n.user||'')+'</span><span>'+(n.date||fmtDate(n.at)||'')+'</span>'
       +'<button class="note-del" onclick="delNoteAndRefresh(\''+type+'\',\''+id+'\','+realIdx+')">🗑</button>'
       +'</div></div>';
   }).join('');
@@ -7566,12 +7566,13 @@ function renderActivity(){
     // ۲. یادداشت‌ها
     Object.keys(DB.notes||{}).forEach(function(k){
       (DB.notes[k]||[]).forEach(function(n){
-        if(!n||!n.ts)return;
+        if(!n||(!n.ts&&!n.at))return;
+        var _nts=n.ts||(n.at?new Date(n.at).getTime():0);
         var pts=k.split('_');var tp=pts[0];var id=pts.slice(1).join('_');
         var name=id;
         if(tp==='center'){var c=CENTERS.find(function(x){return x.id===id;});if(c)name=c.name;}
         else if(tp==='pc'){var ex=(DB.extra||[]).find(function(x){return x.id===id;});if(ex)name=ex.name;}
-        entries.push({ts:n.ts,name:name,desc:(n.text||'').slice(0,60),icon:'💬',user:n.user||''});
+        entries.push({ts:_nts,name:name,desc:(n.text||'').slice(0,60),icon:'💬',user:n.by||n.user||''});
       });
     });
     // ۳. هفته‌های انجام‌شده

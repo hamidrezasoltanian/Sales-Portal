@@ -22,7 +22,7 @@ function renderNotesList(type,id){
   return notes.slice().reverse().map(function(n,i){
     var realIdx=notes.length-1-i;
     return'<div class="note-item">'+esc(n.text)
-      +'<div class="note-meta"><span>'+esc(n.user)+'</span><span>'+n.date+'</span>'
+      +'<div class="note-meta"><span>'+esc(n.by||n.user||'')+'</span><span>'+(n.date||fmtDate(n.at)||'')+'</span>'
       +'<button class="note-del" onclick="delNoteAndRefresh(\''+type+'\',\''+id+'\','+realIdx+')">🗑</button>'
       +'</div></div>';
   }).join('');

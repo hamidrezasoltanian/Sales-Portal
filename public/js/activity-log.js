@@ -44,12 +44,13 @@ function renderActivity(){
     // ۲. یادداشت‌ها
     Object.keys(DB.notes||{}).forEach(function(k){
       (DB.notes[k]||[]).forEach(function(n){
-        if(!n||!n.ts)return;
+        if(!n||(!n.ts&&!n.at))return;
+        var _nts=n.ts||(n.at?new Date(n.at).getTime():0);
         var pts=k.split('_');var tp=pts[0];var id=pts.slice(1).join('_');
         var name=id;
         if(tp==='center'){var c=CENTERS.find(function(x){return x.id===id;});if(c)name=c.name;}
         else if(tp==='pc'){var ex=(DB.extra||[]).find(function(x){return x.id===id;});if(ex)name=ex.name;}
-        entries.push({ts:n.ts,name:name,desc:(n.text||'').slice(0,60),icon:'💬',user:n.user||''});
+        entries.push({ts:_nts,name:name,desc:(n.text||'').slice(0,60),icon:'💬',user:n.by||n.user||''});
       });
     });
     // ۳. هفته‌های انجام‌شده

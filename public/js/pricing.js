@@ -738,11 +738,11 @@ function openCenterAudit(centerKey, centerName) {
   });
   // notes
   (DB.notes[rtype+'_'+rid]||[]).forEach(function(n){
-    var dp=n.date?n.date.split('/').map(Number):null;
+    var dp=n.date?n.date.split('/').map(Number):(n.at?(function(){var _nd=new Date(n.at);return g2j(_nd.getFullYear(),_nd.getMonth()+1,_nd.getDate());}()):null);
     var g=dp?j2g(dp[0],dp[1],dp[2]):[2000,1,1];
     var ts=dp?new Date(g[0],g[1]-1,g[2]).getTime():0;
     events.push({ts:ts,type:'note',icon:'📝',color:'#0ea5e9',
-      title:'یادداشت',detail:String(n.text||'').substring(0,60),by:n.user,at:null,dateStr:n.date||''});
+      title:'یادداشت',detail:String(n.text||'').substring(0,60),by:n.by||n.user,at:null,dateStr:n.date||(n.at?fmtDate(n.at):'')||''});
   });
   // weekEntries done
   Object.values(DB.weekEntries||{}).filter(function(we){return we.recKey===centerKey&&we.done;}).forEach(function(we){
@@ -1134,8 +1134,8 @@ function _renderNotesList(notes){
     return '<div class="note-item" style="'+(isFirst?'border-right:3px solid #6366f1;':'')+'padding-right:8px;margin-bottom:8px">'
       +'<div style="font-size:12px;line-height:1.6;color:var(--text-primary)">'+lines+'</div>'
       +tagBadges
-      +'<div class="note-meta" style="margin-top:3px"><span style="font-weight:600">'+esc(n.user||'')+'</span>'
-      +'<span style="margin-right:6px">'+esc(n.date||'')+'</span></div></div>';
+      +'<div class="note-meta" style="margin-top:3px"><span style="font-weight:600">'+esc(n.by||n.user||'')+'</span>'
+      +'<span style="margin-right:6px">'+esc(n.date||(n.at?fmtDate(n.at):'')||'')+'</span></div></div>';
   }).join('');
 }
 
