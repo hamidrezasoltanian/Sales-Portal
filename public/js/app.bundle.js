@@ -11438,7 +11438,8 @@ function _msCtrSearch(q) {
   results = results.slice(0, 12);
   if (!results.length) { el.innerHTML = '<div style="padding:8px 12px;font-size:12px;color:var(--text-muted)">نتیجه‌ای یافت نشد</div>'; el.style.display = 'block'; return; }
   el.innerHTML = results.map(function(r) {
-    var nm = esc(r.name).replace(new RegExp('(' + esc(q) + ')', 'i'), '<strong>$1</strong>');
+    var _qEsc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  var nm = esc(r.name).replace(new RegExp('(' + _qEsc + ')', 'i'), '<strong>$1</strong>');
     return '<div onclick="_msAddCenter(\'' + r.rtype + '\',\'' + r.id + '\',\'' + esc(r.name).replace(/'/g, "\\'") + '\')" '
       + 'style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border)" '
       + 'onmouseover="this.style.background=\'var(--bg-hover)\'" onmouseout="this.style.background=\'\'">'
@@ -11664,16 +11665,15 @@ function _msBuildReportTab() {
   exps.forEach(function(e) {
     bycat[e.cat || 'سایر'] = (bycat[e.cat || 'سایر'] || 0) + _expAmt(e);
   });
-  // effectiveness: centers that changed status or got new notes in the month
+  // effectiveness: build active-rkey set once, then O(1) per center
   var mBounds = jMonthBounds(ms.month);
-  var effectiveCtr = 0;
-  ctrs.forEach(function(c) {
-    var hasActivity = (DB.changeLog || []).some(function(ch) {
-      var ts = new Date(ch.at).getTime();
-      return ch.rkey === c.rtype + '_' + c.id && ts >= mBounds.startTs && ts <= mBounds.endTs;
-    });
-    if (hasActivity) effectiveCtr++;
+  var _activeRkeys = {};
+  (DB.changeLog || []).forEach(function(ch) {
+    var ts = new Date(ch.at).getTime();
+    if (ts >= mBounds.startTs && ts <= mBounds.endTs) _activeRkeys[ch.rkey] = true;
   });
+  var effectiveCtr = 0;
+  ctrs.forEach(function(c) { if (_activeRkeys[c.rtype + '_' + c.id]) effectiveCtr++; });
   var costPerCenter = ctrs.length ? Math.round(total / ctrs.length) : 0;
   var html = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
     + _msStatCard('🏥 مراکز ویزیت', ctrs.length, '')
@@ -11700,10 +11700,7 @@ function _msBuildReportTab() {
     html += '<div><div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:8px">مراکز ویزیت‌شده:</div>'
       + '<div style="display:flex;flex-wrap:wrap;gap:6px">'
       + ctrs.map(function(c) {
-          var act = (DB.changeLog || []).some(function(ch) {
-            var ts = new Date(ch.at).getTime();
-            return ch.rkey === c.rtype + '_' + c.id && ts >= mBounds.startTs && ts <= mBounds.endTs;
-          });
+          var act = !!_activeRkeys[c.rtype + '_' + c.id];
           return '<span style="padding:3px 10px;border-radius:12px;font-size:11px;background:' + (act ? '#d1fae5' : '#f0f0f0') + ';color:' + (act ? '#065f46' : 'var(--text-secondary)') + '">' + esc(c.name) + (act ? ' ✅' : '') + '</span>';
         }).join('')
       + '</div></div>';
@@ -11727,14 +11724,7 @@ function _msCollectFormData() {
   if (f('ms_startDate') !== null) ms.startDate = f('ms_startDate');
   if (f('ms_endDate') !== null) ms.endDate = f('ms_endDate');
   if (f('ms_note') !== null) ms.note = f('ms_note');
-  // collect expense fields live if on expenses tab
-  if (_msCurrent.tab === 'expenses') {
-    (ms.expenses || []).forEach(function(ex, i) {
-      ['title','amount','cat','date','note'].forEach(function(field) {
-        // fields are bound via oninput so already current
-      });
-    });
-  }
+  // expense fields sync live via oninput → _msExpField; nothing to collect here
 }
 
 function _msSave(done) {
@@ -11753,9 +11743,10 @@ function _msSave(done) {
 
 function _msDelete() {
   if (!_msCurrent) return;
-  var m = _msCurrent;
+  _msCollectFormData();
+  var ms = _msCurrent.ms;
   ensureKPIDB();
-  DB.missionLog = DB.missionLog.filter(function(l) { return !(l.userId === m.userId && l.month === m.month); });
+  DB.missionLog = DB.missionLog.filter(function(l) { return !(l.userId === ms.userId && l.month === ms.month); });
   saveDB();
   showToast('ماموریت حذف شد');
   closeModal('missionDetailModal');

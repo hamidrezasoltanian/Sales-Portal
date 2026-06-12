@@ -12,26 +12,37 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB per file
 });
 
-// POST /api/missions/files — upload files for a mission expense
-router.post('/files', requireAuth, upload.array('files', 10), async (req, res) => {
+// POST /api/missions/files — upload one file for a mission expense
+router.post('/files', requireAuth, upload.single('file'), async (req, res) => {
   const { missionId, expenseId } = req.body;
   if (!missionId) return res.status(400).json({ error: 'missionId الزامی است' });
-  if (!req.files || !req.files.length) return res.status(400).json({ error: 'فایلی ارسال نشده' });
+  if (!req.file) return res.status(400).json({ error: 'فایلی ارسال نشده' });
   try {
-    const inserted = [];
-    for (const f of req.files) {
-      const r = await query(
-        `INSERT INTO mission_files (mission_id, expense_id, filename, mime_type, file_size, data, uploaded_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, filename, mime_type, file_size, uploaded_by, created_at`,
-        [String(missionId), String(expenseId || ''), f.originalname, f.mimetype, f.size, f.buffer, req.user.username]
-      );
-      inserted.push(r.rows[0]);
-    }
-    res.json({ ok: true, files: inserted });
+    const f = req.file;
+    const r = await query(
+      `INSERT INTO mission_files (mission_id, expense_id, filename, mime_type, file_size, data, uploaded_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, filename, mime_type, file_size, uploaded_by, created_at`,
+      [String(missionId), String(expenseId || ''), f.originalname, f.mimetype, f.size, f.buffer, req.user.username]
+    );
+    res.json({ ok: true, id: r.rows[0].id, file: r.rows[0] });
   } catch (e) {
     console.error('[missions/upload]', e.message);
     res.status(500).json({ error: 'خطای ذخیره فایل' });
+  }
+});
+
+// GET /api/missions/files/list/:missionId — list files for a mission
+// Must be registered BEFORE /files/:id to avoid route shadowing
+router.get('/files/list/:missionId', requireAuth, async (req, res) => {
+  try {
+    const r = await query(
+      'SELECT id, expense_id, filename, mime_type, file_size, uploaded_by, created_at FROM mission_files WHERE mission_id = $1 ORDER BY created_at ASC',
+      [req.params.missionId]
+    );
+    res.json({ files: r.rows });
+  } catch (e) {
+    res.status(500).json({ error: 'خطای سرور' });
   }
 });
 
@@ -55,26 +66,17 @@ router.get('/files/:id', requireAuth, async (req, res) => {
   }
 });
 
-// DELETE /api/missions/files/:id
+// DELETE /api/missions/files/:id — only the uploader (or a manager role) can delete
 router.delete('/files/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) return res.status(400).json({ error: 'شناسه نامعتبر' });
   try {
-    await query('DELETE FROM mission_files WHERE id = $1', [id]);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: 'خطای سرور' });
-  }
-});
-
-// GET /api/missions/files/list/:missionId — list files for a mission
-router.get('/files/list/:missionId', requireAuth, async (req, res) => {
-  try {
-    const r = await query(
-      'SELECT id, expense_id, filename, mime_type, file_size, uploaded_by, created_at FROM mission_files WHERE mission_id = $1 ORDER BY created_at ASC',
-      [req.params.missionId]
+    const result = await query(
+      'DELETE FROM mission_files WHERE id = $1 AND uploaded_by = $2 RETURNING id',
+      [id, req.user.username]
     );
-    res.json({ files: r.rows });
+    if (!result.rowCount) return res.status(403).json({ error: 'دسترسی مجاز نیست' });
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: 'خطای سرور' });
   }
