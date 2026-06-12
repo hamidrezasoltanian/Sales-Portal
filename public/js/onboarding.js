@@ -221,7 +221,7 @@ var _sseReconnectTimer = null;
 
 function initSSE() {
   if (_sse) return;
-  _sse = new EventSource('/api/events/stream');
+  _sse = new EventSource('/api/events/stream?cid='+_sseClientId);
   _sse.onmessage = function(e) {
     try {
       var data = JSON.parse(e.data);
@@ -240,9 +240,11 @@ function initSSE() {
 function _sseReloadDB(byUser) {
   fetch('/api/data/db').then(function(r){ return r.ok ? r.json() : null; }).then(function(d) {
     if (!d || typeof d !== 'object') return;
+    if (d._serverTs) _dbServerTs = d._serverTs;
     var merged = Object.assign({}, DB, d);
     merged.weekEntries = Object.assign({}, DB.weekEntries, d.weekEntries || {});
     merged.edits = Object.assign({}, DB.edits, d.edits || {});
+    delete merged._serverTs; delete merged._clientTs;
     Object.keys(merged).forEach(function(k) { DB[k] = merged[k]; });
     if (currentTab === 'weekplan') renderWeekPlan();
     else if (currentTab === 'provinces') { renderDashboard(); renderTable(); }

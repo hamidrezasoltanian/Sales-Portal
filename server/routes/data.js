@@ -109,7 +109,8 @@ router.put('/db', async (req, res) => {
     await client.query('COMMIT');
 
     const _serverTs = upserted.rows[0].updated_at.toISOString();
-    try { if (_broadcast) _broadcast('db-updated', { by: req.user.username, at: Date.now() }, req.user.username); } catch(e) {}
+    const _cid = req.headers['x-cid'] || '';
+    try { if (_broadcast) _broadcast('db-updated', { by: req.user.username, at: Date.now() }, _cid); } catch(e) {}
     return res.json({ ok: true, _serverTs });
   } catch (e) {
     await client.query('ROLLBACK').catch(function() {});
@@ -180,7 +181,8 @@ router.put('/mtr', async (req, res) => {
        ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
       [JSON.stringify(body), req.user.username]
     );
-    try { if (_broadcast) _broadcast('mtr-updated', { by: req.user.username, at: Date.now() }, req.user.username); } catch(e) {}
+    const _mtrCid = req.headers['x-cid'] || '';
+    try { if (_broadcast) _broadcast('mtr-updated', { by: req.user.username, at: Date.now() }, _mtrCid); } catch(e) {}
     return res.json({ ok: true });
   } catch (e) {
     console.error('[data/mtr PUT]', e.message);

@@ -12,7 +12,7 @@ router.get('/stream', requireAuth, (req, res) => {
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
-  const client = { res, username: req.user.username, id: Date.now() };
+  const client = { res, username: req.user.username, cid: req.query.cid || '', id: Date.now() };
   _clients.add(client);
   res.write(`data: ${JSON.stringify({ type: 'connected', username: req.user.username })}\n\n`);
 
@@ -22,10 +22,10 @@ router.get('/stream', requireAuth, (req, res) => {
   req.on('close', () => { _clients.delete(client); clearInterval(hb); });
 });
 
-function broadcast(type, data, excludeUsername) {
+function broadcast(type, data, excludeCid) {
   const msg = `data: ${JSON.stringify({ type, ...data })}\n\n`;
   _clients.forEach(c => {
-    if (c.username !== excludeUsername) {
+    if (!excludeCid || c.cid !== excludeCid) {
       try { c.res.write(msg); } catch(e) { _clients.delete(c); }
     }
   });

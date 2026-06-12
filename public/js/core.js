@@ -120,6 +120,7 @@ var _serverSynced=false;
 var _saveDebounceTimer=null;
 var _dbServerTs=null; // tracks server updated_at for conflict detection
 var _saveSeq=0; // sequence counter to ignore out-of-order fetch responses
+var _sseClientId=Math.random().toString(36).slice(2)+Date.now().toString(36); // unique per tab, used to exclude own SSE events
 
 async function loadDB(){
   var _spinner=document.getElementById('loadingSpinner');
@@ -154,7 +155,7 @@ function _saveDBNow(){
   var payload=JSON.parse(JSON.stringify(DB));
   if(_dbServerTs)payload._clientTs=_dbServerTs;
   var seq=++_saveSeq; // capture sequence; ignore late-resolving responses
-  return fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+  return fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json','X-Cid':_sseClientId},body:JSON.stringify(payload)})
     .then(function(r){
       if(r.status===409){
         showToast('⚠ کاربر دیگری تغییراتی ذخیره کرده — صفحه بارگذاری می‌شود',5000);

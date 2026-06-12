@@ -121,6 +121,7 @@ var _serverSynced=false;
 var _saveDebounceTimer=null;
 var _dbServerTs=null; // tracks server updated_at for conflict detection
 var _saveSeq=0; // sequence counter to ignore out-of-order fetch responses
+var _sseClientId=Math.random().toString(36).slice(2)+Date.now().toString(36); // unique per tab, used to exclude own SSE events
 
 async function loadDB(){
   var _spinner=document.getElementById('loadingSpinner');
@@ -155,7 +156,7 @@ function _saveDBNow(){
   var payload=JSON.parse(JSON.stringify(DB));
   if(_dbServerTs)payload._clientTs=_dbServerTs;
   var seq=++_saveSeq; // capture sequence; ignore late-resolving responses
-  return fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+  return fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json','X-Cid':_sseClientId},body:JSON.stringify(payload)})
     .then(function(r){
       if(r.status===409){
         showToast('⚠ کاربر دیگری تغییراتی ذخیره کرده — صفحه بارگذاری می‌شود',5000);
@@ -10382,7 +10383,7 @@ var _sseReconnectTimer = null;
 
 function initSSE() {
   if (_sse) return;
-  _sse = new EventSource('/api/events/stream');
+  _sse = new EventSource('/api/events/stream?cid='+_sseClientId);
   _sse.onmessage = function(e) {
     try {
       var data = JSON.parse(e.data);
@@ -10401,9 +10402,11 @@ function initSSE() {
 function _sseReloadDB(byUser) {
   fetch('/api/data/db').then(function(r){ return r.ok ? r.json() : null; }).then(function(d) {
     if (!d || typeof d !== 'object') return;
+    if (d._serverTs) _dbServerTs = d._serverTs;
     var merged = Object.assign({}, DB, d);
     merged.weekEntries = Object.assign({}, DB.weekEntries, d.weekEntries || {});
     merged.edits = Object.assign({}, DB.edits, d.edits || {});
+    delete merged._serverTs; delete merged._clientTs;
     Object.keys(merged).forEach(function(k) { DB[k] = merged[k]; });
     if (currentTab === 'weekplan') renderWeekPlan();
     else if (currentTab === 'provinces') { renderDashboard(); renderTable(); }
