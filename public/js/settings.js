@@ -172,7 +172,7 @@ function umSaveUser(userId){
     .then(function(d){
       if(payload.new_username){
         var nu=payload.new_username;
-        Object.keys(DB.edits).forEach(function(k){if(DB.edits[k].owner===userId)DB.edits[k].owner=nu;});
+        Object.keys(DB.edits||{}).forEach(function(k){if(DB.edits[k].owner===userId)DB.edits[k].owner=nu;});
         getAllProvinces().forEach(function(p){var e=getE(getProvType(p.id),p.id);if(e.owner===userId)setE(getProvType(p.id),p.id,'owner',nu);});
         saveDB();
       }

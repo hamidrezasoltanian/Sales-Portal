@@ -76,7 +76,7 @@ function getMissionMonth(userId,month){
 }
 function getAutoConversions(userId,month){
   var b=jMonthBounds(month);var n=0;
-  Object.keys(DB.edits).forEach(function(key){
+  Object.keys(DB.edits||{}).forEach(function(key){
     var e=DB.edits[key];
     if(e.status!=='قرارداد بسته شد')return;
     var owner=e.owner||_getOwnerForRecKey(key)||'';
@@ -88,7 +88,7 @@ function getAutoConversions(userId,month){
 }
 function getRetentionData(userId){
   var total=0,cust=0;
-  Object.keys(DB.edits).forEach(function(key){
+  Object.keys(DB.edits||{}).forEach(function(key){
     var e=DB.edits[key];
     var owner=e.owner||_getOwnerForRecKey(key)||'';
     if(owner!==userId)return;
@@ -161,7 +161,7 @@ function calcKPIs(userId,month){
 
   // auto-count touchpoints from DB.edits
   var touchedCenters={};
-  Object.keys(DB.edits).forEach(function(key){
+  Object.keys(DB.edits||{}).forEach(function(key){
     var e=DB.edits[key];
     var owner=e.owner||_getOwnerForRecKey(key)||'';
     if(owner!==userId)return;
@@ -679,7 +679,7 @@ function calcCenterRecommendations() {
   }
   allCenters.forEach(function(c) {
     var k = c.rtype + '_' + c.id;
-    var e = DB.edits[k] || {};
+    var e = (DB.edits||{})[k] || {};
     var pot = parseInt(e.potential!==undefined&&e.potential!==''?e.potential:(c.potential||4))||4;
     if(pot > 2) return; // فقط مراکز P1 و P2 پیشنهاد می‌شوند (۱=بیشترین ارزش)
     var status = e.status || STATUS_LIST[0];

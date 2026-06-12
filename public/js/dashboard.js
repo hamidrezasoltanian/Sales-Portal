@@ -1098,7 +1098,7 @@ function getFollowups(){
   var today=todayStr();var items=[];
   _buildPCCache();
   var validK=_getAllValidRecKeys?_getAllValidRecKeys():new Set();
-  Object.keys(DB.edits).forEach(function(k){
+  Object.keys(DB.edits||{}).forEach(function(k){
     var e=DB.edits[k];var fd=e.followupDate||'';if(!fd||fd>today)return;
     var st=e.status||'بدون تماس';if(st==='قرارداد بسته شد'||st==='غیرفعال')return;
     var pts=k.split('_');var tp=pts[0];var id=pts.slice(1).join('_');

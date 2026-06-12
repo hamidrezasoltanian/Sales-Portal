@@ -392,7 +392,7 @@ function umSaveUser(userId){
     .then(function(d){
       if(payload.new_username){
         var nu=payload.new_username;
-        Object.keys(DB.edits).forEach(function(k){if(DB.edits[k].owner===userId)DB.edits[k].owner=nu;});
+        Object.keys(DB.edits||{}).forEach(function(k){if(DB.edits[k].owner===userId)DB.edits[k].owner=nu;});
         getAllProvinces().forEach(function(p){var e=getE(getProvType(p.id),p.id);if(e.owner===userId)setE(getProvType(p.id),p.id,'owner',nu);});
         saveDB();
       }
@@ -2341,7 +2341,7 @@ function getFollowups(){
   var today=todayStr();var items=[];
   _buildPCCache();
   var validK=_getAllValidRecKeys?_getAllValidRecKeys():new Set();
-  Object.keys(DB.edits).forEach(function(k){
+  Object.keys(DB.edits||{}).forEach(function(k){
     var e=DB.edits[k];var fd=e.followupDate||'';if(!fd||fd>today)return;
     var st=e.status||'بدون تماس';if(st==='قرارداد بسته شد'||st==='غیرفعال')return;
     var pts=k.split('_');var tp=pts[0];var id=pts.slice(1).join('_');
@@ -5887,7 +5887,7 @@ function wpOpenAssignAll(){
 
 function saveWpAssign(weekId){
   var actType = document.getElementById('wpAssignActType').value || 'call';
-  Object.keys(DB.weekEntries).filter(function(k){return k.startsWith(weekId+':::');}).forEach(function(k){delete DB.weekEntries[k];});
+  Object.keys(DB.weekEntries||{}).filter(function(k){return k.startsWith(weekId+':::');}).forEach(function(k){delete DB.weekEntries[k];});
   document.querySelectorAll('#wpAList input[type=checkbox]').forEach(function(cb){
     if(!cb.checked)return;
     var rtype=cb.getAttribute('data-rtype');var rid=cb.getAttribute('data-rid');
@@ -6487,7 +6487,7 @@ function openTkColumnsModal(){
         +'<input type="color" value="'+(c.color||'#64748b')+'" onchange="_tkColsEdit('+i+',\'color\',this.value)" style="width:32px;height:28px;border:none;background:none;cursor:pointer;padding:0">'
         +'<input type="text" value="'+esc(c.label||'')+'" onchange="_tkColsEdit('+i+',\'label\',this.value)" placeholder="عنوان ستون..." style="'+inpS+';flex:1">'
         +'<input type="number" min="1" max="99" value="'+(c.wip||'')+'" oninput="_tkColsEdit('+i+',\'wip\',this.value?parseInt(this.value):null)" placeholder="WIP" title="حداکثر کارت" style="width:52px;padding:4px 6px;border:1px solid var(--border-input);border-radius:5px;font-size:11px;font-family:inherit;text-align:center">'
-        +(i>0&&i<cols.length-1?'<button onclick="_tkColsRemove('+i+')" style="padding:4px 8px;background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:4px;cursor:pointer;font-size:11px">حذف</button>':'<span style="width:54px"></span>')
+        +(i>0&&i<window._tkColsPending.length-1?'<button onclick="_tkColsRemove('+i+')" style="padding:4px 8px;background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:4px;cursor:pointer;font-size:11px">حذف</button>':'<span style="width:54px"></span>')
         +'</div>';
     }).join('');
   };
@@ -10418,7 +10418,7 @@ function getMissionMonth(userId,month){
 }
 function getAutoConversions(userId,month){
   var b=jMonthBounds(month);var n=0;
-  Object.keys(DB.edits).forEach(function(key){
+  Object.keys(DB.edits||{}).forEach(function(key){
     var e=DB.edits[key];
     if(e.status!=='قرارداد بسته شد')return;
     var owner=e.owner||_getOwnerForRecKey(key)||'';
@@ -10430,7 +10430,7 @@ function getAutoConversions(userId,month){
 }
 function getRetentionData(userId){
   var total=0,cust=0;
-  Object.keys(DB.edits).forEach(function(key){
+  Object.keys(DB.edits||{}).forEach(function(key){
     var e=DB.edits[key];
     var owner=e.owner||_getOwnerForRecKey(key)||'';
     if(owner!==userId)return;
@@ -10503,7 +10503,7 @@ function calcKPIs(userId,month){
 
   // auto-count touchpoints from DB.edits
   var touchedCenters={};
-  Object.keys(DB.edits).forEach(function(key){
+  Object.keys(DB.edits||{}).forEach(function(key){
     var e=DB.edits[key];
     var owner=e.owner||_getOwnerForRecKey(key)||'';
     if(owner!==userId)return;
@@ -11021,7 +11021,7 @@ function calcCenterRecommendations() {
   }
   allCenters.forEach(function(c) {
     var k = c.rtype + '_' + c.id;
-    var e = DB.edits[k] || {};
+    var e = (DB.edits||{})[k] || {};
     var pot = parseInt(e.potential!==undefined&&e.potential!==''?e.potential:(c.potential||4))||4;
     if(pot > 2) return; // فقط مراکز P1 و P2 پیشنهاد می‌شوند (۱=بیشترین ارزش)
     var status = e.status || STATUS_LIST[0];
@@ -11537,7 +11537,7 @@ function _renderKPIHistory(userId,month){
     text:'ماموریت: '+(ms.done?'✅ انجام شد':'⏳ برنامه‌ریزی')+(ms.note?' — '+esc(ms.note):''),del:null});
 
   // قراردادهای خودکار از CRM
-  Object.values(DB.edits).forEach(function(e){
+  Object.values(DB.edits||{}).forEach(function(e){
     if((e.owner||'')===userId&&e.status==='قرارداد بسته شد'&&e._ts&&e._ts>=b.startTs&&e._ts<=b.endTs){
       var jd=msToJ(e._ts);
       entries.push({ts:e._ts,date:jd,icon:'🔄',text:'CRM: قرارداد بسته شد (خودکار)',del:null});

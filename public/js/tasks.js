@@ -28,7 +28,7 @@ function openTkColumnsModal(){
         +'<input type="color" value="'+(c.color||'#64748b')+'" onchange="_tkColsEdit('+i+',\'color\',this.value)" style="width:32px;height:28px;border:none;background:none;cursor:pointer;padding:0">'
         +'<input type="text" value="'+esc(c.label||'')+'" onchange="_tkColsEdit('+i+',\'label\',this.value)" placeholder="عنوان ستون..." style="'+inpS+';flex:1">'
         +'<input type="number" min="1" max="99" value="'+(c.wip||'')+'" oninput="_tkColsEdit('+i+',\'wip\',this.value?parseInt(this.value):null)" placeholder="WIP" title="حداکثر کارت" style="width:52px;padding:4px 6px;border:1px solid var(--border-input);border-radius:5px;font-size:11px;font-family:inherit;text-align:center">'
-        +(i>0&&i<cols.length-1?'<button onclick="_tkColsRemove('+i+')" style="padding:4px 8px;background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:4px;cursor:pointer;font-size:11px">حذف</button>':'<span style="width:54px"></span>')
+        +(i>0&&i<window._tkColsPending.length-1?'<button onclick="_tkColsRemove('+i+')" style="padding:4px 8px;background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:4px;cursor:pointer;font-size:11px">حذف</button>':'<span style="width:54px"></span>')
         +'</div>';
     }).join('');
   };

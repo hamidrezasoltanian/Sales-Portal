@@ -435,7 +435,7 @@ function _renderKPIHistory(userId,month){
     text:'ماموریت: '+(ms.done?'✅ انجام شد':'⏳ برنامه‌ریزی')+(ms.note?' — '+esc(ms.note):''),del:null});
 
   // قراردادهای خودکار از CRM
-  Object.values(DB.edits).forEach(function(e){
+  Object.values(DB.edits||{}).forEach(function(e){
     if((e.owner||'')===userId&&e.status==='قرارداد بسته شد'&&e._ts&&e._ts>=b.startTs&&e._ts<=b.endTs){
       var jd=msToJ(e._ts);
       entries.push({ts:e._ts,date:jd,icon:'🔄',text:'CRM: قرارداد بسته شد (خودکار)',del:null});
