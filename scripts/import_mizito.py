@@ -161,9 +161,16 @@ def detect_province_id(address):
     return None, False
 
 
+def strip_html(s):
+    """Strip HTML tags and decode common entities."""
+    s = re.sub(r'<[^>]+>', '', s)
+    s = s.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>').replace('&#160;', ' ')
+    return s.strip()
+
+
 def normalize_phone(p):
     """Normalize phone number."""
-    p = str(p).strip()
+    p = strip_html(str(p)).strip()
     # Remove spaces, dashes, +98, spaces
     p = re.sub(r'[\s\-\+]', '', p)
     p = re.sub(r'^98', '0', p)
@@ -200,8 +207,9 @@ def parse_mht(filepath):
 
     # Also find all contact rows: plain <td>name</td><td>phone</td> pairs
     # These appear AFTER the main rowspan block
+    # Use \s+ to handle both single and double newlines between tags
     contact_pattern = re.compile(
-        r'<tr>\s*\n\s*\n\s*<td>([^<]*)</td>\s*\n\s*<td>([^<]*)</td>\s*\n\s*</tr>'
+        r'<tr>\s+<td>([^<]*)</td>\s+<td>([^<]*)</td>\s+</tr>'
     )
 
     customers = []
@@ -217,7 +225,7 @@ def parse_mht(filepath):
             continue
 
         rowspan = int(rowspan_s)
-        name = name.strip()
+        name = strip_html(name).strip()
         if not name:
             continue
 
@@ -260,42 +268,49 @@ def parse_mht(filepath):
         contacts = []
         # First contact row is embedded in the main td block (first representative)
         # subsequent contacts appear as plain <tr><td>name</td><td>phone</td></tr>
+        # Allow any content (including HTML) inside the rowspan tags cell
         main_contact_m = re.search(
-            r'<td rowspan="\d+">[^<]*</td>\s*\n\s*<td>([^<]*)</td>\s*\n\s*<td>([^<]*)</td>',
-            block
+            r'<td rowspan="\d+">.*?</td>\s*\n\s*<td>([^<]*)</td>\s*\n\s*<td>([^<]*)</td>',
+            block, re.DOTALL
         )
         if main_contact_m:
-            cname, cphone = main_contact_m.groups()
-            cname, cphone = cname.strip(), normalize_phone(cphone.strip())
+            cname = strip_html(main_contact_m.group(1)).strip()
+            cphone = normalize_phone(main_contact_m.group(2))
             if cname or cphone:
                 contacts.append({'name': cname, 'title': '', 'phones': [p for p in [cphone] if p]})
 
         for cm in contact_pattern.finditer(block):
-            cname, cphone = cm.group(1).strip(), normalize_phone(cm.group(2).strip())
+            cname = strip_html(cm.group(1)).strip()
+            cphone = normalize_phone(cm.group(2))
             # Skip if duplicate first contact
             if contacts and contacts[0]['name'] == cname:
                 continue
             if cname or cphone:
                 contacts.append({'name': cname, 'title': '', 'phones': [p for p in [cphone] if p]})
 
-        # Build phone list from header fields too
+        # Build phone list from header fields (center-level landline + mobile)
         header_phones = []
         for ph in [phone_fix, phone_mob]:
-            pn = normalize_phone(ph.strip())
+            pn = normalize_phone(ph)
             if pn and len(pn) >= 6:
                 header_phones.append(pn)
 
-        # Merge header phones into first contact if no phone there
-        if contacts and not contacts[0]['phones'] and header_phones:
-            contacts[0]['phones'] = header_phones
-        elif not contacts and header_phones:
-            contacts.append({'name': '', 'title': '', 'phones': header_phones})
+        # Add header phones to first contact (merge, avoid duplicates)
+        if header_phones:
+            if not contacts:
+                contacts.append({'name': '', 'title': '', 'phones': header_phones})
+            else:
+                existing_phones = set(contacts[0]['phones'])
+                for hp in header_phones:
+                    if hp not in existing_phones:
+                        contacts[0]['phones'].append(hp)
+                        existing_phones.add(hp)
 
         customers.append({
             'rownum': rownum,
             'name': name,
-            'brand': brand.strip(),
-            'address': address.strip(),
+            'brand': strip_html(brand).strip(),
+            'address': strip_html(address).strip(),
             'potential': potential,
             'lead': lead,
             'status': status,
@@ -450,12 +465,25 @@ def main():
         # Build edit entry — don't overwrite existing data if key already present
         existing_edit = DB['edits'].get(edit_key, {})
         if existing_edit:
-            # Merge contacts (add new ones only)
+            # Merge contacts: add new contacts and merge missing phones into existing ones
             existing_contacts = existing_edit.get('contacts', [])
             existing_contact_names = {ct.get('name', '') for ct in existing_contacts}
             for ct in c['contacts']:
-                if ct.get('name', '') not in existing_contact_names:
+                cname = ct.get('name', '')
+                if cname not in existing_contact_names:
                     existing_contacts.append(ct)
+                else:
+                    # Contact exists — merge any new phones
+                    existing_ct = next((x for x in existing_contacts if x.get('name', '') == cname), None)
+                    if existing_ct:
+                        ep = set(existing_ct.get('phones', []))
+                        for ph in ct.get('phones', []):
+                            if ph not in ep:
+                                existing_ct.setdefault('phones', []).append(ph)
+                                ep.add(ph)
+            # If no contacts at all yet, use fresh list
+            if not existing_contacts and c['contacts']:
+                existing_contacts = c['contacts']
             existing_edit['contacts'] = existing_contacts
             # Only update fields that are currently empty/default
             if not existing_edit.get('address') and c['address']:
