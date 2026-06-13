@@ -364,6 +364,13 @@ def main():
     CENTERS = centers_data.get('CENTERS', [])
     PC_RAW = centers_data.get('PC_RAW', {})
 
+    # Migrate any legacy centers that used 'n' key instead of 'row'
+    for prov_id, pcs in PC_RAW.items():
+        if isinstance(pcs, list):
+            for pc in pcs:
+                if isinstance(pc, dict) and 'n' in pc and 'row' not in pc:
+                    pc['row'] = pc.pop('n')
+
     # Build name lookup for existing centers
     existing_names = set()
     for c in CENTERS:
@@ -421,15 +428,16 @@ def main():
             # Check if already exists by name
             existing = next((x for x in PC_RAW[prov_id] if isinstance(x, dict) and x.get('name', '').strip() == name), None)
             if existing:
-                n_idx = existing.get('n', 0)
+                n_idx = existing.get('row', existing.get('n', 0))
                 edit_key = f"pc_{prov_id}||{n_idx}"
                 skipped_existing += 1
             else:
                 n_idx = len(PC_RAW[prov_id])
                 PC_RAW[prov_id].append({
-                    'n': n_idx,
+                    'row': n_idx,
                     'name': name,
                     'type': c['type'],
+                    'lead': 'سرنخ',
                     'owner': '',
                     '_mizito': True,
                 })
