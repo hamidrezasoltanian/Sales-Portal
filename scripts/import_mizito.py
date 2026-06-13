@@ -54,6 +54,9 @@ PROVINCE_MAP = {
     'سمنان': 'p30',
 }
 
+# Reverse map: province id → province name (for looking up PC_RAW by name key)
+PROV_ID_TO_NAME = {v: k for k, v in PROVINCE_MAP.items()}
+
 # ─── Tag mapping ──────────────────────────────────────────────────────────────
 POTENTIAL_MAP = {
     'پرمصرف': 1,
@@ -440,14 +443,22 @@ def main():
             prov_id = c['prov_id']
             if prov_id not in PC_RAW:
                 PC_RAW[prov_id] = []
-            # Check if already exists by name
-            existing = next((x for x in PC_RAW[prov_id] if isinstance(x, dict) and x.get('name', '').strip() == name), None)
+            # Search in BOTH id-key (PC_RAW['p1']) and name-key (PC_RAW['فارس'])
+            # Old centers are stored under name keys; Mizito-added ones under id keys
+            pname = PROV_ID_TO_NAME.get(prov_id, '')
+            name_key_list = PC_RAW.get(pname, []) if pname else []
+            id_key_list = PC_RAW[prov_id]
+            existing = next(
+                (x for lst in [id_key_list, name_key_list]
+                 for x in lst if isinstance(x, dict) and x.get('name', '').strip() == name),
+                None
+            )
             if existing:
                 n_idx = existing.get('row', existing.get('n', 0))
                 edit_key = f"pc_{prov_id}||{n_idx}"
                 skipped_existing += 1
             else:
-                n_idx = len(PC_RAW[prov_id])
+                n_idx = len(id_key_list)
                 PC_RAW[prov_id].append({
                     'row': n_idx,
                     'name': name,
