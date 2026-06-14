@@ -144,7 +144,14 @@ async function loadDB(){
   }
 }
 function _saveDBNow(){
-  fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(DB)}).catch(function(e){console.warn('saveDB sync failed:',e.message);});
+  var payload=Object.assign({},DB,{_clientTs:DB._serverTs||null});
+  fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+    .then(function(r){
+      return r.json().then(function(d){
+        if(r.ok&&d._serverTs){DB._serverTs=d._serverTs;}
+      });
+    })
+    .catch(function(e){console.warn('saveDB sync failed:',e.message);});
 }
 function saveDB(){
   clearTimeout(_saveDebounceTimer);
@@ -10258,10 +10265,16 @@ function _sseReloadDB(byUser) {
     merged.weekEntries = Object.assign({}, DB.weekEntries, d.weekEntries || {});
     merged.edits = Object.assign({}, DB.edits, d.edits || {});
     Object.keys(merged).forEach(function(k) { DB[k] = merged[k]; });
-    if (currentTab === 'weekplan') renderWeekPlan();
-    else if (currentTab === 'provinces') { renderDashboard(); renderTable(); }
-    else if (currentTab === 'activity') renderActivity();
-    else if (currentTab === 'kpi') renderKPIPanel();
+    // اگه modal باز است یا کاربر در حال تایپ است، فقط داده رو آپدیت کن — re-render نکن
+    var hasOpenModal = document.querySelectorAll('.m-overlay').length > 0;
+    var activeEl = document.activeElement;
+    var userTyping = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable);
+    if (!hasOpenModal && !userTyping) {
+      if (currentTab === 'weekplan') renderWeekPlan();
+      else if (currentTab === 'provinces') { renderDashboard(); renderTable(); }
+      else if (currentTab === 'activity') renderActivity();
+      else if (currentTab === 'kpi') renderKPIPanel();
+    }
     var name = byUser ? (USERS[byUser] || byUser) : 'کاربر دیگری';
     showToast('🔄 ' + name + ' تغییراتی اعمال کرد', 3000);
   }).catch(function() {});
