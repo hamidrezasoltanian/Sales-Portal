@@ -272,6 +272,45 @@ async function initSchema() {
   `);
   await query(`CREATE INDEX IF NOT EXISTS idx_adh_key_at ON app_data_history(key, saved_at DESC)`);
 
+  // week_entries: individual rows per week-plan entry (permanent fix for concurrency)
+  await query(`
+    CREATE TABLE IF NOT EXISTS week_entries (
+      key VARCHAR(600) PRIMARY KEY,
+      value JSONB NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_by VARCHAR(100)
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_we_updated ON week_entries(updated_at DESC)`);
+
+  // One-time migration: move existing weekEntries from main blob to dedicated table
+  try {
+    const tableCount = await query('SELECT COUNT(*) FROM week_entries');
+    if (parseInt(tableCount.rows[0].count) === 0) {
+      const mainRow = await query("SELECT value FROM app_data WHERE key = 'main'");
+      if (mainRow.rows.length > 0) {
+        const mainVal = mainRow.rows[0].value;
+        const we = (mainVal && mainVal.weekEntries) ? mainVal.weekEntries : {};
+        const keys = Object.keys(we);
+        if (keys.length > 0) {
+          console.log(`[DB] Migrating ${keys.length} weekEntries to week_entries table...`);
+          for (const k of keys) {
+            await query(
+              `INSERT INTO week_entries (key, value, updated_by) VALUES ($1, $2, 'migration') ON CONFLICT (key) DO NOTHING`,
+              [k, JSON.stringify(we[k])]
+            );
+          }
+          const newVal = Object.assign({}, mainVal);
+          delete newVal.weekEntries;
+          await query(`UPDATE app_data SET value = $1 WHERE key = 'main'`, [JSON.stringify(newVal)]);
+          console.log(`[DB] weekEntries migration complete: ${keys.length} entries moved`);
+        }
+      }
+    }
+  } catch (migErr) {
+    console.warn('[DB] weekEntries migration warning:', migErr.message);
+  }
+
   // Seed products and initial price list if products table is empty
   const prodCount = await query('SELECT COUNT(*) FROM products');
   if (parseInt(prodCount.rows[0].count) === 0) {

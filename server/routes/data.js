@@ -14,12 +14,20 @@ router.use(requireAuth);
 // GET /api/data/db
 router.get('/db', async (req, res) => {
   try {
-    const result = await query("SELECT value, updated_at FROM app_data WHERE key = 'main'");
-    if (result.rows.length === 0) {
-      return res.json({ _serverTs: null });
+    const [mainResult, weResult] = await Promise.all([
+      query("SELECT value, updated_at FROM app_data WHERE key = 'main'"),
+      query("SELECT key, value FROM week_entries"),
+    ]);
+    if (mainResult.rows.length === 0) {
+      return res.json({ weekEntries: {}, _serverTs: null });
     }
-    const data = result.rows[0].value;
-    const _serverTs = result.rows[0].updated_at ? result.rows[0].updated_at.toISOString() : null;
+    const data = mainResult.rows[0].value;
+    const _serverTs = mainResult.rows[0].updated_at ? mainResult.rows[0].updated_at.toISOString() : null;
+
+    // Assemble weekEntries from dedicated table
+    const weekEntries = {};
+    weResult.rows.forEach(r => { weekEntries[r.key] = r.value; });
+
     // Strip server-side secrets before sending to client
     let safe = data;
     if (data && data.settings && data.settings.anthropicKey) {
@@ -27,7 +35,7 @@ router.get('/db', async (req, res) => {
         settings: Object.assign({}, data.settings, { anthropicKey: '***' }),
       });
     }
-    return res.json(Object.assign({}, safe, { _serverTs }));
+    return res.json(Object.assign({}, safe, { weekEntries, _serverTs }));
   } catch (e) {
     console.error('[data/db GET]', e.message);
     return res.status(500).json({ error: 'خطای سرور' });
@@ -67,6 +75,28 @@ router.put('/db', async (req, res) => {
     delete mainData._clientTs;
     delete mainData._serverTs;
 
+    // Handle weekEntries: upsert individual rows into week_entries table
+    const incomingWE = mainData.weekEntries || {};
+    delete mainData.weekEntries;
+
+    // Handle deleted keys (filter out any being re-added in same request)
+    const deletedKeys = (Array.isArray(mainData._weDeletedKeys) ? mainData._weDeletedKeys : [])
+      .filter(k => !incomingWE[k]);
+    delete mainData._weDeletedKeys;
+
+    // Process deletions first, then upserts (so re-adding a deleted key wins)
+    for (const dk of deletedKeys) {
+      await client.query('DELETE FROM week_entries WHERE key = $1', [dk]);
+    }
+    for (const [weKey, weVal] of Object.entries(incomingWE)) {
+      await client.query(
+        `INSERT INTO week_entries (key, value, updated_at, updated_by)
+         VALUES ($1, $2, NOW(), $3)
+         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW(), updated_by = $3`,
+        [weKey, JSON.stringify(weVal), req.user.username]
+      );
+    }
+
     // If body has _mtr key, store separately
     if (mainData._mtr) {
       const mtrData = mainData._mtr;
@@ -79,31 +109,15 @@ router.put('/db', async (req, res) => {
       delete mainData._mtr;
     }
 
-    // weekEntries guard: never allow incoming data to reduce weekEntries count
-    // (protects against a stale session overwriting with fewer planned entries)
-    if (existingRow && existingRow.value) {
-      const serverWE = existingRow.value.weekEntries || {};
-      const incomingWE = mainData.weekEntries || {};
-      const serverCount = Object.keys(serverWE).length;
-      const incomingCount = Object.keys(incomingWE).length;
-      if (serverCount > incomingCount) {
-        // Merge: keep server entries not present in incoming (incoming entries take priority)
-        const merged = Object.assign({}, serverWE, incomingWE);
-        mainData.weekEntries = merged;
-        console.warn(`[data/db PUT] weekEntries guard: merged server(${serverCount}) + incoming(${incomingCount}) → ${Object.keys(merged).length}`);
-      }
-    }
-
-    // Save current version to history before overwriting (keeps 30 days)
-    // Use SAVEPOINT so a missing history table doesn't abort the transaction
+    // Save current version to history only if blob actually changed (keeps 30 days)
     await client.query('SAVEPOINT history_ops');
     try {
       await client.query(
         `INSERT INTO app_data_history (key, value, saved_by)
-         SELECT 'main', value, $1 FROM app_data WHERE key = 'main'`,
-        [req.user.username]
+         SELECT 'main', value, $1 FROM app_data
+         WHERE key = 'main' AND value IS DISTINCT FROM $2::jsonb`,
+        [req.user.username, JSON.stringify(mainData)]
       );
-      // Keep last 30 days of history (not just 30 records)
       await client.query(
         `DELETE FROM app_data_history WHERE key = 'main' AND saved_at < NOW() - INTERVAL '30 days'`
       );
@@ -113,11 +127,15 @@ router.put('/db', async (req, res) => {
       console.warn('[data/db PUT history]', histErr.message);
     }
 
-    // Use RETURNING to get exact timestamp written — avoids post-upsert SELECT race
+    // Only change updated_at if blob content changed — weekEntries-only saves
+    // must not bump the timestamp, otherwise other clients get stale _clientTs → 409
     const upserted = await client.query(
       `INSERT INTO app_data (key, value, updated_at, updated_by)
        VALUES ('main', $1, NOW(), $2)
-       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2
+       ON CONFLICT (key) DO UPDATE SET
+         value = EXCLUDED.value,
+         updated_at = CASE WHEN app_data.value = EXCLUDED.value THEN app_data.updated_at ELSE NOW() END,
+         updated_by = EXCLUDED.updated_by
        RETURNING updated_at`,
       [JSON.stringify(mainData), req.user.username]
     );
@@ -129,7 +147,7 @@ router.put('/db', async (req, res) => {
     try { if (_broadcast) _broadcast('db-updated', { by: req.user.username, at: Date.now() }, _cid); } catch(e) {}
     return res.json({ ok: true, _serverTs });
   } catch (e) {
-    await client.query('ROLLBACK').catch(function() {});
+    if (client) await client.query('ROLLBACK').catch(function() {});
     console.error('[data/db PUT]', e.message);
     return res.status(500).json({ error: 'خطای سرور' });
   } finally {
@@ -157,11 +175,32 @@ router.post('/history/:id/restore', requireManager, async (req, res) => {
   try {
     const hist = await query('SELECT value FROM app_data_history WHERE id = $1 AND key = $2', [id, 'main']);
     if (!hist.rows.length) return res.status(404).json({ error: 'نسخه یافت نشد' });
-    await query(
-      `INSERT INTO app_data (key, value, updated_at, updated_by) VALUES ('main', $1, NOW(), $2)
-       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
-      [JSON.stringify(hist.rows[0].value), req.user.username]
-    );
+    const snapVal = hist.rows[0].value;
+
+    // If snapshot has weekEntries (old format), restore them to the dedicated table
+    if (snapVal && snapVal.weekEntries) {
+      const we = snapVal.weekEntries;
+      for (const [k, v] of Object.entries(we)) {
+        await query(
+          `INSERT INTO week_entries (key, value, updated_at, updated_by) VALUES ($1, $2, NOW(), $3)
+           ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW(), updated_by = $3`,
+          [k, JSON.stringify(v), req.user.username]
+        );
+      }
+      const cleanSnap = Object.assign({}, snapVal);
+      delete cleanSnap.weekEntries;
+      await query(
+        `INSERT INTO app_data (key, value, updated_at, updated_by) VALUES ('main', $1, NOW(), $2)
+         ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
+        [JSON.stringify(cleanSnap), req.user.username]
+      );
+    } else {
+      await query(
+        `INSERT INTO app_data (key, value, updated_at, updated_by) VALUES ('main', $1, NOW(), $2)
+         ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
+        [JSON.stringify(snapVal), req.user.username]
+      );
+    }
     return res.json({ ok: true });
   } catch (e) {
     console.error('[data/history restore]', e.message);
@@ -252,11 +291,12 @@ router.put('/centers/master', requireManager, async (req, res) => {
 // GET /api/data/backup — manager only (contains full DB including sensitive config)
 router.get('/backup', requireManager, async (req, res) => {
   try {
-    const [mainR, mtrR, usersR, centersR] = await Promise.all([
+    const [mainR, mtrR, usersR, centersR, weR] = await Promise.all([
       query("SELECT value FROM app_data WHERE key = 'main'"),
       query("SELECT value FROM app_data WHERE key = 'mtr'"),
       query('SELECT username, display_name, role, color, phone, active FROM app_users ORDER BY username'),
       query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS', 'PC_RAW')"),
+      query("SELECT key, value FROM week_entries"),
     ]);
 
     const centers = { CENTERS: [], PC_RAW: {} };
@@ -265,11 +305,15 @@ router.get('/backup', requireManager, async (req, res) => {
       else if (row.key === 'PC_RAW') centers.PC_RAW = row.data;
     });
 
+    const weekEntries = {};
+    weR.rows.forEach(r => { weekEntries[r.key] = r.value; });
+
     return res.json({
       db: mainR.rows.length ? mainR.rows[0].value : {},
       mtr: mtrR.rows.length ? mtrR.rows[0].value : {},
       users: usersR.rows,
       centers: centers,
+      weekEntries: weekEntries,
       exportedAt: new Date().toISOString(),
     });
   } catch (e) {
@@ -280,15 +324,29 @@ router.get('/backup', requireManager, async (req, res) => {
 
 // POST /api/data/restore
 router.post('/restore', requireManager, async (req, res) => {
-  const { db, mtr, users, centers } = req.body || {};
+  const { db, mtr, users, centers, weekEntries } = req.body || {};
 
   try {
+    // Restore weekEntries to dedicated table
+    if (weekEntries && typeof weekEntries === 'object') {
+      for (const [k, v] of Object.entries(weekEntries)) {
+        await query(
+          `INSERT INTO week_entries (key, value, updated_at, updated_by) VALUES ($1, $2, NOW(), $3)
+           ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW(), updated_by = $3`,
+          [k, JSON.stringify(v), req.user.username]
+        );
+      }
+    }
+
     if (db && typeof db === 'object') {
+      // Strip weekEntries from blob if present (old backup format)
+      const cleanDb = Object.assign({}, db);
+      delete cleanDb.weekEntries;
       await query(
         `INSERT INTO app_data (key, value, updated_at, updated_by)
          VALUES ('main', $1, NOW(), $2)
          ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
-        [JSON.stringify(db), req.user.username]
+        [JSON.stringify(cleanDb), req.user.username]
       );
     }
 
