@@ -144,12 +144,22 @@ async function loadDB(){
     console.warn('Server fetch failed, using empty DB:',e.message);
   }
 }
-function _saveDBNow(){
+function _saveDBNow(isRetry){
   var payload=Object.assign({},DB,{_clientTs:DB._serverTs||null});
   fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json','X-CID':_tabId},body:JSON.stringify(payload)})
     .then(function(r){
       return r.json().then(function(d){
         if(r.ok&&d._serverTs){DB._serverTs=d._serverTs;}
+        else if(r.status===409&&!isRetry){
+          // تعارض: دیتای جدیدتر از سرور بگیر، merge کن، دوباره ذخیره کن
+          fetch('/api/data/db').then(function(r2){return r2.ok?r2.json():null;}).then(function(srv){
+            if(!srv)return;
+            var m=Object.assign({},srv,{weekEntries:Object.assign({},srv.weekEntries||{},DB.weekEntries||{}),edits:Object.assign({},srv.edits||{},DB.edits||{})});
+            if(srv._serverTs)m._serverTs=srv._serverTs;
+            Object.keys(m).forEach(function(k){DB[k]=m[k];});
+            _saveDBNow(true);
+          }).catch(function(){});
+        }
       });
     })
     .catch(function(e){console.warn('saveDB sync failed:',e.message);});
@@ -10262,23 +10272,47 @@ function initSSE() {
 function _sseReloadDB(byUser) {
   fetch('/api/data/db').then(function(r){ return r.ok ? r.json() : null; }).then(function(d) {
     if (!d || typeof d !== 'object') return;
+    // داده رو در پس‌زمینه merge کن — بدون re-render
     var merged = Object.assign({}, DB, d);
     merged.weekEntries = Object.assign({}, DB.weekEntries, d.weekEntries || {});
     merged.edits = Object.assign({}, DB.edits, d.edits || {});
+    if(d._serverTs) merged._serverTs = d._serverTs;
     Object.keys(merged).forEach(function(k) { DB[k] = merged[k]; });
-    // اگه modal باز است یا کاربر در حال تایپ است، فقط داده رو آپدیت کن — re-render نکن
+    // فقط تب‌هایی که اطلاعات real-time نیاز دارن و کاربر تعامل ندارد
     var hasOpenModal = document.querySelectorAll('.m-overlay').length > 0;
     var activeEl = document.activeElement;
-    var userTyping = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable);
-    if (!hasOpenModal && !userTyping) {
-      if (currentTab === 'weekplan') renderWeekPlan();
-      else if (currentTab === 'provinces') { renderDashboard(); renderTable(); }
-      else if (currentTab === 'activity') renderActivity();
+    var userBusy = hasOpenModal || (activeEl && (activeEl.tagName==='INPUT'||activeEl.tagName==='TEXTAREA'||activeEl.isContentEditable));
+    if (!userBusy) {
+      if (currentTab === 'activity') renderActivity();
       else if (currentTab === 'kpi') renderKPIPanel();
+      else if (currentTab === 'manager') renderManagerPanel();
+      // weekplan و provinces: فقط یه نوتیف نشون بده — کاربر خودش تصمیم بگیره
+      else if (currentTab === 'weekplan' || currentTab === 'provinces') {
+        _sseShowRefreshBanner(byUser);
+        return;
+      }
     }
     var name = byUser ? (USERS[byUser] || byUser) : 'کاربر دیگری';
-    showToast('🔄 ' + name + ' تغییراتی اعمال کرد', 3000);
+    showToast('🔄 ' + name + ' تغییراتی اعمال کرد', 2500);
   }).catch(function() {});
+}
+
+function _sseShowRefreshBanner(byUser) {
+  var existing = document.getElementById('_sseRefreshBanner');
+  if (existing) { existing._count = (existing._count||1)+1; existing.querySelector('._sseBadge').textContent=existing._count; return; }
+  var name = byUser ? (USERS[byUser] || byUser) : 'کاربر دیگری';
+  var bar = document.createElement('div');
+  bar.id = '_sseRefreshBanner';
+  bar._count = 1;
+  bar.style.cssText='position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:#6366f1;color:#fff;padding:10px 20px;border-radius:24px;cursor:pointer;z-index:9999;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,0.2);display:flex;align-items:center;gap:8px;';
+  bar.innerHTML='<span>🔄 '+name+' تغییراتی اعمال کرد — </span><strong>کلیک برای بروزرسانی</strong><span class="_sseBadge" style="background:rgba(255,255,255,0.3);border-radius:10px;padding:1px 7px;margin-right:4px;">1</span>';
+  bar.onclick = function() {
+    bar.remove();
+    if (currentTab === 'weekplan') renderWeekPlan();
+    else if (currentTab === 'provinces') { renderDashboard(); renderTable(); }
+  };
+  document.body.appendChild(bar);
+  setTimeout(function(){ if(bar.parentNode){ bar.parentNode.removeChild(bar); } }, 30000);
 }
 
 
