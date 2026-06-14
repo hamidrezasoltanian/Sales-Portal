@@ -118,6 +118,7 @@ async function doLogout(){
 // ── Server sync state ─────────────────────────────────────────
 var _serverSynced=false;
 var _saveDebounceTimer=null;
+var _tabId=(function(){var id=sessionStorage.getItem('_crmTabId');if(!id){id='t'+Date.now()+'_'+Math.random().toString(36).slice(2);}sessionStorage.setItem('_crmTabId',id);return id;})();
 
 async function loadDB(){
   try{
@@ -145,7 +146,7 @@ async function loadDB(){
 }
 function _saveDBNow(){
   var payload=Object.assign({},DB,{_clientTs:DB._serverTs||null});
-  fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+  fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json','X-CID':_tabId},body:JSON.stringify(payload)})
     .then(function(r){
       return r.json().then(function(d){
         if(r.ok&&d._serverTs){DB._serverTs=d._serverTs;}
@@ -10242,7 +10243,7 @@ var _sseReconnectTimer = null;
 
 function initSSE() {
   if (_sse) return;
-  _sse = new EventSource('/api/events/stream');
+  _sse = new EventSource('/api/events/stream?cid='+encodeURIComponent(_tabId));
   _sse.onmessage = function(e) {
     try {
       var data = JSON.parse(e.data);
