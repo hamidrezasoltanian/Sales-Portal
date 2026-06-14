@@ -64,9 +64,15 @@ def main():
     pc_row = cur.fetchone()
     pc_ids = set()
     if pc_row and pc_row[0]:
-        for prov_centers in pc_row[0].values() if isinstance(pc_row[0], dict) else []:
-            for c in (prov_centers if isinstance(prov_centers, list) else []):
-                pc_ids.add(c.get('id',''))
+        raw = pc_row[0]
+        items = raw.values() if isinstance(raw, dict) else (raw if isinstance(raw, list) else [])
+        for item in items:
+            if isinstance(item, list):
+                for c in item:
+                    if isinstance(c, dict):
+                        pc_ids.add(c.get('id',''))
+            elif isinstance(item, dict):
+                pc_ids.add(item.get('id',''))
 
     print("Status of new_ centers:")
     for rtype, rid, name in sorted(new_refs, key=lambda x: x[1]):
