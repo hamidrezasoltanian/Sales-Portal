@@ -283,38 +283,37 @@ async function initSchema() {
   `);
   await query(`CREATE INDEX IF NOT EXISTS idx_we_updated ON week_entries(updated_at DESC)`);
 
-  // One-time migration: move existing weekEntries from main blob to dedicated table
-  // Uses a transaction so a mid-migration crash doesn't leave partial state
+  // Idempotent weekEntries migration: runs every startup, safe to re-run
+  // Migrates blob.weekEntries → week_entries table AND strips blob clean.
+  // Handles partial-failure recovery: if table already has rows but blob still
+  // has weekEntries (e.g. a previous crash mid-migration), we still clean the blob.
   try {
-    const tableCount = await query('SELECT 1 FROM week_entries LIMIT 1');
-    if (tableCount.rows.length === 0) {
-      const mainRow = await query("SELECT value FROM app_data WHERE key = 'main'");
-      if (mainRow.rows.length > 0) {
-        const mainVal = mainRow.rows[0].value;
-        const we = (mainVal && mainVal.weekEntries) ? mainVal.weekEntries : {};
+    const mainRow = await query("SELECT value FROM app_data WHERE key = 'main'");
+    if (mainRow.rows.length > 0) {
+      const mainVal = mainRow.rows[0].value;
+      if (mainVal && mainVal.weekEntries && Object.keys(mainVal.weekEntries).length > 0) {
+        const we = mainVal.weekEntries;
         const keys = Object.keys(we);
-        if (keys.length > 0) {
-          console.log(`[DB] Migrating ${keys.length} weekEntries to week_entries table...`);
-          const migClient = await pool.connect();
-          try {
-            await migClient.query('BEGIN');
-            for (const k of keys) {
-              await migClient.query(
-                `INSERT INTO week_entries (key, value, updated_by) VALUES ($1, $2, 'migration') ON CONFLICT (key) DO NOTHING`,
-                [k, JSON.stringify(we[k])]
-              );
-            }
-            const newVal = Object.assign({}, mainVal);
-            delete newVal.weekEntries;
-            await migClient.query(`UPDATE app_data SET value = $1 WHERE key = 'main'`, [JSON.stringify(newVal)]);
-            await migClient.query('COMMIT');
-            console.log(`[DB] weekEntries migration complete: ${keys.length} entries moved`);
-          } catch (txErr) {
-            await migClient.query('ROLLBACK').catch(() => {});
-            throw txErr;
-          } finally {
-            migClient.release();
+        console.log(`[DB] weekEntries found in blob (${keys.length} entries) — migrating to week_entries table...`);
+        const migClient = await pool.connect();
+        try {
+          await migClient.query('BEGIN');
+          for (const k of keys) {
+            await migClient.query(
+              `INSERT INTO week_entries (key, value, updated_by) VALUES ($1, $2, 'migration') ON CONFLICT (key) DO NOTHING`,
+              [k, JSON.stringify(we[k])]
+            );
           }
+          const newVal = Object.assign({}, mainVal);
+          delete newVal.weekEntries;
+          await migClient.query(`UPDATE app_data SET value = $1 WHERE key = 'main'`, [JSON.stringify(newVal)]);
+          await migClient.query('COMMIT');
+          console.log(`[DB] weekEntries migration complete: ${keys.length} entries moved, blob cleaned`);
+        } catch (txErr) {
+          await migClient.query('ROLLBACK').catch(() => {});
+          throw txErr;
+        } finally {
+          migClient.release();
         }
       }
     }
@@ -322,7 +321,7 @@ async function initSchema() {
     console.warn('[DB] weekEntries migration warning:', migErr.message);
   }
 
-  // Seed products and initial price list if products table is empty
+    // Seed products and initial price list if products table is empty
   const prodCount = await query('SELECT COUNT(*) FROM products');
   if (parseInt(prodCount.rows[0].count) === 0) {
     const seedProducts = [

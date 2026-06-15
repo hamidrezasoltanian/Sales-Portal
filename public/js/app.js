@@ -157,7 +157,9 @@ function _saveDBNow(isRetry){
     .then(function(r){
       return r.json().then(function(d){
         if(r.ok&&d._serverTs){DB._serverTs=d._serverTs;DB._weDeletedKeys=[];}
+        else if(!r.ok&&r.status!==409){showToast('❌ خطا در ذخیره ('+r.status+') — لطفاً دوباره تلاش کنید',3500);}
         else if(r.status===409&&!isRetry){
+          showToast('⚠ تعارض ذخیره‌سازی — در حال بارگذاری مجدد...',2000);
           // تعارض: دیتای جدیدتر از سرور بگیر، merge کن، دوباره ذخیره کن
           fetch('/api/data/db').then(function(r2){return r2.ok?r2.json():null;}).then(function(srv){
             if(!srv)return;
