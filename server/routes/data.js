@@ -54,26 +54,17 @@ router.put('/db', async (req, res) => {
     return res.status(400).json({ error: 'داده نامعتبر' });
   }
 
-  // Use a transaction + FOR UPDATE to make conflict check atomic (fixes TOCTOU race)
+
+  // FOR UPDATE lock ensures atomic weekEntries + blob save (no TOCTOU race).
+  // No 409 conflict check — original design is last-write-wins; the SSE
+  // refresh banner notifies other tabs of changes without blocking saves.
   let client;
   try {
     client = await pool.connect();
     await client.query('BEGIN');
 
-    const _clientTs = body._clientTs || null;
-
-    // Lock the current row for the conflict check and weekEntries guard
-    const cur = await client.query("SELECT value, updated_at FROM app_data WHERE key = 'main' FOR UPDATE");
-    const existingRow = cur.rows[0] || null;
-
-    if (_clientTs && existingRow && existingRow.updated_at) {
-      // Timestamp conflict check: reject if server has newer data
-      const serverTs = existingRow.updated_at.toISOString();
-      if (serverTs !== _clientTs) {
-        await client.query('ROLLBACK');
-        return res.status(409).json({ error: 'تغییرات توسط کاربر دیگری ذخیره شده — صفحه بارگذاری می‌شود' });
-      }
-    }
+    // Lock the row so weekEntries ops and blob upsert are atomic
+    await client.query("SELECT 1 FROM app_data WHERE key = 'main' FOR UPDATE");
 
     // Strip client-only meta fields before storing
     let mainData = Object.assign({}, body);
