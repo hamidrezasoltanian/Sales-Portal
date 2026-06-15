@@ -10297,6 +10297,7 @@ function _sseReloadDB(byUser) {
     Object.keys(localWE).forEach(function(k){
       if(!srvWE[k] && pendingDels.indexOf(k)<0) mergedWE[k]=localWE[k];
     });
+    pendingDels.forEach(function(k){ delete mergedWE[k]; });
     merged.weekEntries = mergedWE;
     merged.edits = Object.assign({}, DB.edits, d.edits || {});
     if(d._serverTs) merged._serverTs = d._serverTs;

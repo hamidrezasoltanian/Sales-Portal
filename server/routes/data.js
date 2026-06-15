@@ -88,19 +88,19 @@ router.put('/db', async (req, res) => {
       .filter(k => !incomingWE[k]);
     delete mainData._weDeletedKeys;
 
-    // Batch delete then batch upsert weekEntries (two queries regardless of count)
+    // Batch delete then batch upsert weekEntries (outside the blob transaction)
     if (deletedKeys.length > 0) {
       await query('DELETE FROM week_entries WHERE key = ANY($1::text[])', [deletedKeys]);
     }
-    const weKeys = Object.keys(incomingWE);
-    if (weKeys.length > 0) {
-      const weVals = weKeys.map(k => JSON.stringify(incomingWE[k]));
+    if (Object.keys(incomingWE).length > 0) {
+      // Use jsonb_each to expand the whole object in one query — avoids unnest
+      // with text[] of JSON strings which requires complex quoting
       await query(
         `INSERT INTO week_entries (key, value, updated_at, updated_by)
-         SELECT k, v::jsonb, NOW(), $3
-         FROM unnest($1::text[], $2::text[]) AS t(k, v)
+         SELECT e.key, e.value, NOW(), $2
+         FROM jsonb_each($1::jsonb) AS e(key, value)
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
-        [weKeys, weVals, req.user.username]
+        [JSON.stringify(incomingWE), req.user.username]
       );
     }
 
