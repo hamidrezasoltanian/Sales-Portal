@@ -11,24 +11,26 @@ const router = express.Router();
 // All routes require auth
 router.use(requireAuth);
 
-// GET /api/data/db
+// GET /api/data/db — single REPEATABLE READ snapshot so blob ts and weekEntries are consistent
 router.get('/db', async (req, res) => {
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ');
     const [mainResult, weResult] = await Promise.all([
-      query("SELECT value, updated_at FROM app_data WHERE key = 'main'"),
-      query("SELECT key, value FROM week_entries"),
+      client.query("SELECT value, updated_at FROM app_data WHERE key = 'main'"),
+      client.query("SELECT key, value FROM week_entries"),
     ]);
+    await client.query('COMMIT');
+
     if (mainResult.rows.length === 0) {
       return res.json({ weekEntries: {}, _serverTs: null });
     }
     const data = mainResult.rows[0].value;
     const _serverTs = mainResult.rows[0].updated_at ? mainResult.rows[0].updated_at.toISOString() : null;
 
-    // Assemble weekEntries from dedicated table
     const weekEntries = {};
     weResult.rows.forEach(r => { weekEntries[r.key] = r.value; });
 
-    // Strip server-side secrets before sending to client
     let safe = data;
     if (data && data.settings && data.settings.anthropicKey) {
       safe = Object.assign({}, data, {
@@ -37,8 +39,11 @@ router.get('/db', async (req, res) => {
     }
     return res.json(Object.assign({}, safe, { weekEntries, _serverTs }));
   } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('[data/db GET]', e.message);
     return res.status(500).json({ error: 'خطای سرور' });
+  } finally {
+    client.release();
   }
 });
 
@@ -75,25 +80,27 @@ router.put('/db', async (req, res) => {
     delete mainData._clientTs;
     delete mainData._serverTs;
 
-    // Handle weekEntries: upsert individual rows into week_entries table
+    // Extract weekEntries and deletions — processed OUTSIDE the blob transaction
+    // so the FOR UPDATE lock on app_data is not held during N round-trips
     const incomingWE = mainData.weekEntries || {};
     delete mainData.weekEntries;
-
-    // Handle deleted keys (filter out any being re-added in same request)
     const deletedKeys = (Array.isArray(mainData._weDeletedKeys) ? mainData._weDeletedKeys : [])
       .filter(k => !incomingWE[k]);
     delete mainData._weDeletedKeys;
 
-    // Process deletions first, then upserts (so re-adding a deleted key wins)
-    for (const dk of deletedKeys) {
-      await client.query('DELETE FROM week_entries WHERE key = $1', [dk]);
+    // Batch delete then batch upsert weekEntries (two queries regardless of count)
+    if (deletedKeys.length > 0) {
+      await query('DELETE FROM week_entries WHERE key = ANY($1::text[])', [deletedKeys]);
     }
-    for (const [weKey, weVal] of Object.entries(incomingWE)) {
-      await client.query(
+    const weKeys = Object.keys(incomingWE);
+    if (weKeys.length > 0) {
+      const weVals = weKeys.map(k => JSON.stringify(incomingWE[k]));
+      await query(
         `INSERT INTO week_entries (key, value, updated_at, updated_by)
-         VALUES ($1, $2, NOW(), $3)
-         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW(), updated_by = $3`,
-        [weKey, JSON.stringify(weVal), req.user.username]
+         SELECT k, v::jsonb, NOW(), $3
+         FROM unnest($1::text[], $2::text[]) AS t(k, v)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+        [weKeys, weVals, req.user.username]
       );
     }
 

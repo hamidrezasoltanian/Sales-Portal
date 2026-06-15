@@ -284,9 +284,10 @@ async function initSchema() {
   await query(`CREATE INDEX IF NOT EXISTS idx_we_updated ON week_entries(updated_at DESC)`);
 
   // One-time migration: move existing weekEntries from main blob to dedicated table
+  // Uses a transaction so a mid-migration crash doesn't leave partial state
   try {
-    const tableCount = await query('SELECT COUNT(*) FROM week_entries');
-    if (parseInt(tableCount.rows[0].count) === 0) {
+    const tableCount = await query('SELECT 1 FROM week_entries LIMIT 1');
+    if (tableCount.rows.length === 0) {
       const mainRow = await query("SELECT value FROM app_data WHERE key = 'main'");
       if (mainRow.rows.length > 0) {
         const mainVal = mainRow.rows[0].value;
@@ -294,16 +295,26 @@ async function initSchema() {
         const keys = Object.keys(we);
         if (keys.length > 0) {
           console.log(`[DB] Migrating ${keys.length} weekEntries to week_entries table...`);
-          for (const k of keys) {
-            await query(
-              `INSERT INTO week_entries (key, value, updated_by) VALUES ($1, $2, 'migration') ON CONFLICT (key) DO NOTHING`,
-              [k, JSON.stringify(we[k])]
-            );
+          const migClient = await pool.connect();
+          try {
+            await migClient.query('BEGIN');
+            for (const k of keys) {
+              await migClient.query(
+                `INSERT INTO week_entries (key, value, updated_by) VALUES ($1, $2, 'migration') ON CONFLICT (key) DO NOTHING`,
+                [k, JSON.stringify(we[k])]
+              );
+            }
+            const newVal = Object.assign({}, mainVal);
+            delete newVal.weekEntries;
+            await migClient.query(`UPDATE app_data SET value = $1 WHERE key = 'main'`, [JSON.stringify(newVal)]);
+            await migClient.query('COMMIT');
+            console.log(`[DB] weekEntries migration complete: ${keys.length} entries moved`);
+          } catch (txErr) {
+            await migClient.query('ROLLBACK').catch(() => {});
+            throw txErr;
+          } finally {
+            migClient.release();
           }
-          const newVal = Object.assign({}, mainVal);
-          delete newVal.weekEntries;
-          await query(`UPDATE app_data SET value = $1 WHERE key = 'main'`, [JSON.stringify(newVal)]);
-          console.log(`[DB] weekEntries migration complete: ${keys.length} entries moved`);
         }
       }
     }

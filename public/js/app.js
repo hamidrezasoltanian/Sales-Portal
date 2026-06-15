@@ -127,6 +127,7 @@ async function loadDB(){
     var d=await r.json();
     if(d&&typeof d==='object'){
       Object.keys(DB).forEach(function(k){if(d[k]!==undefined)DB[k]=d[k];});
+      DB._weDeletedKeys=[];  // clear stale pending deletions from previous session
     }
     // migrate legacy single-contact fields to contacts[] array
     var _migrated=false;
@@ -161,6 +162,8 @@ function _saveDBNow(isRetry){
           fetch('/api/data/db').then(function(r2){return r2.ok?r2.json():null;}).then(function(srv){
             if(!srv)return;
             var m=Object.assign({},srv,{weekEntries:Object.assign({},srv.weekEntries||{},DB.weekEntries||{}),edits:Object.assign({},srv.edits||{},DB.edits||{})});
+            // re-apply pending deletions so _weRemove'd keys don't get resurrected by srv.weekEntries
+            (DB._weDeletedKeys||[]).forEach(function(k){delete m.weekEntries[k];});
             if(srv._serverTs)m._serverTs=srv._serverTs;
             Object.keys(m).forEach(function(k){DB[k]=m[k];});
             _saveDBNow(true);
@@ -195,6 +198,11 @@ function importDBJson(input){
       if(!src||typeof src!=='object'||!src.edits)throw new Error('فایل معتبر نیست');
       if(!confirm('⚠ این عملیات داده‌های فعلی را جایگزین می‌کند. ادامه می‌دهید؟'))return;
       Object.assign(DB,src);
+      // server backup puts weekEntries at top level (not inside .db)
+      if(parsed.weekEntries&&typeof parsed.weekEntries==='object'){
+        DB.weekEntries=Object.assign({},parsed.weekEntries);
+      }
+      DB._weDeletedKeys=[];
       saveDBSync();
       showToast('✅ داده‌ها بازیابی شدند — صفحه رفرش می‌شود',2000);
       setTimeout(function(){location.reload();},2200);
@@ -10280,7 +10288,16 @@ function _sseReloadDB(byUser) {
     if (!d || typeof d !== 'object') return;
     // داده رو در پس‌زمینه merge کن — بدون re-render
     var merged = Object.assign({}, DB, d);
-    merged.weekEntries = Object.assign({}, DB.weekEntries, d.weekEntries || {});
+    // Server is authoritative for weekEntries; only keep local-only entries that are
+    // pending adds (not on server yet) and NOT scheduled for deletion
+    var srvWE = d.weekEntries || {};
+    var pendingDels = DB._weDeletedKeys || [];
+    var localWE = DB.weekEntries || {};
+    var mergedWE = Object.assign({}, srvWE);
+    Object.keys(localWE).forEach(function(k){
+      if(!srvWE[k] && pendingDels.indexOf(k)<0) mergedWE[k]=localWE[k];
+    });
+    merged.weekEntries = mergedWE;
     merged.edits = Object.assign({}, DB.edits, d.edits || {});
     if(d._serverTs) merged._serverTs = d._serverTs;
     Object.keys(merged).forEach(function(k) { DB[k] = merged[k]; });
@@ -11985,7 +12002,15 @@ function unifiedRestore(ev){
       if(data.mtrMeta) msg += '\nداده‌های مطالبات هم بازیابی می‌شود.'+(data.mtrData&&data.mtrData.rows?' ('+data.mtrData.rows.length+' ردیف اکسل)':'');
       if(!confirm(msg)) return;
       // ── 1. CRM DB ──────────────────────────────────────────────
-      if(data.db){ Object.assign(DB,data.db); saveDB(); }
+      if(data.db){
+        Object.assign(DB,data.db);
+        // server backup puts weekEntries at top level
+        if(data.weekEntries&&typeof data.weekEntries==='object'){
+          DB.weekEntries=Object.assign({},data.weekEntries);
+        }
+        DB._weDeletedKeys=[];
+        saveDB();
+      }
       // ── 2. Centers: convert flat array → {CENTERS, PC_RAW} ────
       var p = Promise.resolve();
       if(data.centersDB&&data.centersDB.centers){
