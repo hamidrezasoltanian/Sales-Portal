@@ -152,6 +152,7 @@ function _weRemove(k){
 }
 function _saveDBNow(isRetry){
   var deletedKeys=(DB._weDeletedKeys||[]).filter(function(k){return !DB.weekEntries[k];});
+  if(deletedKeys.length>0)console.log('[_saveDBNow] sending deletedKeys:', JSON.stringify(deletedKeys));
   var payload=Object.assign({},DB,{_clientTs:DB._serverTs||null,_weDeletedKeys:deletedKeys});
   fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json','X-CID':_tabId},body:JSON.stringify(payload)})
     .then(function(r){
@@ -5687,7 +5688,9 @@ function wpDrop(event, targetDate) {
 }
 
 function wpRemoveEntry(eKey){
+  console.log('[wpRemoveEntry] key:', eKey, '_weDeletedKeys before:', JSON.stringify(DB._weDeletedKeys));
   _weRemove(eKey);saveDB();renderWeekPlan();
+  console.log('[wpRemoveEntry] _weDeletedKeys after:', JSON.stringify(DB._weDeletedKeys));
 }
 // حذف همه ورودی‌های یک مرکز در یک هفته خاص (برای رفع مشکل duplicate)
 function wpRemoveAllInWeek(weekId,recKey){

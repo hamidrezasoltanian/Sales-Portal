@@ -81,7 +81,9 @@ router.put('/db', async (req, res) => {
 
     // Batch delete then batch upsert weekEntries (outside the blob transaction)
     if (deletedKeys.length > 0) {
-      await query('DELETE FROM week_entries WHERE key = ANY($1::text[])', [deletedKeys]);
+      console.log('[week_entries DELETE]', deletedKeys.length, 'keys:', deletedKeys);
+      const delRes = await query('DELETE FROM week_entries WHERE key = ANY($1::text[])', [deletedKeys]);
+      console.log('[week_entries DELETE] rows affected:', delRes.rowCount);
     }
     if (Object.keys(incomingWE).length > 0) {
       // Use jsonb_each to expand the whole object in one query — avoids unnest
