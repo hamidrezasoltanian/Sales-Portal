@@ -52,10 +52,21 @@ app.use('/api/pricing', require('./routes/pricing'));
 app.use('/api/files', require('./routes/files'));
 app.use('/api/discovery', require('./routes/discovery'));
 app.use('/api/missions', require('./routes/missions'));
+app.use('/api/wms', require('./routes/wms'));
 
 // Health check
 app.get('/api/health', function (req, res) {
   res.json({ ok: true, time: new Date().toISOString() });
+});
+
+// WMS page — serve wms.html (auth handled client-side via /api/auth/me check)
+app.get('/wms', function (req, res) {
+  const wmsPath = path.join(publicDir, 'wms.html');
+  if (fs.existsSync(wmsPath)) {
+    res.sendFile(wmsPath);
+  } else {
+    res.status(404).send('WMS not deployed yet');
+  }
 });
 
 // Catch-all: serve public/index.html for non-API routes
