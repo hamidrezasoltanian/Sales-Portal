@@ -143,8 +143,9 @@ async function loadDB(){
     console.warn('Server fetch failed, using empty DB:',e.message);
   }
 }
+var _sseCid = 'cid_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
 function _saveDBNow(){
-  fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(DB)}).catch(function(e){console.warn('saveDB sync failed:',e.message);});
+  fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json','X-CID':_sseCid},body:JSON.stringify(DB)}).catch(function(e){console.warn('saveDB sync failed:',e.message);});
 }
 function saveDB(){
   clearTimeout(_saveDebounceTimer);
@@ -10258,7 +10259,7 @@ var _sseReconnectTimer = null;
 
 function initSSE() {
   if (_sse) return;
-  _sse = new EventSource('/api/events/stream');
+  _sse = new EventSource('/api/events/stream?cid=' + _sseCid);
   _sse.onmessage = function(e) {
     try {
       var data = JSON.parse(e.data);
@@ -10275,6 +10276,7 @@ function initSSE() {
 }
 
 function _sseReloadDB(byUser) {
+  if (byUser && byUser === currentUser) return;
   fetch('/api/data/db').then(function(r){ return r.ok ? r.json() : null; }).then(function(d) {
     if (!d || typeof d !== 'object') return;
     var merged = Object.assign({}, DB, d);
