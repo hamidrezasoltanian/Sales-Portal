@@ -29,6 +29,8 @@
     <span id="uSelDot" style="width:10px;height:10px;border-radius:50%;background:#8b5cf6;display:inline-block;margin-left:6px;vertical-align:middle;flex-shrink:0"></span>
     <span id="currentUserDisplay" style="font-size:12px;color:var(--topbar-text);font-weight:600;margin-left:4px"></span>
     <select id="uSel" onchange="onUserChange(this.value)" style="display:none"></select>
+    <button class="top-btn" id="tab_checklist" onclick="switchTab('checklist')" title="چک‌لیست روزانه" style="font-size:15px;padding:4px 8px">☑</button>
+    <button class="top-btn" id="tab_activity_btn" onclick="switchTab('activity')" title="فعالیت‌ها" style="font-size:13px">📜</button>
     <span class="notif-bell-wrap"><button class="top-btn" id="notifBell" onclick="toggleNotifPanel()" title="اعلان‌ها">🔔</button><span id="notifBadge" class="notif-badge" style="display:none">0</span></span>
     <button class="top-btn" onclick="openGSearch()" title="جستجو سریع (Ctrl+K)" style="background:rgba(255,255,255,.15);font-size:13px">🔍 <span style="font-size:11px;opacity:.7">Ctrl+K</span></button>
     <button class="top-btn" onclick="doLogout()" style="background:rgba(220,38,38,.2);border-color:rgba(220,38,38,.4)">خروج</button>
@@ -52,8 +54,6 @@
     <button class="tab-btn active" id="tab_provinces" onclick="switchTab('provinces')" title="استان‌ها"><span class="sb-icon">🗺</span><span class="sb-label">استان‌ها</span></button>
     <button class="tab-btn" id="tab_weekplan" onclick="switchTab('weekplan')" title="برنامه هفته"><span class="sb-icon">📋</span><span class="sb-label">برنامه هفته</span></button>
     <button class="tab-btn" id="tab_calendar" onclick="switchTab('calendar')" title="تقویم"><span class="sb-icon">📅</span><span class="sb-label">تقویم</span></button>
-    <button class="tab-btn" id="tab_checklist" onclick="switchTab('checklist')" title="چک‌لیست روزانه"><span class="sb-icon">✅</span><span class="sb-label">چک‌لیست</span></button>
-    <button class="tab-btn" id="tab_activity" onclick="switchTab('activity')" title="فعالیت‌ها"><span class="sb-icon">📜</span><span class="sb-label">فعالیت‌ها</span></button>
     <button class="tab-btn" id="tab_tasks" onclick="switchTab('tasks')" title="وظایف"><span class="sb-icon">📌</span><span class="sb-label">وظایف</span></button>
     <button class="tab-btn" id="tab_mtr" onclick="switchTab('mtr')" title="مطالبات"><span class="sb-icon">💰</span><span class="sb-label"><span id="mtrBadge"></span>مطالبات</span></button>
     <button class="tab-btn" id="tab_pricing" onclick="switchTab('pricing')" title="قیمت‌گذاری"><span class="sb-icon">🏷</span><span class="sb-label">قیمت‌گذاری</span></button>
@@ -63,7 +63,6 @@
     <div class="sb-section-label sb-manager-wrap" style="display:none">مدیریت</div>
     <button class="tab-btn sb-manager-wrap" id="tab_kpi" onclick="switchTab('kpi')" title="KPI" style="display:none"><span class="sb-icon">📊</span><span class="sb-label">KPI</span></button>
     <button class="tab-btn sb-manager-wrap" id="tab_manager" onclick="switchTab('manager')" title="بررسی مدیر" style="display:none"><span class="sb-icon">🔎</span><span class="sb-label">بررسی مدیر</span></button>
-    <button class="tab-btn sb-manager-wrap" id="tab_changelog" onclick="switchTab('changelog')" title="لاگ تغییرات" style="display:none"><span class="sb-icon">🗃</span><span class="sb-label">لاگ تغییرات</span></button>
   </div>
 </nav>
 <div class="content-area">

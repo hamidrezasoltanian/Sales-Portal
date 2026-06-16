@@ -239,8 +239,11 @@ router.post('/:id/action', requireAuth, async (req, res) => {
     const updated = rowToObj(r.rows[0]);
     res.json(updated);
 
-    // Push Telegram notifications (non-blocking)
+    // Push Telegram notifications (non-blocking, only if enabled in settings)
     try {
+      const settingsRow = await query("SELECT value->'settings'->>'telegramNotify' AS v FROM app_data WHERE key='main'");
+      const notifyEnabled = !settingsRow.rows.length || settingsRow.rows[0].v !== 'false';
+      if (!notifyEnabled) throw new Error('telegram notify disabled');
       const bot = require('../bot/telegram');
       if (d.action === 'send') {
         const msg = '📄 پیشفاکتور ' + updated.no + ' از ' + req.user.username +

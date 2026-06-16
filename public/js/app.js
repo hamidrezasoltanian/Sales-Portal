@@ -8678,6 +8678,7 @@ function openSettings(){
   var companyInfo=s.companyInfo||'';
   var sipDomain=s.sipDomain||'';
   var anthropicKey=s.anthropicKey||'';
+  var telegramNotify=s.telegramNotify!==false;
   var ckItems=s.ckItems||CK_ITEMS_DEFAULT;
 
   var membersHtml=members.map(function(m,i){
@@ -8716,6 +8717,7 @@ function openSettings(){
     +'<div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:3px">👥 مدیریت کاربران</div>'
     +'<div style="font-size:11px;color:var(--text-muted)">کارشناسان، نقش‌ها، رنگ‌ها، مالکیت استان‌ها و جابجایی مراکز</div>'
     +'</div>'
+    +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px">📩 اعلان تلگرام</label>'    +'<label style="display:flex;align-items:center;gap:8px;cursor:pointer">'    +'<input type="checkbox" id="stgTelegramNotify"'+(telegramNotify?' checked':'')+' style="width:16px;height:16px;cursor:pointer">'    +'<span style="font-size:12px;color:var(--text-secondary)">ارسال اعلان‌های تلگرام هنگام ارسال/تأیید/رد پیشفاکتور</span>'    +'</label>'    +'</div>'
     +'<button onclick="closeModal(\'settingsModal\');openUserMgmt()" style="background:var(--brand);color:#fff;border:none;border-radius:6px;padding:7px 16px;cursor:pointer;font-size:12px;font-family:inherit;font-weight:600">باز کردن ←</button>'
     +'</div>'
     +'<div>'
@@ -8829,6 +8831,7 @@ function removeCKRow(i){var r=document.getElementById('ckrow_'+i);if(r)r.remove(
 function saveSettings(){
   var companyName=(document.getElementById('stgCompanyName').value||'').trim()||'شرکت';
   var companyInfo=(document.getElementById('stgCompanyInfo').value||'').trim();
+  var _tgEl=document.getElementById('stgTelegramNotify');var telegramNotify=_tgEl?_tgEl.checked:true;
   // Members managed via openUserMgmt — preserve existing
   var members = umGetMembers();
   // collect ck items
@@ -8849,6 +8852,7 @@ function saveSettings(){
   if(_anthKey.trim())DB.settings.anthropicKey=_anthKey.trim();
   DB.settings.members=members;
   DB.settings.ckItems=ckItems;
+  DB.settings.telegramNotify=telegramNotify;
   // ذخیره برچسب‌های ویرایش‌شده
   if(!DB.tags)DB.tags=[];
   DB.tags.forEach(function(t){
@@ -8944,6 +8948,7 @@ function renderManagerPanel(){
   html+='<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">'
     +'<button onclick="openDailyMonitor()" style="flex:1;min-width:200px;background:#1d4ed8;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">📋 گزارش فعالیت امروز</button>'
     +'<button onclick="openOverdueList()" style="flex:1;min-width:160px;background:#dc2626;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">🔴 پیگیری‌های معوق</button>'
+    +'<button onclick="switchTab(\'changelog\')" style="flex:1;min-width:140px;background:#475569;color:#fff;border:none;border-radius:7px;padding:10px;cursor:pointer;font-family:inherit;font-size:12px;font-weight:600">🗃 لاگ تغییرات</button>'
     +'</div>';
   // summary cards
   html+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:18px">';
