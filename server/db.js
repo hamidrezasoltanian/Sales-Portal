@@ -566,7 +566,7 @@ async function initSchema() {
   ];
 
   for (const u of defaultUsers) {
-    const exists = await query('SELECT username FROM app_users WHERE username = $1', [u.username]);
+    const exists = await query('SELECT username, password_hash FROM app_users WHERE username = $1', [u.username]);
     if (exists.rows.length === 0) {
       const hash = await bcrypt.hash(u.pwd, 10);
       await query(
@@ -575,6 +575,11 @@ async function initSchema() {
         [u.username, u.name, u.role, u.color, true, hash]
       );
       console.log('[DB] User seeded:', u.username);
+    } else if (!exists.rows[0].password_hash) {
+      // Backfill password for users created before password feature was added
+      const hash = await bcrypt.hash(u.pwd, 10);
+      await query('UPDATE app_users SET password_hash=$1 WHERE username=$2', [hash, u.username]);
+      console.log('[DB] User password backfilled:', u.username);
     }
   }
 
