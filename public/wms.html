@@ -1610,10 +1610,33 @@ function fmtExpiry(d){
 
 async function loadS(){
   try{
-    const r=await fetch('/api/wms');
-    if(r.ok){ const d=await r.json(); S=d||seedState(); }
-    else S=seedState();
-    // Migration: add new structures if missing
+    const [prRes,whRes,cpRes,lotRes,txnRes,poRes,stRes]=await Promise.all([
+      fetch('/api/wms/products'),
+      fetch('/api/wms/warehouses'),
+      fetch('/api/wms/counterparties'),
+      fetch('/api/wms/lots'),
+      fetch('/api/wms/transactions?limit=500'),
+      fetch('/api/wms/purchase-orders'),
+      fetch('/api/wms/settings'),
+    ]);
+    if(prRes.ok)  S.products       = await prRes.json();
+    if(whRes.ok)  S.warehouses     = await whRes.json();
+    if(cpRes.ok)  S.counterparties = await cpRes.json();
+    if(lotRes.ok) S.lots           = await lotRes.json();
+    if(txnRes.ok){ const txnData=await txnRes.json(); S.transactions=txnData.rows||txnData; }
+    if(poRes.ok)  S.purchaseOrders = await poRes.json();
+    if(stRes.ok){
+      const settings=await stRes.json();
+      S.seq          = settings.seq          || S.seq;
+      S.printConfig  = settings.printConfig  || S.printConfig;
+      S.priceLists   = settings.priceLists   || S.priceLists;
+      S.priceItems   = settings.priceItems   || S.priceItems;
+      S.priceHistory = settings.priceHistory || S.priceHistory;
+      S.stockCounts  = settings.stockCounts  || S.stockCounts;
+      S.reconciliations = settings.reconciliations || S.reconciliations;
+      S.auditLog     = settings.auditLog     || S.auditLog;
+    }
+    // Migration: ensure new structures if missing
     const seed=seedState();
     if(!S.priceLists||S.priceLists.length===0) S.priceLists=seed.priceLists;
     if(!S.priceItems||S.priceItems.length===0) S.priceItems=seed.priceItems;
@@ -1627,16 +1650,16 @@ async function loadS(){
     if(!S.reconciliations) S.reconciliations=[];
     if(!S.auditLog) S.auditLog=[];
     if(!S.seq.po) S.seq.po=1000;
-    if(!S.printConfig) S.printConfig=seedState().printConfig;
+    if(!S.printConfig) S.printConfig=seed.printConfig;
     // Ensure all printConfig fields exist
-    const dfPC=seedState().printConfig;
+    const dfPC=seed.printConfig;
     Object.keys(dfPC).forEach(k=>{if(S.printConfig[k]===undefined)S.printConfig[k]=dfPC[k];});
     if(!S.seq.recall) S.seq.recall=100;
     // Add TTAC field to existing lots
     S.lots.forEach(l=>{if(!l.ttacNo)l.ttacNo='';});
     // Add TTAC field to entry form lots
     S.transactions.forEach(t=>{if(!t.ttacNo)t.ttacNo='';});
-  }catch(e){S=seedState();}
+  }catch(e){ console.error('loadS failed:',e); S=seedState(); }
   // Sync users from CRM
   try{
     const ur=await fetch('/api/users');
@@ -1648,13 +1671,16 @@ async function loadS(){
         role:roleMap[u.role]||'sales', phone:u.phone||'', email:'',
         note:u.role, active:true
       }));
-      saveS();
     }
   }catch(e){}
 }
 async function saveS(){
+  // Saves settings/config only — entity CRUD uses specific REST endpoints
   try{
-    await fetch('/api/wms',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(S)});
+    const cfg={seq:S.seq,printConfig:S.printConfig,priceLists:S.priceLists,priceItems:S.priceItems,priceHistory:S.priceHistory,stockCounts:S.stockCounts,reconciliations:S.reconciliations,auditLog:S.auditLog};
+    for(const[k,v]of Object.entries(cfg)){
+      await fetch(`/api/wms/settings/${k}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:v})});
+    }
   }catch(e){}
 }
 
@@ -2166,6 +2192,8 @@ function submitEntry(skipDupCheck=false){
   lotObj.txnId=txn.id;
   S.lots.push(lotObj);
   S.transactions.push(txn);
+  fetch('/api/wms/lots',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(lotObj)}).catch(()=>{});
+  fetch('/api/wms/transactions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(txn)}).catch(()=>{});
   saveS();
   logAudit('entry_created','transaction',txn.id,`ورود ${pn(pid)} — ${lotNo} — ${qty} عدد`);
   clearEntry();
@@ -2384,6 +2412,7 @@ function approveTxn(id){
   }
   const l=S.lots.find(x=>x.id===t.lotId);
   if(l&&t.type==='entry'&&!l.approvedBy) l.approvedBy=currentUserId;
+  fetch(`/api/wms/transactions/${id}/approve`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({note:t.note||''})}).catch(()=>{});
   saveS(); logAudit('txn_approved','transaction',id,`تأیید ${t.txnNo}`);
   renderAppr(); updateBadges();
   toast(`تأیید شد — ${t.txnNo}`);
@@ -2391,7 +2420,7 @@ function approveTxn(id){
 function rejectTxn(id){
   const t=S.transactions.find(x=>x.id===id); if(!t) return;
   if(!confirm(`رد کردن ${t.txnNo}؟`))return;
-  t.status='rejected'; saveS(); renderAppr(); updateBadges();
+  t.status='rejected'; fetch(`/api/wms/transactions/${id}/cancel`,{method:'PUT'}).catch(()=>{}); saveS(); renderAppr(); updateBadges();
   toast(`رد شد — ${t.txnNo}`,'e');
 }
 
@@ -2445,14 +2474,18 @@ function saveProd(){
   const obj={id:id||uid(),name:n,fullName:fn,brand:document.getElementById('mProdBrand').value.trim(),size:document.getElementById('mProdSize').value.trim(),catalogCode:document.getElementById('mProdCat').value.trim(),ircCode:document.getElementById('mProdIrc').value.trim(),unit:document.getElementById('mProdUnit').value,category:document.getElementById('mProdCatg').value.trim(),reorderPoint:parseInt(document.getElementById('mProdReo').value)||10,note:document.getElementById('mProdNote').value.trim(),active:true};
   if(id) Object.assign(S.products.find(x=>x.id===id),obj);
   else S.products.push(obj);
+  const _pMethod=id?'PUT':'POST';
+  const _pUrl=id?`/api/wms/products/${id}`:'/api/wms/products';
+  fetch(_pUrl,{method:_pMethod,headers:{'Content-Type':'application/json'},body:JSON.stringify(obj)}).catch(()=>{});
   saveS(); closeModal('mProd'); renderProds();
   toast(`کالا ${id?'ویرایش':'اضافه'} شد`);
 }
-function toggleProd(id){const p=S.products.find(x=>x.id===id);if(!p)return;if(p.active&&!confirm(`کالای "${p.name}" غیرفعال شود؟`))return;p.active=!p.active;saveS();renderProds();}
+function toggleProd(id){const p=S.products.find(x=>x.id===id);if(!p)return;if(p.active&&!confirm(`کالای "${p.name}" غیرفعال شود؟`))return;p.active=!p.active;fetch(`/api/wms/products/${id}`,{method:'DELETE'}).catch(()=>{});saveS();renderProds();}
 function copyProd(id){
   const src=S.products.find(x=>x.id===id); if(!src) return;
   const copy={...src, id:uid(), name:src.name+' (کپی)', fullName:src.fullName+' (کپی)', active:true};
   S.products.push(copy);
+  fetch('/api/wms/products',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(copy)}).catch(()=>{});
   saveS(); renderProds();
   toast('کالا کپی شد — برای ویرایش کلیک کنید');
   // Auto-open edit modal for the copy
@@ -2492,7 +2525,7 @@ function openWhModal(id=null){
   ms.value=w?w.managerId||'':'';
   openModal('mWh');
 }
-function toggleWh(id){const w=S.warehouses.find(x=>x.id===id);if(!w)return;if(w.active&&!confirm(`انبار "${w.name}" غیرفعال شود؟`))return;w.active=!w.active;saveS();renderWhs();}
+function toggleWh(id){const w=S.warehouses.find(x=>x.id===id);if(!w)return;if(w.active&&!confirm(`انبار "${w.name}" غیرفعال شود؟`))return;w.active=!w.active;fetch(`/api/wms/warehouses/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(w)}).catch(()=>{});saveS();renderWhs();}
 function saveWh(){
   const id=document.getElementById('mWhId').value;
   const n=document.getElementById('mWhName').value.trim();
@@ -2500,6 +2533,9 @@ function saveWh(){
   const obj={id:id||uid(),name:n,location:document.getElementById('mWhLoc').value.trim(),managerId:document.getElementById('mWhMgr').value,note:document.getElementById('mWhNote').value.trim(),active:true};
   if(id) Object.assign(S.warehouses.find(x=>x.id===id),obj);
   else S.warehouses.push(obj);
+  const _whMethod=id?'PUT':'POST';
+  const _whUrl=id?`/api/wms/warehouses/${id}`:'/api/wms/warehouses';
+  fetch(_whUrl,{method:_whMethod,headers:{'Content-Type':'application/json'},body:JSON.stringify(obj)}).catch(()=>{});
   saveS(); closeModal('mWh'); renderWhs();
   toast(`انبار ${id?'ویرایش':'اضافه'} شد`);
 }
@@ -2550,6 +2586,9 @@ function saveCp(){
   const obj={id:id||uid(),name:n,type:document.getElementById('mCpType').value,phone:document.getElementById('mCpPhone').value.trim(),address:document.getElementById('mCpAddr').value.trim(),taxCode:document.getElementById('mCpTax').value.trim(),email:document.getElementById('mCpEmail').value.trim(),active:true};
   if(id) Object.assign(S.counterparties.find(x=>x.id===id),obj);
   else S.counterparties.push(obj);
+  const _cpMethod=id?'PUT':'POST';
+  const _cpUrl=id?`/api/wms/counterparties/${id}`:'/api/wms/counterparties';
+  fetch(_cpUrl,{method:_cpMethod,headers:{'Content-Type':'application/json'},body:JSON.stringify(obj)}).catch(()=>{});
   saveS(); closeModal('mCp'); renderCp();
   toast(`طرف‌حساب ${id?'ویرایش':'اضافه'} شد`);
 }
@@ -4457,11 +4496,14 @@ function savePO(){
   if(id) Object.assign(S.purchaseOrders.find(x=>x.id===id),obj);
   else S.purchaseOrders.push(obj);
   logAudit('po_created','po',obj.id,`PO ${obj.poNo} — ${cp(suppId).name}`);
+  const _poMethod=id?'PUT':'POST';
+  const _poUrl=id?`/api/wms/purchase-orders/${id}`:'/api/wms/purchase-orders';
+  fetch(_poUrl,{method:_poMethod,headers:{'Content-Type':'application/json'},body:JSON.stringify(obj)}).catch(()=>{});
   saveS(); closeModal('mPO'); renderPO(); updateBadges(); toast(`PO ${obj.poNo} ذخیره شد`);
 }
-function submitPOForApproval(id){const po=S.purchaseOrders.find(x=>x.id===id);if(po){po.status='pending';saveS();renderPO();updateBadges();toast('برای تأیید ارسال شد');}}
-function approvePO(id){const po=S.purchaseOrders.find(x=>x.id===id);if(po){po.status='approved';po.approvedBy=currentUserId;po.approvedAt=new Date().toISOString();logAudit('po_approved','po',id,`PO ${po.poNo} تأیید شد`);saveS();renderPO();updateBadges();toast(`PO ${po.poNo} تأیید شد`);}}
-function cancelPO(id){if(!confirm('آیا این سفارش لغو شود؟'))return;const po=S.purchaseOrders.find(x=>x.id===id);if(po){po.status='cancelled';saveS();renderPO();updateBadges();toast('سفارش لغو شد','w');}}
+function submitPOForApproval(id){const po=S.purchaseOrders.find(x=>x.id===id);if(po){po.status='pending';fetch(`/api/wms/purchase-orders/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(po)}).catch(()=>{});saveS();renderPO();updateBadges();toast('برای تأیید ارسال شد');}}
+function approvePO(id){const po=S.purchaseOrders.find(x=>x.id===id);if(po){po.status='approved';po.approvedBy=currentUserId;po.approvedAt=new Date().toISOString();logAudit('po_approved','po',id,`PO ${po.poNo} تأیید شد`);fetch(`/api/wms/purchase-orders/${id}/approve`,{method:'PUT'}).catch(()=>{});saveS();renderPO();updateBadges();toast(`PO ${po.poNo} تأیید شد`);}}
+function cancelPO(id){if(!confirm('آیا این سفارش لغو شود؟'))return;const po=S.purchaseOrders.find(x=>x.id===id);if(po){po.status='cancelled';fetch(`/api/wms/purchase-orders/${id}/reject`,{method:'PUT'}).catch(()=>{});saveS();renderPO();updateBadges();toast('سفارش لغو شد','w');}}
 let _receivePOId=null;
 function openReceivePO(id){
   _receivePOId=id;
@@ -4500,11 +4542,14 @@ function receivePO(){
       const txn={id:uid(),txnNo,type:'entry',txnType:'purchase',productId:item.productId,lotId:lotObj.id,warehouseId:po.warehouseId,qty,unitPrice:item.unitPrice,salePrice:0,counterpartyId:po.supplierId,by:currentUserId,date:new Date().toISOString(),status:'approved',note:`از PO: ${po.poNo}`,refNo:po.poNo,imedStatus:'not_registered',imedRefNo:'',ttacNo};
       lotObj.txnId=txn.id;
       S.lots.push(lotObj); S.transactions.push(txn);
+      fetch('/api/wms/lots',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(lotObj)}).catch(()=>{});
+      fetch('/api/wms/transactions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(txn)}).catch(()=>{});
       logAudit('po_received','po',po.id,`دریافت ${qty} عدد ${pn(item.productId)} از PO ${po.poNo}`);
     }
     if(item.receivedQty<item.qty) allReceived=false;
   });
   po.status=allReceived?'received':'partial';
+  fetch(`/api/wms/purchase-orders/${_receivePOId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(po)}).catch(()=>{});
   saveS(); closeModal('mPOReceive'); renderPO(); updateBadges();
   toast('دریافت ثبت شد — ورود کالا به صورت خودکار ثبت گردید');
 }
