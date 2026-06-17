@@ -1,11 +1,11 @@
 <template>
   <div class="nb-wrapper" dir="rtl" v-click-outside="close">
-    <button class="nb-bell" @click="toggle" :class="{ active: open }">
+    <button class="nb-bell" ref="bellRef" @click="toggle" :class="{ active: open }">
       🔔
       <span v-if="unreadCount > 0" class="nb-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
     </button>
 
-    <div v-if="open" class="nb-panel">
+    <div v-if="open" class="nb-panel" :style="panelStyle">
       <div class="nb-header">
         <span class="nb-title">اعلان‌ها</span>
         <div class="nb-header-actions">
@@ -35,7 +35,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 
 interface Notif {
   id: string;
@@ -51,11 +51,33 @@ const emit = defineEmits<{ openCenter: [centerKey: string] }>();
 const open = ref(false);
 const loading = ref(false);
 const items = ref<Notif[]>([]);
+const bellRef = ref<HTMLElement | null>(null);
+const panelStyle = ref<Record<string, string>>({});
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
 const unreadCount = computed(() => items.value.filter(n => !n.read).length);
 
-function toggle() { open.value = !open.value; if (open.value) load(); }
+function calcPanelPos() {
+  if (!bellRef.value) return;
+  const r = bellRef.value.getBoundingClientRect();
+  const panelW = 320;
+  const viewW = window.innerWidth;
+  // Position panel below the bell, staying within viewport
+  let left = r.left;
+  if (left + panelW > viewW - 10) left = viewW - panelW - 10;
+  if (left < 10) left = 10;
+  panelStyle.value = {
+    position: 'fixed',
+    top: (r.bottom + 8) + 'px',
+    left: left + 'px',
+    right: 'auto',
+  };
+}
+
+function toggle() {
+  open.value = !open.value;
+  if (open.value) { nextTick(calcPanelPos); load(); }
+}
 function close() { open.value = false; }
 
 async function load() {
@@ -125,7 +147,7 @@ defineExpose({ load });
 .nb-bell { position: relative; background: none; border: none; font-size: 18px; cursor: pointer; padding: 4px 8px; border-radius: 8px; transition: background .15s; }
 .nb-bell:hover, .nb-bell.active { background: rgba(99,102,241,.1); }
 .nb-badge { position: absolute; top: -2px; left: -2px; background: #ef4444; color: #fff; font-size: 10px; min-width: 16px; height: 16px; border-radius: 8px; display: flex; align-items: center; justify-content: center; padding: 0 3px; }
-.nb-panel { position: absolute; top: calc(100% + 8px); left: 0; width: 320px; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,.12); z-index: 1000; overflow: hidden; }
+.nb-panel { position: fixed; width: 320px; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,.12); z-index: 3500; overflow: hidden; max-height: calc(100vh - 80px); display: flex; flex-direction: column; }
 .nb-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid #f3f4f6; }
 .nb-title { font-weight: 600; font-size: 14px; color: #111827; }
 .nb-header-actions { display: flex; gap: 8px; align-items: center; }
@@ -133,7 +155,7 @@ defineExpose({ load });
 .nb-read-all:hover { background: #eef2ff; }
 .nb-close { background: none; border: none; cursor: pointer; color: #9ca3af; font-size: 14px; padding: 2px 6px; }
 .nb-loading, .nb-empty { padding: 32px; text-align: center; color: #9ca3af; font-size: 13px; }
-.nb-list { max-height: 380px; overflow-y: auto; }
+.nb-list { flex: 1; overflow-y: auto; }
 .nb-item { display: flex; gap: 10px; align-items: flex-start; padding: 12px 16px; cursor: pointer; border-bottom: 1px solid #f9fafb; transition: background .1s; }
 .nb-item:hover { background: #f9fafb; }
 .nb-item-dot { width: 8px; height: 8px; border-radius: 50%; background: #6366f1; margin-top: 5px; flex-shrink: 0; }
