@@ -164,9 +164,23 @@ function _saveDBNow(){
   return fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json','X-Cid':_sseClientId},body:JSON.stringify(payload)})
     .then(function(r){
       if(r.status===409){
-        showToast('⚠ کاربر دیگری تغییراتی ذخیره کرده — صفحه بارگذاری می‌شود',5000);
-        setTimeout(function(){location.reload();},5500);
-        return;
+        // Merge latest server data and retry once — no page reload
+        return fetch('/api/data/db').then(function(r2){return r2.ok?r2.json():null;}).then(function(d){
+          if(!d||typeof d!=='object'){showToast('⚠ خطای همگام‌سازی — لطفاً صفحه را رفرش کنید',5000);return;}
+          if(d._serverTs)_dbServerTs=d._serverTs;
+          // Merge: local edits + weekEntries win over server (preserve unsaved work)
+          var merged=Object.assign({},DB,d);
+          merged.weekEntries=Object.assign({},d.weekEntries||{},DB.weekEntries||{});
+          merged.edits=Object.assign({},d.edits||{},DB.edits||{});
+          delete merged._serverTs;delete merged._clientTs;
+          Object.keys(merged).forEach(function(k){DB[k]=merged[k];});
+          // Retry save with updated timestamp
+          var p2=JSON.parse(JSON.stringify(DB));
+          if(_dbServerTs)p2._clientTs=_dbServerTs;
+          return fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json','X-Cid':_sseClientId},body:JSON.stringify(p2)})
+            .then(function(r3){if(!r3.ok)return;return r3.json().then(function(res){if(res&&res._serverTs)_dbServerTs=res._serverTs;if(seq===_saveSeq)DB._weDeletedKeys=[];});})
+            .catch(function(){});
+        }).catch(function(){showToast('⚠ خطای شبکه — لطفاً صفحه را رفرش کنید',5000);});
       }
       return r.json().then(function(result){
         if(result&&result._serverTs&&seq===_saveSeq)_dbServerTs=result._serverTs;
@@ -10477,6 +10491,8 @@ function _reEnableOnboarding(){
 
 var _sse = null;
 var _sseReconnectTimer = null;
+var _sseReloadTimer = null;
+var _ssePendingBy = null;
 
 function initSSE() {
   if (_sse) return;
@@ -10498,21 +10514,32 @@ function initSSE() {
 
 function _sseReloadDB(byUser) {
   if (!byUser || byUser === currentUser) return;
-  fetch('/api/data/db').then(function(r){ return r.ok ? r.json() : null; }).then(function(d) {
-    if (!d || typeof d !== 'object') return;
-    if (d._serverTs) _dbServerTs = d._serverTs;
-    var merged = Object.assign({}, DB, d);
-    merged.weekEntries = Object.assign({}, DB.weekEntries, d.weekEntries || {});
-    merged.edits = Object.assign({}, DB.edits, d.edits || {});
-    delete merged._serverTs; delete merged._clientTs;
-    Object.keys(merged).forEach(function(k) { DB[k] = merged[k]; });
-    if (currentTab === 'weekplan') renderWeekPlan();
-    else if (currentTab === 'provinces') { renderDashboard(); renderTable(); }
-    else if (currentTab === 'activity') renderActivity();
-    else if (currentTab === 'kpi') renderKPIPanel();
-    var name = byUser ? (USERS[byUser] || byUser) : 'کاربر دیگری';
-    showToast('🔄 ' + name + ' تغییراتی اعمال کرد', 3000);
-  }).catch(function() {});
+  // Update who triggered the last sync (for toast message)
+  if (byUser) _ssePendingBy = byUser;
+  // Debounce: coalesce multiple rapid events into one fetch+render
+  clearTimeout(_sseReloadTimer);
+  _sseReloadTimer = setTimeout(function() {
+    var triggeredBy = _ssePendingBy;
+    _ssePendingBy = null;
+    fetch('/api/data/db').then(function(r){ return r.ok ? r.json() : null; }).then(function(d) {
+      if (!d || typeof d !== 'object') return;
+      if (d._serverTs) _dbServerTs = d._serverTs;
+      var merged = Object.assign({}, DB, d);
+      merged.weekEntries = Object.assign({}, DB.weekEntries, d.weekEntries || {});
+      merged.edits = Object.assign({}, DB.edits, d.edits || {});
+      delete merged._serverTs; delete merged._clientTs;
+      Object.keys(merged).forEach(function(k) { DB[k] = merged[k]; });
+      // Only re-render if no pending user save (avoids clobbering active edits)
+      if (!_saveDebounceTimer) {
+        if (currentTab === 'weekplan') renderWeekPlan();
+        else if (currentTab === 'provinces') { renderDashboard(); renderTable(); }
+        else if (currentTab === 'activity') renderActivity();
+        else if (currentTab === 'kpi') renderKPIPanel();
+      }
+      var name = triggeredBy ? (USERS[triggeredBy] || triggeredBy) : 'کاربر دیگری';
+      showToast('🔄 ' + name + ' تغییراتی اعمال کرد', 2500);
+    }).catch(function() {});
+  }, 1500);
 }
 
 

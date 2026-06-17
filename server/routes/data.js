@@ -72,11 +72,18 @@ router.put('/db', async (req, res) => {
     const existingRow = cur.rows[0] || null;
 
     if (_clientTs && existingRow && existingRow.updated_at) {
-      // Timestamp conflict check: reject if server has newer data
+      // Timestamp conflict check: reject only if server data is significantly newer
+      // (>5s grace period absorbs SSE propagation lag between tabs)
       const serverTs = existingRow.updated_at.toISOString();
       if (serverTs !== _clientTs) {
-        await client.query('ROLLBACK');
-        return res.status(409).json({ error: 'تغییرات توسط کاربر دیگری ذخیره شده — صفحه بارگذاری می‌شود' });
+        const serverAge = Date.now() - new Date(serverTs).getTime();
+        const clientAge = Date.now() - new Date(_clientTs).getTime();
+        if (serverAge < clientAge - 5000) {
+          // Server is more than 5s newer than client's known version — true conflict
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: 'تغییرات توسط کاربر دیگری ذخیره شده' });
+        }
+        // Otherwise allow through — client will have SSE-synced the diff already
       }
     }
 
