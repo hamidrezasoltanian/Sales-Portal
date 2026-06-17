@@ -6054,7 +6054,7 @@ function _initBrowserNotif(){
   setTimeout(function(){
     Notification.requestPermission().then(function(p){
       _pushGranted=(p==='granted');
-      if(_pushGranted)_firePushNotif('Flow CRM','اعلان‌های مرورگر فعال شد ✅');
+      if(_pushGranted)_firePushNotif('Click CRM','اعلان‌های مرورگر فعال شد ✅');
     });
   },3000);
 }

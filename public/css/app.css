@@ -114,11 +114,11 @@
 .mob-tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px 6px;cursor:pointer;border:none;background:none;font-size:9px;color:var(--text-muted);font-family:inherit;gap:2px;transition:color .2s}
 .mob-tab.active{color:#0ea5e9}
 .mob-tab .mob-icon{font-size:20px;line-height:1}
-@media(max-width:640px){
+@media(max-width:768px){
   .mobile-nav{display:flex!important}
   body{padding-bottom:60px}
 }
-@media(min-width:641px){body{padding-bottom:0}}
+@media(min-width:769px){body{padding-bottom:0}}
 
 /* ── Extra small ≤380px ─────────────────────────────────────*/
 @media(max-width:380px){
@@ -1594,6 +1594,7 @@ button:active:not(:disabled){transform:scale(.97)}
 }
 [data-theme="dark"] .sidebar{box-shadow:-2px 0 16px rgba(0,0,0,.3)}
 .content-area{margin-right:200px}
+.top-bar{margin-right:200px}
 .sb-logo{
   padding:14px 16px;font-size:15px;font-weight:800;
   color:var(--brand);border-bottom:1px solid var(--border);
@@ -1638,4 +1639,5 @@ tr:hover .row-acts,.row-acts:focus-within{opacity:1}
 @media(max-width:768px){
   .sidebar{display:none!important}
   .content-area{margin-right:0!important}
+  .top-bar{margin-right:0!important}
 }

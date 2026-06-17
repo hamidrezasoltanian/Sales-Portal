@@ -5,7 +5,7 @@ It is the single source of truth for an AI to understand the entire app and its 
 
 ## Project Name
 
-**Flow CRM** — Persian-language (RTL, Jalali calendar) CRM for a medical equipment sales team (~5 users).
+**Click CRM** — Persian-language (RTL, Jalali calendar) CRM for a medical equipment sales team (~5 users).
 Vanilla JS frontend + Express/PostgreSQL backend. Vite + TypeScript + Vue 3 scaffold added in `src/` for incremental migration (no build step yet — new components will be compiled to `public/dist/` and loaded alongside existing vanilla JS).
 
 ## Running the App
@@ -347,7 +347,7 @@ The product owner (hamidreza.soltanian@gmail.com) wants to connect the accountin
 - A server-side route (`/api/mtr/sync`) that pulls from the accounting DB (e.g., via ODBC/REST/PostgreSQL foreign data wrapper depending on the accounting software).
 - The MTR panel would poll this endpoint periodically (e.g., SSE push or 5-min refresh) instead of requiring file upload.
 - Matching algorithm (`matchCentersToData`) stays unchanged — it will still link accounting records to CRM centers.
-- META (notes, followup dates, forecasts) lives in Flow CRM's DB and is merged on top of live accounting data.
+- META (notes, followup dates, forecasts) lives in Click CRM's DB and is merged on top of live accounting data.
 - Accounting software candidates: **میزیتو**, **رافع**, **هوفار**, **سپیدار**, **دینا** — integration method depends on which is in use.
 - Until the integration is live, the existing Excel/TSV upload path remains the fallback.
 
