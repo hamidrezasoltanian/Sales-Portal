@@ -10471,7 +10471,7 @@ function initSSE() {
 }
 
 function _sseReloadDB(byUser) {
-  if (byUser && byUser === currentUser) return;
+  if (!byUser || byUser === currentUser) return;
   fetch('/api/data/db').then(function(r){ return r.ok ? r.json() : null; }).then(function(d) {
     if (!d || typeof d !== 'object') return;
     if (d._serverTs) _dbServerTs = d._serverTs;

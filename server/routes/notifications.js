@@ -25,26 +25,50 @@ router.get('/', requireAuth, async function (req, res) {
     const conditions = [];
     const params = [];
 
-    // Non-managers can only see their own notifications
     const isManager = req.user.role === 'مدیر' || req.user.role === 'سوپر ادمین';
-    if (req.query.to) {
-      params.push(req.query.to);
-      conditions.push(`to_user = $${params.length}`);
-    } else if (!isManager) {
-      params.push(req.user.username);
+    const targetUser = req.query.to || (!isManager ? req.user.username : null);
+
+    if (targetUser) {
+      params.push(targetUser);
       conditions.push(`to_user = $${params.length}`);
     }
-
     if (req.query.unread === 'true') {
       conditions.push(`read = false`);
     }
 
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
-    const result = await query(
+    const sqlResult = await query(
       `SELECT * FROM notifications ${where} ORDER BY at DESC LIMIT 200`,
       params
     );
-    res.json(result.rows.map(rowToObj));
+    const sqlRows = sqlResult.rows.map(rowToObj);
+    const sqlIds = new Set(sqlRows.map(r => r.id));
+
+    // Fall back / merge with blob notifications (data may not be migrated to SQL yet)
+    let blobRows = [];
+    try {
+      const blobRes = await query(`SELECT value FROM app_data WHERE key = 'main'`);
+      const blob = blobRes.rows[0]?.value;
+      const blobNotifs = Array.isArray(blob?.notifications) ? blob.notifications : [];
+      blobRows = blobNotifs
+        .filter(n => n.id && !sqlIds.has(n.id))
+        .filter(n => !targetUser || n.to === targetUser)
+        .filter(n => req.query.unread !== 'true' || !n.read)
+        .map(n => ({
+          id: n.id,
+          to: n.to || null,
+          msg: n.msg || '',
+          centerKey: n.centerKey || null,
+          at: n.at || new Date().toISOString(),
+          read: !!n.read,
+        }));
+    } catch (_) {}
+
+    const all = [...sqlRows, ...blobRows]
+      .sort((a, b) => new Date(b.at) - new Date(a.at))
+      .slice(0, 200);
+
+    res.json(all);
   } catch (e) {
     console.error('[notifications GET /]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
