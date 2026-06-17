@@ -397,7 +397,7 @@ async function handleTasks(chatId, sess) {
   const isMgr = isManagerRole(sess.role);
   const todayStr = toJalali(new Date());
 
-  let rows;
+  let rows = [];
   try {
     const r = await query(
       `SELECT id, title, owner, due_date, priority, status, done
@@ -411,9 +411,42 @@ async function handleTasks(chatId, sess) {
       [sess.username, todayStr]
     );
     rows = r.rows;
-  } catch(e) {
-    await sendMsg(chatId, '⚠️ خطا در دریافت وظایف.', { reply_markup: menuFor(sess) });
-    return;
+  } catch(e) {}
+
+  // Fallback to blob if SQL table has no results
+  if (!rows.length) {
+    try {
+      const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
+      if (blobRes.rows.length) {
+        const blobTasks = (blobRes.rows[0].value || {}).tasks || [];
+        rows = blobTasks
+          .filter(function(t) {
+            return !t.done && (t.owner === sess.username || t.createdBy === sess.username);
+          })
+          .sort(function(a, b) {
+            const aOv = a.dueDate && a.dueDate < todayStr;
+            const bOv = b.dueDate && b.dueDate < todayStr;
+            if (aOv && !bOv) return -1;
+            if (!aOv && bOv) return 1;
+            if (a.dueDate && b.dueDate) return a.dueDate < b.dueDate ? -1 : 1;
+            if (a.dueDate) return -1;
+            if (b.dueDate) return 1;
+            return (b.priority || 2) - (a.priority || 2);
+          })
+          .slice(0, 20)
+          .map(function(t) {
+            return {
+              id: String(t.id),
+              title: t.title,
+              owner: t.owner,
+              due_date: t.dueDate || null,
+              priority: t.priority || 2,
+              status: t.status || 'todo',
+              done: false,
+            };
+          });
+      }
+    } catch(e) {}
   }
 
   if (!rows.length) {
@@ -437,8 +470,7 @@ async function handleTasks(chatId, sess) {
   let header = '📋 <b>وظایف من</b> — ' + rows.length + ' وظیفه باز';
   if (overdueCount > 0) header += ' | ⚠️ ' + overdueCount + ' معوق';
 
-  // Inline "done" buttons for first 5 tasks
-  const inlineRows = rows.slice(0, 5).map(function(t, i) {
+  const inlineRows = rows.slice(0, 5).map(function(t) {
     return [{ text: '✅ انجام: ' + (t.title || '').slice(0, 25), callback_data: 'tk_done:' + t.id }];
   });
 
@@ -979,7 +1011,7 @@ async function sendDailyReport() {
   try {
     const todayStr = toJalali(new Date());
 
-    // Today's schedule stats per expert
+    // Today's schedule stats per expert from SQL
     const weRes = await query(
       `SELECT
          value->>'addedBy' AS expert,
@@ -990,21 +1022,37 @@ async function sendDailyReport() {
       [todayStr]
     ).catch(function(){ return { rows: [] }; });
 
-    // Overdue centers from blob
-    let overdueCount = 0;
+    // Overdue + done entries from blob
+    let overdueTotal = 0;
+    const expertOverdue = {};
+    const expertDoneNames = {};
     try {
       const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
       if (blobRes.rows.length) {
-        const edits = (blobRes.rows[0].value || {}).edits || {};
+        const blob = blobRes.rows[0].value || {};
+        const edits = blob.edits || {};
         Object.values(edits).forEach(function(e) {
-          if (e.followupDate && e.followupDate < todayStr && e.status && e.status !== 'lost') {
-            overdueCount++;
+          if (e.followupDate && e.followupDate < todayStr
+              && e.status !== 'قرارداد بسته شد' && e.status !== 'غیرفعال' && e.status !== 'lost') {
+            overdueTotal++;
+            const ow = e.owner || 'نامشخص';
+            expertOverdue[ow] = (expertOverdue[ow] || 0) + 1;
           }
+        });
+        // Today's done week entries: collect center names per expert
+        const weAll = blob.weekEntries || {};
+        Object.values(weAll).forEach(function(we) {
+          if (!we.done || we.scheduledDate !== todayStr) return;
+          const owner = we.addedBy || 'نامشخص';
+          if (!expertDoneNames[owner]) expertDoneNames[owner] = [];
+          const cname = we.centerName || we.rid || '';
+          if (cname && expertDoneNames[owner].length < 3) expertDoneNames[owner].push(cname);
         });
       }
     } catch(e) {}
 
     const totalToday = weRes.rows.reduce(function(s, r){ return s + r.total; }, 0);
+    const totalDone  = weRes.rows.reduce(function(s, r){ return s + r.done_count; }, 0);
 
     // Pending proformas
     let pfCount = 0;
@@ -1014,14 +1062,24 @@ async function sendDailyReport() {
     } catch(e) {}
 
     let text = '🌅 <b>گزارش صبح — ' + todayStr + '</b>\n\n';
-    text += '📅 برنامه امروز: <b>' + totalToday + '</b> مرکز\n';
-    if (overdueCount > 0) text += '⚠️ مراکز معوق: <b>' + overdueCount + '</b>\n';
+    text += '📅 برنامه امروز: <b>' + totalToday + '</b> مرکز';
+    if (totalDone > 0) text += ' | ✅ <b>' + totalDone + '</b> انجام‌شده';
+    text += '\n';
+    if (overdueTotal > 0) text += '⚠️ مراکز معوق: <b>' + overdueTotal + '</b>\n';
     if (pfCount > 0)      text += '📄 پیشفاکتور منتظر تأیید: <b>' + pfCount + '</b>\n';
 
     if (weRes.rows.length) {
       text += '\n👥 <b>بر اساس کارشناس:</b>\n';
       weRes.rows.forEach(function(r) {
-        text += '• ' + (r.expert || 'نامشخص') + ': ' + r.total + ' برنامه\n';
+        const expert = r.expert || 'نامشخص';
+        const doneTag  = r.done_count > 0 ? ' ✅' + r.done_count : '';
+        const ovTag    = expertOverdue[expert] ? ' ⚠️' + expertOverdue[expert] + ' معوق' : '';
+        text += '• ' + expert + ': 📋' + r.total + doneTag + ovTag + '\n';
+        // Show names of done centers (max 3)
+        const dones = expertDoneNames[expert] || [];
+        if (dones.length) {
+          text += '  ' + dones.map(function(n){ return '✓ ' + n; }).join(' | ') + '\n';
+        }
       });
     }
 

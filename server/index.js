@@ -43,6 +43,11 @@ app.use(function (req, res, next) {
 // Static — serve public/ directory
 const publicDir = path.join(__dirname, '..', 'public');
 if (fs.existsSync(publicDir)) {
+  // Prevent stale JS/CSS after server updates — browser always revalidates
+  app.use(function(req, res, next) {
+    if (/\.(js|css)$/.test(req.path)) res.setHeader('Cache-Control', 'no-cache');
+    next();
+  });
   app.use(express.static(publicDir));
 }
 

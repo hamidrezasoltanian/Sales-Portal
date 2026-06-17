@@ -1,4 +1,4 @@
-var CACHE='atena-crm-v1';
+var CACHE='atena-crm-v2';
 var PRECACHE=[
   'https://cdn.jsdelivr.net/npm/vazirmatn@33.003.0/Vazirmatn-font-face.css',
   'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
