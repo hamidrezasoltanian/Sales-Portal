@@ -57,7 +57,7 @@ router.get('/', requireAuth, async function (req, res) {
         .map(n => ({
           id: n.id,
           to: n.to || null,
-          msg: n.msg || '',
+          msg: n.msg || n.message || '',   // blob uses "message", SQL uses "msg"
           centerKey: n.centerKey || null,
           at: n.at || new Date().toISOString(),
           read: !!n.read,
