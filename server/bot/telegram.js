@@ -23,12 +23,14 @@ const TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 
 // ── States ────────────────────────────────────────────────────────────────
 const ST = {
-  IDLE:            'idle',
-  AWAIT_USERNAME:  'await_username',
-  AWAIT_PASSWORD:  'await_password',
-  AWAIT_REJECT:    'await_reject',
-  AWAIT_CALL_NOTE: 'await_call_note',
-  AWAIT_MSG_TEXT:  'await_msg_text',   // manager: typing message to expert
+  IDLE:             'idle',
+  AWAIT_USERNAME:   'await_username',
+  AWAIT_PASSWORD:   'await_password',
+  AWAIT_REJECT:     'await_reject',
+  AWAIT_CALL_NOTE:  'await_call_note',
+  AWAIT_MSG_TEXT:   'await_msg_text',    // manager: typing message to expert
+  AWAIT_PLAN_SEARCH:'await_plan_search', // typing center name to add to plan
+  AWAIT_SEARCH_Q:   'await_search_q',    // typing center name for info lookup
 };
 
 const sessions = {};
@@ -145,8 +147,10 @@ function toJalali(date) {
 // ── Keyboards ─────────────────────────────────────────────────────────────
 const MENU_KB = {
   keyboard: [
-    [{ text: '☀️ برنامه امروز' }, { text: '📋 وظایف من' }],
-    [{ text: '📄 پیشفاکتورها' }, { text: '🔍 اسکن QR' }],
+    [{ text: '☀️ برنامه امروز' },    { text: '📅 برنامه هفته' }],
+    [{ text: '📋 وظایف من' },         { text: '🔔 اعلان‌ها' }],
+    [{ text: '➕ افزودن به برنامه' }, { text: '🔍 جستجوی مرکز' }],
+    [{ text: '📄 پیشفاکتورها' },      { text: '🔍 اسکن QR' }],
     [{ text: '❓ راهنما' }],
   ],
   resize_keyboard: true,
@@ -154,10 +158,12 @@ const MENU_KB = {
 
 const MENU_KB_MANAGER = {
   keyboard: [
-    [{ text: '☀️ برنامه امروز' }, { text: '📋 وظایف من' }],
-    [{ text: '📊 گزارش معوق' },   { text: '📈 KPI هفتگی' }],
-    [{ text: '📨 ارسال پیام' },   { text: '📄 پیشفاکتورها' }],
-    [{ text: '📦 موجودی انبار' }, { text: '🔍 اسکن QR' }],
+    [{ text: '☀️ برنامه امروز' },    { text: '📅 برنامه هفته' }],
+    [{ text: '📋 وظایف من' },         { text: '🔔 اعلان‌ها' }],
+    [{ text: '📊 گزارش معوق' },       { text: '📈 KPI هفتگی' }],
+    [{ text: '📨 ارسال پیام' },       { text: '➕ افزودن به برنامه' }],
+    [{ text: '🔍 جستجوی مرکز' },     { text: '📄 پیشفاکتورها' }],
+    [{ text: '📦 موجودی انبار' },     { text: '🔍 اسکن QR' }],
     [{ text: '❓ راهنما' }],
   ],
   resize_keyboard: true,
@@ -196,8 +202,12 @@ async function handleUpdate(upd) {
         await sendMsg(chatId,
           '👋 سلام <b>' + sess.name + '</b> | ' + sess.role + (isManagerRole(sess.role) ? ' 👑' : '') + '\n\n' +
           '📋 دستورات:\n' +
-          '☀️ برنامه امروز — مراکز برنامه‌ریزی شده\n' +
+          '☀️ برنامه امروز — مراکز امروز\n' +
+          '📅 برنامه هفته — نمای ۷ روزه\n' +
           '📋 وظایف من — وظایف باز\n' +
+          '🔔 اعلان‌ها — اعلان‌های خوانده‌نشده\n' +
+          '➕ افزودن به برنامه — جستجو و ثبت در برنامه\n' +
+          '🔍 جستجوی مرکز — وضعیت و یادداشت مرکز\n' +
           '📄 پیشفاکتورها — لیست و تأیید\n' +
           '📦 موجودی انبار — وضعیت کالاها\n' +
           '🔍 اسکن QR — اطلاعات لات/کالا\n' +
@@ -277,6 +287,28 @@ async function handleUpdate(upd) {
       return;
     }
 
+    if (sess.state === ST.AWAIT_PLAN_SEARCH) {
+      if (text === '/cancel') {
+        sess.state = ST.IDLE;
+        await sendMsg(chatId, '❌ لغو شد.', { reply_markup: menuFor(sess) });
+        return;
+      }
+      sess.state = ST.IDLE;
+      await handlePlanSearchResults(chatId, sess, text);
+      return;
+    }
+
+    if (sess.state === ST.AWAIT_SEARCH_Q) {
+      if (text === '/cancel') {
+        sess.state = ST.IDLE;
+        await sendMsg(chatId, '❌ لغو شد.', { reply_markup: menuFor(sess) });
+        return;
+      }
+      sess.state = ST.IDLE;
+      await handleCenterInfo(chatId, sess, text);
+      return;
+    }
+
     // Require login for commands below
     if (!sess.username) {
       sess.state = ST.AWAIT_USERNAME;
@@ -284,14 +316,18 @@ async function handleUpdate(upd) {
       return;
     }
 
-    if (text === '☀️ برنامه امروز' || text === '/today')    { await handleTodaySchedule(chatId, sess); return; }
-    if (text === '📋 وظایف من'    || text === '/tasks')     { await handleTasks(chatId, sess); return; }
-    if (text === '📊 گزارش معوق'  || text === '/overdue')  { await handleOverdueReport(chatId, sess); return; }
-    if (text === '📈 KPI هفتگی'   || text === '/kpi')      { await handleWeeklyKPI(chatId, sess); return; }
-    if (text === '📨 ارسال پیام'  || text === '/msg')      { await handleSendMessage(chatId, sess); return; }
-    if (text === '📄 پیشفاکتورها' || text === '/proformas') { await handleProformas(chatId, sess); return; }
-    if (text === '📦 موجودی انبار'|| text === '/inventory') { await handleInventory(chatId); return; }
-    if (text === '🔍 اسکن QR'     || text === '/scan') {
+    if (text === '☀️ برنامه امروز'     || text === '/today')    { await handleTodaySchedule(chatId, sess); return; }
+    if (text === '📅 برنامه هفته'      || text === '/week')     { await handleWeekSchedule(chatId, sess); return; }
+    if (text === '📋 وظایف من'         || text === '/tasks')    { await handleTasks(chatId, sess); return; }
+    if (text === '🔔 اعلان‌ها'          || text === '/notifs')   { await handleNotifications(chatId, sess); return; }
+    if (text === '➕ افزودن به برنامه' || text === '/add')      { await handleAddToPlan(chatId, sess); return; }
+    if (text === '🔍 جستجوی مرکز'     || text === '/search')   { await handleCenterSearch(chatId, sess); return; }
+    if (text === '📊 گزارش معوق'       || text === '/overdue')  { await handleOverdueReport(chatId, sess); return; }
+    if (text === '📈 KPI هفتگی'        || text === '/kpi')      { await handleWeeklyKPI(chatId, sess); return; }
+    if (text === '📨 ارسال پیام'       || text === '/msg')      { await handleSendMessage(chatId, sess); return; }
+    if (text === '📄 پیشفاکتورها'      || text === '/proformas') { await handleProformas(chatId, sess); return; }
+    if (text === '📦 موجودی انبار'     || text === '/inventory') { await handleInventory(chatId); return; }
+    if (text === '🔍 اسکن QR'          || text === '/scan') {
       await sendMsg(chatId, '📸 عکس QR کد کالا را بفرستید:', { reply_markup: { force_reply: true } });
       return;
     }
@@ -621,6 +657,106 @@ async function handleCallback(cb) {
     return;
   }
 
+  // ── Add to plan: pick center from search results ───────────────────────
+  if (data.startsWith('plan_center:')) {
+    const idx = parseInt(data.slice(12));
+    const center = (sess.planResults || [])[idx];
+    if (!center) { await sendMsg(chatId, '❌ مرکز یافت نشد. دوباره /add را بزنید.'); return; }
+    sess.planCenter = center;
+
+    // Build date options (next 6 days)
+    const dates = [];
+    for (let i = 0; i < 6; i++) dates.push(toJalali(new Date(Date.now() + i * 86400000)));
+    sess.planDates = dates;
+    const persianDays = ['یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه'];
+
+    const dateRows = dates.map(function(d, i) {
+      const dow = new Date(Date.now() + i * 86400000).getDay();
+      const label = i === 0 ? '⭐ امروز — ' + d : i === 1 ? '📅 فردا — ' + d : persianDays[dow] + ' — ' + d;
+      return [{ text: label, callback_data: 'plan_date:' + i }];
+    });
+
+    await sendMsg(chatId,
+      '📅 <b>' + center.name + '</b>\n\nتاریخ را انتخاب کنید:',
+      { reply_markup: { inline_keyboard: dateRows } }
+    );
+    return;
+  }
+
+  if (data.startsWith('plan_date:')) {
+    const idx = parseInt(data.slice(10));
+    const date = (sess.planDates || [])[idx];
+    if (!date || !sess.planCenter) { await sendMsg(chatId, '❌ خطا. دوباره /add را بزنید.'); return; }
+    sess.planDate = date;
+
+    await sendMsg(chatId,
+      '📋 نوع فعالیت را انتخاب کنید:',
+      { reply_markup: { inline_keyboard: [[
+        { text: '📞 تماس تلفنی', callback_data: 'plan_action:call' },
+        { text: '🚗 بازدید حضوری', callback_data: 'plan_action:visit' },
+      ]] } }
+    );
+    return;
+  }
+
+  if (data.startsWith('plan_action:')) {
+    const actionType = data.slice(12);
+    const center = sess.planCenter;
+    const date   = sess.planDate;
+    delete sess.planCenter; delete sess.planDate; delete sess.planDates; delete sess.planResults;
+
+    if (!center || !date) { await sendMsg(chatId, '❌ خطا. دوباره /add را بزنید.', { reply_markup: menuFor(sess) }); return; }
+
+    const recKey = (center.rtype || 'center') + '_' + (center.rid || center.name.replace(/\s/g,'_'));
+    const key    = date + ':::' + recKey;
+    const value  = {
+      rtype: center.rtype || 'center', rid: center.rid || '',
+      centerName: center.name, scheduledDate: date,
+      actionType: actionType, done: false,
+      addedBy: sess.username, weekTagId: null,
+    };
+
+    try {
+      await query(
+        `INSERT INTO week_entries (key, value, updated_at, updated_by)
+         VALUES ($1, $2, NOW(), $3)
+         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW(), updated_by = $3`,
+        [key, JSON.stringify(value), sess.username]
+      );
+      const actLabel = actionType === 'call' ? '📞 تماس تلفنی' : '🚗 بازدید حضوری';
+      await sendMsg(chatId,
+        '✅ <b>اضافه شد به برنامه!</b>\n\n' +
+        '🏥 مرکز: <b>' + center.name + '</b>\n' +
+        '📅 تاریخ: ' + date + '\n' +
+        '📋 نوع: ' + actLabel,
+        { reply_markup: menuFor(sess) }
+      );
+    } catch(e) {
+      await sendMsg(chatId, '❌ خطا در ثبت: ' + e.message, { reply_markup: menuFor(sess) });
+    }
+    return;
+  }
+
+  // ── Notifications: mark all read ──────────────────────────────────────
+  if (data === 'notif_readall') {
+    try {
+      await query(`UPDATE notifications SET read = true WHERE to_user = $1 AND read = false`, [sess.username]);
+      await sendMsg(chatId, '✅ همه اعلان‌ها خوانده شد.', { reply_markup: menuFor(sess) });
+    } catch(e) {
+      await sendMsg(chatId, '❌ خطا: ' + e.message);
+    }
+    return;
+  }
+
+  // ── Center info: pick from multiple results ────────────────────────────
+  if (data.startsWith('info_center:')) {
+    const idx = parseInt(data.slice(12));
+    const center = (sess.searchResults || [])[idx];
+    if (!center) { await sendMsg(chatId, '❌ مرکز یافت نشد.'); return; }
+    await showCenterInfo(chatId, sess, center);
+    return;
+  }
+
   // ── Week entry callbacks ───────────────────────────────────────────────
   if (data.startsWith('we_done:')) {
     const idx = parseInt(data.slice(8));
@@ -777,6 +913,286 @@ async function handlePhoto(chatId, msg) {
   } catch(e) {
     console.error('[bot] QR scan error:', e.message);
     await sendMsg(chatId, '❌ خطا در پردازش تصویر: ' + e.message, { reply_markup: MENU_KB });
+  }
+}
+
+// ── 📅 Week Schedule ─────────────────────────────────────────────────────
+async function handleWeekSchedule(chatId, sess) {
+  const isMgr = isManagerRole(sess.role);
+  const days = [];
+  for (let i = 0; i < 7; i++) days.push(toJalali(new Date(Date.now() + i * 86400000)));
+
+  let rows;
+  try {
+    const params = isMgr ? [days[0], days[6]] : [days[0], days[6], sess.username];
+    const r = await query(
+      `SELECT key, value FROM week_entries
+       WHERE value->>'scheduledDate' >= $1 AND value->>'scheduledDate' <= $2
+       ${!isMgr ? "AND value->>'addedBy' = $3" : ''}
+       ORDER BY value->>'scheduledDate', updated_at`,
+      params
+    );
+    rows = r.rows;
+  } catch(e) {
+    await sendMsg(chatId, '❌ خطا: ' + e.message, { reply_markup: menuFor(sess) });
+    return;
+  }
+
+  const byDate = {};
+  rows.forEach(function(r) {
+    const d = r.value.scheduledDate;
+    if (!byDate[d]) byDate[d] = [];
+    byDate[d].push(r.value);
+  });
+
+  const persianDays = ['یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه'];
+  let text = '📅 <b>برنامه ۷ روزه</b>\n\n';
+  let totalEntries = 0;
+
+  days.forEach(function(dayStr, i) {
+    const entries = byDate[dayStr] || [];
+    totalEntries += entries.length;
+    if (!entries.length && i > 0) return; // فقط روزهایی که برنامه دارند نمایش بده (امروز همیشه نمایش)
+
+    const dow = new Date(Date.now() + i * 86400000).getDay();
+    const dayLabel = i === 0 ? '⭐ امروز' : i === 1 ? 'فردا' : persianDays[dow];
+    const done = entries.filter(function(e){ return e.done; }).length;
+
+    text += '<b>' + dayLabel + ' — ' + dayStr + '</b>';
+    if (entries.length) text += ' (' + entries.length + (done ? ' | ✅' + done : '') + ')';
+    text += '\n';
+
+    entries.slice(0, 5).forEach(function(we) {
+      const act = we.actionType === 'call' ? '📞' : '🚗';
+      const name = (we.centerName || we.rid || '—').slice(0, 20);
+      const ownerTag = isMgr && we.addedBy ? ' <i>(' + we.addedBy + ')</i>' : '';
+      text += (we.done ? '  ✅' : '  ⬜') + ' ' + act + ' ' + name + ownerTag + '\n';
+    });
+    if (entries.length > 5) text += '  و ' + (entries.length - 5) + ' مورد دیگر...\n';
+    text += '\n';
+  });
+
+  if (!totalEntries) text += 'هیچ برنامه‌ای برای ۷ روز آینده تنظیم نشده.\n\nاز ➕ افزودن به برنامه استفاده کنید.';
+
+  await sendMsg(chatId, text, { reply_markup: menuFor(sess) });
+}
+
+// ── 🔔 Notifications ──────────────────────────────────────────────────────
+async function handleNotifications(chatId, sess) {
+  try {
+    const r = await query(
+      `SELECT id, msg, center_key, at, read FROM notifications
+       WHERE to_user = $1 ORDER BY at DESC LIMIT 15`,
+      [sess.username]
+    );
+    const notifs = r.rows;
+    const unread = notifs.filter(function(n){ return !n.read; });
+
+    if (!notifs.length) {
+      await sendMsg(chatId, '🔔 <b>اعلان‌ها</b>\n\nهیچ اعلانی وجود ندارد.', { reply_markup: menuFor(sess) });
+      return;
+    }
+
+    let text = '🔔 <b>اعلان‌ها</b> — ' + notifs.length + ' مورد';
+    if (unread.length) text += ' | <b>' + unread.length + ' خوانده‌نشده</b>';
+    text += '\n\n';
+
+    notifs.slice(0, 10).forEach(function(n) {
+      const icon = n.read ? '·' : '🔵';
+      const time = n.at ? toJalali(new Date(n.at)) : '';
+      text += icon + ' ' + (n.msg || '') + '\n';
+      if (time) text += '   <i>' + time + '</i>\n';
+    });
+    if (notifs.length > 10) text += '\n<i>و ' + (notifs.length - 10) + ' مورد دیگر...</i>';
+
+    const inlineKb = unread.length ? {
+      inline_keyboard: [[{ text: '✅ همه خوانده شد', callback_data: 'notif_readall' }]],
+    } : null;
+
+    await sendMsg(chatId, text, inlineKb ? { reply_markup: inlineKb } : { reply_markup: menuFor(sess) });
+  } catch(e) {
+    await sendMsg(chatId, '❌ خطا: ' + e.message, { reply_markup: menuFor(sess) });
+  }
+}
+
+// ── ➕ Add to plan ────────────────────────────────────────────────────────
+async function handleAddToPlan(chatId, sess) {
+  sess.state = ST.AWAIT_PLAN_SEARCH;
+  await sendMsg(chatId,
+    '🔍 <b>افزودن به برنامه هفته</b>\n\nنام مرکز یا بخشی از نام را بنویسید:\n(<code>/cancel</code> برای لغو)',
+    { reply_markup: { force_reply: true } }
+  );
+}
+
+async function searchCentersInDB(searchText, username, isMgr) {
+  const results = [];
+  const seen = new Set();
+  const like = '%' + searchText + '%';
+
+  // Search week_entries for previously scheduled centers
+  try {
+    const params = isMgr ? [like] : [like, username];
+    const cond   = isMgr ? "WHERE value->>'centerName' ILIKE $1" : "WHERE value->>'centerName' ILIKE $1 AND value->>'addedBy' = $2";
+    const r = await query(
+      `SELECT DISTINCT ON (value->>'centerName')
+              value->>'centerName' AS name,
+              value->>'rtype' AS rtype,
+              value->>'rid'   AS rid
+       FROM week_entries ${cond}
+       ORDER BY value->>'centerName'
+       LIMIT 12`,
+      params
+    );
+    r.rows.forEach(function(row) {
+      const key = (row.rtype || '') + '_' + (row.rid || '');
+      if (row.name && !seen.has(key)) {
+        seen.add(key);
+        results.push({ name: row.name, rtype: row.rtype || 'center', rid: row.rid || '' });
+      }
+    });
+  } catch(e) {}
+
+  // Also search blob edits for nameOverride / more coverage
+  if (results.length < 5) {
+    try {
+      const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
+      const blob = blobRes.rows.length ? blobRes.rows[0].value : {};
+      const edits = blob.edits || {};
+      Object.entries(edits).forEach(function([key, e]) {
+        const name = e.nameOverride || '';
+        if (!name || !name.toLowerCase().includes(searchText.toLowerCase())) return;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const parts = key.split('_');
+        const rtype = parts[0];
+        const rid   = parts.slice(1).join('_');
+        if (results.length < 8) results.push({ name, rtype, rid });
+      });
+    } catch(e) {}
+  }
+
+  return results.slice(0, 8);
+}
+
+async function handlePlanSearchResults(chatId, sess, searchText) {
+  const isMgr = isManagerRole(sess.role);
+  const results = await searchCentersInDB(searchText, sess.username, isMgr);
+
+  if (!results.length) {
+    await sendMsg(chatId,
+      '❌ مرکزی با نام «' + searchText + '» یافت نشد.\n\nدوباره /add را بزنید یا نام دیگری جستجو کنید.',
+      { reply_markup: menuFor(sess) }
+    );
+    return;
+  }
+
+  sess.planResults = results;
+
+  const rows = results.map(function(c, i) {
+    return [{ text: c.name.slice(0, 40), callback_data: 'plan_center:' + i }];
+  });
+
+  await sendMsg(chatId, '🔍 <b>' + results.length + ' نتیجه</b> — کدام مرکز؟', {
+    reply_markup: { inline_keyboard: rows },
+  });
+}
+
+// ── 🔍 Center search / info ───────────────────────────────────────────────
+async function handleCenterSearch(chatId, sess) {
+  sess.state = ST.AWAIT_SEARCH_Q;
+  await sendMsg(chatId,
+    '🔍 <b>جستجوی مرکز</b>\n\nنام مرکز را بنویسید:\n(<code>/cancel</code> برای لغو)',
+    { reply_markup: { force_reply: true } }
+  );
+}
+
+async function handleCenterInfo(chatId, sess, searchText) {
+  const isMgr = isManagerRole(sess.role);
+  const results = await searchCentersInDB(searchText, sess.username, isMgr);
+
+  if (!results.length) {
+    await sendMsg(chatId, '❌ مرکزی با نام «' + searchText + '» یافت نشد.', { reply_markup: menuFor(sess) });
+    return;
+  }
+
+  if (results.length === 1) {
+    await showCenterInfo(chatId, sess, results[0]);
+    return;
+  }
+
+  sess.searchResults = results;
+  const rows = results.map(function(c, i) {
+    return [{ text: c.name.slice(0, 40), callback_data: 'info_center:' + i }];
+  });
+  await sendMsg(chatId, '🔍 <b>' + results.length + ' نتیجه</b> — کدام مرکز؟', {
+    reply_markup: { inline_keyboard: rows },
+  });
+}
+
+async function showCenterInfo(chatId, sess, center) {
+  try {
+    const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
+    const data = blobRes.rows.length ? blobRes.rows[0].value : {};
+
+    const key  = (center.rtype || 'center') + '_' + (center.rid || '');
+    const edit = (data.edits || {})[key] || {};
+    const todayStr = toJalali(new Date());
+
+    const statusLabels = {
+      'new': 'جدید', 'contacted': 'تماس گرفته شد', 'interested': 'علاقمند',
+      'negotiating': 'مذاکره', 'demo': 'دمو', 'proposal': 'پیشنهاد داده شده',
+      'contract': '✅ قرارداد', 'lost': '❌ از دست رفته', 'inactive': 'غیرفعال',
+    };
+
+    const status   = statusLabels[edit.status] || edit.status || '—';
+    const owner    = edit.owner || '—';
+    const followup = edit.followupDate || '—';
+    const isOverdue = edit.followupDate && edit.followupDate < todayStr;
+
+    let text = '🏥 <b>' + center.name + '</b>\n\n';
+    text += '📊 وضعیت: ' + status + '\n';
+    text += '👤 مسئول: ' + owner + '\n';
+    text += '📅 فالوآپ: ' + followup;
+    if (isOverdue) text += ' ⚠️ <b>معوق!</b>';
+    text += '\n';
+    if (edit.potential) text += '💎 پتانسیل: P' + edit.potential + '\n';
+    if (edit.competitor) text += '🏭 رقیب: ' + edit.competitor + '\n';
+
+    // Last note
+    const notes = (data.notes || {})[key] || [];
+    if (notes.length) {
+      const last = notes[notes.length - 1];
+      const noteText = (last.text || last.content || '').slice(0, 200);
+      if (noteText) {
+        text += '\n📝 <b>آخرین یادداشت:</b>\n' + noteText;
+        const by = last.by || last.user;
+        if (by) text += '\n   — ' + by;
+        if (last.at || last.date) text += ' | ' + toJalali(new Date(last.at || last.date));
+      }
+    }
+
+    // Recent week entries for this center
+    try {
+      const weRes = await query(
+        `SELECT value FROM week_entries
+         WHERE value->>'rtype' = $1 AND value->>'rid' = $2
+         ORDER BY value->>'scheduledDate' DESC LIMIT 3`,
+        [center.rtype || 'center', center.rid || '']
+      );
+      if (weRes.rows.length) {
+        text += '\n\n📅 <b>آخرین بازدیدها:</b>\n';
+        weRes.rows.forEach(function(r) {
+          const we = r.value;
+          const act = we.actionType === 'call' ? '📞' : '🚗';
+          const doneIcon = we.done ? '✅' : '⬜';
+          text += doneIcon + ' ' + act + ' ' + (we.scheduledDate || '') + '\n';
+        });
+      }
+    } catch(e) {}
+
+    await sendMsg(chatId, text, { reply_markup: menuFor(sess) });
+  } catch(e) {
+    await sendMsg(chatId, '❌ خطا در دریافت اطلاعات: ' + e.message, { reply_markup: menuFor(sess) });
   }
 }
 
