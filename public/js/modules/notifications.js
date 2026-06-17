@@ -167,8 +167,7 @@ function goToNotifCenter(nid){
   var keys=n.centerKeys&&n.centerKeys.length?n.centerKeys:[n.centerKey];
   if(keys.length===1){
     var parts=keys[0].split('_');var rtype=parts[0];var rid=parts.slice(1).join('_');
-    if(currentTab!=='provinces'&&currentTab!=='weekplan')switchTab('provinces');
-    setTimeout(function(){openCenterModal(rtype,rid);},150);
+    setTimeout(function(){openCenterModal(rtype,rid);},100);
     return;
   }
   // multiple centers: show list modal
@@ -208,12 +207,12 @@ function ackNotif(nid){
 function markNotifRead(nid){
   _initNotif();
   var nx=DB.notifications.find(function(x){return x.id===nid;});
-  if(nx){nx.read=true;saveDB();updateNotifBadge();}
+  if(nx){nx.read=true;saveDBSync();updateNotifBadge();}
 }
 function markAllNotifsRead(){
   _initNotif();
   DB.notifications.forEach(function(n){if(n.to===currentUser)n.read=true;});
-  saveDB();updateNotifBadge();
+  saveDBSync();updateNotifBadge();
   var p=document.getElementById('notifPanel');
   if(p){var btn=p.querySelector('.notif-panel-head button');if(btn)btn.remove();p.querySelectorAll('.notif-item.unread').forEach(function(el){el.classList.remove('unread');});}
 }

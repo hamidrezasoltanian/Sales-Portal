@@ -6224,8 +6224,8 @@ function goToNotifCenter(nid){
   var keys=n.centerKeys&&n.centerKeys.length?n.centerKeys:[n.centerKey];
   if(keys.length===1){
     var parts=keys[0].split('_');var rtype=parts[0];var rid=parts.slice(1).join('_');
-    if(currentTab!=='provinces'&&currentTab!=='weekplan')switchTab('provinces');
-    setTimeout(function(){openCenterModal(rtype,rid);},150);
+    // Open center modal directly — no tab switch needed, modal works on any tab
+    setTimeout(function(){openCenterModal(rtype,rid);},100);
     return;
   }
   // multiple centers: show list modal
@@ -6233,7 +6233,7 @@ function goToNotifCenter(nid){
   keys.forEach(function(ck){
     var cname=_clGetName(ck);
     var cparts=ck.split('_');var crt=cparts[0];var crid=cparts.slice(1).join('_');
-    listHtml+='<button onclick="closeModal(\'notifCkList\');if(currentTab!==\'provinces\'&&currentTab!==\'weekplan\')switchTab(\'provinces\');setTimeout(function(){openCenterModal(\''+crt+'\',\''+crid+'\');},150)" style="text-align:right;padding:8px 12px;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px;cursor:pointer">'+esc(cname)+'</button>';
+    listHtml+='<button onclick="closeModal(\'notifCkList\');setTimeout(function(){openCenterModal(\''+crt+'\',\''+crid+'\');},150)" style="text-align:right;padding:8px 12px;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px;cursor:pointer">'+esc(cname)+'</button>';
   });
   listHtml+='</div>';
   openModal('notifCkList','📍 مراکز مرتبط با این اعلان',listHtml,'<button class="btn-secondary" onclick="closeModal(\'notifCkList\')">بستن</button>');
@@ -6265,12 +6265,12 @@ function ackNotif(nid){
 function markNotifRead(nid){
   _initNotif();
   var nx=DB.notifications.find(function(x){return x.id===nid;});
-  if(nx){nx.read=true;saveDB();updateNotifBadge();}
+  if(nx){nx.read=true;saveDBSync();updateNotifBadge();}
 }
 function markAllNotifsRead(){
   _initNotif();
   DB.notifications.forEach(function(n){if(n.to===currentUser)n.read=true;});
-  saveDB();updateNotifBadge();
+  saveDBSync();updateNotifBadge();
   var p=document.getElementById('notifPanel');
   if(p){var btn=p.querySelector('.notif-panel-head button');if(btn)btn.remove();p.querySelectorAll('.notif-item.unread').forEach(function(el){el.classList.remove('unread');});}
 }
@@ -10527,6 +10527,14 @@ function _sseReloadDB(byUser) {
       var merged = Object.assign({}, DB, d);
       merged.weekEntries = Object.assign({}, DB.weekEntries, d.weekEntries || {});
       merged.edits = Object.assign({}, DB.edits, d.edits || {});
+      // Preserve local read=true — SSE must not un-read notifications the user already opened
+      if (d.notifications && DB.notifications && DB.notifications.length) {
+        var _localRead={};
+        DB.notifications.forEach(function(n){if(n.read)_localRead[n.id]=true;});
+        merged.notifications=(d.notifications||[]).map(function(n){
+          return _localRead[n.id]?Object.assign({},n,{read:true}):n;
+        });
+      }
       delete merged._serverTs; delete merged._clientTs;
       Object.keys(merged).forEach(function(k) { DB[k] = merged[k]; });
       // Only re-render if no pending user save (avoids clobbering active edits)
