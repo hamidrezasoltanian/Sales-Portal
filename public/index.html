@@ -7,7 +7,7 @@
 <!-- cache-bust: v2.1 -->
 <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(function(){});}</script>
 <!-- Vazirmatn از jsDelivr — npm package، بدون Google dependency -->
-<link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/app.css?v=20260617b">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" onerror="console.warn('XLSX CDN failed - only TSV format supported offline')"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
 </head>
@@ -282,16 +282,16 @@
 
 <!-- DATA -->
 <!-- Core utilities (extracted from app.js — copy-only, bundle still has all code) -->
-<script src="/js/modules/auth-ui.js"></script>
-<script src="/js/modules/storage.js"></script>
-<script src="/js/modules/user-mgmt.js"></script>
-<script src="/js/modules/tab-nav.js"></script>
-<script src="/js/modules/banner.js"></script>
-<script src="/js/modules/week-plan.js"></script>
-<script src="/js/modules/notifications.js"></script>
+<script src="/js/modules/auth-ui.js?v=20260617b"></script>
+<script src="/js/modules/storage.js?v=20260617b"></script>
+<script src="/js/modules/user-mgmt.js?v=20260617b"></script>
+<script src="/js/modules/tab-nav.js?v=20260617b"></script>
+<script src="/js/modules/banner.js?v=20260617b"></script>
+<script src="/js/modules/week-plan.js?v=20260617b"></script>
+<script src="/js/modules/notifications.js?v=20260617b"></script>
 <!-- bundled from 20 modules — rebuild with: python3 scripts/build-bundle.py -->
-<script src="/js/app.bundle.js"></script>
-<script src="/js/proforma.js"></script>
+<script src="/js/app.bundle.js?v=20260617b"></script>
+<script src="/js/proforma.js?v=20260617b"></script>
 
 <!-- JS -->
 
