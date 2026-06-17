@@ -199,18 +199,65 @@ router.post('/:id/comment', requireAuth, async function (req, res) {
 router.post('/:id/done', requireAuth, async function (req, res) {
   try {
     const result = await query(
-      `UPDATE tasks SET done = true, done_at = NOW(), updated_at = NOW()
+      `UPDATE tasks SET done = true, done_at = NOW(), status = 'done', updated_at = NOW()
        WHERE id = $1 RETURNING *`,
       [req.params.id]
     );
     if (!result.rows.length) {
       return res.status(404).json({ error: 'وظیفه یافت نشد' });
     }
-    res.json(rowToObj(result.rows[0]));
+    const task = result.rows[0];
+    const obj = rowToObj(task);
+
+    // Auto-spawn next occurrence for recurring tasks
+    if (task.recurring && task.recurring !== 'none' && task.due_date) {
+      const nextDate = calcNextJalaliDate(task.due_date, task.recurring);
+      if (nextDate) {
+        const newId = 'rec_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+        await query(
+          `INSERT INTO tasks
+             (id, title, owner, created_by, priority, status, center_key, note, due_date, recurring, subtasks, created_at, done)
+           VALUES ($1,$2,$3,$4,$5,'todo',$6,$7,$8,$9,'[]'::jsonb,NOW(),false)`,
+          [newId, task.title, task.owner, req.user.username,
+           task.priority, task.center_key, task.note, nextDate, task.recurring]
+        );
+        obj.nextTaskId  = newId;
+        obj.nextDueDate = nextDate;
+      }
+    }
+
+    res.json(obj);
   } catch (e) {
     console.error('[tasks POST /:id/done]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
   }
 });
+
+// Jalali date arithmetic for recurring tasks
+function calcNextJalaliDate(jalaliStr, recurring) {
+  if (!jalaliStr) return null;
+  const parts = jalaliStr.split('/').map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return null;
+  let [jy, jm, jd] = parts;
+  const monthDays = [31,31,31,31,31,31,30,30,30,30,30,29];
+
+  if (recurring === 'daily') {
+    jd++;
+    if (jd > (monthDays[jm-1] || 30)) { jd = 1; jm++; }
+    if (jm > 12) { jm = 1; jy++; }
+  } else if (recurring === 'weekly') {
+    jd += 7;
+    while (jd > (monthDays[jm-1] || 30)) { jd -= (monthDays[jm-1] || 30); jm++; if (jm > 12) { jm = 1; jy++; } }
+  } else if (recurring === 'monthly') {
+    jm++;
+    if (jm > 12) { jm = 1; jy++; }
+    const max = monthDays[jm-1] || 29;
+    if (jd > max) jd = max;
+  } else {
+    return null;
+  }
+
+  return jy + '/' + String(jm).padStart(2,'0') + '/' + String(jd).padStart(2,'0');
+}
 
 module.exports = router;

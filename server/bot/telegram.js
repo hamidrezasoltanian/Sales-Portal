@@ -1847,18 +1847,54 @@ async function doSendMessageToExpert(chatId, sess, recipient, text) {
 async function doMarkTaskDone(chatId, sess, taskId) {
   try {
     const r = await query(
-      `UPDATE tasks SET done = true, done_at = NOW(), status = 'done'
-       WHERE id = $1 AND (owner = $2 OR created_by = $2) RETURNING title`,
+      `UPDATE tasks SET done = true, done_at = NOW(), status = 'done', updated_at = NOW()
+       WHERE id = $1 AND (owner = $2 OR created_by = $2) RETURNING *`,
       [taskId, sess.username]
     );
     if (!r.rows.length) {
       await sendMsg(chatId, '⚠️ وظیفه یافت نشد یا دسترسی ندارید.');
       return;
     }
-    await sendMsg(chatId, '✅ وظیفه «' + r.rows[0].title + '» انجام شد.', { reply_markup: menuFor(sess) });
+    const task = r.rows[0];
+    let reply = '✅ وظیفه «' + task.title + '» انجام شد.';
+
+    // Auto-spawn next for recurring tasks
+    if (task.recurring && task.recurring !== 'none' && task.due_date) {
+      const nextDate = calcNextJalaliDateBot(task.due_date, task.recurring);
+      if (nextDate) {
+        const newId = 'rec_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+        await query(
+          `INSERT INTO tasks
+             (id, title, owner, created_by, priority, status, center_key, note, due_date, recurring, subtasks, created_at, done)
+           VALUES ($1,$2,$3,$4,$5,'todo',$6,$7,$8,$9,'[]'::jsonb,NOW(),false)`,
+          [newId, task.title, task.owner, sess.username,
+           task.priority, task.center_key, task.note, nextDate, task.recurring]
+        );
+        const recLabel = { daily: 'روزانه', weekly: 'هفتگی', monthly: 'ماهانه' };
+        reply += '\n🔁 وظیفه ' + (recLabel[task.recurring] || task.recurring) + ' برای ' + nextDate + ' ایجاد شد.';
+      }
+    }
+
+    await sendMsg(chatId, reply, { reply_markup: menuFor(sess) });
   } catch(e) {
     await sendMsg(chatId, '❌ خطا: ' + e.message);
   }
+}
+
+function calcNextJalaliDateBot(jalaliStr, recurring) {
+  if (!jalaliStr) return null;
+  const parts = jalaliStr.split('/').map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return null;
+  let [jy, jm, jd] = parts;
+  const monthDays = [31,31,31,31,31,31,30,30,30,30,30,29];
+  if (recurring === 'daily') {
+    jd++; if (jd > (monthDays[jm-1]||30)) { jd=1; jm++; } if (jm>12) { jm=1; jy++; }
+  } else if (recurring === 'weekly') {
+    jd+=7; while(jd>(monthDays[jm-1]||30)){jd-=(monthDays[jm-1]||30);jm++;if(jm>12){jm=1;jy++;}}
+  } else if (recurring === 'monthly') {
+    jm++; if(jm>12){jm=1;jy++;} const max=monthDays[jm-1]||29; if(jd>max)jd=max;
+  } else { return null; }
+  return jy+'/'+String(jm).padStart(2,'0')+'/'+String(jd).padStart(2,'0');
 }
 
 // ── Notify helpers ────────────────────────────────────────────────────────
