@@ -502,9 +502,22 @@ async function initSchema() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
-  await query(`CREATE INDEX IF NOT EXISTS idx_tasks_owner ON tasks(owner)`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date)`);
+  // Add missing columns to existing tasks tables (idempotent)
+  await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS owner TEXT`);
+  await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS due_date TEXT`);
+  await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS priority INTEGER DEFAULT 2`);
+  await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'todo'`);
+  await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS center_key TEXT`);
+  await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS note TEXT DEFAULT ''`);
+  await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS subtasks JSONB DEFAULT '[]'`);
+  await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS done BOOLEAN DEFAULT FALSE`);
+  await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS done_at TIMESTAMPTZ`);
+  await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS created_by TEXT`);
+  await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`);
+  await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_tasks_owner ON tasks(owner)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date)`).catch(()=>{});
 
   // ════════════════════════════════════════
   // WEEK ENTRIES — extracted from DB.weekEntries blob
@@ -527,10 +540,24 @@ async function initSchema() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
-  await query(`CREATE INDEX IF NOT EXISTS idx_we_week ON week_entries(week_id)`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_we_reckey ON week_entries(rec_key)`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_we_done ON week_entries(done)`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_we_date ON week_entries(scheduled_date)`);
+  // Add missing columns to existing week_entries tables (idempotent migrations)
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS week_id TEXT`);
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS rec_key TEXT`);
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS rtype TEXT`);
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS rid TEXT`);
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS scheduled_date TEXT`);
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS action_type TEXT`);
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS done BOOLEAN DEFAULT FALSE`);
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS done_date TEXT`);
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS added_by TEXT`);
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS center_name TEXT`);
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS week_tag_id TEXT`);
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`);
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_we_week ON week_entries(week_id)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_we_reckey ON week_entries(rec_key)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_we_done ON week_entries(done)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_we_date ON week_entries(scheduled_date)`).catch(()=>{});
 
   // ════════════════════════════════════════
   // NOTIFICATIONS — extracted from DB.notifications blob
@@ -545,9 +572,15 @@ async function initSchema() {
       read BOOLEAN DEFAULT FALSE
     )
   `);
-  await query(`CREATE INDEX IF NOT EXISTS idx_notif_to ON notifications(to_user)`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_notif_read ON notifications(read)`);
-  await query(`CREATE INDEX IF NOT EXISTS idx_notif_at ON notifications(at DESC)`);
+  // Add missing columns to existing notifications tables (idempotent)
+  await query(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS to_user TEXT`);
+  await query(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS msg TEXT`);
+  await query(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS center_key TEXT`);
+  await query(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS at TIMESTAMPTZ DEFAULT NOW()`);
+  await query(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read BOOLEAN DEFAULT FALSE`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_notif_to ON notifications(to_user)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_notif_read ON notifications(read)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_notif_at ON notifications(at DESC)`).catch(()=>{});
 
   // ════════════════════════════════════════
   // CHANGE LOG — extracted from DB.changeLog blob
