@@ -9,6 +9,7 @@
 //   • mark entry done + call note
 //   • tasks list
 //   • 🌅 daily morning report at 08:00 to managers
+//   • 📊 weekly digest every Monday 08:00 (overdue aging + KPI summary)
 //   • 🔔 push CRM notifications to Telegram
 // ════════════════════════════════════════════════════════════════
 
@@ -1031,6 +1032,109 @@ async function sendDailyReport() {
   }
 }
 
+async function sendWeeklyDigest() {
+  try {
+    const todayStr = toJalali(new Date());
+    const now = new Date();
+
+    // Overdue aging from blob
+    let aging = { w1: 0, w2: 0, old: 0 };
+    let perExpert = {};
+    try {
+      const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
+      if (blobRes.rows.length) {
+        const blob = blobRes.rows[0].value || {};
+        const edits = blob.edits || {};
+        Object.values(edits).forEach(function(e) {
+          if (!e.followupDate || e.followupDate >= todayStr) return;
+          if (e.status === 'lost' || e.status === 'غیرفعال' || e.status === 'قرارداد بسته شد') return;
+          // compute days overdue (rough: compare strings in Jalali is OK for same-year)
+          const fd = e.followupDate;
+          const nowParts = todayStr.split('/').map(Number);
+          const fdParts = fd.split('/').map(Number);
+          const diffDays = (nowParts[0]-fdParts[0])*365 + (nowParts[1]-fdParts[1])*30 + (nowParts[2]-fdParts[2]);
+          if (diffDays <= 7) aging.w1++;
+          else if (diffDays <= 30) aging.w2++;
+          else aging.old++;
+          const owner = e.owner || 'نامشخص';
+          if (!perExpert[owner]) perExpert[owner] = { overdue: 0, calls: 0, visits: 0 };
+          perExpert[owner].overdue++;
+        });
+
+        // Last 7 days calls/visits from logs
+        const sevenDaysAgo = new Date(now.getTime() - 7*24*60*60*1000);
+        const callLog = Array.isArray(blob.callLog) ? blob.callLog : [];
+        const visitLog = Array.isArray(blob.visitLog) ? blob.visitLog : [];
+        callLog.forEach(function(l) {
+          if (new Date(l.at || l.date) >= sevenDaysAgo) {
+            const u = l.by || l.user || 'نامشخص';
+            if (!perExpert[u]) perExpert[u] = { overdue: 0, calls: 0, visits: 0 };
+            perExpert[u].calls++;
+          }
+        });
+        visitLog.forEach(function(l) {
+          if (new Date(l.at || l.date) >= sevenDaysAgo) {
+            const u = l.by || l.user || 'نامشخص';
+            if (!perExpert[u]) perExpert[u] = { overdue: 0, calls: 0, visits: 0 };
+            perExpert[u].visits++;
+          }
+        });
+      }
+    } catch(e) {}
+
+    // Done entries this week from SQL
+    const weekStart = toJalali(new Date(now.getTime() - 6*24*60*60*1000));
+    let doneCounts = {};
+    try {
+      const weRes = await query(
+        `SELECT value->>'addedBy' AS expert, COUNT(*)::int AS cnt
+         FROM week_entries
+         WHERE (value->>'done')::boolean = true AND value->>'doneDate' >= $1
+         GROUP BY value->>'addedBy'`,
+        [weekStart]
+      );
+      weRes.rows.forEach(function(r) { doneCounts[r.expert || 'نامشخص'] = r.cnt; });
+    } catch(e) {}
+
+    let text = '📊 <b>خلاصه هفتگی — ' + todayStr + '</b>\n\n';
+
+    // Overdue aging
+    const totalOverdue = aging.w1 + aging.w2 + aging.old;
+    text += '⚠️ <b>وضعیت معوق‌ها:</b>\n';
+    if (totalOverdue === 0) {
+      text += '✅ هیچ مرکز معوقی وجود ندارد!\n';
+    } else {
+      if (aging.w1) text += '🟡 ۱-۷ روز: <b>' + aging.w1 + '</b> مرکز\n';
+      if (aging.w2) text += '🟠 ۸-۳۰ روز: <b>' + aging.w2 + '</b> مرکز\n';
+      if (aging.old) text += '🔴 بیش از ۳۰ روز: <b>' + aging.old + '</b> مرکز\n';
+    }
+
+    // Per-expert summary
+    const experts = Object.keys(perExpert).sort();
+    if (experts.length) {
+      text += '\n👥 <b>عملکرد کارشناسان (۷ روز گذشته):</b>\n';
+      experts.forEach(function(u) {
+        const s = perExpert[u];
+        const done = doneCounts[u] || 0;
+        text += '• ' + u + ': ';
+        const parts = [];
+        if (s.calls) parts.push('📞' + s.calls);
+        if (s.visits) parts.push('🤝' + s.visits);
+        if (done) parts.push('✅' + done);
+        if (s.overdue) parts.push('⚠️' + s.overdue + ' معوق');
+        text += (parts.length ? parts.join(' | ') : 'فعالیتی ثبت نشده') + '\n';
+      });
+    }
+
+    await notifyManagers(text);
+    console.log('[bot] Weekly digest sent for ' + todayStr);
+  } catch(e) {
+    console.error('[bot] weekly digest error:', e.message);
+  }
+}
+
+let _lastWeeklyDate = '';
+
 function startDailyScheduler() {
   setInterval(async function() {
     try {
@@ -1041,6 +1145,11 @@ function startDailyScheduler() {
       if (h === 8 && m === 0 && dateKey !== _lastReportDate) {
         _lastReportDate = dateKey;
         await sendDailyReport();
+        // Monday = day 1 in JS (0=Sun, 1=Mon)
+        if (now.getDay() === 1 && dateKey !== _lastWeeklyDate) {
+          _lastWeeklyDate = dateKey;
+          await sendWeeklyDigest();
+        }
       }
     } catch(e) {}
   }, 60000);

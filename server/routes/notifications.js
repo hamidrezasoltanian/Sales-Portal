@@ -117,7 +117,8 @@ router.put('/:id/read', requireAuth, async function (req, res) {
       [req.params.id]
     );
     if (!result.rows.length) {
-      return res.status(404).json({ error: 'اعلان یافت نشد' });
+      // Blob-sourced notifications don't exist in SQL — treat as already read
+      return res.json({ ok: true, local: true });
     }
     res.json(rowToObj(result.rows[0]));
   } catch (e) {

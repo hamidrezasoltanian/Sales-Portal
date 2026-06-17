@@ -4357,7 +4357,7 @@ function openCenterModal(rtype,id){
         if(parseFloat(cfg.discount_ceiling_pct)>0)parts.push('⬇ سقف تخفیف: <b>'+cfg.discount_ceiling_pct+'%</b>');
         if(cfg.payment_terms)parts.push('📅 شرایط پرداخت: <b>'+cfg.payment_terms+'</b>');
         el.innerHTML=parts.length?'<div style="font-size:11px;font-weight:700;color:#0369a1;margin-bottom:5px">💰 قیمت‌گذاری</div><div style="display:flex;flex-wrap:wrap;gap:8px">'+parts.map(function(p){return'<span style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:5px;padding:2px 7px;color:var(--text-primary)">'+p+'</span>';}).join('')+'</div>':'<span style="color:var(--text-muted);font-size:10px">قیمت‌گذاری تنظیم نشده</span>';
-  var elCom=document.getElementById('cmCommission_'+_rid);if(elCom){elCom.innerHTML=cfg&&cfg.commission_level?'<span style="font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:5px;padding:3px 10px;font-weight:600">💼 پورسانت: '+esc(cfg.commission_level)+'</span>':'';}
+  var elCom=document.getElementById('cmCommission_'+_rid);if(elCom){var _curLvl=cfg&&cfg.commission_level?String(cfg.commission_level):'';elCom.innerHTML='<div style="display:flex;align-items:center;gap:5px"><label style="font-size:10px;color:var(--text-muted);flex-shrink:0">💼 پورسانت:</label><select onchange="(function(sel,nm){fetch(\'/api/pricing/center/\'+encodeURIComponent(nm),{method:\'PUT\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({commission_level:sel.value||null})}).then(function(){showToast(sel.value?\'💼 سطح پورسانت ذخیره شد\':\'💼 پورسانت حذف شد\');}).catch(function(){showToast(\'خطا در ذخیره پورسانت\');});})(this,\''+esc(_rname)+'\')" style="font-size:10px;padding:2px 5px;border:1px solid var(--border-input);border-radius:4px;background:var(--bg-input);font-family:inherit;color:var(--text-primary)"><option value="">---</option><option value="1"'+(_curLvl==='1'?' selected':'')+'>سطح ۱</option><option value="2"'+(_curLvl==='2'?' selected':'')+'>سطح ۲</option><option value="3"'+(_curLvl==='3'?' selected':'')+'>سطح ۳</option></select></div>';}
       }).catch(function(){var el=document.getElementById('cmPricingInfo_'+_rid);if(el)el.style.display='none';});
   })(r.id, r.name);
 }
@@ -7023,6 +7023,21 @@ function tkSaveTask(tid){
     t._notifiedOwner=t.owner;
   }
   saveDB();
+  // SQL dual-write (fire-and-forget)
+  (function(task,isNew){
+    fetch('/api/tasks'+(isNew?'':'/'+encodeURIComponent(String(task.id))),{
+      method:isNew?'POST':'PUT',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        id:task.id,title:task.title,owner:task.owner||null,
+        dueDate:task.dueDate||null,priority:task.priority||2,
+        status:task.status||'todo',centerKey:task.centerKey||null,
+        note:task.note||'',subtasks:task.subtasks||[],
+        done:!!task.done,recurring:task.recurring||'none',
+        activity:task.activity||[],createdBy:task.createdBy||currentUser
+      })
+    }).catch(function(){});
+  })(t,!tid);
   closeModal('taskDetail');
   showToast(tid?'💾 ذخیره شد':'✅ وظیفه ایجاد شد');
   renderTasksPanel();
@@ -7032,6 +7047,7 @@ function tkDeleteTask(tid){
   _ensureTasks();
   DB.tasks=DB.tasks.filter(function(x){return String(x.id)!==String(tid);});
   saveDB();
+  fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'DELETE'}).catch(function(){});
   closeModal('taskDetail');
   showToast('🗑 وظیفه حذف شد');
   renderTasksPanel();
@@ -7046,6 +7062,10 @@ function tkAddComment(tid){
   t.activity.push({type:'comment',text:text,by:currentUser,at:new Date().toISOString()});
   inp.value='';
   saveDB();
+  fetch('/api/tasks/'+encodeURIComponent(String(tid))+'/comment',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({text:text})
+  }).catch(function(){});
   // re-render activity log in place
   var log=document.getElementById('tkActivityLog');
   if(log){
@@ -9670,7 +9690,7 @@ function openManagerDrilldown(memberId){
       var fd=e.followupDate||'';
       var isOverdue=fd&&fd<today&&e.status!=='قرارداد بسته شد'&&e.status!=='غیرفعال';
       var noteArr=(DB.notes&&DB.notes[rkey])||[];
-      var recentLog=(DB.changeLog||[]).filter(function(l){return l.rkey===rkey;}).slice(-10);
+      var recentLog=(DB.changeLog||[]).filter(function(l){return l.rkey===rkey;}).slice(-25);
       var doneEntries=Object.keys(DB.weekEntries||{}).map(function(k){return DB.weekEntries[k];})
         .filter(function(we){var r2=we.rtype||(we.recKey?we.recKey.split('_')[0]:'');var i2=we.rid||(we.recKey?we.recKey.split('_')[1]:'');return r2===rt&&i2===c.id&&we.done&&(we.doneNote||we.doneResult||we.doneObstacle||we.doneAmount);})
         .sort(function(a,b){return (b.doneDate||'')<(a.doneDate||'')?-1:1;}).slice(0,5);
@@ -9732,7 +9752,7 @@ function openManagerDrilldown(memberId){
       }
       if(c.recentLog.length>1){
         body+='<div style="margin-top:6px;border-top:1px solid var(--border);padding-top:4px">';
-        c.recentLog.slice(0,-1).reverse().slice(0,8).forEach(function(l){
+        c.recentLog.slice(0,-1).reverse().slice(0,20).forEach(function(l){
           body+='<div style="font-size:10px;color:var(--text-muted);padding:1px 0">'+fmtDate(l.at)+' — '+esc(l.field||'')+': '+esc(String(l.val||''))+'</div>';
         });
         body+='</div>';

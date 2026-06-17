@@ -515,6 +515,8 @@ async function initSchema() {
   await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS created_by TEXT`);
   await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`);
   await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`);
+  await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS recurring TEXT DEFAULT 'none'`);
+  await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS activity JSONB DEFAULT '[]'`);
   await query(`CREATE INDEX IF NOT EXISTS idx_tasks_owner ON tasks(owner)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date)`).catch(()=>{});
