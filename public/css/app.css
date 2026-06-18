@@ -1688,3 +1688,18 @@ table.compact-mode th:nth-child(9),
 table.compact-mode td:nth-child(9) {
   display: none;
 }
+
+/* ── Tab Tutorial System ── */
+@keyframes tutSlideIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes tutFadeOut {
+  to { opacity: 0; transform: translateY(-8px); }
+}
+#_tabTutPanel {
+  animation: tutSlideIn .25s ease;
+}
+#_tabTutPanel[style*="fadeOut"] {
+  animation: tutFadeOut .2s ease forwards;
+}
