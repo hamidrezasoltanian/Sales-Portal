@@ -1384,54 +1384,83 @@ async function handleAddToPlan(chatId, sess) {
   );
 }
 
+// Normalize Persian/Arabic text for fuzzy matching
+function normFa(s) {
+  return (s || '')
+    .replace(/ي/g, 'ی').replace(/ك/g, 'ک')
+    .replace(/أ|إ|آ/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/\s+/g, ' ')
+    .trim().toLowerCase();
+}
+
 async function searchCentersInDB(searchText, username, isMgr) {
   const results = [];
   const seen = new Set();
-  const like = '%' + searchText + '%';
+  const q = normFa(searchText);
+  if (!q) return [];
 
-  // Search week_entries for previously scheduled centers
+  // Load master center data + blob edits in one round-trip
+  let CENTERS = [], PC_RAW = {}, edits = {};
   try {
-    const params = isMgr ? [like] : [like, username];
-    const cond   = isMgr ? "WHERE value->>'centerName' ILIKE $1" : "WHERE value->>'centerName' ILIKE $1 AND value->>'addedBy' = $2";
-    const r = await query(
-      `SELECT DISTINCT ON (value->>'centerName')
-              value->>'centerName' AS name,
-              value->>'rtype' AS rtype,
-              value->>'rid'   AS rid
-       FROM week_entries ${cond}
-       ORDER BY value->>'centerName'
-       LIMIT 12`,
-      params
-    );
-    r.rows.forEach(function(row) {
-      const key = (row.rtype || '') + '_' + (row.rid || '');
-      if (row.name && !seen.has(key)) {
-        seen.add(key);
-        results.push({ name: row.name, rtype: row.rtype || 'center', rid: row.rid || '' });
-      }
+    const [cmRes, blobRes] = await Promise.all([
+      query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS', 'PC_RAW')"),
+      query("SELECT value FROM app_data WHERE key = 'main'"),
+    ]);
+    cmRes.rows.forEach(function(r) {
+      if (r.key === 'CENTERS') CENTERS = Array.isArray(r.data) ? r.data : [];
+      else if (r.key === 'PC_RAW') PC_RAW = (r.data && typeof r.data === 'object') ? r.data : {};
     });
-  } catch(e) {}
+    const blob = (blobRes.rows[0] || {}).value || {};
+    edits = blob.edits || {};
+  } catch(e) { console.error('[searchCenters load]', e.message); }
 
-  // Also search blob edits for nameOverride / more coverage
-  if (results.length < 5) {
-    try {
-      const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
-      const blob = blobRes.rows.length ? blobRes.rows[0].value : {};
-      const edits = blob.edits || {};
-      Object.entries(edits).forEach(function([key, e]) {
-        const name = e.nameOverride || '';
-        if (!name || !name.toLowerCase().includes(searchText.toLowerCase())) return;
-        if (seen.has(key)) return;
-        seen.add(key);
-        const parts = key.split('_');
-        const rtype = parts[0];
-        const rid   = parts.slice(1).join('_');
-        if (results.length < 8) results.push({ name, rtype, rid });
-      });
-    } catch(e) {}
+  // ── Search Tehran centers (CENTERS array) ──
+  for (const c of CENTERS) {
+    if (!c || !c.name) continue;
+    const key = 'center_' + c.id;
+    const edit = edits[key] || {};
+    const displayName = edit.nameOverride || c.name;
+    if (!normFa(displayName).includes(q)) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    results.push({ name: displayName, rtype: 'center', rid: String(c.id), owner: edit.owner || c.owner || '' });
   }
 
-  return results.slice(0, 8);
+  // ── Search province centers (PC_RAW: {provId: [{id, name, owner,...}]}) ──
+  for (const [provId, provCenters] of Object.entries(PC_RAW)) {
+    if (!Array.isArray(provCenters)) continue;
+    for (const c of provCenters) {
+      if (!c || !c.name) continue;
+      const rid = provId + '||' + c.id;
+      const key = 'pc_' + rid;
+      const edit = edits[key] || {};
+      const displayName = edit.nameOverride || c.name;
+      if (!normFa(displayName).includes(q)) continue;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push({ name: displayName, rtype: 'pc', rid, owner: edit.owner || c.owner || '' });
+    }
+  }
+
+  // ── Search nameOverrides in edits (centers not in master) ──
+  for (const [key, e] of Object.entries(edits)) {
+    if (!e.nameOverride) continue;
+    if (!normFa(e.nameOverride).includes(q)) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const parts = key.split('_');
+    results.push({ name: e.nameOverride, rtype: parts[0], rid: parts.slice(1).join('_'), owner: e.owner || '' });
+  }
+
+  // For experts: sort owned centers first so they appear at the top
+  if (!isMgr) {
+    const owned  = results.filter(function(c) { return c.owner === username; });
+    const others = results.filter(function(c) { return c.owner !== username; });
+    return owned.concat(others).slice(0, 10);
+  }
+
+  return results.slice(0, 10);
 }
 
 async function handlePlanSearchResults(chatId, sess, searchText) {
