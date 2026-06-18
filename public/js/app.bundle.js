@@ -2815,12 +2815,27 @@ function renderProvTable(){
     // Last contact
     var lastTs=e._lastActivity||e._ts||0;
     var daysSince=lastTs?Math.floor((nowTs()-lastTs)/86400000):null;
+    // Contact touchpoint counter from done weekEntries
+    var _recK2=rtype+'_'+r.id;
+    var _tpCalls=0,_tpVisits=0;
+    Object.values(DB.weekEntries||{}).forEach(function(we){
+      if(!we.done)return;
+      if((we.recKey||(we.rtype+'_'+we.rid))!==_recK2)return;
+      if(we.actionType==='visit')_tpVisits++;else _tpCalls++;
+    });
+    var _tpHtml=(_tpCalls||_tpVisits)
+      ?'<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">'
+        +(_tpCalls?'<span style="font-size:9px;background:#e0f2fe;color:#0369a1;border-radius:4px;padding:1px 5px">📞'+_tpCalls+'</span>':'')
+        +(_tpVisits?'<span style="font-size:9px;background:#f0fdf4;color:#166534;border-radius:4px;padding:1px 5px">🤝'+_tpVisits+'</span>':'')
+        +'</div>'
+      :''
     var lastContactHtml=daysSince===null
       ?'<span style="color:var(--text-muted);font-size:10px">—</span>'
       :daysSince===0?'<span style="color:#16a34a;font-size:10px;font-weight:600">امروز</span>'
       :daysSince<=7?'<span style="color:#0ea5e9;font-size:10px">'+daysSince+' روز</span>'
       :daysSince<=30?'<span style="color:#f59e0b;font-size:10px">'+daysSince+' روز</span>'
       :'<span style="color:#dc2626;font-size:10px;font-weight:600">'+daysSince+' روز 🔴</span>';
+    lastContactHtml+=_tpHtml;
     return'<tr data-rowid="'+r.id+'" class="'+rowCls+'">'
       +'<td><input type="checkbox" class="row-cb" data-rid="'+r.id+'" data-rtype="'+rtype+'" onclick="toggleCenterSelect(this,\''+r.id+'\')" style="width:14px;height:14px;cursor:pointer;accent-color:#2563eb"></td>'
       +'<td>'
@@ -5720,81 +5735,126 @@ function wpMarkDoneKey(eKey){
   var we=DB.weekEntries[eKey];
   var rtype=we.rtype||(we.recKey?we.recKey.split('_')[0]:'');
   var rid=we.rid||(we.recKey?we.recKey.split('_').slice(1).join('_'):'');
-  var cname=we.name||'';
+  var cname=we.centerName||'';
   if(!cname&&rtype&&rid){var c=getCenterById(rtype,rid);if(c)cname=c.name||c.hosp_name||'';}
-  // Default next date: today + 7 days in Jalali
   var td=todayStr();var tdp=td.split('/').map(Number);
   var defNext=jAddDays(tdp[0],tdp[1],tdp[2],7);
   var defNextStr=defNext[0]+'/'+(defNext[1]<10?'0'+defNext[1]:defNext[1])+'/'+(defNext[2]<10?'0'+defNext[2]:defNext[2]);
-  var _resultOpts=['موفق — قرارداد','پیشنهاد ارسال شد','نیاز به پیگیری','عدم علاقه','قابل دسترس نبود','دیگر'];
-  var body='<div style="padding:6px 0">'
-    +'<div style="margin-bottom:10px;font-size:13px;color:var(--text-secondary)">مرکز: <b>'+esc(cname)+'</b></div>'
-    +'<label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:3px">نتیجه</label>'
-    +'<select id="_mdk_result" style="width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary);margin-bottom:8px">'
-    +_resultOpts.map(function(o){return'<option value="'+o+'">'+o+'</option>';}).join('')
-    +'</select>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:6px">'
-    +'<div><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:3px">💰 مبلغ تخمینی (میلیون تومان)</label>'
-    +'<input id="_mdk_amount" type="number" min="0" step="0.1" placeholder="مثلاً: 12.5" style="width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid var(--border-input);border-radius:5px;font-family:inherit;font-size:12px;background:var(--bg-input);color:var(--text-primary)"></div>'
-    +'<div><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:3px">🚧 مانع اصلی</label>'
-    +'<select id="_mdk_obstacle" style="width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid var(--border-input);border-radius:5px;font-family:inherit;font-size:12px;background:var(--bg-input);color:var(--text-primary)">'
-    +'<option value="">— ندارد —</option>'
-    +'<option>عدم بودجه / کمبود نقدینگی</option>'
-    +'<option>رقیب قیمت پایین‌تر</option>'
-    +'<option>نیاز به تأیید مدیر بالاتر</option>'
-    +'<option>عدم علاقه به محصول</option>'
-    +'<option>زمان‌بندی نامناسب</option>'
-    +'<option>عدم آشنایی با محصول</option>'
-    +'<option>دیگر</option>'
-    +'</select></div>'
+  var actLabel=we.actionType==='visit'?'مراجعه':'تماس';
+  var body='<div style="padding:4px 0">'
+    +'<div style="margin-bottom:12px;padding:8px 12px;background:var(--bg-raised);border-radius:7px;font-size:13px">مرکز: <b>'+esc(cname)+'</b> &nbsp;|&nbsp; نوع: <b>'+actLabel+'</b></div>'
+    +'<div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">نتیجه این '+actLabel+' چه بود؟ <span style="color:#dc2626">*</span></div>'
+    +'<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">'
+    +'<label style="display:flex;align-items:flex-start;gap:8px;padding:9px 12px;border:1.5px solid var(--border);border-radius:7px;cursor:pointer;transition:border-color .15s" onclick="_mdkSelectOutcome(this,\'followup\')">'
+    +'<input type="radio" name="_mdk_outcome" value="followup" style="margin-top:2px;flex-shrink:0"> '
+    +'<div><div style="font-weight:600;font-size:12px">🔄 نیاز به پیگیری دارد</div><div style="font-size:10px;color:var(--text-muted)">جلسه / تماس بعدی برنامه‌ریزی می‌شه</div></div></label>'
+    +'<label style="display:flex;align-items:flex-start;gap:8px;padding:9px 12px;border:1.5px solid var(--border);border-radius:7px;cursor:pointer;transition:border-color .15s" onclick="_mdkSelectOutcome(this,\'won\')">'
+    +'<input type="radio" name="_mdk_outcome" value="won" style="margin-top:2px;flex-shrink:0"> '
+    +'<div><div style="font-weight:600;font-size:12px">✅ قرارداد / فروش بسته شد</div><div style="font-size:10px;color:var(--text-muted)">وضعیت مرکز به «قرارداد بسته شد» تغییر می‌کند</div></div></label>'
+    +'<label style="display:flex;align-items:flex-start;gap:8px;padding:9px 12px;border:1.5px solid var(--border);border-radius:7px;cursor:pointer;transition:border-color .15s" onclick="_mdkSelectOutcome(this,\'inactive\')">'
+    +'<input type="radio" name="_mdk_outcome" value="inactive" style="margin-top:2px;flex-shrink:0"> '
+    +'<div><div style="font-weight:600;font-size:12px">❌ غیرفعال / رد شد</div><div style="font-size:10px;color:var(--text-muted)">وضعیت مرکز به «غیرفعال» تغییر می‌کند</div></div></label>'
     +'</div>'
-    +'<label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:3px">یادداشت / جزئیات</label>'
-    +'<textarea id="_mdk_note" rows="2" placeholder="توضیحات..." style="width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;resize:vertical;background:var(--bg-input);color:var(--text-primary);direction:rtl;margin-bottom:8px"></textarea>'
-    +'<label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:3px">اقدام بعدی</label>'
-    +'<input id="_mdk_nextaction" type="text" placeholder="مثلاً: ارسال کاتالوگ، تماس با مدیر..." style="width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary);margin-bottom:8px">'
-    +'<label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:3px">تاریخ پیگیری بعدی</label>'
-    +'<input id="_mdk_nextdate" type="text" value="'+defNextStr+'" readonly class="fd-inp" style="cursor:pointer;width:100%;box-sizing:border-box" '
-    +'onclick="openJDP(this,function(v){document.getElementById(\'_mdk_nextdate\').value=v;})">'
+    +'<div id="_mdk_followup_sec" style="display:none;margin-bottom:10px;padding:10px 12px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:7px">'
+    +'<label style="font-size:12px;font-weight:700;color:#0369a1;display:block;margin-bottom:6px">📅 تاریخ پیگیری بعدی <span style="color:#dc2626">*</span></label>'
+    +'<input id="_mdk_nextdate" type="text" value="" readonly class="fd-inp" placeholder="برای ثبت انتخاب کنید" style="width:100%;box-sizing:border-box;cursor:pointer;border-color:#7dd3fc" onclick="openJDP(this,function(v){document.getElementById(\'_mdk_nextdate\').value=v;_mdkCheckSubmit();})">'
+    +'</div>'
+    +'<div id="_mdk_won_sec" style="display:none;margin-bottom:10px;padding:10px 12px;background:#f0fdf4;border:1px solid #86efac;border-radius:7px">'
+    +'<label style="font-size:12px;font-weight:700;color:#166534;display:block;margin-bottom:6px">💰 مبلغ قرارداد (میلیون تومان) — اختیاری</label>'
+    +'<input id="_mdk_amount" type="number" min="0" step="0.1" placeholder="مثلاً: 12.5" style="width:100%;box-sizing:border-box;padding:5px 8px;border:1px solid #86efac;border-radius:5px;font-size:12px;font-family:inherit">'
+    +'</div>'
+    +'<label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:3px">📝 یادداشت (اختیاری)</label>'
+    +'<textarea id="_mdk_note" rows="2" placeholder="خلاصه مکالمه یا نتیجه..." style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;resize:vertical"></textarea>'
     +'</div>';
-  var footer='<button class="btn-primary" style="background:#16a34a;border-color:#16a34a" onclick="_wpFinishDone(\''+eKey+'\',true)">✅ ثبت + پیگیری بعدی</button>'
-    +'<button class="btn-secondary" onclick="_wpFinishDone(\''+eKey+'\',false)">بدون پیگیری</button>'
+  var footer='<button id="_mdk_submit" class="btn-primary" onclick="_wpFinishDone(\''+eKey+'\')" disabled style="opacity:.45;cursor:not-allowed">✅ ثبت</button>'
     +'<button class="btn-secondary" onclick="closeModal(\'wpDoneModal\')">انصراف</button>';
-  openModal('wpDoneModal','✅ انجام شد',body,footer);
+  openModal('wpDoneModal','✅ نتیجه '+actLabel,body,footer);
+}
+function _mdkSelectOutcome(lbl,val){
+  // Highlight selected option
+  document.querySelectorAll('[name="_mdk_outcome"]').forEach(function(r){
+    var p=r.closest('label');if(p)p.style.borderColor='var(--border)';
+  });
+  if(lbl)lbl.style.borderColor=val==='won'?'#22c55e':val==='inactive'?'#ef4444':'#38bdf8';
+  var r=document.querySelector('[name="_mdk_outcome"][value="'+val+'"]');
+  if(r)r.checked=true;
+  document.getElementById('_mdk_followup_sec').style.display=val==='followup'?'':'none';
+  document.getElementById('_mdk_won_sec').style.display=val==='won'?'':'none';
+  if(val==='followup'){
+    // pre-fill default date if empty
+    var nd=document.getElementById('_mdk_nextdate');
+    if(nd&&!nd.value){
+      var td=todayStr();var tdp=td.split('/').map(Number);
+      var df=jAddDays(tdp[0],tdp[1],tdp[2],7);
+      nd.value=df[0]+'/'+(df[1]<10?'0'+df[1]:df[1])+'/'+(df[2]<10?'0'+df[2]:df[2]);
+    }
+  }
+  _mdkCheckSubmit();
+}
+function _mdkCheckSubmit(){
+  var r=document.querySelector('[name="_mdk_outcome"]:checked');
+  var btn=document.getElementById('_mdk_submit');
+  if(!btn)return;
+  var ok=!!r;
+  if(r&&r.value==='followup'){
+    var nd=document.getElementById('_mdk_nextdate');
+    ok=!!(nd&&nd.value);
+  }
+  btn.disabled=!ok;
+  btn.style.opacity=ok?'1':'.45';
+  btn.style.cursor=ok?'pointer':'not-allowed';
 }
 function jAddDays(jy,jm,jd,days){
   var g=j2g(jy,jm,jd);var ts=new Date(g[0],g[1]-1,g[2]);
   ts.setDate(ts.getDate()+days);
   return g2j(ts.getFullYear(),ts.getMonth()+1,ts.getDate());
 }
-function _wpFinishDone(eKey,setNext){
+function _wpFinishDone(eKey){
   if(!DB.weekEntries[eKey])return;
   var we=DB.weekEntries[eKey];
-  we.done=true;we.doneDate=todayStr();
-  we.doneResult=(document.getElementById('_mdk_result')||{}).value||'';
-  we.doneNote=(document.getElementById('_mdk_note')||{}).value||'';
-  we.doneNextAction=(document.getElementById('_mdk_nextaction')||{}).value||'';
-  var _doneAmt=parseFloat((document.getElementById('_mdk_amount')||{}).value||'');
-  if(_doneAmt>0)we.doneAmount=_doneAmt;
-  var _doneObs=(document.getElementById('_mdk_obstacle')||{}).value||'';
-  if(_doneObs)we.doneObstacle=_doneObs;
   var rtype=we.rtype||(we.recKey?we.recKey.split('_')[0]:'');
   var rid=we.rid||(we.recKey?we.recKey.split('_').slice(1).join('_'):'');
   var cname=we.centerName||getRecLabel(rtype+'_'+rid)||'';
   var actionType=we.actionType||'call';
-  // auto-mirror done note into DB.notes so manager can see it
-  if(we.doneNote&&rtype&&rid){
+  var outcomeEl=document.querySelector('[name="_mdk_outcome"]:checked');
+  var outcome=outcomeEl?outcomeEl.value:'followup';
+  var note=(document.getElementById('_mdk_note')||{}).value||'';
+  var nextDate=(document.getElementById('_mdk_nextdate')||{}).value||'';
+  var amount=parseFloat((document.getElementById('_mdk_amount')||{}).value||'')||0;
+
+  // Mark week entry done
+  we.done=true;we.doneDate=todayStr();we.doneResult=outcome;we.doneNote=note;
+  if(amount>0)we.doneAmount=amount;
+
+  // ── Auto-log to KPI callLog / visitLog ───────────────────────────────────
+  ensureKPIDB();
+  var logEntry={id:Date.now(),date:todayStr(),userId:currentUser||'',centerName:cname,centerKey:rtype+'_'+rid,note:note,count:1,outcome:outcome};
+  if(actionType==='visit'){DB.visitLog.push(logEntry);}
+  else{DB.callLog.push(logEntry);}
+
+  // ── Mirror note to DB.notes ───────────────────────────────────────────────
+  if(note&&rtype&&rid){
     if(!DB.notes)DB.notes={};
     var _dnKey=rtype+'_'+rid;
     if(!DB.notes[_dnKey])DB.notes[_dnKey]=[];
-    var _dnPfx=actionType==='visit'?'🤝 نتیجه ملاقات: ':'📞 نتیجه تماس: ';
-    DB.notes[_dnKey].push({text:_dnPfx+we.doneNote,at:new Date().toISOString(),by:currentUser||''});
+    var pfx=actionType==='visit'?'🤝 نتیجه مراجعه: ':'📞 نتیجه تماس: ';
+    DB.notes[_dnKey].push({text:pfx+note,at:new Date().toISOString(),by:currentUser||''});
   }
+
   var _foundWeekLabel='';
-  if(setNext){
-    var nextDate=(document.getElementById('_mdk_nextdate')||{}).value||'';
+  // ── Handle outcome ────────────────────────────────────────────────────────
+  if(outcome==='won'){
+    if(rtype&&rid){setE(rtype,rid,'status','قرارداد بسته شد');}
+    if(amount>0){
+      ensureKPIDB();
+      DB.salesLog.push({id:Date.now()+1,date:todayStr(),userId:currentUser||'',centerName:cname,centerKey:rtype+'_'+rid,amount:amount,isCash:false});
+    }
+  } else if(outcome==='inactive'){
+    if(rtype&&rid){setE(rtype,rid,'status','غیرفعال');}
+  } else {
+    // followup: schedule next contact
     if(nextDate&&rtype&&rid){
       setE(rtype,rid,'followupDate',nextDate);
-      // find the week that contains nextDate and auto-schedule
       var ndp=nextDate.split('/').map(Number);
       if(ndp.length===3&&ndp[0]){
         var ndMs=jMs(ndp[0],ndp[1],ndp[2]);
@@ -5811,7 +5871,6 @@ function _wpFinishDone(eKey,setNext){
         if(foundWeek){
           var newKey=wpEntryKey(foundWeek.id,rtype,rid);
           DB.weekEntries[newKey]={scheduledDate:nextDate,done:false,doneDate:null,rtype:rtype,rid:rid,recKey:rtype+'_'+rid,centerName:cname,actionType:actionType,addedBy:currentUser};
-          // navigate week plan to destination week so entry is visible
           _wpYear=foundWeek.jYear;
           var _sel=document.getElementById('wpSel');
           if(_sel){wpBuildSelect();_sel.value=foundWeek.id;}
@@ -5820,10 +5879,14 @@ function _wpFinishDone(eKey,setNext){
       }
     }
   }
+
   closeModal('wpDoneModal');
   saveDBSync();renderWeekPlan();renderDashboard();
   if(currentTab==='provinces'&&_currentProvId)setTimeout(renderTable,100);
-  showToast(_foundWeekLabel?'✅ انجام شد — پیگیری در '+_foundWeekLabel:'✅ انجام شد!',3000);
+  var msg=outcome==='won'?'🎉 قرارداد ثبت شد! — '+cname
+    :outcome==='inactive'?'❌ غیرفعال شد — '+cname
+    :_foundWeekLabel?'✅ ثبت شد — پیگیری در '+_foundWeekLabel:'✅ ثبت شد!';
+  showToast(msg,3000);
   if(currentTab==='kpi')setTimeout(renderKPIPanel,300);
 }
 var _wpDragging = null;
