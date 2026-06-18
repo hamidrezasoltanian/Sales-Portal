@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { query } = require('../db');
+const { query, pool } = require('../db');
 const { requireAuth } = require('../auth');
 
 // Lazy-load bot to avoid circular deps
@@ -9,6 +9,13 @@ let _tgNotify = null;
 function getTgNotify() {
   if (!_tgNotify) { try { _tgNotify = require('../bot/telegram').notifyUser; } catch(e) {} }
   return _tgNotify;
+}
+
+// Lazy-load SSE broadcast to avoid circular deps at module load
+let _broadcast = null;
+function getBroadcast() {
+  if (!_broadcast) { try { _broadcast = require('./events').broadcast; } catch(e) {} }
+  return _broadcast;
 }
 
 const router = express.Router();
@@ -99,6 +106,9 @@ router.post('/', requireAuth, async function (req, res) {
     // Push to Telegram if the recipient has an active bot session
     const tgNotify = getTgNotify();
     if (tgNotify) tgNotify(to, '🔔 ' + msg).catch(function(){});
+    // Broadcast SSE so the recipient's open browser tab sees the badge update immediately
+    const broadcast = getBroadcast();
+    if (broadcast) broadcast('notif_new', { to, msg, id: notif.id });
     res.status(201).json(notif);
   } catch (e) {
     if (e.code === '23505') {
@@ -141,6 +151,45 @@ async function _markBlobNotifRead(id, allForUser) {
     client.release();
   }
 }
+
+// ── GET /api/notifications/count ──────────────────────────────────────────
+// Lightweight endpoint: returns just the unread count for the current user.
+router.get('/count', requireAuth, async function (req, res) {
+  try {
+    const isManager = req.user.role === 'مدیر' || req.user.role === 'سوپر ادمین';
+    const targetUser = req.query.to || (!isManager ? req.user.username : null);
+
+    // Count from SQL
+    let sqlCount = 0;
+    if (targetUser) {
+      const r = await query(`SELECT COUNT(*) AS c FROM notifications WHERE to_user = $1 AND read = false`, [targetUser]);
+      sqlCount = parseInt(r.rows[0].c, 10) || 0;
+    } else {
+      const r = await query(`SELECT COUNT(*) AS c FROM notifications WHERE read = false`);
+      sqlCount = parseInt(r.rows[0].c, 10) || 0;
+    }
+
+    // Count from blob (unread only, not already in SQL)
+    let blobCount = 0;
+    try {
+      const blobRes = await query(`SELECT value FROM app_data WHERE key = 'main'`);
+      const blob = blobRes.rows[0]?.value;
+      const blobNotifs = Array.isArray(blob?.notifications) ? blob.notifications : [];
+      // Get SQL ids to avoid double-counting
+      const sqlIds = targetUser
+        ? new Set((await query(`SELECT id FROM notifications WHERE to_user = $1`, [targetUser])).rows.map(r => r.id))
+        : new Set((await query(`SELECT id FROM notifications`)).rows.map(r => r.id));
+      blobCount = blobNotifs.filter(function(n) {
+        return !n.read && !sqlIds.has(n.id) && (!targetUser || n.to === targetUser);
+      }).length;
+    } catch (_) {}
+
+    res.json({ count: sqlCount + blobCount });
+  } catch (e) {
+    console.error('[notifications GET /count]', e.message);
+    res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
 
 // ── PUT /api/notifications/:id/read ───────────────────────────────────────
 router.put('/:id/read', requireAuth, async function (req, res) {
@@ -218,8 +267,31 @@ async function _markBlobReadAll(user) {
 // ── DELETE /api/notifications/:id ─────────────────────────────────────────
 router.delete('/:id', requireAuth, async function (req, res) {
   try {
-    const result = await query('DELETE FROM notifications WHERE id = $1 RETURNING id', [req.params.id]);
-    if (!result.rows.length) {
+    const nid = req.params.id;
+    const sqlResult = await query('DELETE FROM notifications WHERE id = $1 RETURNING id', [nid]);
+    // Also remove from blob (handles legacy blob-only notifications)
+    const client = await pool.connect();
+    let blobRemoved = 0;
+    try {
+      await client.query('BEGIN');
+      const cur = await client.query("SELECT value FROM app_data WHERE key = 'main' FOR UPDATE");
+      if (cur.rows.length) {
+        const blob = cur.rows[0].value || {};
+        const notifs = Array.isArray(blob.notifications) ? blob.notifications : [];
+        const before = notifs.length;
+        blob.notifications = notifs.filter(function(n) { return n.id !== nid; });
+        blobRemoved = before - blob.notifications.length;
+        if (blobRemoved > 0) {
+          await client.query("UPDATE app_data SET value = $1, updated_at = NOW() WHERE key = 'main'", [blob]);
+        }
+      }
+      await client.query('COMMIT');
+    } catch (_) {
+      try { await client.query('ROLLBACK'); } catch (__) {}
+    } finally {
+      client.release();
+    }
+    if (!sqlResult.rows.length && !blobRemoved) {
       return res.status(404).json({ error: 'اعلان یافت نشد' });
     }
     res.json({ ok: true });

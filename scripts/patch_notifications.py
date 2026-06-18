@@ -1,9 +1,21 @@
-'use strict';
-// notifications.js — In-app notification system (API-backed)
-// Functions: _initNotif, _refreshNotifs, _initBrowserNotif, sendNotif,
-//   updateNotifBadge, toggleNotifPanel, goToNotifCenter, ackNotif,
-//   markNotifRead, markAllNotifsRead, _timeAgo
+#!/usr/bin/env python3
+# Replaces the notification block in app.bundle.js with API-backed version
+# and extends initSSE to handle notif_new events.
 
+with open('public/js/app.bundle.js', 'r', encoding='utf-8') as f:
+    content = f.read()
+
+# ─── 1. Replace notification block ──────────────────────────────────────────
+OLD_START = '\nfunction _initNotif(){if(!DB.notifications)DB.notifications=[];}'
+OLD_END   = '\nfunction openDailyMonitor(){'
+
+start_idx = content.find(OLD_START)
+end_idx   = content.find(OLD_END)
+assert start_idx != -1, "Could not find _initNotif"
+assert end_idx   != -1, "Could not find openDailyMonitor"
+assert end_idx > start_idx, "Unexpected order"
+
+NEW_NOTIF_BLOCK = r"""
 // ════════════════════════ NOTIFICATIONS (API-backed) ════════════════════
 var _notifCache = [];
 var _notifLoaded = false;
@@ -84,7 +96,7 @@ function sendNotif(toUser, message, centerKey, centerKeys) {
       read: false, from: currentUser
     });
   }).catch(function() {
-    // Fallback: add to blob
+    // Fallback: add to blob so at least something is stored
     if (!DB.notifications) DB.notifications = [];
     var n = { id: id, to: toUser, from: currentUser, at: new Date().toISOString(),
               message: message, msg: message, centerKey: centerKey || '',
@@ -94,7 +106,7 @@ function sendNotif(toUser, message, centerKey, centerKeys) {
     if (DB.notifications.length > 300) DB.notifications = DB.notifications.slice(-300);
     saveDB();
   });
-  showToast('📩 اعلان برای ' + (USERS[toUser] || toUser) + ' ارسال شد', 2000);
+  showToast('\U0001f4e9 اعلان برای ' + (USERS[toUser] || toUser) + ' ارسال شد', 2000);
 }
 
 function updateNotifBadge() {
@@ -127,7 +139,7 @@ function _renderNotifPanel(arr) {
       + '<button onclick="setNotifView(true)" style="font-size:10px;border:none;border-radius:4px;padding:2px 8px;cursor:pointer;background:' + (viewAll ? 'var(--brand,#6366f1)' : 'transparent') + ';color:' + (viewAll ? '#fff' : 'var(--text-secondary)') + '">همه</button>'
       + '</span>';
   }
-  var head = '<div class="notif-panel-head"><span>🔔 ' + (viewAll ? 'همه اعلان‌ها' : 'اعلان‌های من') + '</span>'
+  var head = '<div class="notif-panel-head"><span>\U0001f514 ' + (viewAll ? 'همه اعلان‌ها' : 'اعلان‌های من') + '</span>'
     + '<span style="display:inline-flex;gap:6px;align-items:center">'
     + _tglBtn
     + (unreadIds.length ? '<button onclick="markAllNotifsRead()" style="font-size:10px;background:var(--bg-raised);border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer">همه خوانده شد</button>' : '')
@@ -147,9 +159,9 @@ function _renderNotifPanel(arr) {
       var cName = hasCk ? _clGetName(n.centerKey) : '';
       return '<div class="notif-item' + (n.read ? '' : ' unread') + (n.ack ? ' notif-acked' : '') + '" data-nid="' + nid + '">'
         + '<div class="notif-item-msg">' + esc(nmsg) + '</div>'
-        + ((hasCk || hasMultiCk) ? '<div class="notif-item-center">📍 <span class="notif-center-link" onclick="goToNotifCenter(\'' + nid + '\')">' + (hasMultiCk ? (n.centerKeys.length + ' مرکز') : esc(cName)) + '</span></div>' : '')
+        + ((hasCk || hasMultiCk) ? '<div class="notif-item-center">\U0001f4cd <span class="notif-center-link" onclick="goToNotifCenter(\'' + nid + '\')">' + (hasMultiCk ? (n.centerKeys.length + ' مرکز') : esc(cName)) + '</span></div>' : '')
         + '<div class="notif-item-actions">'
-        + ((hasCk || hasMultiCk) ? '<button class="notif-act-btn" onclick="goToNotifCenter(\'' + nid + '\')">🔍 ' + (hasMultiCk ? 'مشاهده مراکز' : 'مشاهده مرکز') + '</button>' : '')
+        + ((hasCk || hasMultiCk) ? '<button class="notif-act-btn" onclick="goToNotifCenter(\'' + nid + '\')">\U0001f50d ' + (hasMultiCk ? 'مشاهده مراکز' : 'مشاهده مرکز') + '</button>' : '')
         + (viewAll
           ? (n.ack ? '<span class="notif-ack-badge">✓ تأیید شده</span>' : '')
           : (n.ack
@@ -192,6 +204,7 @@ function toggleNotifPanel() {
   var existing = document.getElementById('notifPanel');
   if (existing) { existing.remove(); _notifPanelOpen = false; return; }
   _notifPanelOpen = true;
+  // Fetch fresh notifications from API then render
   var url = '/api/notifications' + (_notifViewAll && _isManager() ? '' : '?to=' + encodeURIComponent(currentUser));
   fetch(url)
     .then(function(r) { return r.ok ? r.json() : _notifCache; })
@@ -217,7 +230,7 @@ function goToNotifCenter(nid) {
     listHtml += '<button onclick="closeModal(\'notifCkList\');if(currentTab!==\'provinces\'&&currentTab!==\'weekplan\')switchTab(\'provinces\');setTimeout(function(){openCenterModal(\'' + crt + '\',\'' + crid + '\');},150)" style="text-align:right;padding:8px 12px;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px;cursor:pointer">' + esc(cname) + '</button>';
   });
   listHtml += '</div>';
-  openModal('notifCkList', '📍 مراکز مرتبط با این اعلان', listHtml, '<button class="btn-secondary" onclick="closeModal(\'notifCkList\')">بستن</button>');
+  openModal('notifCkList', '\U0001f4cd مراکز مرتبط با این اعلان', listHtml, '<button class="btn-secondary" onclick="closeModal(\'notifCkList\')">بستن</button>');
 }
 
 function ackNotif(nid) {
@@ -226,6 +239,7 @@ function ackNotif(nid) {
   n.read = true; n.ack = true; n.ackAt = new Date().toISOString();
   fetch('/api/notifications/' + encodeURIComponent(nid) + '/read', { method: 'PUT' }).catch(function() {});
   if (n.from && n.from !== currentUser) {
+    var nmsg = n.msg || n.message || '';
     var cName = n.centerKey ? _clGetName(n.centerKey) : '';
     var replyMsg = (USERS[currentUser] || currentUser) + ' تأیید کرد: ' + (cName ? '"' + cName + '" ' : '') + 'انجام شد ✓';
     sendNotif(n.from, replyMsg, n.centerKey || '');
@@ -275,3 +289,29 @@ function _timeAgo(isoStr) {
   if (diff < 86400) return Math.floor(diff / 3600) + ' ساعت پیش';
   return Math.floor(diff / 86400) + ' روز پیش';
 }
+"""
+
+content = content[:start_idx] + NEW_NOTIF_BLOCK + content[end_idx:]
+print("Notification block replaced. New block size:", len(NEW_NOTIF_BLOCK), "bytes")
+
+# ─── 2. Extend initSSE to handle notif_new events ───────────────────────────
+OLD_SSE = "      if (data.type === 'db-updated') {\n        _sseReloadDB(data.by);\n      }"
+NEW_SSE  = (
+    "      if (data.type === 'db-updated') {\n"
+    "        _sseReloadDB(data.by);\n"
+    "      } else if (data.type === 'notif_new' && data.to === currentUser) {\n"
+    "        _refreshNotifs();\n"
+    "        if (data.msg) _firePushNotif('\U0001f514 اعلان جدید', data.msg, 'notif-' + Date.now());\n"
+    "      }"
+)
+
+if OLD_SSE in content:
+    content = content.replace(OLD_SSE, NEW_SSE, 1)
+    print("initSSE extended for notif_new")
+else:
+    print("WARNING: Could not find initSSE onmessage block")
+
+with open('public/js/app.bundle.js', 'w', encoding='utf-8') as f:
+    f.write(content)
+
+print("Done. Run: node --check public/js/app.bundle.js")
