@@ -36,7 +36,10 @@ const ST = {
   AWAIT_TASK_TITLE:   'await_task_title',    // typing task title
   AWAIT_TASK_DATE:    'await_task_date',     // typing task due date
   AWAIT_FU_SEARCH:    'await_fu_search',     // typing center name to change followup
-  AWAIT_FU_DATE:      'await_fu_date',       // typing new followup date
+  AWAIT_FU_DATE:        'await_fu_date',         // typing new followup date
+  AWAIT_OUTCOME_DATE:   'await_outcome_date',     // typing next followup date after outcome
+  AWAIT_OUTCOME_NOTE:   'await_outcome_note',     // typing optional note after outcome
+  AWAIT_STATUS_SEARCH:  'await_status_search',    // typing center name to change status
 };
 
 const sessions = {};
@@ -380,6 +383,33 @@ async function handleUpdate(upd) {
       return;
     }
 
+    if (sess.state === ST.AWAIT_OUTCOME_DATE) {
+      if (text === '/cancel') {
+        sess.state = ST.IDLE;
+        delete sess.pendingOutcomeKey; delete sess.pendingOutcome; delete sess.pendingOutcomeCenter;
+        await sendMsg(chatId, '❌ لغو شد.', { reply_markup: menuFor(sess) }); return;
+      }
+      if (!/^\d{4}\/\d{2}\/\d{2}$/.test(text.trim())) {
+        await sendMsg(chatId, '❌ فرمت تاریخ اشتباه. مثال: <code>1403/10/20</code>\nیا /cancel'); return;
+      }
+      sess.pendingOutcomeDate = text.trim();
+      sess.state = ST.AWAIT_OUTCOME_NOTE;
+      await sendMsg(chatId, '📝 یادداشت (اختیاری — یا <code>/skip</code>):'); return;
+    }
+
+    if (sess.state === ST.AWAIT_OUTCOME_NOTE) {
+      const note = (text === '/skip' || text === '-') ? '' : text;
+      const key = sess.pendingOutcomeKey;
+      const outcome = sess.pendingOutcome;
+      const center = sess.pendingOutcomeCenter;
+      const nextDate = sess.pendingOutcomeDate || '';
+      delete sess.pendingOutcomeKey; delete sess.pendingOutcome;
+      delete sess.pendingOutcomeCenter; delete sess.pendingOutcomeDate;
+      sess.state = ST.IDLE;
+      await doCompleteEntry(chatId, sess, key, outcome, note, nextDate, center);
+      return;
+    }
+
     // Require login for commands below
     if (!sess.username) {
       sess.state = ST.AWAIT_USERNAME;
@@ -467,10 +497,12 @@ async function handleTodaySchedule(chatId, sess) {
     const ownerTag = isMgr && we.addedBy ? ' <i>(' + we.addedBy + ')</i>' : '';
     text += (idx + 1) + '. ' + (we.done ? '✅' : '⬜') + ' ' + act + ' ' + name + ownerTag + '\n';
     if (!we.done) {
-      inlineRows.push([{
-        text: '✅ ثبت نتیجه: ' + name.slice(0, 18),
-        callback_data: 'we_done:' + idx,
-      }]);
+      const rtype = we.rtype || 'center';
+      const rid   = we.rid   || '';
+      inlineRows.push([
+        { text: '✅ ثبت نتیجه: ' + name.slice(0, 16), callback_data: 'we_done:' + idx },
+        { text: '📋 خلاصه', callback_data: 'center_brief:' + rtype + ':' + rid + ':' + idx },
+      ]);
     }
   });
 
@@ -480,28 +512,173 @@ async function handleTodaySchedule(chatId, sess) {
   await sendMsg(chatId, text, opts);
 }
 
-// ── Mark entry done ───────────────────────────────────────────────────────
-async function markEntryDone(chatId, sess, key, result, note) {
+// ── Complete entry with full outcome flow ────────────────────────────────────
+async function doCompleteEntry(chatId, sess, key, outcome, note, nextDate, center) {
+  const { pool } = require('../db');
+  const client = await pool.connect();
   try {
     const todayStr = toJalali(new Date());
-    const update = { done: true, doneDate: todayStr };
-    if (result) update.callResult = result;
-    if (note)   update.callNote   = note;
-
-    await query(
+    // Mark week entry done
+    const update = { done: true, doneDate: todayStr, doneResult: outcome };
+    if (note) update.doneNote = note;
+    await client.query(
       `UPDATE week_entries SET value = value || $2::jsonb, updated_at = NOW(), updated_by = $3 WHERE key = $1`,
       [key, JSON.stringify(update), sess.username]
     );
 
-    const resultLabel = { ok: '✅ موفق', followup: '🔄 پیگیری', fail: '❌ ناموفق' };
-    let reply = '✅ <b>ثبت شد!</b>\n';
-    if (result) reply += '📊 نتیجه: ' + (resultLabel[result] || result) + '\n';
-    if (note)   reply += '📝 یادداشت: ' + note;
+    // Read week entry for center info
+    const weRow = await client.query('SELECT value FROM week_entries WHERE key = $1', [key]);
+    const we    = weRow.rows.length ? weRow.rows[0].value : {};
+    const cname = center && center.name ? center.name : (we.centerName || '—');
+    const rtype = center ? center.rtype : (we.rtype || 'center');
+    const rid   = center ? center.rid   : (we.rid   || '');
+    const rkey  = rtype + '_' + rid;
+    const actType = we.actionType || 'call';
 
+    // Update blob: KPI log + note + status + followup
+    await client.query('BEGIN');
+    const blobRes = await client.query("SELECT value FROM app_data WHERE key = 'main' FOR UPDATE");
+    if (!blobRes.rows.length) { await client.query('ROLLBACK'); throw new Error('DB blob not found'); }
+    const blob = blobRes.rows[0].value || {};
+
+    // KPI log
+    if (!blob.callLog)  blob.callLog  = [];
+    if (!blob.visitLog) blob.visitLog = [];
+    const kpiEntry = { id: Date.now(), date: todayStr, userId: sess.username, centerName: cname, centerKey: rkey, note: note || '', count: 1, outcome };
+    if (actType === 'visit') blob.visitLog.push(kpiEntry);
+    else                     blob.callLog.push(kpiEntry);
+
+    // Mirror note
+    if (note && rid) {
+      if (!blob.notes) blob.notes = {};
+      if (!blob.notes[rkey]) blob.notes[rkey] = [];
+      const pfx = actType === 'visit' ? '🤝 نتیجه مراجعه: ' : '📞 نتیجه تماس: ';
+      blob.notes[rkey].push({ text: pfx + note, by: sess.username, at: new Date().toISOString(), date: todayStr });
+    }
+
+    // Status change + followup
+    if (!blob.edits) blob.edits = {};
+    if (!blob.edits[rkey]) blob.edits[rkey] = {};
+    if (!blob.changeLog) blob.changeLog = [];
+    if (outcome === 'won') {
+      blob.edits[rkey].status = 'قرارداد بسته شد';
+      blob.changeLog.push({ at: new Date().toISOString(), by: sess.username, rkey, field: 'status', val: 'قرارداد بسته شد' });
+    } else if (outcome === 'inactive') {
+      blob.edits[rkey].status = 'غیرفعال';
+      blob.changeLog.push({ at: new Date().toISOString(), by: sess.username, rkey, field: 'status', val: 'غیرفعال' });
+    } else if (outcome === 'followup' && nextDate) {
+      blob.edits[rkey].followupDate = nextDate;
+      blob.changeLog.push({ at: new Date().toISOString(), by: sess.username, rkey, field: 'followupDate', val: nextDate });
+    }
+
+    await client.query("UPDATE app_data SET value = $1, updated_at = NOW() WHERE key = 'main'", [blob]);
+    await client.query('COMMIT');
+
+    // Schedule next week entry if followup
+    if (outcome === 'followup' && nextDate && rid) {
+      const newKey = nextDate + ':::' + rkey;
+      await query(
+        `INSERT INTO week_entries (key, value, updated_at, updated_by)
+         VALUES ($1, $2, NOW(), $3)
+         ON CONFLICT (key) DO NOTHING`,
+        [newKey, JSON.stringify({ rtype, rid, recKey: rkey, centerName: cname, scheduledDate: nextDate, actionType: actType, done: false, addedBy: sess.username }), sess.username]
+      );
+    }
+
+    const outcomeLabel = { followup: '🔄 پیگیری', won: '✅ قرارداد بسته شد', inactive: '❌ غیرفعال' };
+    let reply = '✅ <b>ثبت شد!</b>\n🏥 ' + cname + '\n📊 نتیجه: ' + (outcomeLabel[outcome] || outcome);
+    if (note) reply += '\n📝 ' + note;
+    if (outcome === 'followup' && nextDate) reply += '\n📅 پیگیری بعدی: <b>' + nextDate + '</b>';
+    reply += '\n\n📈 KPI: یک ' + (actType === 'visit' ? 'مراجعه' : 'تماس') + ' ثبت شد.';
     await sendMsg(chatId, reply, { reply_markup: menuFor(sess) });
   } catch(e) {
+    try { await client.query('ROLLBACK'); } catch(_) {}
     await sendMsg(chatId, '❌ خطا در ثبت: ' + e.message, { reply_markup: menuFor(sess) });
+  } finally {
+    client.release();
   }
+}
+
+// ── Legacy markEntryDone (backward compat for AWAIT_CALL_NOTE) ────────────────
+async function markEntryDone(chatId, sess, key, result, note) {
+  const center = null;
+  const outcomeMap = { ok: 'followup', followup: 'followup', fail: 'inactive' };
+  await doCompleteEntry(chatId, sess, key, outcomeMap[result] || 'followup', note, '', center);
+}
+
+// ── doCenterBrief: pre-call summary ──────────────────────────────────────────
+async function doCenterBrief(chatId, sess, rtype, rid, entryIdx) {
+  const rkey = rtype + '_' + rid;
+  try {
+    const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
+    const blob    = blobRes.rows.length ? blobRes.rows[0].value : {};
+    const edit    = (blob.edits || {})[rkey] || {};
+    const notes   = (blob.notes || {})[rkey] || [];
+    const lastNote = notes.length ? notes[notes.length - 1] : null;
+    // Touchpoint count
+    const doneRows = await query(
+      `SELECT COUNT(*) as cnt FROM week_entries WHERE value->>'rtype' = $1 AND value->>'rid' = $2 AND (value->>'done')::boolean = true`,
+      [rtype, rid]
+    );
+    const touchpoints = parseInt((doneRows.rows[0] || {}).cnt || 0);
+    const cname  = edit.nameOverride || rid;
+    const status = edit.status   || 'بدون تماس';
+    const fd     = edit.followupDate || '—';
+    const potMap = { '1':'P1 ⭐⭐⭐', '2':'P2 ⭐⭐', '3':'P3 ⭐', '4':'P4' };
+    const pot    = potMap[String(edit.potential)] || '—';
+
+    let text = '📋 <b>خلاصه پیش از تماس</b>\n';
+    text += '🏥 <b>' + cname + '</b>\n';
+    text += '📊 وضعیت: ' + status + ' | ' + pot + '\n';
+    text += '📅 فالوآپ: ' + fd + '\n';
+    text += '📞 تماس‌های قبلی: ' + touchpoints + ' بار\n';
+    if (lastNote) {
+      text += '\n📝 <b>آخرین یادداشت</b> (' + (lastNote.date || '') + '):\n';
+      text += '<i>' + (lastNote.text || '').slice(0, 250) + '</i>';
+    } else {
+      text += '\n📝 یادداشتی ثبت نشده.';
+    }
+
+    const btns = [];
+    if (entryIdx !== undefined && entryIdx >= 0) {
+      btns.push([{ text: '✅ ثبت نتیجه تماس', callback_data: 'we_done:' + entryIdx }]);
+    }
+    btns.push([
+      { text: '📝 یادداشت جدید', callback_data: 'brief_note:' + rtype + ':' + rid },
+      { text: '📅 تغییر فالوآپ', callback_data: 'brief_fu:' + rtype + ':' + rid },
+    ]);
+    btns.push([
+      { text: '🔄 تغییر وضعیت', callback_data: 'brief_status:' + rtype + ':' + rid },
+    ]);
+
+    await sendMsg(chatId, text, { reply_markup: { inline_keyboard: btns } });
+  } catch(e) {
+    await sendMsg(chatId, '❌ خطا: ' + e.message);
+  }
+}
+
+// ── doSetStatus: change center status from bot ────────────────────────────────
+async function doSetStatus(chatId, sess, rkey, newStatus) {
+  const { pool } = require('../db');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const blobRes = await client.query("SELECT value FROM app_data WHERE key = 'main' FOR UPDATE");
+    if (!blobRes.rows.length) { await client.query('ROLLBACK'); throw new Error('blob not found'); }
+    const blob = blobRes.rows[0].value || {};
+    if (!blob.edits) blob.edits = {};
+    if (!blob.edits[rkey]) blob.edits[rkey] = {};
+    const oldStatus = blob.edits[rkey].status || 'بدون تماس';
+    blob.edits[rkey].status = newStatus;
+    if (!blob.changeLog) blob.changeLog = [];
+    blob.changeLog.push({ at: new Date().toISOString(), by: sess.username, rkey, field: 'status', val: newStatus });
+    await client.query("UPDATE app_data SET value = $1, updated_at = NOW() WHERE key = 'main'", [blob]);
+    await client.query('COMMIT');
+    await sendMsg(chatId, '✅ وضعیت تغییر کرد:\n' + oldStatus + ' ← <b>' + newStatus + '</b>', { reply_markup: menuFor(sess) });
+  } catch(e) {
+    try { await client.query('ROLLBACK'); } catch(_) {}
+    await sendMsg(chatId, '❌ خطا: ' + e.message);
+  } finally { client.release(); }
 }
 
 // ── 📋 Tasks ──────────────────────────────────────────────────────────────
@@ -900,19 +1077,65 @@ async function handleCallback(cb) {
     const idx = parseInt(data.slice(8));
     const key = (sess.todayEntries || [])[idx];
     if (!key) { await sendMsg(chatId, '❌ برنامه یافت نشد. دوباره ☀️ برنامه امروز را باز کنید.'); return; }
-    sess.pendingWeKey = key;
-    await sendMsg(chatId, '📊 نتیجه تماس/بازدید را انتخاب کنید:', {
+    const weRow = await query('SELECT value FROM week_entries WHERE key = $1', [key]);
+    const weName = weRow.rows.length ? (weRow.rows[0].value.centerName || '—') : '—';
+    sess.pendingOutcomeKey = key;
+    await answerCallback(cb.id, '');
+    await sendMsg(chatId, '📊 <b>' + weName + '</b>\nنتیجه این تماس/مراجعه چه بود؟', {
       reply_markup: {
-        inline_keyboard: [[
-          { text: '✅ موفق',    callback_data: 'we_result:' + idx + ':ok' },
-          { text: '🔄 پیگیری', callback_data: 'we_result:' + idx + ':followup' },
-          { text: '❌ ناموفق', callback_data: 'we_result:' + idx + ':fail' },
-        ]],
+        inline_keyboard: [
+          [{ text: '🔄 پیگیری می‌کنم', callback_data: 'we_outcome:' + idx + ':followup' }],
+          [{ text: '✅ قرارداد / فروش بسته شد', callback_data: 'we_outcome:' + idx + ':won' }],
+          [{ text: '❌ غیرفعال / رد شد', callback_data: 'we_outcome:' + idx + ':inactive' }],
+        ],
       },
     });
     return;
   }
 
+  if (data.startsWith('we_outcome:')) {
+    const parts   = data.split(':');
+    const idx     = parseInt(parts[1]);
+    const outcome = parts[2];
+    const key     = sess.pendingOutcomeKey || (sess.todayEntries || [])[idx];
+    if (!key) { await sendMsg(chatId, '❌ برنامه یافت نشد.'); return; }
+    const weRow = await query('SELECT value FROM week_entries WHERE key = $1', [key]);
+    const we    = weRow.rows.length ? weRow.rows[0].value : {};
+    const center = { name: we.centerName || '—', rtype: we.rtype || 'center', rid: we.rid || '' };
+    await answerCallback(cb.id, outcome === 'followup' ? '🔄 پیگیری' : outcome === 'won' ? '✅ قرارداد' : '❌ غیرفعال');
+    sess.pendingOutcomeKey    = key;
+    sess.pendingOutcome       = outcome;
+    sess.pendingOutcomeCenter = center;
+    if (outcome === 'followup') {
+      sess.state = ST.AWAIT_OUTCOME_DATE;
+      const td = toJalali(new Date()); const tp = td.split('/').map(Number);
+      const nd = calcNextJalaliDateBot(td, 'weekly') || td;
+      await sendMsg(chatId, '📅 تاریخ پیگیری بعدی را وارد کنید:\n<i>مثال: <code>' + nd + '</code></i>\nیا /cancel');
+    } else {
+      sess.state = ST.AWAIT_OUTCOME_NOTE;
+      await sendMsg(chatId, '📝 یادداشت (اختیاری — یا <code>/skip</code>):');
+    }
+    return;
+  }
+
+  if (data.startsWith('center_brief:')) {
+    const parts = data.split(':');
+    const rtype = parts[1]; const rid = parts[2];
+    await answerCallback(cb.id, '');
+    await doCenterBrief(chatId, sess, rtype, rid, parseInt(parts[3]));
+    return;
+  }
+
+  if (data.startsWith('status_set:')) {
+    const parts = data.split(':');
+    const rkey  = parts[1] + '_' + parts[2];
+    const newStatus = decodeURIComponent(parts.slice(3).join(':'));
+    await answerCallback(cb.id, '');
+    await doSetStatus(chatId, sess, rkey, newStatus);
+    return;
+  }
+
+  // Legacy: keep old we_result for backward compat
   if (data.startsWith('we_result:')) {
     const parts  = data.split(':');
     const idx    = parseInt(parts[1]);
@@ -922,9 +1145,8 @@ async function handleCallback(cb) {
     sess.pendingWeKey    = key;
     sess.pendingWeResult = result;
     sess.state = ST.AWAIT_CALL_NOTE;
-    const label = { ok: 'موفق ✅', followup: 'پیگیری 🔄', fail: 'ناموفق ❌' };
-    await answerCallback(cb.id, label[result] || '');
-    await sendMsg(chatId, '✏️ یادداشت (یا <code>/skip</code> بدون یادداشت):');
+    await answerCallback(cb.id, '');
+    await sendMsg(chatId, '✏️ یادداشت (یا <code>/skip</code>):');
     return;
   }
 }
