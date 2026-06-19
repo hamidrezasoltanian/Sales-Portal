@@ -27,6 +27,7 @@ function rowToObj(r) {
     to:        r.to_user,
     msg:       r.msg,
     centerKey: r.center_key,
+    centerKeys: r.center_keys || null,
     at:        r.at,
     read:      r.read,
     type:      r.type || 'general',
@@ -75,6 +76,7 @@ router.get('/', requireAuth, async function (req, res) {
           to: n.to || null,
           msg: n.msg || n.message || '',
           centerKey: n.centerKey || null,
+          centerKeys: n.centerKeys || null,
           at: n.at || new Date().toISOString(),
           read: !!n.read,
           type: n.type || 'general',
@@ -96,15 +98,17 @@ router.get('/', requireAuth, async function (req, res) {
 // ── POST /api/notifications ────────────────────────────────────────────────
 router.post('/', requireAuth, async function (req, res) {
   try {
-    const { id, to, msg, centerKey, at, type, meta } = req.body;
+    const { id, to, msg, centerKey, centerKeys, at, type, meta } = req.body;
     if (!id || !to || !msg) {
       return res.status(400).json({ error: 'فیلدهای id، to و msg الزامی هستند' });
     }
     const result = await query(
-      `INSERT INTO notifications (id, to_user, msg, center_key, at, type, meta)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO notifications (id, to_user, msg, center_key, center_keys, at, type, meta)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      [id, to, msg, centerKey || null, at ? new Date(at) : new Date(),
+      [id, to, msg, centerKey || null,
+       (centerKeys && centerKeys.length) ? JSON.stringify(centerKeys) : null,
+       at ? new Date(at) : new Date(),
        type || 'general', meta ? JSON.stringify(meta) : null]
     );
     const notif = rowToObj(result.rows[0]);
