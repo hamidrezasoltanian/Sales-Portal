@@ -10436,7 +10436,7 @@ async function init(){
       var _spid=localStorage.getItem('_spid');
       var _svm=localStorage.getItem('_svm');
       if(_svm&&['list','card','pipeline'].indexOf(_svm)>=0)_viewMode=_svm;
-      if(_st&&['home','provinces','weekplan','calendar','checklist','activity','kpi','manager','mtr','pricing'].indexOf(_st)>=0)currentTab=_st;
+      if(_st&&['home','provinces','weekplan','calendar','checklist','activity','kpi','manager','mtr','pricing','tasks','changelog','proforma'].indexOf(_st)>=0)currentTab=_st;
       if(_spid)_currentProvId=_spid;
     }catch(e){}
     // Default new sessions to home tab
@@ -10703,9 +10703,12 @@ function initSSE() {
 }
 
 function _sseReloadDB(byUser) {
-  if (!byUser || byUser === currentUser) return;
+  if (!byUser) return;
+  // Skip own saves from THIS browser tab (not from Telegram)
+  var _isTgBot = byUser && byUser.indexOf(':bot') !== -1;
+  if (!_isTgBot && byUser === currentUser) return;
   // Update who triggered the last sync (for toast message)
-  if (byUser) _ssePendingBy = byUser;
+  _ssePendingBy = _isTgBot ? byUser.replace(':bot','') : byUser;
   // Debounce: coalesce multiple rapid events into one fetch+render
   clearTimeout(_sseReloadTimer);
   _sseReloadTimer = setTimeout(function() {
@@ -10734,8 +10737,10 @@ function _sseReloadDB(byUser) {
         else if (currentTab === 'activity') renderActivity();
         else if (currentTab === 'kpi') renderKPIPanel();
       }
-      var name = triggeredBy ? (USERS[triggeredBy] || triggeredBy) : 'کاربر دیگری';
-      showToast('🔄 ' + name + ' تغییراتی اعمال کرد', 2500);
+      var _tgSuffix = triggeredBy && triggeredBy.endsWith(':bot') ? ' (تلگرام)' : '';
+      var _tgBy = triggeredBy ? triggeredBy.replace(':bot','') : null;
+      var name = _tgBy ? (USERS[_tgBy] || _tgBy) : 'کاربر دیگری';
+      showToast('🔄 ' + name + _tgSuffix + ' تغییراتی اعمال کرد', 2500);
     }).catch(function() {});
   }, 1500);
 }
