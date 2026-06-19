@@ -39,7 +39,8 @@ const ST = {
   AWAIT_FU_DATE:        'await_fu_date',         // typing new followup date
   AWAIT_OUTCOME_DATE:   'await_outcome_date',     // typing next followup date after outcome
   AWAIT_OUTCOME_NOTE:   'await_outcome_note',     // typing optional note after outcome
-  AWAIT_STATUS_SEARCH:  'await_status_search',    // typing center name to change status
+  AWAIT_STATUS_SEARCH:    'await_status_search',    // typing center name to change status
+  AWAIT_COMPETITOR_TEXT:  'await_competitor_text',  // typing competitor name for briefCenter
 };
 
 const sessions = {};
@@ -154,6 +155,7 @@ function toJalali(date) {
 const MENU_KB = {
   keyboard: [
     [{ text: '☀️ برنامه امروز' },    { text: '📅 برنامه هفته' }],
+    [{ text: '🏥 مراکز من' },         { text: '🎯 پیشنهادی' }],
     [{ text: '📋 وظایف من' },         { text: '🔔 اعلان‌ها' }],
     [{ text: '➕ ثبت در برنامه' },    { text: '📝 یادداشت مرکز' }],
     [{ text: '➕ وظیفه جدید' },       { text: '📅 تغییر فالوآپ' }],
@@ -167,6 +169,7 @@ const MENU_KB = {
 const MENU_KB_MANAGER = {
   keyboard: [
     [{ text: '☀️ برنامه امروز' },    { text: '📅 برنامه هفته' }],
+    [{ text: '🗂 همه مراکز' },        { text: '📊 داشبورد مدیریت' }],
     [{ text: '📋 وظایف من' },         { text: '🔔 اعلان‌ها' }],
     [{ text: '📊 گزارش معوق' },       { text: '📈 KPI هفتگی' }],
     [{ text: '👥 گزارش تیم' },        { text: '📨 ارسال پیام' }],
@@ -214,6 +217,8 @@ async function handleUpdate(upd) {
           '📋 <b>دستورات:</b>\n' +
           '☀️ برنامه امروز — مراکز برنامه‌ریزی‌شده\n' +
           '📅 برنامه هفته — نمای ۷ روزه\n' +
+          '🏥 مراکز من — لیست مراکز با فیلتر و اقدام سریع\n' +
+          '🎯 پیشنهادی — مراکز P1/P2 نیاز به پیگیری\n' +
           '📋 وظایف من — وظایف باز\n' +
           '🔔 اعلان‌ها — اعلان‌های خوانده‌نشده\n' +
           '➕ ثبت در برنامه — افزودن مرکز به برنامه هفته\n' +
@@ -225,7 +230,7 @@ async function handleUpdate(upd) {
           '📄 پیشفاکتورها — لیست و تأیید\n' +
           '📦 موجودی انبار — وضعیت کالاها\n' +
           '🔍 اسکن QR — اطلاعات لات/کالا\n' +
-          (isManagerRole(sess.role) ? '👥 گزارش تیم — نمای کلی همه کارشناسان\n' : '') +
+          (isManagerRole(sess.role) ? '🗂 همه مراکز — همه مراکز با فیلتر کارشناس\n📊 داشبورد مدیریت — نمای یکپارچه امروز+هفته+بحرانی\n👥 گزارش تیم — نمای کلی همه کارشناسان\n' : '') +
           '/logout — خروج',
           { reply_markup: menuFor(sess) }
         );
@@ -407,6 +412,14 @@ async function handleUpdate(upd) {
       return;
     }
 
+    if (sess.state === ST.AWAIT_COMPETITOR_TEXT) {
+      const center = sess.briefCenter;
+      sess.state = ST.IDLE;
+      if (!center || text === '/cancel') { await sendMsg(chatId, '❌ لغو شد.', { reply_markup: menuFor(sess) }); return; }
+      await doSetCompetitor(chatId, sess, center, text);
+      return;
+    }
+
     // Require login for commands below
     if (!sess.username) {
       sess.state = ST.AWAIT_USERNAME;
@@ -414,22 +427,26 @@ async function handleUpdate(upd) {
       return;
     }
 
-    if (text === '☀️ برنامه امروز'   || text === '/today')     { await handleTodaySchedule(chatId, sess); return; }
-    if (text === '📅 برنامه هفته'    || text === '/week')      { await handleWeekSchedule(chatId, sess); return; }
-    if (text === '📋 وظایف من'       || text === '/tasks')     { await handleTasks(chatId, sess); return; }
-    if (text === '🔔 اعلان‌ها'        || text === '/notifs')    { await handleNotifications(chatId, sess); return; }
-    if (text === '➕ ثبت در برنامه'  || text === '/add')       { await handleAddToPlan(chatId, sess); return; }
-    if (text === '📝 یادداشت مرکز'   || text === '/note')      { await handleAddNote(chatId, sess); return; }
-    if (text === '➕ وظیفه جدید'     || text === '/task')      { await handleNewTask(chatId, sess); return; }
-    if (text === '📅 تغییر فالوآپ'   || text === '/followup')  { await handleChangeFollowup(chatId, sess); return; }
-    if (text === '📊 آمار من'         || text === '/stats')     { await handleMyStats(chatId, sess); return; }
-    if (text === '👥 گزارش تیم'       || text === '/team')      { await handleTeamReport(chatId, sess); return; }
-    if (text === '🔍 جستجوی مرکز'   || text === '/search')    { await handleCenterSearch(chatId, sess); return; }
-    if (text === '📊 گزارش معوق'     || text === '/overdue')   { await handleOverdueReport(chatId, sess); return; }
-    if (text === '📈 KPI هفتگی'      || text === '/kpi')       { await handleWeeklyKPI(chatId, sess); return; }
-    if (text === '📨 ارسال پیام'     || text === '/msg')       { await handleSendMessage(chatId, sess); return; }
-    if (text === '📄 پیشفاکتورها'    || text === '/proformas') { await handleProformas(chatId, sess); return; }
-    if (text === '📦 موجودی انبار'   || text === '/inventory') { await handleInventory(chatId); return; }
+    if (text === '☀️ برنامه امروز'      || text === '/today')      { await handleTodaySchedule(chatId, sess); return; }
+    if (text === '📅 برنامه هفته'       || text === '/week')       { await handleWeekSchedule(chatId, sess); return; }
+    if (text === '🏥 مراکز من'          || text === '/mycenters')  { await handleMyCenters(chatId, sess, 0, 'all'); return; }
+    if (text === '🗂 همه مراکز'         || text === '/allcenters') { await handleAllCenters(chatId, sess, 0, 'all'); return; }
+    if (text === '🎯 پیشنهادی'          || text === '/suggest')    { await handleRecommendations(chatId, sess); return; }
+    if (text === '📊 داشبورد مدیریت'   || text === '/dashboard')  { await handleManagerDashboard(chatId, sess); return; }
+    if (text === '📋 وظایف من'          || text === '/tasks')      { await handleTasks(chatId, sess); return; }
+    if (text === '🔔 اعلان‌ها'           || text === '/notifs')     { await handleNotifications(chatId, sess); return; }
+    if (text === '➕ ثبت در برنامه'     || text === '/add')        { await handleAddToPlan(chatId, sess); return; }
+    if (text === '📝 یادداشت مرکز'      || text === '/note')       { await handleAddNote(chatId, sess); return; }
+    if (text === '➕ وظیفه جدید'        || text === '/task')       { await handleNewTask(chatId, sess); return; }
+    if (text === '📅 تغییر فالوآپ'      || text === '/followup')   { await handleChangeFollowup(chatId, sess); return; }
+    if (text === '📊 آمار من'            || text === '/stats')      { await handleMyStats(chatId, sess); return; }
+    if (text === '👥 گزارش تیم'          || text === '/team')       { await handleTeamReport(chatId, sess); return; }
+    if (text === '🔍 جستجوی مرکز'      || text === '/search')     { await handleCenterSearch(chatId, sess); return; }
+    if (text === '📊 گزارش معوق'        || text === '/overdue')    { await handleOverdueReport(chatId, sess); return; }
+    if (text === '📈 KPI هفتگی'         || text === '/kpi')        { await handleWeeklyKPI(chatId, sess); return; }
+    if (text === '📨 ارسال پیام'        || text === '/msg')        { await handleSendMessage(chatId, sess); return; }
+    if (text === '📄 پیشفاکتورها'       || text === '/proformas')  { await handleProformas(chatId, sess); return; }
+    if (text === '📦 موجودی انبار'      || text === '/inventory')  { await handleInventory(chatId); return; }
     if (text === '🔍 اسکن QR'        || text === '/scan') {
       await sendMsg(chatId, '📸 عکس QR کد کالا را بفرستید:', { reply_markup: { force_reply: true } });
       return;
@@ -636,6 +653,7 @@ async function doCenterBrief(chatId, sess, rtype, rid, entryIdx) {
     const edit    = (blob.edits || {})[rkey] || {};
     const notes   = (blob.notes || {})[rkey] || [];
     const lastNote = notes.length ? notes[notes.length - 1] : null;
+    const todayStr = toJalali(new Date());
     // Touchpoint count
     const doneRows = await query(
       `SELECT COUNT(*) as cnt FROM week_entries WHERE value->>'rtype' = $1 AND value->>'rid' = $2 AND (value->>'done')::boolean = true`,
@@ -647,12 +665,15 @@ async function doCenterBrief(chatId, sess, rtype, rid, entryIdx) {
     const fd     = edit.followupDate || '—';
     const potMap = { '1':'P1 ⭐⭐⭐', '2':'P2 ⭐⭐', '3':'P3 ⭐', '4':'P4' };
     const pot    = potMap[String(edit.potential)] || '—';
+    const isOverdue = edit.followupDate && edit.followupDate < todayStr;
 
     let text = '📋 <b>خلاصه پیش از تماس</b>\n';
     text += '🏥 <b>' + cname + '</b>\n';
     text += '📊 وضعیت: ' + status + ' | ' + pot + '\n';
-    text += '📅 فالوآپ: ' + fd + '\n';
+    text += '📅 فالوآپ: ' + fd + (isOverdue ? ' ⚠️' : '') + '\n';
     text += '📞 تماس‌های قبلی: ' + touchpoints + ' بار\n';
+    if (edit.competitor) text += '🏴 رقیب: ' + edit.competitor + '\n';
+    if (edit.biopsyScore > 0) text += '🔬 بیوپسی: ' + edit.biopsyScore + '\n';
     if (lastNote) {
       text += '\n📝 <b>آخرین یادداشت</b> (' + (lastNote.date || '') + '):\n';
       text += '<i>' + (lastNote.text || '').slice(0, 250) + '</i>';
@@ -660,16 +681,31 @@ async function doCenterBrief(chatId, sess, rtype, rid, entryIdx) {
       text += '\n📝 یادداشتی ثبت نشده.';
     }
 
+    // Store brief center in session for quick-action callbacks
+    sess.briefCenter = { rtype, rid, name: cname };
+
+    const tomorrow = toJalali(new Date(Date.now() + 86400000));
+    const day2 = toJalali(new Date(Date.now() + 2 * 86400000));
+
     const btns = [];
     if (entryIdx !== undefined && entryIdx >= 0) {
       btns.push([{ text: '✅ ثبت نتیجه تماس', callback_data: 'we_done:' + entryIdx }]);
     }
     btns.push([
+      { text: '📅 امروز بریز 📞', callback_data: 'bap:d0:call' },
+      { text: '📅 فردا بریز 📞', callback_data: 'bap:d1:call' },
+    ]);
+    btns.push([
       { text: '📝 یادداشت جدید', callback_data: 'brief_note:' + rtype + ':' + rid },
       { text: '📅 تغییر فالوآپ', callback_data: 'brief_fu:' + rtype + ':' + rid },
     ]);
     btns.push([
+      { text: '📞 شماره‌ها', callback_data: 'brief_contacts' },
+      { text: '📜 تاریخچه', callback_data: 'brief_history' },
+    ]);
+    btns.push([
       { text: '🔄 تغییر وضعیت', callback_data: 'brief_status:' + rtype + ':' + rid },
+      { text: '✏️ رقیب', callback_data: 'brief_setcomp' },
     ]);
 
     await sendMsg(chatId, text, { reply_markup: { inline_keyboard: btns } });
@@ -1155,6 +1191,253 @@ async function handleCallback(cb) {
     const newStatus = decodeURIComponent(parts.slice(3).join(':'));
     await answerCallback(cb.id, '');
     await doSetStatus(chatId, sess, rkey, newStatus);
+    return;
+  }
+
+  // ── Brief: missing handlers (note/fu/status) ──────────────────────────
+  if (data.startsWith('brief_note:')) {
+    const parts = data.split(':');
+    const rtype = parts[1]; const rid = parts.slice(2).join(':');
+    await answerCallback(cb.id, '');
+    const cname = await getCenterName(rtype, rid);
+    sess.noteCenter = { rtype, rid, name: cname };
+    sess.briefCenter = { rtype, rid, name: cname };
+    sess.state = ST.AWAIT_NOTE_TEXT;
+    await sendMsg(chatId, '📝 <b>' + cname + '</b>\n\nیادداشت خود را بنویسید:\n(<code>/cancel</code> برای لغو)', { reply_markup: { force_reply: true } });
+    return;
+  }
+
+  if (data.startsWith('brief_fu:')) {
+    const parts = data.split(':');
+    const rtype = parts[1]; const rid = parts.slice(2).join(':');
+    await answerCallback(cb.id, '');
+    const cname = await getCenterName(rtype, rid);
+    const center = { rtype, rid, name: cname };
+    sess.briefCenter = center;
+    await showFollowupDatePicker(chatId, sess, center);
+    return;
+  }
+
+  if (data.startsWith('brief_status:')) {
+    const parts = data.split(':');
+    const rtype = parts[1]; const rid = parts.slice(2).join(':');
+    await answerCallback(cb.id, '');
+    const STATUSES = ['بدون تماس', 'تماس گرفته شد', 'علاقمند', 'مذاکره', 'پیشنهاد داده شده', 'قرارداد بسته شد', 'غیرفعال'];
+    const statusBtns = STATUSES.map(function(s) {
+      return [{ text: s, callback_data: 'status_set:' + rtype + ':' + rid + ':' + s }];
+    });
+    await sendMsg(chatId, '🔄 وضعیت جدید را انتخاب کنید:', { reply_markup: { inline_keyboard: statusBtns } });
+    return;
+  }
+
+  // ── Brief quick-add-to-plan (bap:d0:call or bap:d1:call/visit) ────────
+  if (data.startsWith('bap:')) {
+    const parts = data.split(':');
+    const dayOff = parseInt(parts[1].replace('d',''));
+    const actType = parts[2] || 'call';
+    const center = sess.briefCenter;
+    if (!center) { await sendMsg(chatId, '❌ مرکز نامشخص است. دوباره خلاصه را باز کنید.'); return; }
+    await answerCallback(cb.id, '');
+    const date = toJalali(new Date(Date.now() + dayOff * 86400000));
+    const recKey = (center.rtype || 'center') + '_' + (center.rid || '');
+    const key = date + ':::' + recKey;
+    const value = {
+      rtype: center.rtype, rid: center.rid,
+      centerName: center.name, scheduledDate: date,
+      actionType: actType, done: false,
+      addedBy: sess.username, weekTagId: null,
+    };
+    try {
+      await query(
+        `INSERT INTO week_entries (key, value, updated_at, updated_by)
+         VALUES ($1, $2, NOW(), $3)
+         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW(), updated_by = $3`,
+        [key, JSON.stringify(value), sess.username]
+      );
+      try { require('./routes/events').broadcast('db-updated', { by: sess.username + ':bot' }); } catch(_) {}
+      const dayLabel = dayOff === 0 ? 'امروز' : dayOff === 1 ? 'فردا' : date;
+      await sendMsg(chatId, '✅ <b>' + center.name + '</b>\n📅 اضافه شد به برنامه ' + dayLabel + ' (' + date + ')\n' + (actType === 'call' ? '📞 تماس' : '🚗 بازدید'), { reply_markup: menuFor(sess) });
+    } catch(e) {
+      await sendMsg(chatId, '❌ خطا: ' + e.message);
+    }
+    return;
+  }
+
+  // ── Brief: contacts ────────────────────────────────────────────────────
+  if (data === 'brief_contacts') {
+    await answerCallback(cb.id, '');
+    const center = sess.briefCenter;
+    if (!center) { await sendMsg(chatId, '❌ مرکز نامشخص.'); return; }
+    const rkey = center.rtype + '_' + center.rid;
+    try {
+      const [contactsRes, blobRes] = await Promise.all([
+        query('SELECT * FROM center_contacts WHERE center_key = $1 LIMIT 10', [rkey]),
+        query("SELECT value FROM app_data WHERE key = 'main'"),
+      ]);
+      const blob = (blobRes.rows[0] || {}).value || {};
+      const edit = (blob.edits || {})[rkey] || {};
+      const blobContacts = Array.isArray(edit.contacts) ? edit.contacts : [];
+      const sqlContacts = contactsRes.rows;
+
+      let text = '📞 <b>شماره‌های ' + center.name + '</b>\n\n';
+      let found = false;
+
+      if (blobContacts.length) {
+        found = true;
+        blobContacts.forEach(function(c) {
+          text += '👤 ' + (c.name || '—') + (c.role ? ' — ' + c.role : '') + '\n';
+          if (c.phone) text += '   📞 <code>' + c.phone + '</code>\n';
+          if (c.mobile) text += '   📱 <code>' + c.mobile + '</code>\n';
+        });
+      }
+      if (sqlContacts.length) {
+        found = true;
+        sqlContacts.forEach(function(c) {
+          if (!blobContacts.some(function(b) { return b.phone === c.phone; })) {
+            text += '👤 ' + (c.name || '—') + (c.role ? ' — ' + c.role : '') + '\n';
+            if (c.phone) text += '   📞 <code>' + c.phone + '</code>\n';
+          }
+        });
+      }
+      if (!found) text += 'شماره‌ای ثبت نشده است.';
+      await sendMsg(chatId, text);
+    } catch(e) {
+      await sendMsg(chatId, '❌ خطا: ' + e.message);
+    }
+    return;
+  }
+
+  // ── Brief: history ─────────────────────────────────────────────────────
+  if (data === 'brief_history') {
+    await answerCallback(cb.id, '');
+    const center = sess.briefCenter;
+    if (!center) { await sendMsg(chatId, '❌ مرکز نامشخص.'); return; }
+    const rkey = center.rtype + '_' + center.rid;
+    try {
+      const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
+      const blob = (blobRes.rows[0] || {}).value || {};
+      const changeLog = (blob.changeLog || []).filter(function(e) { return e.rkey === rkey; }).slice(-10).reverse();
+      const notes = ((blob.notes || {})[rkey] || []).slice(-5).reverse();
+
+      let text = '📜 <b>تاریخچه ' + center.name + '</b>\n\n';
+
+      if (notes.length) {
+        text += '📝 <b>یادداشت‌های اخیر:</b>\n';
+        notes.forEach(function(n) {
+          const by = n.by || n.user || '';
+          const date = n.date || (n.at ? toJalali(new Date(n.at)) : '');
+          text += '• ' + (n.text || '').slice(0, 100) + '\n';
+          if (by || date) text += '   <i>' + [by, date].filter(Boolean).join(' | ') + '</i>\n';
+        });
+        text += '\n';
+      }
+
+      if (changeLog.length) {
+        text += '🗃 <b>تغییرات اخیر:</b>\n';
+        changeLog.forEach(function(e) {
+          const date = e.at ? toJalali(new Date(e.at)) : '';
+          text += '• ' + (e.field || '') + ': ' + (String(e.val || '')).slice(0, 50);
+          if (e.by || date) text += ' <i>(' + [e.by, date].filter(Boolean).join(', ') + ')</i>';
+          text += '\n';
+        });
+      }
+
+      if (!notes.length && !changeLog.length) text += 'هیچ سابقه‌ای ثبت نشده.';
+      await sendMsg(chatId, text);
+    } catch(e) {
+      await sendMsg(chatId, '❌ خطا: ' + e.message);
+    }
+    return;
+  }
+
+  // ── Brief: set competitor ──────────────────────────────────────────────
+  if (data === 'brief_setcomp') {
+    await answerCallback(cb.id, '');
+    const center = sess.briefCenter;
+    if (!center) { await sendMsg(chatId, '❌ مرکز نامشخص.'); return; }
+    sess.state = ST.AWAIT_COMPETITOR_TEXT;
+    await sendMsg(chatId, '✏️ نام رقیب را برای <b>' + center.name + '</b> وارد کنید:\n(<code>/cancel</code> برای لغو)', { reply_markup: { force_reply: true } });
+    return;
+  }
+
+  // ── My Centers list navigation ─────────────────────────────────────────
+  if (data.startsWith('mc:')) {
+    const parts = data.split(':');
+    const page = parseInt(parts[1]) || 0;
+    const filter = parts[2] || 'all';
+    await answerCallback(cb.id, '');
+    await handleMyCenters(chatId, sess, page, filter);
+    return;
+  }
+
+  if (data.startsWith('mc_act:')) {
+    const parts = data.split(':');
+    const idx = parseInt(parts[1]);
+    const action = parts[2];
+    const center = (sess.mcData || [])[idx];
+    if (!center) { await sendMsg(chatId, '❌ مرکز یافت نشد. دوباره لیست را باز کنید.'); return; }
+    await answerCallback(cb.id, '');
+    sess.briefCenter = { rtype: center.rtype, rid: center.rid, name: center.name };
+    if (action === 'brief') {
+      await doCenterBrief(chatId, sess, center.rtype, center.rid, undefined);
+    } else if (action === 'note') {
+      sess.noteCenter = { rtype: center.rtype, rid: center.rid, name: center.name };
+      sess.state = ST.AWAIT_NOTE_TEXT;
+      await sendMsg(chatId, '📝 <b>' + center.name + '</b>\n\nیادداشت خود را بنویسید:\n(<code>/cancel</code> برای لغو)', { reply_markup: { force_reply: true } });
+    } else if (action === 'plan') {
+      const todayDate = toJalali(new Date());
+      const persianDays = ['یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه'];
+      const dates = [];
+      for (let i = 0; i < 5; i++) dates.push(toJalali(new Date(Date.now() + i * 86400000)));
+      sess.planCenter = { rtype: center.rtype, rid: center.rid, name: center.name };
+      sess.planDates = dates;
+      const dateRows = dates.map(function(d, i) {
+        const dow = new Date(Date.now() + i * 86400000).getDay();
+        const label = i === 0 ? '⭐ امروز — ' + d : i === 1 ? '📅 فردا — ' + d : persianDays[dow] + ' — ' + d;
+        return [{ text: label, callback_data: 'plan_date:' + i }];
+      });
+      await sendMsg(chatId, '📅 <b>' + center.name + '</b>\n\nتاریخ را انتخاب کنید:', { reply_markup: { inline_keyboard: dateRows } });
+    }
+    return;
+  }
+
+  // ── All Centers list navigation (manager) ─────────────────────────────
+  if (data.startsWith('ac:')) {
+    const parts = data.split(':');
+    const page = parseInt(parts[1]) || 0;
+    const ownerFilter = parts.slice(2).join(':') || 'all';
+    await answerCallback(cb.id, '');
+    await handleAllCenters(chatId, sess, page, ownerFilter === 'all' ? 'all' : ownerFilter);
+    return;
+  }
+
+  if (data.startsWith('ac_act:')) {
+    const parts = data.split(':');
+    const idx = parseInt(parts[1]);
+    const action = parts[2];
+    const center = (sess.acData || [])[idx];
+    if (!center) { await sendMsg(chatId, '❌ مرکز یافت نشد. دوباره لیست را باز کنید.'); return; }
+    await answerCallback(cb.id, '');
+    sess.briefCenter = { rtype: center.rtype, rid: center.rid, name: center.name };
+    if (action === 'brief') {
+      await doCenterBrief(chatId, sess, center.rtype, center.rid, undefined);
+    } else if (action === 'note') {
+      sess.noteCenter = { rtype: center.rtype, rid: center.rid, name: center.name };
+      sess.state = ST.AWAIT_NOTE_TEXT;
+      await sendMsg(chatId, '📝 <b>' + center.name + '</b>\n\nیادداشت خود را بنویسید:\n(<code>/cancel</code> برای لغو)', { reply_markup: { force_reply: true } });
+    } else if (action === 'plan') {
+      const persianDays = ['یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه'];
+      const dates = [];
+      for (let i = 0; i < 5; i++) dates.push(toJalali(new Date(Date.now() + i * 86400000)));
+      sess.planCenter = { rtype: center.rtype, rid: center.rid, name: center.name };
+      sess.planDates = dates;
+      const dateRows = dates.map(function(d, i) {
+        const dow = new Date(Date.now() + i * 86400000).getDay();
+        const label = i === 0 ? '⭐ امروز — ' + d : i === 1 ? '📅 فردا — ' + d : persianDays[dow] + ' — ' + d;
+        return [{ text: label, callback_data: 'plan_date:' + i }];
+      });
+      await sendMsg(chatId, '📅 <b>' + center.name + '</b>\n\nتاریخ را انتخاب کنید:', { reply_markup: { inline_keyboard: dateRows } });
+    }
     return;
   }
 
@@ -2166,6 +2449,509 @@ function calcNextJalaliDateBot(jalaliStr, recurring) {
   return jy+'/'+String(jm).padStart(2,'0')+'/'+String(jd).padStart(2,'0');
 }
 
+// ── Get center display name (helper) ─────────────────────────────────────────
+async function getCenterName(rtype, rid) {
+  try {
+    const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
+    const blob = (blobRes.rows[0] || {}).value || {};
+    const rkey = rtype + '_' + rid;
+    const edit = (blob.edits || {})[rkey] || {};
+    if (edit.nameOverride) return edit.nameOverride;
+
+    const cmRes = await query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS', 'PC_RAW')");
+    for (const r of cmRes.rows) {
+      if (r.key === 'CENTERS' && rtype === 'center') {
+        const c = (Array.isArray(r.data) ? r.data : []).find(function(x) { return String(x.id) === String(rid); });
+        if (c && c.name) return c.name;
+      } else if (r.key === 'PC_RAW' && rtype === 'pc') {
+        const provId = rid.split('||')[0];
+        const cId = rid.split('||')[1];
+        const arr = ((r.data && typeof r.data === 'object') ? r.data : {})[provId] || [];
+        const c = arr.find(function(x) { return String(x.id) === String(cId); });
+        if (c && c.name) return c.name;
+      }
+    }
+  } catch(e) {}
+  return rid;
+}
+
+// ── Load all centers from master + edits ─────────────────────────────────────
+async function loadAllCenters() {
+  let CENTERS = [], PC_RAW = {}, edits = {};
+  const [cmRes, blobRes] = await Promise.all([
+    query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS', 'PC_RAW')"),
+    query("SELECT value FROM app_data WHERE key = 'main'"),
+  ]);
+  cmRes.rows.forEach(function(r) {
+    if (r.key === 'CENTERS') CENTERS = Array.isArray(r.data) ? r.data : [];
+    else if (r.key === 'PC_RAW') PC_RAW = (r.data && typeof r.data === 'object') ? r.data : {};
+  });
+  const blob = (blobRes.rows[0] || {}).value || {};
+  edits = blob.edits || {};
+
+  const centers = [];
+
+  for (const c of CENTERS) {
+    if (!c || !c.name) continue;
+    const rkey = 'center_' + c.id;
+    const edit = edits[rkey] || {};
+    centers.push({
+      name: edit.nameOverride || c.name,
+      rtype: 'center',
+      rid: String(c.id),
+      rkey,
+      owner: edit.owner || c.owner || '',
+      status: edit.status || '',
+      followupDate: edit.followupDate || '',
+      potential: edit.potential ? String(edit.potential) : '',
+      competitor: edit.competitor || '',
+      biopsyScore: edit.biopsyScore || 0,
+    });
+  }
+
+  for (const [provId, provCenters] of Object.entries(PC_RAW)) {
+    if (!Array.isArray(provCenters)) continue;
+    for (const c of provCenters) {
+      if (!c || !c.name) continue;
+      const rid = provId + '||' + c.id;
+      const rkey = 'pc_' + rid;
+      const edit = edits[rkey] || {};
+      centers.push({
+        name: edit.nameOverride || c.name,
+        rtype: 'pc',
+        rid,
+        rkey,
+        owner: edit.owner || c.owner || '',
+        status: edit.status || '',
+        followupDate: edit.followupDate || '',
+        potential: edit.potential ? String(edit.potential) : '',
+        competitor: edit.competitor || '',
+        biopsyScore: edit.biopsyScore || 0,
+      });
+    }
+  }
+
+  return centers;
+}
+
+// ── 🏥 My Centers (expert) ────────────────────────────────────────────────────
+async function handleMyCenters(chatId, sess, page, filter) {
+  const todayStr = toJalali(new Date());
+
+  let allCenters;
+  try {
+    allCenters = await loadAllCenters();
+  } catch(e) {
+    await sendMsg(chatId, '❌ خطا در بارگذاری مراکز: ' + e.message, { reply_markup: menuFor(sess) });
+    return;
+  }
+
+  const myCenters = allCenters.filter(function(c) { return c.owner === sess.username; });
+
+  let scheduledKeys = new Set();
+  try {
+    const r = await query(
+      `SELECT DISTINCT value->>'rid' AS rid, value->>'rtype' AS rtype
+       FROM week_entries
+       WHERE value->>'addedBy' = $1 AND value->>'scheduledDate' >= $2
+         AND (value->>'done')::boolean = false`,
+      [sess.username, todayStr]
+    );
+    r.rows.forEach(function(row) {
+      scheduledKeys.add((row.rtype || 'center') + '_' + (row.rid || ''));
+    });
+  } catch(e) {}
+
+  let filtered = myCenters;
+  if (filter === 'noplan') {
+    filtered = myCenters.filter(function(c) { return !scheduledKeys.has(c.rkey); });
+  } else if (filter === 'hasplan') {
+    filtered = myCenters.filter(function(c) { return scheduledKeys.has(c.rkey); });
+  } else if (filter === 'p1') {
+    filtered = myCenters.filter(function(c) { return c.potential === '1'; });
+  } else if (filter === 'p2') {
+    filtered = myCenters.filter(function(c) { return c.potential === '2'; });
+  } else if (filter === 'overdue') {
+    filtered = myCenters.filter(function(c) {
+      return c.followupDate && c.followupDate < todayStr
+        && c.status !== 'غیرفعال' && c.status !== 'قرارداد بسته شد';
+    });
+  }
+
+  filtered.sort(function(a, b) {
+    const pa = parseInt(a.potential) || 99;
+    const pb = parseInt(b.potential) || 99;
+    if (pa !== pb) return pa - pb;
+    if (a.followupDate && b.followupDate) return a.followupDate < b.followupDate ? -1 : 1;
+    if (a.followupDate) return -1;
+    if (b.followupDate) return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  sess.mcData = filtered;
+  sess.mcFilter = filter;
+  sess.mcPage = page;
+
+  const pageSize = 8;
+  const totalPages = Math.ceil(filtered.length / pageSize) || 1;
+  const pageNum = Math.min(page, totalPages - 1);
+  const slice = filtered.slice(pageNum * pageSize, (pageNum + 1) * pageSize);
+  const baseIdx = pageNum * pageSize;
+
+  const filterLabel = { all: 'همه', noplan: 'بدون برنامه', hasplan: 'دارای برنامه', p1: 'P1', p2: 'P2', overdue: 'معوق' };
+  let text = '🏥 <b>مراکز من</b> — ' + myCenters.length + ' مرکز';
+  text += ' | فیلتر: <b>' + (filterLabel[filter] || 'همه') + '</b> (' + filtered.length + ')\n\n';
+
+  if (!slice.length) {
+    text += 'هیچ مرکزی با این فیلتر یافت نشد.';
+    const filterBtns = [
+      [
+        { text: (filter === 'all' ? '✓ ' : '') + 'همه', callback_data: 'mc:0:all' },
+        { text: (filter === 'noplan' ? '✓ ' : '') + 'بدون برنامه', callback_data: 'mc:0:noplan' },
+        { text: (filter === 'hasplan' ? '✓ ' : '') + 'دارای برنامه', callback_data: 'mc:0:hasplan' },
+      ],
+      [
+        { text: (filter === 'p1' ? '✓ ' : '') + 'P1', callback_data: 'mc:0:p1' },
+        { text: (filter === 'p2' ? '✓ ' : '') + 'P2', callback_data: 'mc:0:p2' },
+        { text: (filter === 'overdue' ? '✓ ' : '') + 'معوق', callback_data: 'mc:0:overdue' },
+      ],
+    ];
+    await sendMsg(chatId, text, { reply_markup: { inline_keyboard: filterBtns } });
+    return;
+  }
+
+  slice.forEach(function(c, i) {
+    const potBadge = c.potential ? ' P' + c.potential : '';
+    const ovTag = (c.followupDate && c.followupDate < todayStr && c.status !== 'غیرفعال') ? ' ⚠️' : '';
+    const schTag = scheduledKeys.has(c.rkey) ? ' 📅' : '';
+    const compTag = c.competitor ? ' 🏴' : '';
+    text += (baseIdx + i + 1) + '. <b>' + c.name.slice(0, 22) + '</b>' + potBadge + ovTag + schTag + compTag + '\n';
+    if (c.followupDate) text += '   📅 ' + c.followupDate + (c.status ? ' | ' + c.status.slice(0, 12) : '') + '\n';
+  });
+
+  const centerBtns = slice.map(function(c, i) {
+    return [
+      { text: '🎯 ' + c.name.slice(0, 14), callback_data: 'mc_act:' + (baseIdx + i) + ':brief' },
+      { text: '➕', callback_data: 'mc_act:' + (baseIdx + i) + ':plan' },
+      { text: '📝', callback_data: 'mc_act:' + (baseIdx + i) + ':note' },
+    ];
+  });
+
+  const filterBtns = [
+    [
+      { text: (filter === 'all' ? '✓ ' : '') + 'همه', callback_data: 'mc:0:all' },
+      { text: (filter === 'noplan' ? '✓ ' : '') + 'بدون برنامه', callback_data: 'mc:0:noplan' },
+      { text: (filter === 'hasplan' ? '✓ ' : '') + 'دارای برنامه', callback_data: 'mc:0:hasplan' },
+    ],
+    [
+      { text: (filter === 'p1' ? '✓ ' : '') + 'P1', callback_data: 'mc:0:p1' },
+      { text: (filter === 'p2' ? '✓ ' : '') + 'P2', callback_data: 'mc:0:p2' },
+      { text: (filter === 'overdue' ? '✓ ' : '') + 'معوق', callback_data: 'mc:0:overdue' },
+    ],
+  ];
+
+  const navBtns = [];
+  if (totalPages > 1) {
+    const navRow = [];
+    if (pageNum > 0) navRow.push({ text: '◀ قبلی', callback_data: 'mc:' + (pageNum - 1) + ':' + filter });
+    navRow.push({ text: (pageNum + 1) + '/' + totalPages, callback_data: 'mc:' + pageNum + ':' + filter });
+    if (pageNum < totalPages - 1) navRow.push({ text: 'بعدی ▶', callback_data: 'mc:' + (pageNum + 1) + ':' + filter });
+    navBtns.push(navRow);
+  }
+
+  await sendMsg(chatId, text, { reply_markup: { inline_keyboard: [...filterBtns, ...centerBtns, ...navBtns] } });
+}
+
+// ── 🗂 All Centers (manager) ──────────────────────────────────────────────────
+async function handleAllCenters(chatId, sess, page, ownerFilter) {
+  if (!isManagerRole(sess.role)) {
+    await sendMsg(chatId, '❌ این قابلیت فقط برای مدیران است.', { reply_markup: menuFor(sess) });
+    return;
+  }
+
+  const todayStr = toJalali(new Date());
+
+  let allCenters;
+  try {
+    allCenters = await loadAllCenters();
+  } catch(e) {
+    await sendMsg(chatId, '❌ خطا در بارگذاری مراکز: ' + e.message, { reply_markup: menuFor(sess) });
+    return;
+  }
+
+  let scheduledKeys = new Set();
+  try {
+    const r = await query(
+      `SELECT DISTINCT value->>'rid' AS rid, value->>'rtype' AS rtype
+       FROM week_entries WHERE value->>'scheduledDate' >= $1 AND (value->>'done')::boolean = false`,
+      [todayStr]
+    );
+    r.rows.forEach(function(row) {
+      scheduledKeys.add((row.rtype || 'center') + '_' + (row.rid || ''));
+    });
+  } catch(e) {}
+
+  const owners = Array.from(new Set(allCenters.map(function(c) { return c.owner; }).filter(Boolean))).sort();
+  sess.acOwners = owners;
+
+  const isFiltered = ownerFilter && ownerFilter !== 'all';
+  let filtered = isFiltered
+    ? allCenters.filter(function(c) { return c.owner === ownerFilter; })
+    : allCenters;
+
+  filtered.sort(function(a, b) {
+    const aOv = (a.followupDate && a.followupDate < todayStr) ? 0 : 1;
+    const bOv = (b.followupDate && b.followupDate < todayStr) ? 0 : 1;
+    if (aOv !== bOv) return aOv - bOv;
+    const pa = parseInt(a.potential) || 99;
+    const pb = parseInt(b.potential) || 99;
+    if (pa !== pb) return pa - pb;
+    return a.name.localeCompare(b.name);
+  });
+
+  sess.acData = filtered;
+  sess.acOwner = ownerFilter;
+  sess.acPage = page;
+
+  const pageSize = 8;
+  const totalPages = Math.ceil(filtered.length / pageSize) || 1;
+  const pageNum = Math.min(page, totalPages - 1);
+  const slice = filtered.slice(pageNum * pageSize, (pageNum + 1) * pageSize);
+  const baseIdx = pageNum * pageSize;
+
+  let text = '🗂 <b>همه مراکز</b> — ' + allCenters.length + ' مرکز\n';
+  if (isFiltered) text += '👤 فیلتر: <b>' + ownerFilter + '</b>\n';
+  text += 'نمایش: ' + filtered.length + '\n\n';
+
+  if (!slice.length) {
+    text += 'هیچ مرکزی یافت نشد.';
+    await sendMsg(chatId, text, { reply_markup: menuFor(sess) });
+    return;
+  }
+
+  slice.forEach(function(c, i) {
+    const potBadge = c.potential ? ' P' + c.potential : '';
+    const ovTag = (c.followupDate && c.followupDate < todayStr) ? ' ⚠️' : '';
+    const schTag = scheduledKeys.has(c.rkey) ? ' 📅' : '';
+    const ownerShort = c.owner ? (' 👤' + c.owner.split('.')[0]) : '';
+    text += (baseIdx + i + 1) + '. <b>' + c.name.slice(0, 18) + '</b>' + potBadge + ovTag + schTag + ownerShort + '\n';
+    if (c.followupDate) text += '   📅 ' + c.followupDate + '\n';
+  });
+
+  const centerBtns = slice.map(function(c, i) {
+    return [
+      { text: '🎯 ' + c.name.slice(0, 12), callback_data: 'ac_act:' + (baseIdx + i) + ':brief' },
+      { text: '➕', callback_data: 'ac_act:' + (baseIdx + i) + ':plan' },
+      { text: '📝', callback_data: 'ac_act:' + (baseIdx + i) + ':note' },
+    ];
+  });
+
+  // Owner filter buttons (max 4)
+  const ownerRow = [{ text: (!isFiltered ? '✓ ' : '') + 'همه', callback_data: 'ac:0:all' }];
+  owners.slice(0, 3).forEach(function(ow) {
+    const shortName = ow.split('.')[0];
+    ownerRow.push({ text: (ownerFilter === ow ? '✓ ' : '') + shortName, callback_data: 'ac:0:' + ow });
+  });
+
+  const navBtns = [];
+  if (totalPages > 1) {
+    const navRow = [];
+    const ownerParam = ownerFilter || 'all';
+    if (pageNum > 0) navRow.push({ text: '◀ قبلی', callback_data: 'ac:' + (pageNum - 1) + ':' + ownerParam });
+    navRow.push({ text: (pageNum + 1) + '/' + totalPages, callback_data: 'ac:' + pageNum + ':' + ownerParam });
+    if (pageNum < totalPages - 1) navRow.push({ text: 'بعدی ▶', callback_data: 'ac:' + (pageNum + 1) + ':' + ownerParam });
+    navBtns.push(navRow);
+  }
+
+  await sendMsg(chatId, text, { reply_markup: { inline_keyboard: [[...ownerRow], ...centerBtns, ...navBtns] } });
+}
+
+// ── 🎯 Smart Recommendations (expert) ────────────────────────────────────────
+async function handleRecommendations(chatId, sess) {
+  const todayStr = toJalali(new Date());
+
+  let allCenters;
+  try {
+    allCenters = await loadAllCenters();
+  } catch(e) {
+    await sendMsg(chatId, '❌ خطا: ' + e.message, { reply_markup: menuFor(sess) });
+    return;
+  }
+
+  // P1/P2 owned by this expert, not closed, with overdue or no followup date
+  const candidates = allCenters.filter(function(c) {
+    if (c.owner !== sess.username) return false;
+    const pot = parseInt(c.potential);
+    if (pot !== 1 && pot !== 2) return false;
+    if (c.status === 'غیرفعال' || c.status === 'قرارداد بسته شد') return false;
+    return !c.followupDate || c.followupDate < todayStr;
+  });
+
+  candidates.sort(function(a, b) {
+    const pa = parseInt(a.potential) || 99;
+    const pb = parseInt(b.potential) || 99;
+    if (pa !== pb) return pa - pb;
+    if (a.followupDate && b.followupDate) return a.followupDate < b.followupDate ? -1 : 1;
+    if (a.followupDate) return 1; // overdue first → actually overdue is < todayStr
+    if (b.followupDate) return -1;
+    return 0;
+  });
+
+  const top5 = candidates.slice(0, 5);
+  sess.mcData = candidates;
+
+  if (!top5.length) {
+    await sendMsg(chatId, '🎯 <b>مراکز پیشنهادی</b>\n\n✅ همه مراکز P1/P2 شما فالوآپ دارند!', { reply_markup: menuFor(sess) });
+    return;
+  }
+
+  let text = '🎯 <b>مراکز پیشنهادی</b> — ' + candidates.length + ' مرکز نیاز به پیگیری\n\n';
+  top5.forEach(function(c, i) {
+    const potBadge = c.potential ? ' P' + c.potential : '';
+    const ovTag = c.followupDate ? ' ⚠️معوق (' + c.followupDate + ')' : ' 📌بدون تاریخ';
+    text += (i + 1) + '. <b>' + c.name.slice(0, 25) + '</b>' + potBadge + ovTag + '\n';
+  });
+
+  const btns = top5.map(function(c, i) {
+    return [
+      { text: '🎯 ' + c.name.slice(0, 14), callback_data: 'mc_act:' + i + ':brief' },
+      { text: '➕ برنامه', callback_data: 'mc_act:' + i + ':plan' },
+    ];
+  });
+
+  await sendMsg(chatId, text, { reply_markup: { inline_keyboard: btns } });
+}
+
+// ── 📊 Manager Dashboard ──────────────────────────────────────────────────────
+async function handleManagerDashboard(chatId, sess) {
+  if (!isManagerRole(sess.role)) {
+    await sendMsg(chatId, '❌ این قابلیت فقط برای مدیران است.', { reply_markup: menuFor(sess) });
+    return;
+  }
+
+  const todayStr = toJalali(new Date());
+  const weekStart = toJalali(new Date(Date.now() - 6 * 86400000));
+
+  // Today schedule per expert
+  let todayStats = {};
+  try {
+    const r = await query(
+      `SELECT value->>'addedBy' AS expert,
+              COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE (value->>'done')::boolean = true)::int AS done
+       FROM week_entries WHERE value->>'scheduledDate' = $1 GROUP BY value->>'addedBy'`,
+      [todayStr]
+    );
+    r.rows.forEach(function(row) { todayStats[row.expert] = row; });
+  } catch(e) {}
+
+  // Week KPI per expert from SQL
+  let weekDone = {};
+  try {
+    const r = await query(
+      `SELECT value->>'addedBy' AS expert,
+              COUNT(*) FILTER (WHERE value->>'actionType' = 'call')::int AS calls,
+              COUNT(*) FILTER (WHERE value->>'actionType' = 'visit')::int AS visits
+       FROM week_entries
+       WHERE (value->>'done')::boolean = true AND value->>'doneDate' >= $1
+       GROUP BY value->>'addedBy'`,
+      [weekStart]
+    );
+    r.rows.forEach(function(row) { weekDone[row.expert] = row; });
+  } catch(e) {}
+
+  // Overdue + critical from blob
+  let overdueByOwner = {}, overdueTotal = 0, pfCount = 0;
+  try {
+    const [blobRes, pfRes] = await Promise.all([
+      query("SELECT value FROM app_data WHERE key = 'main'"),
+      query(`SELECT COUNT(*)::int AS cnt FROM proformas WHERE status = 'sent'`),
+    ]);
+    pfCount = (pfRes.rows[0] || {}).cnt || 0;
+    const blob = (blobRes.rows[0] || {}).value || {};
+    Object.values(blob.edits || {}).forEach(function(e) {
+      if (!e.followupDate || e.followupDate >= todayStr) return;
+      if (e.status === 'غیرفعال' || e.status === 'قرارداد بسته شد') return;
+      overdueTotal++;
+      const ow = e.owner || 'نامشخص';
+      overdueByOwner[ow] = (overdueByOwner[ow] || 0) + 1;
+    });
+  } catch(e) {}
+
+  const allExperts = new Set([
+    ...Object.keys(todayStats),
+    ...Object.keys(weekDone),
+    ...Object.keys(overdueByOwner),
+  ].filter(Boolean));
+
+  let text = '📊 <b>داشبورد مدیریت — ' + todayStr + '</b>\n\n';
+
+  text += '☀️ <b>امروز:</b>\n';
+  if (!allExperts.size) {
+    text += '  هیچ فعالیتی ثبت نشده\n';
+  } else {
+    Array.from(allExperts).sort().forEach(function(exp) {
+      const td = todayStats[exp] || { total: 0, done: 0 };
+      const ov = overdueByOwner[exp] || 0;
+      const pct = td.total > 0 ? Math.round(td.done / td.total * 100) : 0;
+      const bar = '▓'.repeat(Math.round(pct / 25)) + '░'.repeat(4 - Math.round(pct / 25));
+      const expShort = exp.split('.')[0];
+      text += '  👤 <b>' + expShort + '</b>: ' + bar + ' ' + td.done + '/' + td.total;
+      if (ov) text += ' ⚠️' + ov + ' معوق';
+      text += '\n';
+    });
+  }
+
+  text += '\n📈 <b>۷ روز گذشته:</b>\n';
+  if (!Object.keys(weekDone).length) {
+    text += '  فعالیتی ثبت نشده\n';
+  } else {
+    Array.from(allExperts).sort().forEach(function(exp) {
+      const wd = weekDone[exp];
+      if (!wd) return;
+      const expShort = exp.split('.')[0];
+      text += '  👤 <b>' + expShort + '</b>: 📞' + (wd.calls || 0) + ' 🚗' + (wd.visits || 0) + '\n';
+    });
+  }
+
+  text += '\n⚠️ <b>بحرانی:</b>\n';
+  text += '  مراکز معوق: <b>' + overdueTotal + '</b>\n';
+  if (pfCount > 0) text += '  📄 پیشفاکتور منتظر تأیید: <b>' + pfCount + '</b>\n';
+  if (overdueTotal === 0 && pfCount === 0) text += '  ✅ همه چیز در وضعیت خوب است\n';
+
+  await sendMsg(chatId, text, { reply_markup: menuFor(sess) });
+}
+
+// ── Set competitor for center ─────────────────────────────────────────────────
+async function doSetCompetitor(chatId, sess, center, competitorName) {
+  const rkey = center.rtype + '_' + center.rid;
+  const client = await require('../db').pool.connect();
+  try {
+    await client.query('BEGIN');
+    const cur = await client.query("SELECT value FROM app_data WHERE key = 'main' FOR UPDATE");
+    if (!cur.rows.length) { await client.query('ROLLBACK'); throw new Error('blob not found'); }
+    const blob = cur.rows[0].value || {};
+    if (!blob.edits) blob.edits = {};
+    if (!blob.edits[rkey]) blob.edits[rkey] = {};
+    const old = blob.edits[rkey].competitor || '—';
+    blob.edits[rkey].competitor = competitorName;
+    if (!blob.changeLog) blob.changeLog = [];
+    blob.changeLog.push({ at: new Date().toISOString(), by: sess.username, rkey, field: 'competitor', val: competitorName });
+    await client.query("UPDATE app_data SET value = $1, updated_at = NOW() WHERE key = 'main'", [blob]);
+    await client.query('COMMIT');
+    try { require('./routes/events').broadcast('db-updated', { by: sess.username + ':bot' }); } catch(_) {}
+    await sendMsg(chatId,
+      '✅ <b>رقیب ثبت شد!</b>\n🏥 ' + center.name + '\n🏴 ' + old + ' ← <b>' + competitorName + '</b>',
+      { reply_markup: menuFor(sess) }
+    );
+  } catch(e) {
+    try { await client.query('ROLLBACK'); } catch(_) {}
+    await sendMsg(chatId, '❌ خطا: ' + e.message, { reply_markup: menuFor(sess) });
+  } finally {
+    client.release();
+  }
+}
+
 // ── Notify helpers ────────────────────────────────────────────────────────
 async function notifyUser(username, text) {
   try {
@@ -2288,6 +3074,29 @@ async function sendDailyReport() {
     }
 
     await notifyManagers(text);
+
+    // Expert daily push — personalized per expert
+    try {
+      const stored = await loadBotSessions();
+      for (const [chatIdStr, s] of Object.entries(stored)) {
+        if (!s.username || isManagerRole(s.role) || s.state !== ST.IDLE) continue;
+        try {
+          const expertEntries = await getWeekEntriesForRange(todayStr, todayStr, s.username, false);
+          if (!expertEntries.length) continue;
+          const doneCount = expertEntries.filter(function(r) { return r.value.done; }).length;
+          let expertText = '☀️ <b>' + (s.name || s.username) + '</b> عزیز، برنامه امروزت:\n\n';
+          expertText += '📋 ' + expertEntries.length + ' مرکز | ✅ ' + doneCount + ' انجام شده\n\n';
+          expertEntries.slice(0, 5).forEach(function(r) {
+            const we = r.value;
+            const act = we.actionType === 'call' ? '📞' : '🚗';
+            expertText += (we.done ? '✅' : '⬜') + ' ' + act + ' ' + (we.centerName || we.rid || '—').slice(0, 20) + '\n';
+          });
+          if (expertEntries.length > 5) expertText += '...و ' + (expertEntries.length - 5) + ' مورد دیگر';
+          await sendMsg(parseInt(chatIdStr), expertText).catch(function(){});
+        } catch(e2) {}
+      }
+    } catch(e) {}
+
     console.log('[bot] Daily report sent for ' + todayStr);
   } catch(e) {
     console.error('[bot] daily report error:', e.message);
