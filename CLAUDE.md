@@ -371,9 +371,31 @@ Priorities expressed by the product owner (hamidreza.soltanian@gmail.com), rough
 6. **app.js modularization (tech debt)** — 12k+ lines in one file; if a build step is ever accepted, split by tab/module. Until then keep the function map above accurate.
 7. **UX polish** — owner cares about "روان بودن" (flow); the app was renamed Flow for this reason. Prefer inline editing over prompt()/alert(), keep the indigo design system (`--brand:#6366f1`) consistent.
 
+### Process Management (PM2)
+
+پروداکشن با PM2 مدیریت می‌شود و بعد از ری‌استارت سرور خودکار بالا می‌آید.
+
+```bash
+# آپدیت و ری‌استارت (بعد از هر git pull)
+cd /home/hamidreza/Sales-Portal && git pull origin claude/hopeful-bardeen-iz7jf9 && pm2 restart sales-portal
+
+# وضعیت
+pm2 status
+
+# لاگ لایو
+pm2 logs sales-portal
+
+# ری‌استارت دستی
+pm2 restart sales-portal
+
+# اگر PM2 به هر دلیلی نبود، راه‌اندازی مجدد:
+pkill -f "node server/index.js"; sleep 1
+pm2 start server/index.js --name "sales-portal" && pm2 save
+```
+
 ### Dev vs Prod environment
 
-- **Prod**: `/home/hamidreza/Sales-Portal` — port 3000, auto-starts via crontab `@reboot sleep 50`
+- **Prod**: `/home/hamidreza/Sales-Portal` — port 3000, managed by PM2 (autostart on reboot)
 - **Dev**: `/home/hamidreza/Sales-Portal-dev` — port 4000, manual start
 - **CRITICAL**: Both use the same PostgreSQL DB (`atena_crm`). Running dev with backend changes that write to DB can corrupt prod data.
 - **Safe for dev**: frontend-only changes (HTML/CSS/JS) — the dev server just serves files, DB writes go to same place but are protected by weekEntries guard.
