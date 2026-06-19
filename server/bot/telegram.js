@@ -137,19 +137,16 @@ const PF_LABELS = { draft:'پیش‌نویس', sent:'ارسال شده', approve
 // Minimal Gregorian → Jalali
 function toJalali(date) {
   const gy = date.getFullYear(), gm = date.getMonth() + 1, gd = date.getDate();
-  const g_d_no = 365*gy + Math.floor((gy+3)/4) - Math.floor((gy+99)/100) + Math.floor((gy+399)/400);
-  const j_d_no = g_d_no - 79;
-  const j_np   = Math.floor(j_d_no / 12053);
-  let jy = 979 + 33*j_np, jd = j_d_no % 12053;
-  jy += 4 * Math.floor(jd / 1461);
-  jd %= 1461;
-  if (jd >= 366) { jy += Math.floor((jd-1)/365); jd = (jd-1)%365; }
-  const jm_days = [31,31,31,31,31,31,30,30,30,30,30,29];
-  let jm = 0;
-  for (let i = 0; i < 12; i++) {
-    if (jd < jm_days[i]) { jm = i+1; jd++; break; }
-    jd -= jm_days[i];
-  }
+  const g_d_m = [0,31,59,90,120,151,181,212,243,273,304,334];
+  const gy2 = gm > 2 ? gy + 1 : gy;
+  let days = 355666 + (365*gy) + Math.floor((gy2+3)/4) - Math.floor((gy2+99)/100) + Math.floor((gy2+399)/400) + gd + g_d_m[gm-1];
+  let jy = -1595 + 33 * Math.floor(days / 12053);
+  days %= 12053;
+  jy += 4 * Math.floor(days / 1461);
+  days %= 1461;
+  if (days > 365) { jy += Math.floor((days-1)/365); days = (days-1) % 365; }
+  const jm = days < 186 ? 1 + Math.floor(days/31) : 7 + Math.floor((days-186)/30);
+  const jd = 1 + (days < 186 ? days % 31 : (days-186) % 30);
   return jy + '/' + String(jm).padStart(2,'0') + '/' + String(jd).padStart(2,'0');
 }
 
@@ -445,28 +442,51 @@ async function handleUpdate(upd) {
   }
 }
 
-// ── ☀️ Today's schedule (reads from week_entries SQL table) ───────────────
+// ── Fetch week entries merging SQL + blob (mirrors GET /api/data/db logic) ───
+async function getWeekEntriesForRange(dateFrom, dateTo, username, isMgr) {
+  const params = isMgr ? [dateFrom, dateTo] : [dateFrom, dateTo, username];
+  const sqlRes = await query(
+    `SELECT key, value FROM week_entries
+     WHERE value->>'scheduledDate' >= $1 AND value->>'scheduledDate' <= $2
+     ${!isMgr ? "AND (value->>'addedBy' = $3 OR (value->>'addedBy' IS NULL AND updated_by = $3))" : ''}
+     ORDER BY value->>'scheduledDate', updated_at`,
+    params
+  );
+  const sqlMap = {};
+  sqlRes.rows.forEach(function(r) { sqlMap[r.key] = r.value; });
+
+  // Also include blob entries not yet migrated to SQL
+  try {
+    const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
+    const blob = blobRes.rows[0] && blobRes.rows[0].value;
+    const blobWE = blob && typeof blob.weekEntries === 'object' ? blob.weekEntries : {};
+    Object.keys(blobWE).forEach(function(key) {
+      if (sqlMap[key]) return;
+      const we = blobWE[key];
+      if (!we || !we.scheduledDate) return;
+      if (we.scheduledDate < dateFrom || we.scheduledDate > dateTo) return;
+      if (!isMgr && we.addedBy !== username) return;
+      sqlMap[key] = we;
+    });
+  } catch(_) {}
+
+  return Object.entries(sqlMap)
+    .map(function(e) { return { key: e[0], value: e[1] }; })
+    .sort(function(a, b) {
+      if (a.value.scheduledDate < b.value.scheduledDate) return -1;
+      if (a.value.scheduledDate > b.value.scheduledDate) return 1;
+      return 0;
+    });
+}
+
+// ── ☀️ Today's schedule ───────────────────────────────────────────────────────
 async function handleTodaySchedule(chatId, sess) {
   const todayStr = toJalali(new Date());
   const isMgr = isManagerRole(sess.role);
 
   let rows;
   try {
-    if (isMgr) {
-      const r = await query(
-        `SELECT key, value FROM week_entries WHERE value->>'scheduledDate' = $1 ORDER BY updated_at`,
-        [todayStr]
-      );
-      rows = r.rows;
-    } else {
-      const r = await query(
-        `SELECT key, value FROM week_entries
-         WHERE value->>'scheduledDate' = $1 AND value->>'addedBy' = $2
-         ORDER BY updated_at`,
-        [todayStr, sess.username]
-      );
-      rows = r.rows;
-    }
+    rows = await getWeekEntriesForRange(todayStr, todayStr, sess.username, isMgr);
   } catch(e) {
     await sendMsg(chatId, '❌ خطا در دریافت برنامه:\n' + e.message, { reply_markup: menuFor(sess) });
     return;
@@ -1287,15 +1307,7 @@ async function handleWeekSchedule(chatId, sess) {
 
   let rows;
   try {
-    const params = isMgr ? [days[0], days[6]] : [days[0], days[6], sess.username];
-    const r = await query(
-      `SELECT key, value FROM week_entries
-       WHERE value->>'scheduledDate' >= $1 AND value->>'scheduledDate' <= $2
-       ${!isMgr ? "AND value->>'addedBy' = $3" : ''}
-       ORDER BY value->>'scheduledDate', updated_at`,
-      params
-    );
-    rows = r.rows;
+    rows = await getWeekEntriesForRange(days[0], days[6], sess.username, isMgr);
   } catch(e) {
     await sendMsg(chatId, '❌ خطا: ' + e.message, { reply_markup: menuFor(sess) });
     return;
