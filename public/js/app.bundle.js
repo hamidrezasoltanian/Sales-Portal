@@ -6248,10 +6248,36 @@ document.addEventListener('visibilitychange', function() {
 // Polling fallback: refresh badge every 60s
 setInterval(function() { if (currentUser) _refreshNotifs(); }, 60000);
 
+// ── Helper: check if same-type unread notification exists in cache today ──
+function _hasRecentNotif(toUser, notifType) {
+  var today = (typeof todayStr === 'function') ? todayStr() : new Date().toISOString().slice(0,10);
+  return (_notifCache||[]).some(function(n) {
+    return n.to === toUser && !n.read && n.type === notifType
+      && n.at && n.at.slice(0,10) >= new Date(Date.now()-86400000).toISOString().slice(0,10);
+  });
+}
+
+function _sendPendingNotifs() {
+  fetch('/api/notifications/send-pending', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(d) {
+      if (!d) return;
+      showToast(d.sent > 0 ? ('📤 ' + d.sent + ' اعلان ارسال شد') : 'هیچ اعلان pending وجود ندارد', 3000);
+      if (d.sent > 0) { _refreshNotifs(); toggleNotifPanel(); setTimeout(toggleNotifPanel, 50); }
+    }).catch(function() { showToast('❌ خطا در ارسال', 2000); });
+}
+
 function sendNotif(toUser, message, centerKey, centerKeys, type, meta) {
+  // Check global notification preferences
+  var _np = (DB && DB.settings && DB.settings.notifPrefs) || {};
+  if (_np.enabled === false) return; // notifications disabled
+  var _ntType = type || 'general';
+  if (_np.types && _np.types[_ntType] === false) return; // this type is disabled
+
   var id = Date.now() + '_' + Math.random().toString(36).slice(2);
   var payload = { id: id, to: toUser, msg: message, centerKey: centerKey || null,
-                  type: type || 'general', meta: meta || null };
+                  type: _ntType, meta: meta || null,
+                  autoSend: _np.autoSend !== false }; // false = queued, not auto-pushed
   if (centerKeys && centerKeys.length) payload.centerKeys = centerKeys;
   fetch('/api/notifications', {
     method: 'POST',
@@ -6316,6 +6342,9 @@ function _renderNotifPanel(arr) {
     + '<span style="display:inline-flex;gap:6px;align-items:center">'
     + _tglBtn
     + (unreadIds.length ? '<button onclick="markAllNotifsRead()" style="font-size:10px;background:var(--bg-raised);border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer">همه خوانده شد</button>' : '')
+    + (_isManager() && (DB.settings&&DB.settings.notifPrefs&&DB.settings.notifPrefs.autoSend===false)
+       ? '<button onclick="_sendPendingNotifs()" style="font-size:10px;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:4px;padding:2px 8px;cursor:pointer">📤 ارسال دستی</button>'
+       : '')
     + '</span>'
     + '</div>';
   var body = '';
@@ -7572,7 +7601,7 @@ function _runMorningBriefing(today){
       + items.slice(0,5).join('\n• ')
       + (items.length>5?'\nو '+(items.length-5)+' مورد دیگر':'')
       + '\nروز خوبی داشته باشید! 💪';
-    sendNotif(exp, msg, '', [], 'morning_brief', null);
+    if(!_hasRecentNotif(exp,'morning_brief')){sendNotif(exp, msg, '', [], 'morning_brief', null);}
   });
   if(cnt>0) showToast('🌅 بریفینگ صبحگاهی برای '+cnt+' کارشناس ارسال شد', 3000);
 }
@@ -7598,7 +7627,7 @@ function _runTodayReminders(today){
       + items.slice(0,5).map(function(x){return x.name;}).join('\n• ')
       + (items.length>5?'\nو '+(items.length-5)+' مورد دیگر':'')
       + '\nوارد برنامه هفته شوید.';
-    sendNotif(exp, msg, items[0].key, items.map(function(x){return x.key;}), 'followup', null);
+    if(!_hasRecentNotif(exp,'followup')){sendNotif(exp, msg, items[0].key, items.map(function(x){return x.key;}), 'followup', null);}
   });
   if(cnt>0) showToast('🔔 یادآوری ساعت ۱۵ برای '+cnt+' کارشناس ارسال شد', 3000);
 }
@@ -7633,7 +7662,7 @@ function _runOverdueAndUndatedReminders(today){
         + d.overdue.slice(0,5).map(function(x){return x.name+' (تاریخ: '+x.date+')';}).join('\n• ')
         + (d.overdue.length>5?'\nو '+(d.overdue.length-5)+' مورد دیگر':'')
         + '\nلطفاً گزارش ثبت کنید.';
-      sendNotif(exp, msg, d.overdue[0].key, d.overdue.map(function(x){return x.key;}), 'followup', null);
+      if(!_hasRecentNotif(exp,'followup')){sendNotif(exp, msg, d.overdue[0].key, d.overdue.map(function(x){return x.key;}), 'followup', null);}
       cnt++;
     }
     if(d.noDate.length){
@@ -7641,7 +7670,7 @@ function _runOverdueAndUndatedReminders(today){
         + d.noDate.slice(0,5).map(function(x){return x.name;}).join('\n• ')
         + (d.noDate.length>5?'\nو '+(d.noDate.length-5)+' مورد دیگر':'')
         + '\nبرای هر مرکز تاریخ تنظیم کنید.';
-      sendNotif(exp, msg2, d.noDate[0].key, d.noDate.map(function(x){return x.key;}), 'followup', null);
+      if(!_hasRecentNotif(exp,'followup')){sendNotif(exp, msg2, d.noDate[0].key, d.noDate.map(function(x){return x.key;}), 'followup', null);}
       if(!d.overdue.length) cnt++;
     }
   });
@@ -9276,6 +9305,44 @@ function openSettings(){
     +'<button onclick="if(confirm(\'پاکسازی همه داده‌ها؟\'))clearAllData()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 8px;border:1px solid #fca5a5;border-radius:8px;background:#fee2e220;cursor:pointer;font-size:11px;font-family:inherit;color:#dc2626"><span style=\"font-size:18px\">🗑</span><span style=\"font-weight:600\">پاکسازی داده‌ها</span><span style=\"font-size:10px\">حذف کامل اطلاعات</span></button>'
     +(_isManager()?'<button onclick="closeModal(\'settingsModal\');openDistributionWizard()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 8px;border:1px solid #c4b5fd;border-radius:8px;background:#f5f3ff;cursor:pointer;font-size:11px;font-family:inherit;color:#5b21b6"><span style=\"font-size:18px\">🔀</span><span style=\"font-weight:600\">تقسیم مراکز</span><span style=\"color:var(--text-muted);font-size:10px\">توزیع بین کارشناسان</span></button>':'')
     +'</div></div>';
+  // ── Notification settings section ──────────────────────────────────────────
+  var _np = (DB.settings&&DB.settings.notifPrefs)||{};
+  var _npEnabled  = _np.enabled  !== false;   // default true
+  var _npAuto     = _np.autoSend !== false;   // default true
+  var _npTypes    = _np.types || {};
+  function _npChk(k){ return (_npTypes[k] !== false) ? 'checked' : ''; }
+  body += '<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'
+    + '<div><div style="font-size:12px;font-weight:700;color:var(--text-primary)">🔔 تنظیمات اعلان‌ها</div>'
+    + '<div style="font-size:11px;color:var(--text-muted)">کنترل ارسال و نوع اعلان‌های خودکار سیستم</div></div>'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
+    // enable/disable toggle
+    + '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:10px 12px">'
+    + '<input type="checkbox" id="stgNotifEnabled" style="width:16px;height:16px;cursor:pointer;accent-color:var(--brand)"'
+    + (_npEnabled ? ' checked' : '') + '>'
+    + '<div><div style="font-size:12px;font-weight:600">اعلان‌ها فعال</div>'
+    + '<div style="font-size:10px;color:var(--text-muted)">ارسال و نمایش اعلان‌های خودکار</div></div></label>'
+    // auto/manual toggle
+    + '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:10px 12px">'
+    + '<input type="checkbox" id="stgNotifAuto" style="width:16px;height:16px;cursor:pointer;accent-color:var(--brand)"'
+    + (_npAuto ? ' checked' : '') + '>'
+    + '<div><div style="font-size:12px;font-weight:600">ارسال خودکار</div>'
+    + '<div style="font-size:10px;color:var(--text-muted)">غیرفعال = اعلان‌ها در صف انتظار باقی می‌مانند</div></div></label>'
+    + '</div>'
+    + '<div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">نوع اعلان‌های فعال:</div>'
+    + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px">'
+    + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
+    + '<input type="checkbox" id="stgNtMorning" style="accent-color:var(--brand)" ' + _npChk('morning_brief') + '>🌅 بریفینگ صبحگاهی</label>'
+    + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
+    + '<input type="checkbox" id="stgNtFollowup" style="accent-color:var(--brand)" ' + _npChk('followup') + '>⚠️ مراکز معوق و بدون تاریخ</label>'
+    + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
+    + '<input type="checkbox" id="stgNtTask" style="accent-color:var(--brand)" ' + _npChk('task') + '>📌 وظایف جدید</label>'
+    + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
+    + '<input type="checkbox" id="stgNtOwner" style="accent-color:var(--brand)" ' + _npChk('owner_change') + '>🔄 تغییر مالکیت مرکز</label>'
+    + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
+    + '<input type="checkbox" id="stgNtGeneral" style="accent-color:var(--brand)" ' + _npChk('general') + '>📩 پیام‌های مستقیم مدیر</label>'
+    + '</div></div>';
   // ── Onboarding tutorial section
   var _obIsDisabled = DB.settings&&DB.settings.onboardingDisabled&&DB.settings.onboardingDisabled[currentUser];
   body += '<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">'
@@ -9342,6 +9409,21 @@ function saveSettings(){
   if(_anthKey.trim())DB.settings.anthropicKey=_anthKey.trim();
   DB.settings.members=members;
   DB.settings.ckItems=ckItems;
+  // ذخیره تنظیمات اعلان‌ها
+  var _npE=document.getElementById('stgNotifEnabled');
+  var _npA=document.getElementById('stgNotifAuto');
+  if(_npE||_npA){
+    if(!DB.settings.notifPrefs)DB.settings.notifPrefs={};
+    if(_npE)DB.settings.notifPrefs.enabled=_npE.checked;
+    if(_npA)DB.settings.notifPrefs.autoSend=_npA.checked;
+    DB.settings.notifPrefs.types={
+      morning_brief:!!(document.getElementById('stgNtMorning')||{checked:true}).checked,
+      followup:!!(document.getElementById('stgNtFollowup')||{checked:true}).checked,
+      task:!!(document.getElementById('stgNtTask')||{checked:true}).checked,
+      owner_change:!!(document.getElementById('stgNtOwner')||{checked:true}).checked,
+      general:!!(document.getElementById('stgNtGeneral')||{checked:true}).checked
+    };
+  }
   // ذخیره برچسب‌های ویرایش‌شده
   if(!DB.tags)DB.tags=[];
   DB.tags.forEach(function(t){

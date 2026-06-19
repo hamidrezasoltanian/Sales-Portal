@@ -32,6 +32,7 @@ function rowToObj(r) {
     read:      r.read,
     type:      r.type || 'general',
     meta:      r.meta || null,
+    sentAt:    r.sent_at || null,   // null = pending (not yet pushed to Telegram)
   };
 }
 
@@ -98,23 +99,29 @@ router.get('/', requireAuth, async function (req, res) {
 // ── POST /api/notifications ────────────────────────────────────────────────
 router.post('/', requireAuth, async function (req, res) {
   try {
-    const { id, to, msg, centerKey, centerKeys, at, type, meta } = req.body;
+    const { id, to, msg, centerKey, centerKeys, at, type, meta, autoSend } = req.body;
     if (!id || !to || !msg) {
       return res.status(400).json({ error: 'فیلدهای id، to و msg الزامی هستند' });
     }
+    // autoSend: true (default) = push to Telegram immediately
+    //           false          = store as pending, no immediate Telegram push
+    const shouldPush = autoSend !== false;
     const result = await query(
-      `INSERT INTO notifications (id, to_user, msg, center_key, center_keys, at, type, meta)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO notifications (id, to_user, msg, center_key, center_keys, at, type, meta, sent_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
       [id, to, msg, centerKey || null,
        (centerKeys && centerKeys.length) ? JSON.stringify(centerKeys) : null,
        at ? new Date(at) : new Date(),
-       type || 'general', meta ? JSON.stringify(meta) : null]
+       type || 'general', meta ? JSON.stringify(meta) : null,
+       shouldPush ? new Date() : null]   // sent_at tracks delivery time
     );
     const notif = rowToObj(result.rows[0]);
-    // Push to Telegram if the recipient has an active bot session
-    const tgNotify = getTgNotify();
-    if (tgNotify) tgNotify(to, '🔔 ' + msg).catch(function(){});
+    // Push to Telegram only if autoSend is enabled
+    if (shouldPush) {
+      const tgNotify = getTgNotify();
+      if (tgNotify) tgNotify(to, '🔔 ' + msg).catch(function(){});
+    }
     // Broadcast SSE so the recipient's open browser tab sees the badge update immediately
     const broadcast = getBroadcast();
     if (broadcast) broadcast('notif_new', { to, msg, id: notif.id });
@@ -272,6 +279,38 @@ async function _markBlobReadAll(user) {
     client.release();
   }
 }
+
+// ── POST /api/notifications/send-pending ─────────────────────────────────
+// Manager manually triggers delivery of pending (autoSend=false) notifications.
+router.post('/send-pending', requireAuth, async function (req, res) {
+  try {
+    const isManager = req.user.role === 'مدیر' || req.user.role === 'سوپر ادمین';
+    if (!isManager) return res.status(403).json({ error: 'فقط مدیر مجاز است' });
+
+    // Find all unsent notifications (sent_at IS NULL)
+    const pending = await query(
+      `SELECT * FROM notifications WHERE sent_at IS NULL ORDER BY at ASC LIMIT 100`
+    );
+    if (!pending.rows.length) return res.json({ sent: 0 });
+
+    const tgNotify = getTgNotify();
+    const broadcast = getBroadcast();
+    let sent = 0;
+    for (const row of pending.rows) {
+      const notif = rowToObj(row);
+      if (tgNotify) {
+        try { await tgNotify(notif.to, '🔔 ' + notif.msg); } catch(_) {}
+      }
+      await query(`UPDATE notifications SET sent_at = NOW() WHERE id = $1`, [notif.id]);
+      if (broadcast) broadcast('notif_new', { to: notif.to, msg: notif.msg, id: notif.id });
+      sent++;
+    }
+    res.json({ sent });
+  } catch (e) {
+    console.error('[notifications POST /send-pending]', e.message);
+    res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
 
 // ── DELETE /api/notifications/:id ─────────────────────────────────────────
 router.delete('/:id', requireAuth, async function (req, res) {
