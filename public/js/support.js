@@ -55,7 +55,7 @@ function loadSupportData(cb) {
   }
 
   fetch('/api/support' + params + (params ? '&limit=100' : '?limit=100'))
-    .then(function(r) { return r.json(); })
+    .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || r.status); return d; }); })
     .then(function(d) {
       _supportLoading = false;
       _supportData  = d.tickets || [];
@@ -202,20 +202,20 @@ window._spSubmitNew = function() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title: title.trim(), category: cat, priority: parseInt(pri), center_name: center || null, assigned_to: assign || null, description: desc || null }),
   })
-    .then(function(r) { return r.json(); })
+    .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || r.status); return d; }); })
     .then(function() {
       if (typeof closeModal === 'function') closeModal('spNewModal');
       if (typeof showToast === 'function') showToast('✅ تیکت ثبت شد', 2000);
       window._spSetFilter(_supportFilter);
     })
-    .catch(function() { alert('خطا در ثبت'); });
+    .catch(function(e) { alert('خطا در ثبت: ' + (e.message || e)); });
 };
 
 window._spOpenTicket = function(id) {
   fetch('/api/support/' + encodeURIComponent(id))
-    .then(function(r) { return r.json(); })
+    .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || r.status); return d; }); })
     .then(function(d) { _renderTicketModal(d.ticket, d.comments); })
-    .catch(function() { alert('خطا'); });
+    .catch(function(e) { alert('خطا: ' + (e.message || e)); });
 };
 
 function _renderTicketModal(t, comments) {

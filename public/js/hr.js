@@ -57,7 +57,7 @@
     cont.innerHTML = '<p style="color:#6b7280;text-align:center;padding:20px">در حال بارگذاری...</p>';
 
     fetch('/api/hr/employees')
-      .then(function (r) { return r.json(); })
+      .then(function (r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || r.status); return d; }); })
       .then(function (employees) {
         _hrRenderEmployees(employees);
       })
@@ -121,10 +121,11 @@
 
   window._hrOpenEmployee = function (id) {
     fetch('/api/hr/employees/' + encodeURIComponent(id))
-      .then(function (r) { return r.json(); })
+      .then(function (r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || r.status); return d; }); })
       .then(function (e) {
         _hrShowEmployeeModal(e);
-      });
+      })
+      .catch(function (e) { if (typeof showToast === 'function') showToast('❌ خطا: ' + (e.message || e)); });
   };
 
   function _hrShowEmployeeModal(e) {
@@ -167,7 +168,7 @@
 
   window._hrViewLeaveBalance = function (emp) {
     fetch('/api/hr/leave/balance/' + encodeURIComponent(emp))
-      .then(function (r) { return r.json(); })
+      .then(function (r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || r.status); return d; }); })
       .then(function (b) {
         var used = parseFloat(b.annual_used) || 0;
         var total = parseFloat(b.annual_total) || 30;
@@ -206,10 +207,11 @@
 
   window._hrEditEmployee = function (id) {
     fetch('/api/hr/employees/' + encodeURIComponent(id))
-      .then(function (r) { return r.json(); })
+      .then(function (r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || r.status); return d; }); })
       .then(function (e) {
         _hrOpenEditModal(e);
-      });
+      })
+      .catch(function (e) { if (typeof showToast === 'function') showToast('❌ خطا: ' + (e.message || e)); });
   };
 
   window._hrOpenNewEmployee = function () {
@@ -403,11 +405,6 @@
   };
 
   window._hrOpenLeaveDetail = function (id) {
-    fetch('/api/hr/leave?employee=')
-      .then(function () {})
-      .catch(function () {});
-
-    // Fetch from list cache or re-fetch
     fetch('/api/hr/leave')
       .then(function (r) { return r.json(); })
       .then(function (reqs) {

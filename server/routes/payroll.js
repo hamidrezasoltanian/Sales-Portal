@@ -144,7 +144,7 @@ async function _calcMonth(month, callerUser) {
   const settingsRes = await query(`SELECT * FROM commission_settings WHERE id='default'`);
   const settings = settingsRes.rows[0] || { base_pct: 1.0, tier_threshold: 2000000000, tier_step_amount: 500000000, tier_step_pct: 0.1, kpi_threshold: 80, kpi_multiplier: 2.0 };
 
-  const users = (await query(`SELECT username, display_name, department, salary_amount FROM app_users WHERE active=true ORDER BY display_name`)).rows;
+  const users = (await query(`SELECT username, display_name, department, salary_amount, commission_pct FROM app_users WHERE active=true ORDER BY display_name`)).rows;
 
   // Fetch finalized records for this month to know which are already locked
   const finalizedRes = await query(`SELECT employee FROM payroll_records WHERE month=$1 AND finalized=true`, [month]);
