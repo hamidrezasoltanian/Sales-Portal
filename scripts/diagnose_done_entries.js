@@ -1,8 +1,8 @@
 'use strict';
 /**
- * Diagnostic: show breakdown of all done:true week entries.
- * Run on production server and share the output.
- *   node scripts/diagnose_done_entries.js
+ * Diagnostic: check done:true week entries in BOTH the SQL table AND the blob.
+ * Run: node scripts/diagnose_done_entries.js
+ * Fix: node scripts/diagnose_done_entries.js --fix
  */
 
 const fs = require('fs');
@@ -27,103 +27,102 @@ const pool = new Pool({
   password: process.env.PG_PASSWORD || '',
 });
 
-// Jalali today — approximate via Gregorian offset
-function todayJalali() {
-  const now = new Date();
-  const gy = now.getFullYear(), gm = now.getMonth() + 1, gd = now.getDate();
-  // g2j approximation (good enough for comparison)
-  const g_d_no = 365 * gy + Math.floor((gy + 3) / 4) - Math.floor((gy + 99) / 100) + Math.floor((gy + 399) / 400);
-  const j_d_no_start = 365 * 1348 + Math.floor((1348 + 3) / 4) - Math.floor((1348 + 99) / 100) + Math.floor((1348 + 399) / 400) + 79;
-  // Use full g2j from a known algorithm
-  let jy = 0, jm = 0, jd = 0;
-  const gdm = [0,31,59,90,120,151,181,212,243,273,304,334];
-  const g_y = gy - 1600; const g_m = gm - 1; const g_d = gd - 1;
-  let g_d_no2 = 365 * g_y + Math.floor((g_y + 3) / 4) - Math.floor((g_y + 99) / 100) + Math.floor((g_y + 399) / 400);
-  for (let i = 0; i < g_m; i++) g_d_no2 += gdm[i];
-  if (g_m > 1 && ((g_y % 4 === 0 && g_y % 100 !== 0) || g_y % 400 === 0)) g_d_no2++;
-  g_d_no2 += g_d;
-  let j_d_no2 = g_d_no2 - 79;
-  const j_np = Math.floor(j_d_no2 / 12053); j_d_no2 %= 12053;
-  jy = 979 + 33 * j_np + 4 * Math.floor(j_d_no2 / 1461);
-  j_d_no2 %= 1461;
-  if (j_d_no2 >= 366) { jy += Math.floor((j_d_no2 - 1) / 365); j_d_no2 = (j_d_no2 - 1) % 365; }
-  const jdm = [31,29,31,30,31,31,30,30,30,29,30,29,31];
-  for (let i = 0; i < 11 && j_d_no2 >= jdm[i]; i++) { j_d_no2 -= jdm[i]; jm++; }
-  jd = j_d_no2 + 1;
-  const p2 = n => String(n).padStart(2, '0');
-  return `${jy}/${p2(jm + 1)}/${p2(jd)}`;
-}
+const DO_FIX = process.argv.includes('--fix');
 
 async function main() {
-  const today = todayJalali();
-  console.log(`\nتاریخ امروز (تقریبی جلالی): ${today}\n`);
-
   const client = await pool.connect();
   try {
-    const { rows } = await client.query(`
+    // ─── ۱. بررسی SQL week_entries ───────────────────────────────────────────
+    console.log('\n══════════════════════════════════════════════════');
+    console.log('  ۱. جدول week_entries (SQL)');
+    console.log('══════════════════════════════════════════════════');
+
+    const { rows: sqlRows } = await client.query(`
       SELECT key,
              value->>'scheduledDate' AS sdate,
              value->>'doneDate'      AS ddate,
              value->>'centerName'    AS cname,
-             value->>'addedBy'       AS added_by,
-             value->>'doneResult'    AS result,
-             updated_at
+             value->>'doneResult'    AS result
       FROM   week_entries
       WHERE  (value->>'done')::boolean = true
       ORDER BY key
     `);
-
-    console.log(`═══════════════════════════════════════════════════════`);
-    console.log(`  کل آیتم‌های done:true در week_entries: ${rows.length}`);
-    console.log(`═══════════════════════════════════════════════════════\n`);
-
-    const buckets = {
-      future_sdate_no_ddate: [],   // scheduledDate در آینده، doneDate ندارد
-      future_sdate_with_ddate: [], // scheduledDate در آینده، doneDate دارد (buggy)
-      past_sdate_no_ddate: [],     // scheduledDate گذشته، doneDate ندارد (قدیمی)
-      past_sdate_with_ddate: [],   // scheduledDate گذشته، doneDate دارد (OK)
-      no_sdate: [],                // scheduledDate ندارد
-    };
-
-    rows.forEach(function(r) {
-      const sd = r.sdate || '';
-      const dd = r.ddate || '';
-      if (!sd) {
-        buckets.no_sdate.push(r);
-      } else if (sd > today) {
-        if (!dd) buckets.future_sdate_no_ddate.push(r);
-        else     buckets.future_sdate_with_ddate.push(r);
-      } else {
-        if (!dd) buckets.past_sdate_no_ddate.push(r);
-        else     buckets.past_sdate_with_ddate.push(r);
-      }
+    console.log(`done:true در SQL: ${sqlRows.length} آیتم`);
+    sqlRows.forEach(function(r) {
+      console.log(`  • ${r.cname||'?'} | هفته:${r.key.split(':::')[0]} | sDate:${r.sdate||'-'} | dDate:${r.ddate||'-'} | ${r.result||'-'}`);
     });
 
-    function show(label, list) {
-      console.log(`── ${label}: ${list.length} آیتم`);
-      list.slice(0, 10).forEach(function(r) {
-        const weekId = r.key.split(':::')[0];
-        console.log(`   • ${r.cname||'?'} | هفته:${weekId} | sDate:${r.sdate||'-'} | dDate:${r.ddate||'-'} | نتیجه:${r.result||'-'}`);
-      });
-      if (list.length > 10) console.log(`   ... و ${list.length - 10} مورد دیگر`);
-      console.log('');
+    // ─── ۲. بررسی Blob (app_data key='main') ────────────────────────────────
+    console.log('\n══════════════════════════════════════════════════');
+    console.log('  ۲. Blob (app_data → weekEntries)');
+    console.log('══════════════════════════════════════════════════');
+
+    const { rows: blobRows } = await client.query(
+      "SELECT data FROM app_data WHERE key='main' LIMIT 1"
+    );
+    if (!blobRows.length || !blobRows[0].data) {
+      console.log('blob یافت نشد.');
+    } else {
+      const db = blobRows[0].data;
+      const we = db.weekEntries || {};
+      const allKeys = Object.keys(we);
+      const doneEntries = allKeys.filter(k => we[k] && we[k].done === true);
+
+      console.log(`کل weekEntries در blob: ${allKeys.length}`);
+      console.log(`done:true در blob: ${doneEntries.length}`);
+
+      // نشان بده کدام‌ها فقط در blob هستن (در SQL نیستن)
+      const sqlKeySet = new Set(sqlRows.map(r => r.key));
+      const blobOnly = doneEntries.filter(k => !sqlKeySet.has(k));
+      const inBoth   = doneEntries.filter(k =>  sqlKeySet.has(k));
+
+      console.log(`\n  در هر دو جا (SQL + blob): ${inBoth.length} آیتم`);
+      console.log(`  فقط در blob (مشکوک):      ${blobOnly.length} آیتم\n`);
+
+      if (blobOnly.length > 0) {
+        console.log('── آیتم‌های فقط در blob (done:true) ──');
+        blobOnly.forEach(function(k) {
+          const e = we[k];
+          const weekId = k.split(':::')[0];
+          console.log(`  • ${e.centerName||'?'} | هفته:${weekId} | sDate:${e.scheduledDate||'-'} | dDate:${e.doneDate||'-'} | نتیجه:${e.doneResult||'-'}`);
+        });
+      }
+
+      if (DO_FIX) {
+        // اصلاح: در blob، همه done:true رو به false برگردون
+        let fixedCount = 0;
+        doneEntries.forEach(function(k) {
+          db.weekEntries[k].done = false;
+          db.weekEntries[k].doneDate = null;
+          db.weekEntries[k].doneResult = null;
+          db.weekEntries[k].doneNote = null;
+          fixedCount++;
+        });
+        // ذخیره blob
+        await client.query(
+          "UPDATE app_data SET data=$1, updated_at=NOW() WHERE key='main'",
+          [db]
+        );
+        console.log(`\n✅ ${fixedCount} آیتم در blob اصلاح شد.`);
+
+        // اصلاح SQL هم
+        if (sqlRows.length > 0) {
+          const sqlKeys = sqlRows.map(r => r.key);
+          await client.query(`
+            UPDATE week_entries
+            SET value = value - 'doneDate' - 'doneResult' - 'doneNote' - 'doneAmount'
+                        || jsonb_build_object('done', false),
+                updated_at = NOW(), updated_by = 'fix_script'
+            WHERE key = ANY($1)
+          `, [sqlKeys]);
+          console.log(`✅ ${sqlRows.length} آیتم در SQL اصلاح شد.`);
+        }
+        console.log('\nبرای اعمال تغییرات pm2 restart sales-portal را اجرا کنید.\n');
+      } else {
+        console.log('\n⚠️  حالت پیش‌نمایش. برای اصلاح:');
+        console.log('   node scripts/diagnose_done_entries.js --fix\n');
+      }
     }
-
-    show('✅ طبیعی (sDate گذشته + dDate دارد)', buckets.past_sdate_with_ddate);
-    show('⚠️  بدون dDate، sDate گذشته (قدیمی)', buckets.past_sdate_no_ddate);
-    show('🔴 مشکوک: sDate آینده + dDate دارد', buckets.future_sdate_with_ddate);
-    show('🔴 مشکوک: sDate آینده، بدون dDate', buckets.future_sdate_no_ddate);
-    show('⚠️  بدون scheduledDate', buckets.no_sdate);
-
-    console.log(`═══════════════════════════════════════════════════════`);
-    console.log(`خلاصه:`);
-    console.log(`  طبیعی:                    ${buckets.past_sdate_with_ddate.length}`);
-    console.log(`  قدیمی (بدون dDate):        ${buckets.past_sdate_no_ddate.length}`);
-    console.log(`  مشکوک (sDate آینده+dDate): ${buckets.future_sdate_with_ddate.length}`);
-    console.log(`  مشکوک (sDate آینده-dDate): ${buckets.future_sdate_no_ddate.length}`);
-    console.log(`  بدون scheduledDate:        ${buckets.no_sdate.length}`);
-    console.log(`═══════════════════════════════════════════════════════\n`);
-
   } finally {
     client.release();
     await pool.end();
