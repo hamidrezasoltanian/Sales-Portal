@@ -174,7 +174,9 @@ async function _calcMonth(month, callerUser) {
 
     const baseSalary = parseFloat(u.salary_amount) || 0;
 
-    const { rate, amount: commissionAmount } = calcCommission(salesTotal, settings, kpiAbove);
+    // Use user's individual commission_pct as base rate; fall back to global base_pct
+    const userSettings = Object.assign({}, settings, { base_pct: (parseFloat(u.commission_pct) > 0 ? u.commission_pct : settings.base_pct) });
+    const { rate, amount: commissionAmount } = calcCommission(salesTotal, userSettings, kpiAbove);
     const totalPay = baseSalary + kpiBonus + commissionAmount;
 
     rows.push({

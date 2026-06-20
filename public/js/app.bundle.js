@@ -5270,7 +5270,7 @@ function renderWpFullCenterList() {
   // ── Section 2: all province centers NOT in this week ─────────────────
   _buildPCCache();
   var allCenters = [];
-  getAllProvinces().forEach(function(p){
+  _getAllowedProvinces(getAllProvinces()).forEach(function(p){
     var tp = getProvType(p.id);
     getProvCenters(p.id).forEach(function(c){
       var rk = tp+'_'+c.id;
@@ -5446,7 +5446,7 @@ function wpPickForDay(weekId, dayStr) {
     inWeekMap[we.recKey||((we.rtype||'')+'_'+(we.rid||''))] = true;
   });
   var centers = [];
-  getAllProvinces().forEach(function(p){
+  _getAllowedProvinces(getAllProvinces()).forEach(function(p){
     var tp = getProvType(p.id);
     getProvCenters(p.id).forEach(function(c){
       var rk = tp+'_'+c.id;
@@ -8263,7 +8263,8 @@ function gSearchQuery(q){
         res.push({icon:'🏥',title:esc(name),sub:esc(e.status||'بدون تماس'),action:function(){closeGSearch();openCenterModal('center',cid);}});
       }
     });
-    Object.keys(_PC_CACHE||{}).forEach(function(pv){if(res.length>=12)return;(_PC_CACHE[pv]||[]).forEach(function(c){
+    var _gsAllowedProvs=(window._myPermissions&&window._myPermissions.provinces&&window._myPermissions.provinces.length)?window._myPermissions.provinces:null;
+    Object.keys(_PC_CACHE||{}).forEach(function(pv){if(res.length>=12)return;if(_gsAllowedProvs&&_gsAllowedProvs.indexOf(pv)<0)return;(_PC_CACHE[pv]||[]).forEach(function(c){
       if(res.length>=12)return;
       var name=c.name||c.center_name||'';
       if(fNorm(name).indexOf(qn)!==-1){
@@ -9098,7 +9099,7 @@ function renderAllCenters(viewMode){
   var _ftgEl=document.getElementById('fTag');var ftg=_ftgEl&&_ftgEl.value?parseInt(_ftgEl.value):0;
   var effectiveOwner=fo||_globalOwnerFilter||(_isExpert()?currentUser:'');
   var allRows=[];
-  getAllProvinces().forEach(function(p){
+  _getAllowedProvinces(getAllProvinces()).forEach(function(p){
     var tp=getProvType(p.id);
     getProvCenters(p.id).forEach(function(c){
       var e=getE(tp,c.id);
