@@ -1108,7 +1108,7 @@ function switchTab(tab){
   currentTab=tab;
   try{localStorage.setItem('_st',tab);}catch(e){}
   _navPush(tab, null);
-  ['home','provinces','weekplan','calendar','checklist','activity','changelog','tasks','manager','kpi','mtr','pricing','proforma'].forEach(function(t){
+  ['home','provinces','weekplan','calendar','checklist','activity','changelog','tasks','manager','kpi','mtr','pricing','proforma','reports'].forEach(function(t){
     var b=document.getElementById('tab_'+t);if(b)b.classList.toggle('active',t===tab);
   });
   document.getElementById('dash').style.display=(tab==='provinces')?'':'none';
@@ -1137,6 +1137,8 @@ function switchTab(tab){
   if(tab==='hr'&&typeof renderHRPanel==='function')renderHRPanel();
   var tradeKPIPanel=document.getElementById('tradeKPIPanel');if(tradeKPIPanel)tradeKPIPanel.style.display=(tab==='trade-kpi')?'':'none';
   if(tab==='trade-kpi'&&typeof renderTradeKPIPanel==='function')renderTradeKPIPanel();
+  var reportsPanel=document.getElementById('reportsPanel');if(reportsPanel)reportsPanel.style.display=(tab==='reports')?'':'none';
+  if(tab==='reports'&&typeof renderReportsPanel==='function')renderReportsPanel();
   // update mobile nav
   (function(){var tabs=['home','provinces','weekplan','calendar','checklist','activity','mtr'];document.querySelectorAll('.mob-tab').forEach(function(btn,i){btn.classList.toggle('active',tabs[i]===tab);});})();
   function _safeRender(fn, tabName) {

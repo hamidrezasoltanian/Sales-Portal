@@ -67,6 +67,7 @@
     <button class="tab-btn sb-manager-wrap" id="tab_kpi" onclick="switchTab('kpi')" title="KPI" style="display:none"><span class="sb-icon">📊</span><span class="sb-label">KPI</span></button>
     <button class="tab-btn sb-manager-wrap" id="tab_manager" onclick="switchTab('manager')" title="بررسی مدیر" style="display:none"><span class="sb-icon">🔎</span><span class="sb-label">بررسی مدیر</span></button>
     <button class="tab-btn sb-manager-wrap" id="tab_changelog" onclick="switchTab('changelog')" title="لاگ تغییرات" style="display:none"><span class="sb-icon">🗃</span><span class="sb-label">لاگ تغییرات</span></button>
+    <button class="tab-btn sb-manager-wrap" id="tab_reports" onclick="switchTab('reports')" title="گزارش‌های تحلیلی" style="display:none"><span class="sb-icon">📊</span><span class="sb-label">گزارش‌ها</span></button>
     <button class="tab-btn sb-super-wrap" onclick="openPayrollPanel()" title="گزارش حقوق و پورسانت" style="display:none"><span class="sb-icon">💵</span><span class="sb-label">حقوق و پورسانت</span></button>
   </div>
 </nav>
@@ -301,6 +302,7 @@
 <script src="/js/hr.js?v=20260619a"></script>
 <script src="/js/trade-kpi.js?v=20260620a"></script>
 <script src="/js/payroll.js?v=20260620a"></script>
+<script src="/js/reports.js?v=20260620b"></script>
 
 <!-- JS -->
 
@@ -688,6 +690,11 @@
 <!-- TRADE KPI PANEL -->
 <div id="tradeKPIPanel" style="display:none;padding:16px">
   <div id="tradeKPIRoot"></div>
+</div>
+
+<!-- REPORTS PANEL -->
+<div id="reportsPanel" style="display:none;padding:16px">
+  <div id="reportsRoot"></div>
 </div>
 
 <div id="centerContactPopup" class="contact-popup">
