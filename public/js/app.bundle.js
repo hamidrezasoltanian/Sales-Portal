@@ -154,7 +154,7 @@ async function loadDB(){
   }
 }
 function _weRemove(k){
-  _weRemove(k);
+  delete DB.weekEntries[k];
   if(!DB._weDeletedKeys)DB._weDeletedKeys=[];
   if(DB._weDeletedKeys.indexOf(k)<0)DB._weDeletedKeys.push(k);
 }
@@ -5876,7 +5876,11 @@ function _wpFinishDone(eKey){
         });
         if(foundWeek){
           var newKey=wpEntryKey(foundWeek.id,rtype,rid);
-          DB.weekEntries[newKey]={scheduledDate:nextDate,done:false,doneDate:null,rtype:rtype,rid:rid,recKey:rtype+'_'+rid,centerName:cname,actionType:actionType,addedBy:currentUser};
+          if(newKey===eKey){
+            DB.weekEntries[eKey].scheduledDate=nextDate;
+          } else {
+            DB.weekEntries[newKey]={scheduledDate:nextDate,done:false,doneDate:null,rtype:rtype,rid:rid,recKey:rtype+'_'+rid,centerName:cname,actionType:actionType,addedBy:currentUser};
+          }
           _wpYear=foundWeek.jYear;
           var _sel=document.getElementById('wpSel');
           if(_sel){wpBuildSelect();_sel.value=foundWeek.id;}
