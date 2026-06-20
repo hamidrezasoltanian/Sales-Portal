@@ -48,12 +48,15 @@ function _umUsers(){
         +roles.map(function(r){return'<option'+(m.role===r?' selected':'')+'>'+r+'</option>';}).join('')
       +'</select></td>'
       +'<td style="padding:9px 6px"><input id="um_phone_'+m.id+'" value="'+esc(m.phone||'')+'" placeholder="09XXXXXXXXX" dir="ltr" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 8px;font-size:11px;font-family:monospace;color:var(--text-primary);width:115px"></td>'
+      +'<td style="padding:9px 6px"><input id="um_dept_'+m.id+'" value="'+esc(m.department||'')+'" placeholder="دپارتمان" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 8px;font-size:11px;font-family:inherit;color:var(--text-primary);width:90px"></td>'
+      +'<td style="padding:9px 6px"><select id="um_mgr_'+m.id+'" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 7px;font-size:11px;font-family:inherit;color:var(--text-primary)"><option value="">— بدون مدیر —</option>'+umGetActive().map(function(u){return'<option value="'+esc(u.id)+'"'+(m.direct_manager===u.id?' selected':'')+'>'+esc(u.name)+'</option>';}).join('')+'</select></td>'
       +'<td style="padding:9px 8px;text-align:center"><span style="font-size:11px;color:var(--text-muted)">🏥'+centers+'</span></td>'
       +'<td style="padding:9px 8px;text-align:center">'
         +'<span onclick="umToggleActive(\''+m.id+'\')" style="font-size:11px;background:'+statusBg+';color:'+statusTxt+';border-radius:20px;padding:3px 11px;cursor:pointer;font-weight:600;border:1px solid '+(active?'#86efac':'var(--border)')+'">'+( active?'● فعال':'○ غیرفعال')+'</span>'
       +'</td>'
       +'<td style="padding:9px 6px;white-space:nowrap">'
         +'<button onclick="umSaveUser(\''+m.id+'\')" title="ذخیره تغییرات" style="background:var(--brand-bg);color:var(--brand);border:1px solid var(--brand);border-radius:5px;padding:4px 10px;cursor:pointer;font-size:11px;font-family:inherit">💾 ذخیره</button> '
+        +'<button onclick="umOpenPermissions(\''+m.id+'\')" title="تنظیم دسترسی" style="background:#f5f3ff;color:#7c3aed;border:1px solid #c4b5fd;border-radius:5px;padding:4px 8px;cursor:pointer;font-size:11px">🔐</button> '
         +'<button onclick="umResetPassword(\''+m.id+'\')" title="تغییر رمز" style="background:var(--bg-raised);color:var(--text-secondary);border:1px solid var(--border);border-radius:5px;padding:4px 8px;cursor:pointer;font-size:11px">🔑</button>'
         +(centers>0?' <button onclick="umReassignAll(\''+m.id+'\')" title="جابجایی مراکز" style="background:#fef9c3;color:#854d0e;border:1px solid #fcd34d;border-radius:5px;padding:4px 8px;cursor:pointer;font-size:11px">🔀</button>':'')
       +'</td>'
@@ -68,6 +71,8 @@ function _umUsers(){
     +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">کد ورود</th>'
     +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">نقش</th>'
     +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">موبایل</th>'
+    +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">دپارتمان</th>'
+    +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">مدیر مستقیم</th>'
     +'<th style="padding:8px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600">مراکز</th>'
     +'<th style="padding:8px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600">وضعیت</th>'
     +'<th style="padding:8px;font-size:11px;color:var(--text-muted);font-weight:600">عملیات</th>'
@@ -172,9 +177,13 @@ function umSaveUser(userId){
   if(!newName){showToast('⚠ نام اجباری است');return;}
   if(newId&&newId!==userId&&!/^[a-zA-Z0-9._-]+$/.test(newId)){showToast('⚠ نام کاربری فقط حروف انگلیسی، اعداد و نقطه/خط تیره');return;}
   if(newId&&newId!==userId&&USERS[newId]){showToast('⚠ این نام کاربری قبلاً وجود دارد');return;}
+  var deptEl=document.getElementById('um_dept_'+userId);
+  var mgrEl=document.getElementById('um_mgr_'+userId);
   var payload={display_name:newName,role:newRole,phone:newPhone};
   if(newColor)payload.color=newColor;
   if(newId&&newId!==userId)payload.new_username=newId;
+  if(deptEl)payload.department=deptEl.value.trim();
+  if(mgrEl)payload.direct_manager=mgrEl.value;
   fetch('/api/users/'+encodeURIComponent(userId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
     .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||r.status);return d;});})
     .then(function(d){
@@ -513,6 +522,88 @@ function _umBulk(){
 
 
 
+function umOpenPermissions(userId){
+  var m=umGetMembers().find(function(m){return m.id===userId;});
+  if(!m){showToast('⚠ کاربر یافت نشد');return;}
+  var perms=m.permissions||{};
+  var modPerms=perms.modules||{};
+  var allowedProvs=perms.provinces||[];
+  var modules=[
+    ['provinces','استان‌ها/مراکز'],['weekplan','برنامه هفته'],['tasks','وظایف'],
+    ['calendar','تقویم'],['kpi','KPI مدیر'],['manager','بررسی مدیر'],
+    ['mtr','مطالبات'],['pricing','قیمت‌گذاری'],['proforma','پیش‌فاکتور'],
+    ['support','پشتیبانی'],['hr','منابع انسانی'],['trade-kpi','بازرگانی'],
+    ['changelog','لاگ تغییرات']
+  ];
+  var provs=typeof getAllProvinces==='function'?getAllProvinces():[];
+  var modRows=modules.map(function(mod){
+    var key=mod[0],label=mod[1];
+    var cur=modPerms[key]||'edit';
+    var lvlColors={none:'#dc2626',view:'#d97706',edit:'#16a34a'};
+    return '<tr style="border-bottom:1px solid var(--border)">'
+      +'<td style="padding:8px 10px;font-size:12px;color:var(--text-primary)">'+label+'</td>'
+      +['none','view','edit'].map(function(lvl){
+        var checked=cur===lvl?' checked':'';
+        return '<td style="padding:8px;text-align:center">'
+          +'<input type="radio" name="perm_'+key+'" value="'+lvl+'"'+checked+' style="cursor:pointer;accent-color:'+lvlColors[lvl]+';width:14px;height:14px">'
+          +'</td>';
+      }).join('')
+      +'</tr>';
+  }).join('');
+  var provBoxes=provs.map(function(p){
+    var checked=allowedProvs.length===0||allowedProvs.indexOf(p.id)>=0?' checked':'';
+    return '<label style="display:inline-flex;align-items:center;gap:4px;padding:4px 8px;background:var(--bg-raised);border:1px solid var(--border);border-radius:5px;cursor:pointer;font-size:11px">'
+      +'<input type="checkbox" name="prov_perm" value="'+esc(p.id)+'"'+checked+' style="cursor:pointer">'+esc(p.name)+'</label>';
+  }).join('');
+  var body='<div style="background:#f5f3ff;border:1px solid #c4b5fd;border-radius:7px;padding:8px 14px;margin-bottom:14px;font-size:12px;color:#5b21b6">'
+    +'🔐 دسترسی برای: <strong>'+esc(m.name)+'</strong> — خالی بودن permissions = دسترسی کامل</div>'
+    +'<div style="overflow-x:auto;margin-bottom:16px"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+    +'<thead><tr style="background:var(--bg-raised)">'
+    +'<th style="padding:8px 10px;text-align:right;font-size:11px;color:var(--text-muted)">ماژول</th>'
+    +'<th style="padding:8px;text-align:center;font-size:11px;color:#dc2626">ندارد</th>'
+    +'<th style="padding:8px;text-align:center;font-size:11px;color:#d97706">فقط دیدن</th>'
+    +'<th style="padding:8px;text-align:center;font-size:11px;color:#16a34a">ویرایش کامل</th>'
+    +'</tr></thead><tbody>'+modRows+'</tbody></table></div>'
+    +'<div style="margin-bottom:8px">'
+    +'<div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:6px">استان‌های مجاز '
+    +'<span style="font-weight:400;color:var(--text-muted)">(همه انتخاب = دسترسی به همه استان‌ها)</span></div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:6px;max-height:160px;overflow-y:auto;padding:8px;background:var(--bg-raised);border:1px solid var(--border);border-radius:7px" id="permProvBox">'
+    +(provs.length?provBoxes:'<span style="font-size:11px;color:var(--text-muted)">استانی بارگذاری نشده</span>')
+    +'</div></div>'
+    +'<div style="display:flex;gap:8px;margin-top:6px">'
+    +'<button onclick="umPermSelectAll(true)" style="background:#f0fdf4;color:#15803d;border:1px solid #86efac;border-radius:5px;padding:4px 10px;cursor:pointer;font-size:11px;font-family:inherit">✅ همه استان‌ها</button>'
+    +'<button onclick="umPermSelectAll(false)" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5;border-radius:5px;padding:4px 10px;cursor:pointer;font-size:11px;font-family:inherit">✗ هیچ‌کدام</button>'
+    +'</div>';
+  var foot='<button class="btn-secondary" onclick="closeModal(\'permModal\')">لغو</button>'
+    +'<button onclick="umSavePermissions(\''+userId+'\')" style="background:#7c3aed;color:#fff;border:none;border-radius:5px;padding:7px 18px;cursor:pointer;font-size:12px;font-family:inherit">💾 ذخیره دسترسی</button>';
+  openModal('permModal','🔐 مدیریت دسترسی: '+esc(m.name),body,foot,{lg:true});
+}
+
+function umPermSelectAll(select){
+  var el=document.getElementById('permProvBox');
+  if(!el)return;
+  el.querySelectorAll('input[type=checkbox]').forEach(function(cb){cb.checked=select;});
+}
+
+function umSavePermissions(userId){
+  var modules=['provinces','weekplan','tasks','calendar','kpi','manager','mtr','pricing','proforma','support','hr','trade-kpi','changelog'];
+  var modPerms={};
+  modules.forEach(function(mod){
+    var radios=document.querySelectorAll('input[name="perm_'+mod+'"]');
+    radios.forEach(function(r){if(r.checked)modPerms[mod]=r.value;});
+  });
+  var checkedProvs=[];
+  var allProvs=typeof getAllProvinces==='function'?getAllProvinces():[];
+  var el=document.getElementById('permProvBox');
+  if(el)el.querySelectorAll('input[type=checkbox]').forEach(function(cb){if(cb.checked)checkedProvs.push(cb.value);});
+  var provList=checkedProvs.length===allProvs.length?[]:checkedProvs;
+  var permissions={modules:modPerms,provinces:provList};
+  fetch('/api/users/'+encodeURIComponent(userId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({permissions:permissions})})
+    .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||r.status);return d;});})
+    .then(function(){closeModal('permModal');showToast('✅ دسترسی‌های «'+userId+'» ذخیره شد');buildUSERS();})
+    .catch(function(e){showToast('❌ خطا: '+e.message);});
+}
+
 function buildUSERS(){
   // Fetch from server API and populate USERS map + _DEFAULT_MEMBERS
   fetch('/api/users')
@@ -521,7 +612,7 @@ function buildUSERS(){
       USERS={};
       _DEFAULT_MEMBERS=list.map(function(m){
         USERS[m.username]=m.display_name;
-        return{id:m.username,name:m.display_name,role:m.role,color:m.color,phone:m.phone||'',active:m.active};
+        return{id:m.username,name:m.display_name,role:m.role,color:m.color,phone:m.phone||'',active:m.active,department:m.department||'',direct_manager:m.direct_manager||'',permissions:m.permissions||{}};
       });
       // Also sync to DB.settings.members so legacy code works
       if(DB.settings)DB.settings.members=_DEFAULT_MEMBERS;

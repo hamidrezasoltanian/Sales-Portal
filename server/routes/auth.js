@@ -133,7 +133,7 @@ router.post('/login', async (req, res) => {
 router.get('/me', requireAuth, async (req, res) => {
   try {
     const result = await query(
-      'SELECT username, display_name, role, color, phone FROM app_users WHERE username = $1 AND active = true',
+      'SELECT username, display_name, role, color, phone, department, direct_manager, permissions FROM app_users WHERE username = $1 AND active = true',
       [req.user.username]
     );
     if (result.rows.length === 0) {
@@ -146,6 +146,9 @@ router.get('/me', requireAuth, async (req, res) => {
       role: u.role,
       color: u.color,
       phone: u.phone,
+      department: u.department || '',
+      direct_manager: u.direct_manager || '',
+      permissions: u.permissions || {},
     });
   } catch (e) {
     console.error('[auth/me]', e.message);

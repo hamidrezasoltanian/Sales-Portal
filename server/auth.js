@@ -42,19 +42,28 @@ async function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'توکن نامعتبر یا منقضی شده' });
   }
 
-  // Check active status with cache
+  // Check active status + load permissions (cached 5 min)
+  let userPerms = {};
+  let userDept = '';
   try {
     const cached = _activeCache.get(decoded.username);
     let active;
     if (cached && (Date.now() - cached.ts) < CACHE_TTL) {
       active = cached.active;
+      userPerms = cached.permissions || {};
+      userDept = cached.department || '';
     } else {
-      const userResult = await query('SELECT active FROM app_users WHERE username = $1', [decoded.username]);
+      const userResult = await query(
+        'SELECT active, permissions, department FROM app_users WHERE username = $1',
+        [decoded.username]
+      );
       if (userResult.rows.length === 0) {
         return res.status(401).json({ error: 'حساب کاربری غیرفعال است' });
       }
       active = userResult.rows[0].active;
-      _activeCache.set(decoded.username, { active, ts: Date.now() });
+      userPerms = userResult.rows[0].permissions || {};
+      userDept = userResult.rows[0].department || '';
+      _activeCache.set(decoded.username, { active, permissions: userPerms, department: userDept, ts: Date.now() });
     }
     if (!active) {
       return res.status(401).json({ error: 'حساب کاربری غیرفعال است' });
@@ -64,7 +73,7 @@ async function requireAuth(req, res, next) {
     console.error('[requireAuth] DB check error:', e.message);
   }
 
-  req.user = { username: decoded.username, role: decoded.role, name: decoded.name };
+  req.user = { username: decoded.username, role: decoded.role, name: decoded.name, permissions: userPerms, department: userDept };
   next();
 }
 
@@ -77,4 +86,8 @@ function requireManager(req, res, next) {
   });
 }
 
-module.exports = { requireAuth, requireManager, JWT_SECRET };
+function invalidateAuthCache(username) {
+  if (username) _activeCache.delete(username);
+}
+
+module.exports = { requireAuth, requireManager, JWT_SECRET, invalidateAuthCache };

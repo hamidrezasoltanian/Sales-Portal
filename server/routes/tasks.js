@@ -62,18 +62,19 @@ router.get('/', requireAuth, async function (req, res) {
 // ── POST /api/tasks ────────────────────────────────────────────────────────
 router.post('/', requireAuth, async function (req, res) {
   try {
-    const { id, title, owner, dueDate, priority, status, centerKey, note, subtasks, createdBy, recurring, activity } = req.body;
+    const { id, title, owner, dueDate, priority, status, centerKey, note, subtasks, createdBy, recurring, activity, department } = req.body;
     if (!id || !title) {
       return res.status(400).json({ error: 'شناسه و عنوان وظیفه الزامی است' });
     }
     const result = await query(
-      `INSERT INTO tasks (id, title, owner, due_date, priority, status, center_key, note, subtasks, created_by, recurring, activity)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      `INSERT INTO tasks (id, title, owner, due_date, priority, status, center_key, note, subtasks, created_by, recurring, activity, department)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        ON CONFLICT (id) DO UPDATE SET
          title=EXCLUDED.title, owner=EXCLUDED.owner, due_date=EXCLUDED.due_date,
          priority=EXCLUDED.priority, status=EXCLUDED.status, center_key=EXCLUDED.center_key,
          note=EXCLUDED.note, subtasks=EXCLUDED.subtasks, done=EXCLUDED.done,
-         recurring=EXCLUDED.recurring, activity=EXCLUDED.activity, updated_at=NOW()
+         recurring=EXCLUDED.recurring, activity=EXCLUDED.activity, department=EXCLUDED.department,
+         updated_at=NOW()
        RETURNING *`,
       [
         id,
@@ -88,6 +89,7 @@ router.post('/', requireAuth, async function (req, res) {
         createdBy || req.user.username,
         recurring || 'none',
         JSON.stringify(activity || []),
+        department || '',
       ]
     );
     res.status(201).json(rowToObj(result.rows[0]));

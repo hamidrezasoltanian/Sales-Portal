@@ -2640,7 +2640,7 @@ function renderTable(){
 
 // ════════════════════════ PROVINCE LIST ══════════════
 function renderProvList(){
-  var provs=getAllProvinces();
+  var provs=_getAllowedProvinces(getAllProvinces());
   // فیلتر search + owner روی province list
   var _plSearch=document.getElementById('srch')?document.getElementById('srch').value:'';
   var _plOwner=document.getElementById('fOwner')?document.getElementById('fOwner').value:_globalOwnerFilter;
@@ -5014,6 +5014,26 @@ function _isSuperAdmin(){
 }
 function _isExpert(){return !_isManager();}
 
+// ── Permission engine (additive — empty permissions = full access) ──────────
+function _hasAccess(module){
+  if(_isManager())return true;
+  var perms=window._myPermissions||{};
+  if(!perms.modules)return true; // empty = full access (backward-compatible)
+  var level=perms.modules[module];
+  return level==='edit'||level==='view';
+}
+function _canEdit(module){
+  if(_isManager())return true;
+  var perms=window._myPermissions||{};
+  if(!perms.modules)return true;
+  return perms.modules[module]==='edit';
+}
+function _getAllowedProvinces(allProvs){
+  if(_isManager())return allProvs;
+  var perms=window._myPermissions||{};
+  if(!perms.provinces||!perms.provinces.length)return allProvs;
+  return allProvs.filter(function(p){return perms.provinces.indexOf(p.id)>=0;});
+}
 
 function wpShowAllUnsched(btn){
   var grid = document.getElementById('wpMyUnschedGrid');
@@ -6922,6 +6942,7 @@ function renderChangelog(){
 var _taskFilter='all'; // all | mine | overdue
 var _taskView='kanban'; // kanban | list
 var _taskSearch=''; // keyword filter
+var _taskTeamMode=false; // toggle: false=personal, true=department team
 var _TK_STATUSES=[
   {id:'todo',label:'انجام نشده',color:'#64748b'},
   {id:'doing',label:'در حال انجام',color:'#6366f1'},
@@ -7031,6 +7052,12 @@ function _tkFindSub(subs,sid){
 function _tkFilteredTasks(){
   _ensureTasks();
   var today=todayStr();
+  // Team mode: show all tasks in same department
+  if(_taskTeamMode&&window._myDepartment){
+    var deptTasks=DB.tasks.filter(function(t){return(t.department||'')===(window._myDepartment||'');});
+    if(_taskSearch&&_taskSearch.trim()){var _q2=fNorm(_taskSearch.trim());deptTasks=deptTasks.filter(function(t){return fNorm(t.title||'').indexOf(_q2)>=0||fNorm(t.note||'').indexOf(_q2)>=0;});}
+    return deptTasks;
+  }
   var tasks=DB.tasks.filter(function(t){
     if(_taskFilter==='mine')return t.owner===currentUser;
     if(_taskFilter==='overdue')return t.status!=='done'&&t.dueDate&&t.dueDate<today;
@@ -7062,6 +7089,10 @@ function renderTasksPanel(){
     +[['all','همه'],['mine','وظایف من'],['overdue','سررسید گذشته']].map(function(f){
       return'<button class="task-filter-btn'+(_taskFilter===f[0]?' active':'')+'" onclick="_taskFilter=\''+f[0]+'\';renderTasksPanel()">'+f[1]+'</button>';
     }).join('')
+    +(window._myDepartment?'<span style="display:inline-flex;gap:2px;background:var(--bg-raised);border-radius:8px;padding:3px;border:1px solid var(--border)">'
+    +'<button onclick="_taskTeamMode=false;renderTasksPanel()" style="font-size:11px;border:none;border-radius:6px;padding:4px 12px;cursor:pointer;font-family:inherit;background:'+(!_taskTeamMode?'#6366f1':'transparent')+';color:'+(!_taskTeamMode?'#fff':'var(--text-secondary)')+'" title="وظایف شخصی">👤 من</button>'
+    +'<button onclick="_taskTeamMode=true;renderTasksPanel()" style="font-size:11px;border:none;border-radius:6px;padding:4px 12px;cursor:pointer;font-family:inherit;background:'+(_taskTeamMode?'#6366f1':'transparent')+';color:'+(_taskTeamMode?'#fff':'var(--text-secondary)')+'" title="وظایف تیم دپارتمان">👥 تیم</button>'
+    +'</span>':'')
     +'<button class="btn-primary" style="margin-right:auto;font-size:12px;padding:6px 16px" onclick="openTaskModal()">+ وظیفه جدید</button>'
     +'<button onclick="openTkColumnsModal()" style="font-size:11px;padding:5px 12px;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-family:inherit;color:var(--text-secondary)">⚙️ ستون‌ها</button>'
     +'</div>';
@@ -7324,6 +7355,7 @@ function tkSaveTask(tid){
   t.note=(document.getElementById('tkd_note')||{}).value||'';
   t.recurring=(document.getElementById('tkd_recurring')||{}).value||'none';
   if(!tid) t.centerKey=(document.getElementById('tkd_centerKey')||{}).value||'';
+  if(!tid) t.department=window._myDepartment||'';
   if(!t.activity)t.activity=[];
   if(tid&&_prevStatus!==status){
     var _statuses=_getTkStatuses();
@@ -7350,7 +7382,8 @@ function tkSaveTask(tid){
         status:task.status||'todo',centerKey:task.centerKey||null,
         note:task.note||'',subtasks:task.subtasks||[],
         done:!!task.done,recurring:task.recurring||'none',
-        activity:task.activity||[],createdBy:task.createdBy||currentUser
+        activity:task.activity||[],createdBy:task.createdBy||currentUser,
+        department:task.department||''
       })
     }).catch(function(){});
   })(t,!tid);
@@ -10523,6 +10556,9 @@ async function init(){
     var authData=await authR.json();
     currentUser=authData.username||currentUser;
     window._authUserRole=authData.role||'';
+    window._myPermissions=authData.permissions||{};
+    window._myDepartment=authData.department||'';
+    window._myDirectManager=authData.direct_manager||'';
   }catch(e){
     showLoginOverlay();return;
   }
@@ -10557,6 +10593,20 @@ async function init(){
     if(_r==='مدیر'||_r==='سوپر ادمین'){
       document.querySelectorAll('.sb-manager-wrap').forEach(function(el){el.style.display='';});
     }
+    if(_r==='سوپر ادمین'){
+      document.querySelectorAll('.sb-super-wrap').forEach(function(el){el.style.display='';});
+    }
+  })();
+  // Apply granular permission hiding (additive — only hides, never shows what role already hides)
+  (function(){
+    var _allMods=['provinces','weekplan','calendar','checklist','activity','tasks','mtr','pricing','proforma','support','hr','trade-kpi','kpi','manager','changelog'];
+    _allMods.forEach(function(mod){
+      if(!_hasAccess(mod)){
+        var btnId='tab_'+mod.replace('-','_');
+        var btn=document.getElementById(btnId);
+        if(btn)btn.style.display='none';
+      }
+    });
   })();
   loadMasterCenters().then(function(){
     _typeFilterBuilt=false;

@@ -855,6 +855,48 @@ async function initSchema() {
   `);
   await query(`CREATE INDEX IF NOT EXISTS idx_tms_emp ON trade_milestones(employee)`).catch(()=>{});
 
+  // ── Phase A: Permission + Payroll columns ──────────────────────────────────
+  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS department VARCHAR(100) DEFAULT ''`).catch(()=>{});
+  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS direct_manager VARCHAR(100) DEFAULT ''`).catch(()=>{});
+  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS permissions JSONB DEFAULT '{}'`).catch(()=>{});
+  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS commission_pct DECIMAL(5,2) DEFAULT 1.0`).catch(()=>{});
+  await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS department VARCHAR(100) DEFAULT ''`).catch(()=>{});
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS commission_settings (
+      id              TEXT PRIMARY KEY DEFAULT 'default',
+      base_pct        DECIMAL(5,2) DEFAULT 1.0,
+      tier_threshold  BIGINT DEFAULT 2000000000,
+      tier_step_amount BIGINT DEFAULT 500000000,
+      tier_step_pct   DECIMAL(5,2) DEFAULT 0.1,
+      kpi_threshold   INT DEFAULT 80,
+      kpi_multiplier  DECIMAL(4,2) DEFAULT 2.0,
+      updated_by      TEXT,
+      updated_at      TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  // seed default row
+  await query(`INSERT INTO commission_settings (id) VALUES ('default') ON CONFLICT DO NOTHING`).catch(()=>{});
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS payroll_records (
+      id               TEXT PRIMARY KEY,
+      employee         TEXT NOT NULL,
+      month            TEXT NOT NULL,
+      base_salary      DECIMAL(15,2) DEFAULT 0,
+      kpi_bonus        DECIMAL(15,2) DEFAULT 0,
+      sales_total      DECIMAL(15,2) DEFAULT 0,
+      commission_pct   DECIMAL(5,2) DEFAULT 0,
+      commission_amount DECIMAL(15,2) DEFAULT 0,
+      total_pay        DECIMAL(15,2) DEFAULT 0,
+      notes            TEXT,
+      finalized        BOOLEAN DEFAULT false,
+      created_by       TEXT,
+      created_at       TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(employee, month)
+    )
+  `);
+
   console.log('[DB] Schema initialized');
 }
 

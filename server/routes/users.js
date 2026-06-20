@@ -4,7 +4,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const { query } = require('../db');
-const { requireAuth, requireManager } = require('../auth');
+const { requireAuth, requireManager, invalidateAuthCache } = require('../auth');
 
 const router = express.Router();
 
@@ -12,7 +12,7 @@ const router = express.Router();
 router.get('/', requireAuth, async (req, res) => {
   try {
     const result = await query(
-      'SELECT username, display_name, role, color, phone, active FROM app_users ORDER BY created_at'
+      'SELECT username, display_name, role, color, phone, active, department, direct_manager, permissions, commission_pct FROM app_users ORDER BY created_at'
     );
     return res.json(result.rows);
   } catch (e) {
@@ -77,7 +77,7 @@ router.put('/:username', requireAuth, async (req, res) => {
     return res.status(403).json({ error: 'دسترسی مجاز نیست' });
   }
 
-  const { display_name, role, color, phone, active, new_username } = req.body || {};
+  const { display_name, role, color, phone, active, new_username, department, direct_manager, permissions, commission_pct } = req.body || {};
 
   try {
     const existing = await query('SELECT username FROM app_users WHERE username = $1', [username]);
@@ -94,10 +94,14 @@ router.put('/:username', requireAuth, async (req, res) => {
     if (color !== undefined) { updates.push(`color = $${idx++}`); params.push(color); }
     if (phone !== undefined) { updates.push(`phone = $${idx++}`); params.push(phone); }
 
-    // Only managers/superadmin can change role/active
+    // Managers/superadmin can change role, active, department, direct_manager, permissions, commission_pct
     if (isAdmin) {
       if (role !== undefined) { updates.push(`role = $${idx++}`); params.push(role); }
       if (active !== undefined) { updates.push(`active = $${idx++}`); params.push(active); }
+      if (department !== undefined) { updates.push(`department = $${idx++}`); params.push(department); }
+      if (direct_manager !== undefined) { updates.push(`direct_manager = $${idx++}`); params.push(direct_manager); }
+      if (permissions !== undefined) { updates.push(`permissions = $${idx++}`); params.push(JSON.stringify(permissions)); }
+      if (commission_pct !== undefined) { updates.push(`commission_pct = $${idx++}`); params.push(commission_pct); }
     }
 
     // Only superadmin can rename username
@@ -122,6 +126,9 @@ router.put('/:username', requireAuth, async (req, res) => {
     params.push(username);
     await query(`UPDATE app_users SET ${updates.join(', ')} WHERE username = $${idx}`, params);
 
+    // Invalidate auth cache so new permissions take effect immediately
+    invalidateAuthCache(username);
+    if (renamedUsername) invalidateAuthCache(renamedUsername);
     return res.json({ ok: true, ...(renamedUsername ? { new_username: renamedUsername } : {}) });
   } catch (e) {
     console.error('[users PUT /:username]', e.message);
