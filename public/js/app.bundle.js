@@ -5877,7 +5877,12 @@ function _wpFinishDone(eKey){
         if(foundWeek){
           var newKey=wpEntryKey(foundWeek.id,rtype,rid);
           if(newKey===eKey){
+            // same week: reset done so the new followup shows as pending
             DB.weekEntries[eKey].scheduledDate=nextDate;
+            DB.weekEntries[eKey].done=false;
+            DB.weekEntries[eKey].doneDate=null;
+            DB.weekEntries[eKey].doneResult=null;
+            DB.weekEntries[eKey].doneNote=null;
           } else {
             DB.weekEntries[newKey]={scheduledDate:nextDate,done:false,doneDate:null,rtype:rtype,rid:rid,recKey:rtype+'_'+rid,centerName:cname,actionType:actionType,addedBy:currentUser};
           }
