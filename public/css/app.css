@@ -1703,3 +1703,292 @@ table.compact-mode td:nth-child(9) {
 #_tabTutPanel[style*="fadeOut"] {
   animation: tutFadeOut .2s ease forwards;
 }
+
+/* ══════════════════════════════════════════════════════════════
+   MOBILE OVERHAUL — comprehensive responsive fixes
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── 1. Touch targets: all buttons/inputs min 44px tall on mobile ─────── */
+@media(max-width:768px){
+  button,
+  .tab-btn,.top-btn,.btn-primary,.btn-secondary,
+  select,input[type="text"],input[type="number"],input[type="search"],
+  textarea{
+    min-height:44px;
+  }
+  input[type="checkbox"],input[type="radio"]{
+    min-height:unset;
+    width:20px;height:20px;
+  }
+  /* Kanban card grab area bigger */
+  .kanban-card,.tk-card{
+    padding:12px!important;
+  }
+}
+
+/* ── 2. Mobile nav: bigger, more readable, active state ──────────────── */
+@media(max-width:768px){
+  .mobile-nav{
+    padding-bottom:max(env(safe-area-inset-bottom),6px);
+    overflow-x:auto;
+    scrollbar-width:none;
+    -webkit-overflow-scrolling:touch;
+  }
+  .mobile-nav::-webkit-scrollbar{display:none}
+  .mob-tab{
+    min-width:60px;
+    padding:6px 8px 4px;
+    font-size:10px;
+    flex-shrink:0;
+    border-radius:10px;
+    margin:4px 2px;
+  }
+  .mob-tab .mob-icon{font-size:22px}
+  .mob-tab.active{
+    background:var(--brand-bg,#eef2ff);
+    color:var(--brand,#6366f1);
+  }
+  body{padding-bottom:72px}
+}
+
+/* ── 3. Kanban columns: horizontal scroll with snap on mobile ─────────── */
+@media(max-width:768px){
+  .kanban-board{
+    display:flex!important;
+    flex-wrap:nowrap!important;
+    overflow-x:auto!important;
+    scroll-snap-type:x mandatory;
+    -webkit-overflow-scrolling:touch;
+    gap:10px;
+    padding:10px 12px;
+    scrollbar-width:none;
+  }
+  .kanban-board::-webkit-scrollbar{display:none}
+  .kanban-col{
+    flex:0 0 85vw!important;
+    max-width:85vw!important;
+    scroll-snap-align:start;
+    max-height:calc(100vh - 200px)!important;
+  }
+
+  /* Task kanban (tk-board) */
+  .tk-board{
+    display:flex!important;
+    flex-wrap:nowrap!important;
+    overflow-x:auto!important;
+    scroll-snap-type:x mandatory;
+    -webkit-overflow-scrolling:touch;
+    gap:10px;
+    scrollbar-width:none;
+  }
+  .tk-board::-webkit-scrollbar{display:none}
+  .tk-col{
+    flex:0 0 85vw!important;
+    min-width:85vw!important;
+    scroll-snap-align:start;
+    grid-column:unset!important;
+  }
+}
+
+/* ── 4. Tables: card view on mobile ──────────────────────────────────── */
+@media(max-width:640px){
+  /* Wrap table in scrollable container */
+  .table-wrap,
+  div[style*="overflow-x:auto"]{
+    -webkit-overflow-scrolling:touch;
+    border-radius:10px;
+  }
+
+  /* Province center list table → card style */
+  table.centers-tbl{display:block;overflow:visible}
+  table.centers-tbl thead{display:none}
+  table.centers-tbl tbody{display:block}
+  table.centers-tbl tr{
+    display:block;
+    background:var(--bg-card);
+    border:1px solid var(--border);
+    border-radius:10px;
+    margin-bottom:10px;
+    padding:10px 12px;
+    box-shadow:0 1px 3px rgba(0,0,0,.06);
+  }
+  table.centers-tbl td{
+    display:flex;
+    align-items:flex-start;
+    gap:6px;
+    padding:4px 0;
+    font-size:12px;
+    border:none;
+    min-height:unset;
+  }
+  table.centers-tbl td::before{
+    content:attr(data-label);
+    font-weight:600;
+    color:var(--text-muted);
+    font-size:11px;
+    min-width:70px;
+    flex-shrink:0;
+  }
+  table.centers-tbl td:first-child{font-size:13px;font-weight:700;padding-bottom:6px;border-bottom:1px solid var(--border);margin-bottom:4px}
+
+  /* Hide low-priority columns instead of card view for report tables */
+  .rpt-table th:nth-child(n+5),
+  .rpt-table td:nth-child(n+5){display:none}
+}
+
+/* ── 5. Modals: full-screen slide-up on mobile ───────────────────────── */
+@media(max-width:640px){
+  .modal-overlay{
+    align-items:flex-end!important;
+    padding:0!important;
+  }
+  .modal-box{
+    width:100%!important;
+    max-width:100%!important;
+    max-height:92dvh!important;
+    border-radius:20px 20px 0 0!important;
+    overflow-y:auto;
+    animation:slideUpMob .25s ease!important;
+    margin:0!important;
+  }
+  .modal-header{
+    position:sticky;
+    top:0;
+    background:var(--bg-card);
+    z-index:2;
+    padding:14px 16px 10px;
+    border-bottom:1px solid var(--border);
+  }
+  .modal-body{padding:14px 16px!important}
+  .modal-footer{
+    position:sticky;
+    bottom:0;
+    background:var(--bg-card);
+    padding:10px 16px!important;
+    border-top:1px solid var(--border);
+  }
+  @keyframes slideUpMob{
+    from{transform:translateY(60px);opacity:0}
+    to{transform:translateY(0);opacity:1}
+  }
+}
+
+/* ── 6. Top bar on mobile: tighter, no overflow ──────────────────────── */
+@media(max-width:640px){
+  .top-bar{
+    padding:6px 10px;
+    gap:6px;
+    flex-wrap:nowrap;
+    overflow-x:auto;
+    scrollbar-width:none;
+  }
+  .top-bar::-webkit-scrollbar{display:none}
+  .top-bar h1{font-size:13px;white-space:nowrap;flex-shrink:0}
+  .top-btn{font-size:11px;padding:5px 8px;white-space:nowrap;flex-shrink:0;min-height:36px}
+  #uSel{max-width:110px;font-size:11px;min-height:36px}
+}
+
+/* ── 7. Panel content padding on mobile ──────────────────────────────── */
+@media(max-width:640px){
+  #reportsPanel,
+  #hrPanel,
+  #tradeKPIPanel,
+  #supportPanel,
+  #payrollPanel,
+  #proformaPanel{
+    padding:8px!important;
+  }
+  /* Report sub-tab buttons: scroll horizontally */
+  #reportsRoot > div > div:nth-child(2),
+  #tradeKPIRoot > div > div:nth-child(2){
+    overflow-x:auto;
+    scrollbar-width:none;
+    flex-wrap:nowrap!important;
+    padding-bottom:4px;
+  }
+}
+
+/* ── 8. KPI / Trade panels: single column on mobile ──────────────────── */
+@media(max-width:640px){
+  /* Score cards grid */
+  div[style*="grid-template-columns:repeat(auto-fill"]{
+    grid-template-columns:1fr 1fr!important;
+  }
+  div[style*="grid-template-columns:repeat(3"]{
+    grid-template-columns:1fr!important;
+  }
+  /* Bar rows keep label short */
+  div[style*="width:130px"]{
+    width:90px!important;
+    font-size:.75rem!important;
+  }
+}
+
+/* ── 9. HR employee cards: full width on mobile ──────────────────────── */
+@media(max-width:640px){
+  .hr-emp-card{
+    padding:12px!important;
+  }
+  /* Force single column for employee grid */
+  div[style*="minmax(280px,1fr)"]{
+    grid-template-columns:1fr!important;
+  }
+}
+
+/* ── 10. Proforma / Support lists: stacked on mobile ─────────────────── */
+@media(max-width:640px){
+  .pf-list-row{
+    flex-direction:column!important;
+    align-items:flex-start!important;
+    gap:6px!important;
+  }
+  .sp-kanban{
+    flex-wrap:nowrap!important;
+    overflow-x:auto!important;
+    scroll-snap-type:x mandatory;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+  }
+  .sp-kanban::-webkit-scrollbar{display:none}
+  .sp-col{
+    flex:0 0 80vw!important;
+    scroll-snap-align:start;
+  }
+}
+
+/* ── 11. Week plan grid: scrollable on mobile ────────────────────────── */
+@media(max-width:640px){
+  .wp-grid{
+    grid-template-columns:repeat(7,min(140px,85vw))!important;
+    overflow-x:auto;
+    scroll-snap-type:x mandatory;
+    -webkit-overflow-scrolling:touch;
+  }
+  .wp-grid > div{scroll-snap-align:start}
+}
+
+/* ── 12. Forms: full-width inputs on mobile ──────────────────────────── */
+@media(max-width:640px){
+  .modal-box input[type="text"],
+  .modal-box input[type="number"],
+  .modal-box input[type="email"],
+  .modal-box select,
+  .modal-box textarea{
+    width:100%;
+    box-sizing:border-box;
+    font-size:16px!important; /* prevent iOS zoom */
+  }
+}
+
+/* ── 13. Province grid: 2 columns on mobile ──────────────────────────── */
+@media(max-width:480px){
+  .prov-grid{
+    grid-template-columns:repeat(2,1fr)!important;
+    gap:8px!important;
+  }
+  .prov-card{
+    padding:10px 8px!important;
+    font-size:11px!important;
+  }
+  .prov-card .prov-icon{font-size:1.4rem!important}
+}

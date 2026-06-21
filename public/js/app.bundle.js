@@ -1141,7 +1141,7 @@ function switchTab(tab){
   var reportsPanel=document.getElementById('reportsPanel');if(reportsPanel)reportsPanel.style.display=(tab==='reports')?'':'none';
   if(tab==='reports'&&typeof renderReportsPanel==='function')renderReportsPanel();
   // update mobile nav
-  (function(){var tabs=['home','provinces','weekplan','calendar','checklist','activity','mtr'];document.querySelectorAll('.mob-tab').forEach(function(btn,i){btn.classList.toggle('active',tabs[i]===tab);});})();
+  (function(){document.querySelectorAll('.mob-tab').forEach(function(btn){var fn=btn.getAttribute('onclick')||'';var m=fn.match(/switchTab\('([^']+)'\)/);if(m)btn.classList.toggle('active',m[1]===tab);});})();
   function _safeRender(fn, tabName) {
     try { fn(); } catch(err) {
       console.error('[switchTab] خطا در رندر تب '+tabName+':', err);
