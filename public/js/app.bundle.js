@@ -1114,6 +1114,7 @@ function switchTab(tab){
   });
   document.getElementById('dash').style.display=(tab==='provinces')?'':'none';
   var _hp=document.getElementById('homePanel');if(_hp)_hp.style.display=(tab==='home')?'':'none';
+  if(tab==='home'&&typeof renderExpertDashboard==='function')renderExpertDashboard();
   var _udp=document.getElementById('userDashPanel');if(_udp)_udp.style.display=(tab==='provinces')?'':'none';
   document.getElementById('banner').style.display='none';
   document.getElementById('filtersBar').style.display=(tab==='provinces')?'flex':'none';
