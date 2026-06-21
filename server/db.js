@@ -898,6 +898,117 @@ async function initSchema() {
     )
   `);
 
+
+  // ════════════════════════════════════════
+  // TRADE KPI — goal-based 7-dimension tables (new system)
+  // ════════════════════════════════════════
+  await query(`
+    CREATE TABLE IF NOT EXISTS trade_kpi_targets (
+      id TEXT PRIMARY KEY,
+      employee TEXT NOT NULL,
+      month TEXT NOT NULL,
+      customs_target INT DEFAULT 5,
+      customs_days_target INT DEFAULT 10,
+      customs_weight DECIMAL(5,2) DEFAULT 20,
+      report_weight DECIMAL(5,2) DEFAULT 15,
+      admin_target INT DEFAULT 10,
+      admin_weight DECIMAL(5,2) DEFAULT 20,
+      supplier_target INT DEFAULT 2,
+      supplier_weight DECIMAL(5,2) DEFAULT 15,
+      finance_target DECIMAL(15,2) DEFAULT 0,
+      finance_weight DECIMAL(5,2) DEFAULT 15,
+      team_weight DECIMAL(5,2) DEFAULT 10,
+      warehouse_weight DECIMAL(5,2) DEFAULT 5,
+      created_by TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(employee, month)
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS trade_daily_reports (
+      id TEXT PRIMARY KEY,
+      employee TEXT NOT NULL,
+      report_date TEXT NOT NULL,
+      jalali_month TEXT NOT NULL,
+      summary TEXT,
+      activities TEXT,
+      issues TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(employee, report_date)
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS trade_clearances (
+      id TEXT PRIMARY KEY,
+      employee TEXT NOT NULL,
+      jalali_month TEXT NOT NULL,
+      title TEXT NOT NULL,
+      start_date TEXT,
+      end_date TEXT,
+      target_days INT DEFAULT 10,
+      actual_days INT,
+      status TEXT DEFAULT 'in_progress',
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS trade_suppliers_new (
+      id TEXT PRIMARY KEY,
+      employee TEXT NOT NULL,
+      jalali_month TEXT NOT NULL,
+      company_name TEXT NOT NULL,
+      country TEXT DEFAULT '',
+      product_category TEXT DEFAULT '',
+      has_iran_rep BOOLEAN DEFAULT false,
+      status TEXT DEFAULT 'identified',
+      notes TEXT,
+      approved_by TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS trade_finance_items (
+      id TEXT PRIMARY KEY,
+      employee TEXT NOT NULL,
+      jalali_month TEXT NOT NULL,
+      title TEXT NOT NULL,
+      type TEXT DEFAULT 'cost_reduction',
+      amount DECIMAL(15,2) DEFAULT 0,
+      description TEXT,
+      status TEXT DEFAULT 'proposed',
+      verified_by TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS trade_warehouse_rec (
+      id TEXT PRIMARY KEY,
+      employee TEXT NOT NULL,
+      jalali_month TEXT NOT NULL,
+      gov_count INT DEFAULT 0,
+      real_count INT DEFAULT 0,
+      software_count INT DEFAULT 0,
+      discrepancies TEXT DEFAULT '',
+      resolved BOOLEAN DEFAULT false,
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(employee, jalali_month)
+    )
+  `);
+
+  await query(`CREATE INDEX IF NOT EXISTS idx_tkpi_targets_emp_month ON trade_kpi_targets(employee,month)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_tkpi_reports_emp_month ON trade_daily_reports(employee,jalali_month)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_tkpi_clearances_emp_month ON trade_clearances(employee,jalali_month)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_tkpi_suppliers_emp_month ON trade_suppliers_new(employee,jalali_month)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_tkpi_finance_emp_month ON trade_finance_items(employee,jalali_month)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_tkpi_warehec_emp_month ON trade_warehouse_rec(employee,jalali_month)`).catch(()=>{});
+
   // Faradis accounting integration cache
   await query(`
     CREATE TABLE IF NOT EXISTS faradis_sales_cache (

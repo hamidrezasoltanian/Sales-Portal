@@ -1,854 +1,689 @@
 'use strict';
-// ─── Trade KPI Module ─────────────────────────────────────────────────────
-// Renders when switchTab('trade-kpi') is called
-// Exposes: window.renderTradeKPIPanel()
+/* بازرگانی — KPI مبتنی بر هدف (۷ شاخص) */
+(function() {
 
-var _tkView = 'tasks';       // tasks | kpi | projects
-var _tkTasks = [];
-var _tkColumns = null;       // [{id,label,color}] — loaded from settings
-var _tkKPIData = null;
-var _tkDeductions = [];
-var _tkHistory = [];
-var _tkMilestones = [];
-var _tkMonth = '';           // 'YYYY/MM'
-var _tkEmployee = '';        // target employee (manager selects; own for non-manager)
-var _tkSettings = {};
-var _tkSalaryData = null;
+  var _tkTab = 'score';  // score | customs | report | admin | supplier | finance | team | warehouse
+  var _tkEmployee = '';
+  var _tkMonth = '';
+  var _tkScore = null;
+  var _tkTargets = null;
 
-var _TK_DEFAULT_COLS = [
-  {id:'open',        label:'باز',           color:'#6366f1'},
-  {id:'in_progress', label:'در حال انجام', color:'#f59e0b'},
-  {id:'waiting',     label:'منتظر',         color:'#8b5cf6'},
-  {id:'done',        label:'تکمیل',         color:'#22c55e'}
-];
-
-var _TK_INDICATORS = [
-  {id:'customs',      label:'دقت گمرکی (EPL/NTSW)',          deductPer:'هر خطای ثبت',   defPts:20},
-  {id:'sla',          label:'رعایت زمان‌بندی (SLA)',          deductPer:'هر روز تأخیر',  defPts:10},
-  {id:'traceability', label:'مستندسازی (Traceability)',       deductPer:'هر سند مفقود',  defPts:15},
-  {id:'reporting',    label:'گزارش‌دهی پیش‌دستانه',         deductPer:'هر پیگیری مدیر', defPts:10},
-  {id:'teamwork',     label:'انطباق رفتاری (Team Synergy)',   deductPer:'نمره کیفی',     defPts:0}
-];
-
-var _TK_PROJECTS = {
-  A:{label:'A — حذف ضمانت بانکی', icon:'💰', metric:'ریال/دلار آزاد شده', unit:'rial',
-     desc:'حذف ضمانت نقدی بانکی — آزادسازی سرمایه مسدود'},
-  B:{label:'B — تسریع ترخیص',     icon:'⚡', metric:'روزهای صرفه‌جویی',   unit:'days',
-     desc:'کاهش Lead Time ترخیص نسبت به میانگین تاریخی'},
-  C:{label:'C — اتوماسیون فرایند', icon:'🤖', metric:'درصد کاهش زمان',    unit:'count',
-     desc:'اسکریپت/ابزاری که ≥۲۰٪ زمان فرایند دستی را کاهش دهد'},
-  D:{label:'D — مهندسی لجستیک',   icon:'🚢', metric:'ریال صرفه‌جویی',    unit:'rial',
-     desc:'کاهش قیمت تمام‌شده کالا یا هزینه حمل نسبت به سورس‌های قبلی'},
-  E:{label:'E — نمایندگی/IRC',     icon:'📋', metric:'تعداد IRC ثبت شده', unit:'count',
-     desc:'اخذ نمایندگی / ثبت IRC جدید در اداره کل تجهیزات پزشکی'}
-};
-
-// ── Helpers ───────────────────────────────────────────────────────────────
-function _tkFmt(n) { return n!=null ? Number(n).toLocaleString('fa') : '—'; }
-
-function _tkSLAInfo(deadline, completedAt) {
-  if (!deadline) return {text:'بدون ددلاین', cls:'', days:null};
-  var today = typeof todayStr==='function' ? todayStr() : new Date().toISOString().slice(0,10).replace(/-/g,'/');
-  var ref = completedAt || today;
-  var dp = deadline.split('/').map(Number), rp = ref.split('/').map(Number);
-  // simple Jalali string comparison works for ordering
-  if (deadline > ref) {
-    // future
-    var ms = (typeof jMs==='function') ? jMs(dp[0],dp[1],dp[2]) - jMs(rp[0],rp[1],rp[2]) : 0;
-    var days = Math.ceil(ms/(1000*60*60*24));
-    return {text: days + ' روز مانده', cls:'sla-ok', days: days};
-  } else if (deadline === ref) {
-    return {text:'امروز ددلاین', cls:'sla-warn', days:0};
-  } else {
-    var ms2 = (typeof jMs==='function') ? jMs(rp[0],rp[1],rp[2]) - jMs(dp[0],dp[1],dp[2]) : 0;
-    var delay = Math.ceil(ms2/(1000*60*60*24));
-    return {text: delay + ' روز تأخیر', cls:'sla-over', days:-delay};
-  }
-}
-
-function _tkJalaliMonth() {
-  if (typeof todayStr === 'function') {
-    var t = todayStr(); // YYYY/MM/DD
-    return t.slice(0,7); // YYYY/MM
-  }
-  return '';
-}
-
-function _tkIsManager() {
-  var role = window._currentUserRole || (typeof currentUser !== 'undefined' && window.USERS ? '' : '');
-  // check via session stored role
-  return typeof _isManager === 'function' ? _isManager() : false;
-}
-
-function _tkIsSuperAdmin() {
-  var role = window._currentUserRole || '';
-  return role === 'سوپر ادمین';
-}
-
-function _tkGetColumns() {
-  return (_tkSettings.columns && _tkSettings.columns.length) ? _tkSettings.columns : _TK_DEFAULT_COLS;
-}
-
-// ── API calls ─────────────────────────────────────────────────────────────
-function _tkAPI(method, path, body) {
-  var opts = {method:method, headers:{'Content-Type':'application/json'}};
-  if (body) opts.body = JSON.stringify(body);
-  return fetch('/api/trade-kpi' + path, opts).then(function(r){
-    if (!r.ok) return r.json().then(function(e){throw new Error(e.error||r.status);});
-    return r.json();
-  });
-}
-
-function _tkLoadAll() {
-  var tasks = _tkAPI('GET','/tasks');
-  var settings = _tkAPI('GET','/settings');
-  var milestones = _tkAPI('GET','/milestones');
-  var history = _tkEmployee ? _tkAPI('GET','/kpi-history/'+encodeURIComponent(_tkEmployee)) : Promise.resolve([]);
-  var kpi = (_tkEmployee && _tkMonth) ? _tkAPI('GET','/kpi/'+encodeURIComponent(_tkEmployee)+'/'+encodeURIComponent(_tkMonth)) : Promise.resolve(null);
-  return Promise.all([tasks, settings, milestones, history, kpi]).then(function(res){
-    _tkTasks = res[0] || [];
-    _tkSettings = res[1] || {};
-    _tkMilestones = res[2] || [];
-    _tkHistory = res[3] || [];
-    _tkKPIData = res[4];
-    if (_tkKPIData) _tkDeductions = _tkKPIData.deductions || [];
-  });
-}
-
-// ── Main render ───────────────────────────────────────────────────────────
-window.renderTradeKPIPanel = function() {
-  var root = document.getElementById('tradeKPIRoot');
-  if (!root) return;
-
-  // determine current employee
-  if (!_tkEmployee) {
-    _tkEmployee = (typeof currentUser !== 'undefined') ? currentUser : '';
-  }
-  if (!_tkMonth) {
-    _tkMonth = _tkJalaliMonth();
+  // ── Date helpers ───────────────────────────────────────────────────────────
+  function _tkCurrentMonth() {
+    var d = new Date();
+    var j = g2j(d.getFullYear(), d.getMonth() + 1, d.getDate());
+    return j[0] + '/' + String(j[1]).padStart(2, '0');
   }
 
-  root.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">در حال بارگذاری…</div>';
-  _addTKStyles();
+  function _tkToday() {
+    var d = new Date();
+    var j = g2j(d.getFullYear(), d.getMonth() + 1, d.getDate());
+    return j[0] + '/' + String(j[1]).padStart(2, '0') + '/' + String(j[2]).padStart(2, '0');
+  }
 
-  _tkLoadAll().then(function(){
-    _tkRenderShell(root);
-    _tkRenderView();
-  }).catch(function(e){
-    root.innerHTML = '<div style="padding:20px;color:#ef4444">⚠ خطا در بارگذاری: ' + esc(e.message) + '</div>';
-  });
-};
+  function _tkIsManager() {
+    if (typeof _isManager === 'function') return _isManager();
+    return false;
+  }
 
-function _tkRenderShell(root) {
-  var isManager = _tkIsManager();
-  root.innerHTML =
-    '<div class="tk-header">' +
-      '<div class="tk-tabs">' +
-        '<button class="tk-tab'+((_tkView==='tasks')?' active':'')+'" onclick="_tkSetView(\'tasks\')">📋 وظایف</button>' +
-        '<button class="tk-tab'+((_tkView==='kpi')?' active':'')+'" onclick="_tkSetView(\'kpi\')">📊 KPI ماهانه</button>' +
-        '<button class="tk-tab'+((_tkView==='projects')?' active':'')+'" onclick="_tkSetView(\'projects\')">🚀 پروژه‌ها</button>' +
-      '</div>' +
-      (isManager ? '<div class="tk-header-actions"><button class="tk-btn tk-btn-outline" onclick="_tkOpenColsModal()" title="مدیریت ستون‌ها">⚙️ ستون‌ها</button></div>' : '') +
-    '</div>' +
-    '<div id="tkViewArea"></div>';
-}
-
-window._tkSetView = function(v) {
-  _tkView = v;
-  document.querySelectorAll('.tk-tab').forEach(function(b){
-    b.classList.toggle('active', b.textContent.includes(v==='tasks'?'وظایف':v==='kpi'?'KPI':'پروژه'));
-  });
-  _tkRenderView();
-};
-
-function _tkRenderView() {
-  if (_tkView === 'tasks') _tkRenderTasks();
-  else if (_tkView === 'kpi') _tkRenderKPI();
-  else _tkRenderProjects();
-}
-
-// ── Tasks View ────────────────────────────────────────────────────────────
-function _tkRenderTasks() {
-  var area = document.getElementById('tkViewArea');
-  if (!area) return;
-  var cols = _tkGetColumns();
-
-  var html = '<div class="tk-task-header">' +
-    '<button class="tk-btn tk-btn-primary" onclick="_tkOpenTaskModal(null)">+ تسک جدید</button>' +
-  '</div>' +
-  '<div class="tk-kanban">';
-
-  cols.forEach(function(col) {
-    var tasks = _tkTasks.filter(function(t){ return t.status === col.id; });
-    html += '<div class="tk-col" data-col="'+esc(col.id)+'">' +
-      '<div class="tk-col-head" style="border-top:3px solid '+col.color+'">'+
-        '<span class="tk-col-title">'+esc(col.label)+'</span>' +
-        '<span class="tk-col-count" style="background:'+col.color+'20;color:'+col.color+'">'+tasks.length+'</span>' +
-      '</div>' +
-      '<div class="tk-col-body">';
-
-    tasks.forEach(function(t) {
-      html += _tkRenderCard(t, col.color);
+  function _tkAPI(method, path, body) {
+    var opts = { method: method, headers: { 'Content-Type': 'application/json' } };
+    if (body) opts.body = JSON.stringify(body);
+    return fetch('/api/trade-kpi' + path, opts).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || r.status); });
+      return r.json();
     });
-
-    html += '<button class="tk-add-card" onclick="_tkOpenTaskModal(null,\''+esc(col.id)+'\')">+ افزودن</button>';
-    html += '</div></div>';
-  });
-
-  html += '</div>';
-  area.innerHTML = html;
-}
-
-function _tkRenderCard(t, colColor) {
-  var sla = _tkSLAInfo(t.deadline, t.completed_at);
-  var stages = Array.isArray(t.stages) ? t.stages : (typeof t.stages === 'string' ? JSON.parse(t.stages||'[]') : []);
-  var totalStages = stages.length;
-  var doneStages = stages.filter(function(s){return s.done;}).length;
-  var pct = totalStages ? Math.round(doneStages/totalStages*100) : 0;
-
-  var priorityColors = ['','#94a3b8','#f59e0b','#ef4444'];
-  var priorityLabels = ['','پایین','متوسط','بالا'];
-  var pr = t.priority||2;
-
-  return '<div class="tk-card" onclick="_tkOpenTaskModal(\''+t.id+'\')">' +
-    '<div class="tk-card-title">'+esc(t.title)+'</div>' +
-    (t.center_name ? '<div class="tk-card-center" onclick="event.stopPropagation();if(t)openCenterModal(t.center_key.split(\'_\')[0],t.center_key.split(\'_\').slice(1).join(\'_\'))">🏥 '+esc(t.center_name)+'</div>' : '') +
-    '<div class="tk-card-meta">' +
-      '<span class="tk-pill" style="background:'+priorityColors[pr]+'20;color:'+priorityColors[pr]+'">'+priorityLabels[pr]+'</span>' +
-      (t.deadline ? '<span class="tk-sla '+sla.cls+'">⏱ '+sla.text+'</span>' : '') +
-    '</div>' +
-    (totalStages ? '<div class="tk-progress-wrap"><div class="tk-progress-bar" style="width:'+pct+'%;background:'+(pct===100?'#22c55e':'#6366f1')+'"></div></div><div style="font-size:10px;color:var(--text-muted);margin-top:2px">'+doneStages+'/'+totalStages+' مرحله</div>' : '') +
-    '<div class="tk-card-actions" onclick="event.stopPropagation()">' +
-      (_tkIsManager() ? '<button class="tk-icon-btn" onclick="_tkManagerFollowup(\''+t.id+'\')" title="مدیر پیگیری کرد — ۱۰ امتیاز کسر">👁 پیگیری</button>' : '') +
-    '</div>' +
-  '</div>';
-}
-
-// ── Task Modal ────────────────────────────────────────────────────────────
-window._tkOpenTaskModal = function(taskId, prefillStatus) {
-  var task = taskId ? _tkTasks.find(function(t){return t.id===taskId;}) : null;
-  var cols = _tkGetColumns();
-  var stages = task ? (Array.isArray(task.stages)?task.stages:(typeof task.stages==='string'?JSON.parse(task.stages||'[]'):[])) : [];
-  var isManager = _tkIsManager();
-
-  var colOpts = cols.map(function(c){
-    return '<option value="'+esc(c.id)+'"'+(((task?task.status:prefillStatus||cols[0].id)===c.id)?' selected':'')+'>'+esc(c.label)+'</option>';
-  }).join('');
-
-  var body =
-    '<div class="m-2col">' +
-      '<div style="grid-column:1/-1"><label>عنوان *</label><input id="tkT_title" class="m-inp" value="'+esc(task?task.title||'':'')+'"></div>' +
-      '<div><label>دسته‌بندی</label><select id="tkT_cat" class="m-inp">'+
-        ['other','customs','logistics','procurement','documentation'].map(function(c){
-          var labels = {other:'سایر',customs:'گمرک',logistics:'لجستیک',procurement:'خرید',documentation:'مستندات'};
-          return '<option value="'+c+'"'+((task&&task.category===c)?' selected':'')+'>'+labels[c]+'</option>';
-        }).join('')+'</select></div>' +
-      '<div><label>اولویت</label><select id="tkT_pri" class="m-inp">'+
-        '<option value="1"'+((task&&task.priority===1)?' selected':'')+'>پایین</option>'+
-        '<option value="2"'+((!task||task.priority===2)?' selected':'')+'>متوسط</option>'+
-        '<option value="3"'+((task&&task.priority===3)?' selected':'')+'>بالا</option>'+
-      '</select></div>' +
-      '<div><label>ستون</label><select id="tkT_status" class="m-inp">'+colOpts+'</select></div>' +
-      '<div><label>ددلاین (شمسی)</label><input id="tkT_deadline" class="m-inp" value="'+esc(task?task.deadline||'':'')+ '" readonly onclick="openJDP(this,function(v){document.getElementById(\'tkT_deadline\').value=v})" placeholder="کلیک برای انتخاب" style="cursor:pointer"></div>' +
-      (task && task.completed_at ? '<div><label>تاریخ تکمیل</label><input id="tkT_done" class="m-inp" value="'+esc(task.completed_at||'')+'" readonly onclick="openJDP(this,function(v){document.getElementById(\'tkT_done\').value=v})" style="cursor:pointer"></div>' : '') +
-      '<div style="grid-column:1/-1"><label>مرکز مشتری</label><div style="display:flex;gap:6px"><input id="tkT_cname" class="m-inp" value="'+esc(task?task.center_name||'':'')+'" placeholder="نام مرکز..." style="flex:1"><input id="tkT_ckey" type="hidden" value="'+esc(task?task.center_key||'':'')+'"><button type="button" class="tk-btn tk-btn-outline" onclick="_tkPickCenter()" style="white-space:nowrap">🔍 انتخاب</button></div></div>' +
-      '<div style="grid-column:1/-1"><label>یادداشت</label><textarea id="tkT_notes" class="m-inp" rows="2">'+esc(task?task.notes||'':'')+'</textarea></div>' +
-    '</div>' +
-    '<hr style="margin:12px 0;border:none;border-top:1px solid var(--border-input)">' +
-    '<div style="font-weight:700;color:var(--text-primary);margin-bottom:8px">مراحل و عملیات</div>' +
-    '<div id="tkStagesArea">'+_tkRenderStages(stages)+'</div>' +
-    '<button type="button" class="tk-btn tk-btn-outline" style="margin-top:8px" onclick="_tkAddStage()">+ مرحله جدید</button>';
-
-  var foot =
-    (task && isManager ? '<button class="btn-danger" onclick="_tkDeleteTask(\''+taskId+'\')">🗑 حذف</button>' : '') +
-    (task && task.deadline && !task.completed_at ? '<button class="tk-btn tk-btn-primary" style="background:#22c55e;border-color:#22c55e" onclick="_tkCompleteTask(\''+taskId+'\')">✓ تکمیل شد</button>' : '') +
-    '<button class="btn-secondary" onclick="closeModal(\'tkTaskModal\')">انصراف</button>' +
-    '<button class="btn-primary" onclick="_tkSaveTask(\''+taskId+'\')">💾 ذخیره</button>';
-
-  openModal('tkTaskModal', task ? '✏️ ویرایش تسک' : '+ تسک جدید', body, foot, {lg:true});
-};
-
-function _tkRenderStages(stages) {
-  if (!stages.length) return '<div style="color:var(--text-muted);font-size:12px;padding:8px">هنوز مرحله‌ای اضافه نشده</div>';
-  return stages.map(function(s, si) {
-    var ops = s.ops || [];
-    return '<div class="tk-stage" id="tkStage_'+si+'">' +
-      '<div class="tk-stage-head">' +
-        '<input type="checkbox" '+(s.done?'checked':'')+' onchange="_tkToggleStage('+si+',this.checked)" style="cursor:pointer">' +
-        '<input class="tk-stage-inp" value="'+esc(s.title||'')+'" onchange="_tkEditStage('+si+',this.value)" placeholder="نام مرحله...">' +
-        '<button type="button" class="tk-icon-btn" onclick="_tkRemoveStage('+si+')" title="حذف مرحله">✕</button>' +
-      '</div>' +
-      '<div class="tk-ops">' +
-        ops.map(function(op, oi){
-          return '<div class="tk-op">' +
-            '<input type="checkbox" '+(op.done?'checked':'')+' onchange="_tkToggleOp('+si+','+oi+',this.checked)" style="cursor:pointer">' +
-            '<input class="tk-op-inp" value="'+esc(op.title||'')+'" onchange="_tkEditOp('+si+','+oi+',this.value)" placeholder="عملیات...">' +
-            '<button type="button" class="tk-icon-btn" onclick="_tkRemoveOp('+si+','+oi+')" title="حذف">✕</button>' +
-          '</div>';
-        }).join('') +
-        '<button type="button" class="tk-add-op" onclick="_tkAddOp('+si+')">+ عملیات</button>' +
-      '</div>' +
-    '</div>';
-  }).join('');
-}
-
-// Stage/op manipulation (works on a transient _tkEditStages array)
-var _tkEditStages = [];
-
-window._tkAddStage = function() {
-  _tkSyncStages();
-  _tkEditStages.push({id:'s_'+Date.now(), title:'', done:false, ops:[]});
-  document.getElementById('tkStagesArea').innerHTML = _tkRenderStages(_tkEditStages);
-};
-window._tkRemoveStage = function(si) {
-  _tkSyncStages(); _tkEditStages.splice(si,1);
-  document.getElementById('tkStagesArea').innerHTML = _tkRenderStages(_tkEditStages);
-};
-window._tkAddOp = function(si) {
-  _tkSyncStages(); _tkEditStages[si].ops.push({id:'op_'+Date.now(), title:'', done:false});
-  document.getElementById('tkStagesArea').innerHTML = _tkRenderStages(_tkEditStages);
-};
-window._tkRemoveOp = function(si, oi) {
-  _tkSyncStages(); _tkEditStages[si].ops.splice(oi,1);
-  document.getElementById('tkStagesArea').innerHTML = _tkRenderStages(_tkEditStages);
-};
-window._tkToggleStage = function(si, v) { _tkSyncStages(); _tkEditStages[si].done = v; };
-window._tkToggleOp    = function(si, oi, v) { _tkSyncStages(); _tkEditStages[si].ops[oi].done = v; };
-window._tkEditStage   = function(si, v) { _tkSyncStages(); _tkEditStages[si].title = v; };
-window._tkEditOp      = function(si, oi, v) { _tkSyncStages(); _tkEditStages[si].ops[oi].title = v; };
-
-function _tkSyncStages() {
-  var area = document.getElementById('tkStagesArea');
-  if (!area) return;
-  if (!_tkEditStages.length) {
-    // first sync — read from DOM inputs
-    _tkEditStages = [];
-  }
-  area.querySelectorAll('.tk-stage').forEach(function(stEl, si) {
-    if (!_tkEditStages[si]) _tkEditStages[si] = {id:'s_'+si, title:'', done:false, ops:[]};
-    var titleInp = stEl.querySelector('.tk-stage-inp');
-    if (titleInp) _tkEditStages[si].title = titleInp.value;
-    var cb = stEl.querySelector('input[type=checkbox]');
-    if (cb) _tkEditStages[si].done = cb.checked;
-    stEl.querySelectorAll('.tk-op').forEach(function(opEl, oi) {
-      if (!_tkEditStages[si].ops[oi]) _tkEditStages[si].ops[oi] = {id:'op_'+oi, title:'', done:false};
-      var opInp = opEl.querySelector('.tk-op-inp');
-      if (opInp) _tkEditStages[si].ops[oi].title = opInp.value;
-      var opCb = opEl.querySelector('input[type=checkbox]');
-      if (opCb) _tkEditStages[si].ops[oi].done = opCb.checked;
-    });
-  });
-}
-
-window._tkSaveTask = function(taskId) {
-  _tkSyncStages();
-  var title = (document.getElementById('tkT_title')||{}).value||'';
-  if (!title.trim()) { showToast('⚠ عنوان الزامی است'); return; }
-  var payload = {
-    title: title.trim(),
-    category: (document.getElementById('tkT_cat')||{}).value||'other',
-    priority: parseInt((document.getElementById('tkT_pri')||{}).value||2),
-    status: (document.getElementById('tkT_status')||{}).value||'open',
-    deadline: (document.getElementById('tkT_deadline')||{}).value||null,
-    completed_at: (document.getElementById('tkT_done')||{}).value||null,
-    center_key: (document.getElementById('tkT_ckey')||{}).value||null,
-    center_name: (document.getElementById('tkT_cname')||{}).value||null,
-    notes: (document.getElementById('tkT_notes')||{}).value||null,
-    stages: _tkEditStages
-  };
-  _tkEditStages = [];
-  var method = taskId ? 'PUT' : 'POST';
-  var path = taskId ? '/tasks/'+taskId : '/tasks';
-  _tkAPI(method, path, payload).then(function(){
-    closeModal('tkTaskModal');
-    showToast('✅ ذخیره شد', 2000);
-    _tkLoadAll().then(_tkRenderView);
-  }).catch(function(e){ showToast('⚠ ' + e.message); });
-};
-
-window._tkDeleteTask = function(taskId) {
-  if (!confirm('این تسک حذف شود؟')) return;
-  _tkAPI('DELETE', '/tasks/'+taskId).then(function(){
-    closeModal('tkTaskModal');
-    showToast('حذف شد');
-    _tkLoadAll().then(_tkRenderView);
-  }).catch(function(e){ showToast('⚠ ' + e.message); });
-};
-
-window._tkCompleteTask = function(taskId) {
-  var today = typeof todayStr === 'function' ? todayStr() : '';
-  var task = _tkTasks.find(function(t){return t.id===taskId;});
-  if (!task) return;
-  var sla = _tkSLAInfo(task.deadline, today);
-  _tkSyncStages();
-  var payload = {status:'done', completed_at: today, stages: _tkEditStages};
-  _tkAPI('PUT', '/tasks/'+taskId, payload).then(function(){
-    closeModal('tkTaskModal');
-    if (sla.days !== null && sla.days < 0) {
-      // offer auto-deduction for SLA
-      var delay = Math.abs(sla.days);
-      var pts = delay * 10;
-      if (confirm('این تسک ' + delay + ' روز تأخیر داشت.\nآیا ' + pts + ' امتیاز از شاخص SLA کسر شود؟')) {
-        _tkAPI('POST', '/deductions', {
-          employee: _tkEmployee,
-          month: _tkMonth,
-          indicator: 'sla',
-          points: pts,
-          reason: 'تأخیر ' + delay + ' روزه در تسک: ' + task.title,
-          ref_task_id: taskId
-        }).then(function(){ showToast('✅ تسک تکمیل + کسر SLA ثبت شد'); })
-          .catch(function(){});
-      }
-    } else {
-      showToast('✅ تکمیل شد');
-    }
-    _tkLoadAll().then(_tkRenderView);
-  }).catch(function(e){ showToast('⚠ ' + e.message); });
-};
-
-window._tkManagerFollowup = function(taskId) {
-  if (!_tkIsManager()) return;
-  var task = _tkTasks.find(function(t){return t.id===taskId;});
-  if (!confirm('ثبت «مدیر پیگیری کرد» برای تسک «' + (task?task.title:'') + '»\n→ کسر ۱۰ امتیاز از شاخص گزارش‌دهی')) return;
-  _tkAPI('POST', '/deductions', {
-    employee: _tkEmployee, month: _tkMonth,
-    indicator: 'reporting', points: 10,
-    reason: 'پیگیری مدیر برای تسک: ' + (task?task.title:taskId),
-    ref_task_id: taskId
-  }).then(function(){
-    showToast('⚠ ۱۰ امتیاز از گزارش‌دهی کسر شد');
-    _tkLoadAll().then(_tkRenderView);
-  }).catch(function(e){ showToast('⚠ ' + e.message); });
-};
-
-window._tkPickCenter = function() {
-  // Simple prompt-based for now; could be enhanced with search modal
-  var name = prompt('نام مرکز را وارد کنید:');
-  if (name) {
-    var inp = document.getElementById('tkT_cname');
-    if (inp) inp.value = name;
-  }
-};
-
-// ── Columns Modal ─────────────────────────────────────────────────────────
-window._tkOpenColsModal = function() {
-  var cols = _tkGetColumns();
-  var body = '<div id="tkColsList">' + _tkRenderColsList(cols) + '</div>' +
-    '<button type="button" class="tk-btn tk-btn-outline" style="margin-top:8px" onclick="_tkAddCol()">+ ستون جدید</button>';
-  var foot = '<button class="btn-secondary" onclick="closeModal(\'tkColsModal\')">انصراف</button>' +
-    '<button class="btn-primary" onclick="_tkSaveCols()">💾 ذخیره</button>';
-  openModal('tkColsModal', '⚙️ مدیریت ستون‌های کانبان', body, foot);
-};
-
-function _tkRenderColsList(cols) {
-  return cols.map(function(c, i){
-    return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">' +
-      '<input type="text" class="m-inp" value="'+esc(c.label)+'" style="flex:1" data-col-i="'+i+'">' +
-      '<input type="color" value="'+c.color+'" style="width:40px;padding:2px" data-col-ci="'+i+'">' +
-      '<button type="button" class="tk-icon-btn" onclick="this.parentElement.remove()">✕</button>' +
-    '</div>';
-  }).join('');
-}
-
-window._tkAddCol = function() {
-  var list = document.getElementById('tkColsList');
-  if (!list) return;
-  var i = list.children.length;
-  var div = document.createElement('div');
-  div.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:6px';
-  div.innerHTML = '<input type="text" class="m-inp" value="ستون جدید" style="flex:1" data-col-i="'+i+'">' +
-    '<input type="color" value="#6366f1" style="width:40px;padding:2px" data-col-ci="'+i+'">' +
-    '<button type="button" class="tk-icon-btn" onclick="this.parentElement.remove()">✕</button>';
-  list.appendChild(div);
-};
-
-window._tkSaveCols = function() {
-  var list = document.getElementById('tkColsList');
-  if (!list) return;
-  var cols = [];
-  list.querySelectorAll('div').forEach(function(row, i){
-    var label = (row.querySelector('[data-col-i]')||{}).value||'';
-    var color = (row.querySelector('[data-col-ci]')||{}).value||'#6366f1';
-    if (label.trim()) cols.push({id: 'col_'+(i+1)+'_'+Date.now(), label: label.trim(), color: color});
-  });
-  if (!cols.length) { showToast('⚠ حداقل یک ستون لازم است'); return; }
-  var newSettings = Object.assign({}, _tkSettings, {columns: cols});
-  _tkAPI('PUT', '/settings', newSettings).then(function(){
-    _tkSettings = newSettings;
-    closeModal('tkColsModal');
-    showToast('✅ ستون‌ها ذخیره شد');
-    _tkRenderView();
-  }).catch(function(e){ showToast('⚠ ' + e.message); });
-};
-
-// ── KPI View ──────────────────────────────────────────────────────────────
-function _tkRenderKPI() {
-  var area = document.getElementById('tkViewArea');
-  if (!area) return;
-  var isManager = _tkIsManager();
-  var kd = _tkKPIData;
-  var scores = kd ? (kd.finalized ? {
-    customs: kd.data.score_customs,
-    sla: kd.data.score_sla,
-    traceability: kd.data.score_traceability,
-    reporting: kd.data.score_reporting,
-    teamwork: kd.data.score_teamwork
-  } : kd.live ? kd.live.scores : null) : null;
-  var avg = kd ? (kd.finalized ? parseFloat(kd.data.avg_score) : (kd.live ? kd.live.avg : 0)) : 0;
-  var gatePassed = avg >= 80;
-  var finalized = kd && kd.finalized;
-
-  var html = '<div class="tk-kpi-header">' +
-    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
-      '<label style="font-size:12px;color:var(--text-muted)">ماه:</label>' +
-      '<input type="text" id="tkMonthInp" value="'+esc(_tkMonth)+'" class="m-inp" style="width:100px" readonly onclick="openJDP(this,_tkChangeMonth)" placeholder="YYYY/MM">' +
-      (isManager && !finalized ? '<button class="tk-btn tk-btn-primary" onclick="_tkFinalizeMonth()">📌 نهایی کردن ماه</button>' : '') +
-      (finalized ? '<span style="background:#dcfce7;color:#16a34a;border-radius:8px;padding:4px 10px;font-size:12px;font-weight:700">✅ نهایی شده</span>' : '') +
-    '</div>' +
-  '</div>';
-
-  // Super-admin salary section
-  if (_tkIsSuperAdmin()) {
-    html += '<div class="tk-salary-box" id="tkSalarySection"><div style="color:var(--text-muted);font-size:12px">در حال بارگذاری حقوق…</div></div>';
   }
 
-  // Average gauge
-  var avgColor = avg >= 80 ? '#22c55e' : avg >= 60 ? '#f59e0b' : '#ef4444';
-  html += '<div class="tk-kpi-gate" style="border-color:'+avgColor+';">' +
-    '<div class="tk-gate-score" style="color:'+avgColor+'">' + avg.toFixed(1) + '</div>' +
-    '<div class="tk-gate-label">' + (gatePassed ? '✅ دروازه باز — پاداش ۵ میلیون تومان' : '🔴 دروازه بسته — پاداش صفر') + '</div>' +
-    '<div class="tk-gate-sub">میانگین ۵ شاخص | حد قبولی: ۸۰</div>' +
-  '</div>';
-
-  // 5 indicators
-  html += '<div class="tk-indicators">';
-  _TK_INDICATORS.forEach(function(ind) {
-    var sc = scores ? (scores[ind.id] || 0) : 100;
-    var iColor = sc >= 80 ? '#22c55e' : sc >= 60 ? '#f59e0b' : '#ef4444';
-    html += '<div class="tk-ind-card">' +
-      '<div class="tk-ind-title">'+esc(ind.label)+'</div>' +
-      '<div class="tk-ind-gauge-wrap">' +
-        '<div class="tk-ind-gauge-bg"><div class="tk-ind-gauge-fill" style="width:'+sc+'%;background:'+iColor+'"></div></div>' +
-        '<span class="tk-ind-score" style="color:'+iColor+'">'+sc+'</span>' +
-      '</div>' +
-      (isManager && !finalized ?
-        '<button class="tk-btn tk-btn-outline" style="font-size:11px;margin-top:6px" onclick="_tkOpenDeductModal(\''+ind.id+'\',\''+esc(ind.label)+'\','+ind.defPts+')">− ثبت کسر</button>'
-      : '') +
-    '</div>';
-  });
-  html += '</div>';
-
-  // Deductions log
-  var deds = _tkDeductions;
-  if (deds.length) {
-    html += '<div class="tk-section-title">📋 لاگ کسرهای این ماه</div>' +
-    '<table class="tk-table"><thead><tr><th>شاخص</th><th>امتیاز</th><th>دلیل</th><th>ثبت‌کننده</th>' + (isManager ? '<th></th>' : '') + '</tr></thead><tbody>' +
-    deds.map(function(d){
-      var indLabel = (_TK_INDICATORS.find(function(i){return i.id===d.indicator;})||{}).label || d.indicator;
-      return '<tr>' +
-        '<td>'+esc(indLabel)+'</td>' +
-        '<td style="color:#ef4444;font-weight:700">−'+d.points+'</td>' +
-        '<td>'+esc(d.reason)+'</td>' +
-        '<td>'+esc(d.registered_by||'')+'</td>' +
-        (isManager ? '<td><button class="tk-icon-btn" onclick="_tkDeleteDeduction(\''+d.id+'\')">🗑</button></td>' : '') +
-      '</tr>';
-    }).join('') +
-    '</tbody></table>';
-  } else if (!finalized) {
-    html += '<div style="color:var(--text-muted);font-size:12px;padding:12px 0">هنوز کسری ثبت نشده — همه شاخص‌ها ۱۰۰ هستند</div>';
+  function _tkFmt(n) {
+    if (!n) return '۰';
+    n = parseFloat(n);
+    if (n >= 1e9) return (n / 1e9).toFixed(1) + ' میلیارد';
+    if (n >= 1e6) return (n / 1e6).toFixed(0) + ' میلیون';
+    return n.toLocaleString('fa-IR');
   }
 
-  // History sparkline
-  if (_tkHistory.length) {
-    html += '<div class="tk-section-title">📈 تاریخچه ۶ ماه گذشته</div>' +
-      '<div class="tk-sparkline">';
-    _tkHistory.slice(0,6).reverse().forEach(function(h){
-      var sc = parseFloat(h.avg_score)||0;
-      var c = sc>=80?'#22c55e':sc>=60?'#f59e0b':'#ef4444';
-      html += '<div class="tk-spark-bar-wrap" title="'+h.month+': '+sc.toFixed(1)+'">' +
-        '<div class="tk-spark-bar" style="height:'+Math.round(sc*0.7)+'px;background:'+c+'"></div>' +
-        '<div class="tk-spark-label">'+h.month.slice(5)+'</div>' +
-        '<div class="tk-spark-score" style="color:'+c+'">'+sc.toFixed(0)+'</div>' +
+  function _tkBar(pct) {
+    pct = Math.min(100, Math.max(0, pct || 0));
+    var bg = pct >= 80 ? '#10b981' : pct >= 60 ? '#f59e0b' : '#ef4444';
+    return '<div style="flex:1;background:#e2e8f0;border-radius:99px;height:12px;overflow:hidden">' +
+      '<div style="width:' + pct + '%;background:' + bg + ';height:100%;border-radius:99px;transition:width .5s"></div>' +
       '</div>';
+  }
+
+  function _tkScoreColor(pct) {
+    return pct >= 80 ? '#10b981' : pct >= 60 ? '#f59e0b' : '#ef4444';
+  }
+
+  function _tkDefaultTargets() {
+    return {
+      customs_target: 5, customs_days_target: 10, customs_weight: 20,
+      report_weight: 15, admin_target: 10, admin_weight: 20,
+      supplier_target: 2, supplier_weight: 15, finance_target: 0,
+      finance_weight: 15, team_weight: 10, warehouse_weight: 5
+    };
+  }
+
+  function _tkInputStyle(w) {
+    return 'border:1px solid #e2e8f0;border-radius:7px;padding:6px 10px;font-family:inherit;font-size:.85rem;' +
+      (w ? 'width:' + (typeof w === 'number' ? w + 'px' : w) + ';' : '') + 'box-sizing:border-box';
+  }
+
+  function _tkTextareaStyle() {
+    return 'width:100%;border:1px solid #e2e8f0;border-radius:7px;padding:8px 10px;font-family:inherit;font-size:.85rem;resize:vertical;box-sizing:border-box';
+  }
+
+  function _tkBtnStyle() {
+    return 'padding:7px 16px;background:#6366f1;color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:inherit;font-size:.85rem;white-space:nowrap';
+  }
+
+  function _tkDimHeader(title, dim, help) {
+    var score = dim ? dim.score : 0;
+    var color = _tkScoreColor(score);
+    return '<div style="background:#fff;border-radius:12px;padding:16px 20px;border:1px solid #e2e8f0;margin-bottom:14px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
+        '<h3 style="margin:0;font-size:1rem;font-weight:700">' + title + '</h3>' +
+        '<span style="font-size:1.4rem;font-weight:800;color:' + color + '">' + score + '<span style="font-size:.8rem">٪</span></span>' +
+      '</div>' +
+      _tkBar(score) +
+      '<div style="margin-top:10px;font-size:.78rem;color:#6b7280;background:#f8fafc;border-radius:6px;padding:8px">' + help + '</div>' +
+      '</div>';
+  }
+
+  // ── Main render ────────────────────────────────────────────────────────────
+  window.renderTradeKPIPanel = function() {
+    if (!_tkMonth) _tkMonth = _tkCurrentMonth();
+    if (!_tkEmployee) {
+      if (!_tkIsManager() && typeof currentUser !== 'undefined') _tkEmployee = currentUser;
+    }
+
+    var root = document.getElementById('tradeKPIRoot');
+    if (!root) return;
+
+    // Month selector — current + 5 previous months
+    var months = [];
+    var d = new Date();
+    for (var i = 0; i < 6; i++) {
+      var mm = d.getMonth() + 1 - i;
+      var yy = d.getFullYear();
+      while (mm < 1) { mm += 12; yy--; }
+      var j = g2j(yy, mm, 1);
+      months.push(j[0] + '/' + String(j[1]).padStart(2, '0'));
+    }
+
+    var monthSel = '<select onchange="window._tkSetMonth(this.value)" style="' + _tkInputStyle() + '">' +
+      months.map(function(m) {
+        return '<option value="' + m + '"' + (m === _tkMonth ? ' selected' : '') + '>' + m + '</option>';
+      }).join('') + '</select>';
+
+    var empSel = '';
+    if (_tkIsManager() && typeof USERS !== 'undefined') {
+      empSel = '<select onchange="window._tkSetEmployee(this.value)" style="' + _tkInputStyle() + '">' +
+        '<option value="">انتخاب کارشناس</option>';
+      Object.keys(USERS).forEach(function(uid) {
+        empSel += '<option value="' + uid + '"' + (uid === _tkEmployee ? ' selected' : '') + '>' + esc(USERS[uid] || uid) + '</option>';
+      });
+      empSel += '</select>';
+    }
+
+    var tabs = [
+      { id: 'score',     icon: '📊', label: 'نمره KPI' },
+      { id: 'customs',   icon: '📦', label: 'ترخیص' },
+      { id: 'report',    icon: '📋', label: 'گزارش روزانه' },
+      { id: 'admin',     icon: '📁', label: 'پیگیری اداری' },
+      { id: 'supplier',  icon: '🔍', label: 'تامین‌کننده' },
+      { id: 'finance',   icon: '💰', label: 'بهبود مالی' },
+      { id: 'team',      icon: '👥', label: 'تیمی' },
+      { id: 'warehouse', icon: '🏭', label: 'انبار' }
+    ];
+
+    var tabBtns = tabs.map(function(t) {
+      var active = t.id === _tkTab;
+      return '<button onclick="window._tkSetTab(\'' + t.id + '\')" ' +
+        'style="padding:6px 12px;border:none;border-radius:8px;cursor:pointer;font-family:inherit;font-size:.83rem;' +
+        'background:' + (active ? '#6366f1' : '#f1f5f9') + ';color:' + (active ? '#fff' : '#374151') + '">' +
+        t.icon + ' ' + t.label + '</button>';
+    }).join('');
+
+    var empLabel = '';
+    if (_tkEmployee) {
+      var empName = (typeof USERS !== 'undefined' && USERS[_tkEmployee]) ? USERS[_tkEmployee] : _tkEmployee;
+      empLabel = '<span style="font-size:.82rem;color:#6b7280">کارشناس: <b>' + esc(empName) + '</b></span>';
+    }
+
+    root.innerHTML =
+      '<div style="max-width:900px;margin:0 auto">' +
+        '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px">' +
+          '<h2 style="margin:0;font-size:1.1rem;font-weight:700">🏭 بازرگانی — KPI</h2>' +
+          monthSel + empSel + empLabel +
+        '</div>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">' + tabBtns + '</div>' +
+        '<div id="tkContent"><div style="text-align:center;padding:40px;color:#9ca3af">در حال بارگذاری...</div></div>' +
+      '</div>';
+
+    if (_tkEmployee && _tkMonth) {
+      _tkLoadAndRender();
+    } else {
+      document.getElementById('tkContent').innerHTML =
+        '<div style="text-align:center;padding:40px;color:#9ca3af;background:#f8fafc;border-radius:12px">' +
+        (_tkIsManager() ? 'لطفاً یک کارشناس انتخاب کنید' : 'در حال بارگذاری...') + '</div>';
+    }
+  };
+
+  window._tkSetTab = function(id) { _tkTab = id; window.renderTradeKPIPanel(); };
+  window._tkSetMonth = function(m) { _tkMonth = m; _tkScore = null; window.renderTradeKPIPanel(); };
+  window._tkSetEmployee = function(e) { _tkEmployee = e; _tkScore = null; window.renderTradeKPIPanel(); };
+
+  function _tkLoadAndRender() {
+    var cont = document.getElementById('tkContent');
+    if (!cont) return;
+    var emp = encodeURIComponent(_tkEmployee);
+    var mon = encodeURIComponent(_tkMonth);
+
+    var promises = [
+      _tkAPI('GET', '/score/' + emp + '/' + mon).catch(function() { return null; }),
+      _tkAPI('GET', '/targets/' + emp + '/' + mon).catch(function() { return null; })
+    ];
+
+    if (_tkTab === 'customs') promises.push(_tkAPI('GET', '/clearances/' + emp + '/' + mon).catch(function() { return []; }));
+    else if (_tkTab === 'report') promises.push(_tkAPI('GET', '/reports/' + emp + '/' + mon).catch(function() { return []; }));
+    else if (_tkTab === 'supplier') promises.push(_tkAPI('GET', '/suppliers/' + emp + '/' + mon).catch(function() { return []; }));
+    else if (_tkTab === 'finance') promises.push(_tkAPI('GET', '/finance/' + emp + '/' + mon).catch(function() { return []; }));
+    else if (_tkTab === 'warehouse') promises.push(_tkAPI('GET', '/warehouse/' + emp + '/' + mon).catch(function() { return null; }));
+    else if (_tkTab === 'admin' || _tkTab === 'team') promises.push(_tkAPI('GET', '/tasks').catch(function() { return []; }));
+
+    Promise.all(promises).then(function(res) {
+      _tkScore = res[0];
+      _tkTargets = res[1] || _tkDefaultTargets();
+      var extra = res[2];
+
+      if (_tkTab === 'score') _tkRenderScore(cont);
+      else if (_tkTab === 'customs') _tkRenderCustoms(cont, extra || []);
+      else if (_tkTab === 'report') _tkRenderReport(cont, extra || []);
+      else if (_tkTab === 'supplier') _tkRenderSupplier(cont, extra || []);
+      else if (_tkTab === 'finance') _tkRenderFinance(cont, extra || []);
+      else if (_tkTab === 'warehouse') _tkRenderWarehouse(cont, extra);
+      else if (_tkTab === 'admin') _tkRenderAdmin(cont, extra || []);
+      else if (_tkTab === 'team') _tkRenderTeam(cont, extra || []);
+    }).catch(function(e) {
+      cont.innerHTML = '<div style="color:#ef4444;padding:20px">خطا: ' + esc(e.message) + '</div>';
     });
-    html += '</div>';
   }
 
-  area.innerHTML = html;
+  // ── Score dashboard ────────────────────────────────────────────────────────
+  function _tkRenderScore(cont) {
+    var sc = _tkScore;
+    var tg = _tkTargets;
 
-  // Load salary for super-admin
-  if (_tkIsSuperAdmin() && _tkEmployee) {
-    _tkLoadSalary();
-  }
-}
+    if (!sc) {
+      cont.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;background:#f8fafc;border-radius:12px">اطلاعاتی برای این ماه ثبت نشده</div>';
+      if (_tkIsManager()) {
+        cont.innerHTML += '<div style="margin-top:16px">' + _tkTargetsForm() + '</div>';
+      }
+      return;
+    }
 
-function _tkLoadSalary() {
-  _tkAPI('GET', '/salary/'+encodeURIComponent(_tkEmployee)).then(function(data){
-    var sec = document.getElementById('tkSalarySection');
-    if (!sec) return;
-    _tkSalaryData = data;
-    sec.innerHTML = '<div class="tk-salary-inner">' +
-      '<span style="font-weight:700;color:var(--text-primary)">💼 حقوق پایه (سوپر ادمین):</span> ' +
-      '<span style="color:#6366f1;font-size:16px;font-weight:700">' +
-        (data.salary_amount ? _tkFmt(data.salary_amount) + ' تومان' : 'تنظیم نشده') +
-      '</span>' +
-      ' <button class="tk-btn tk-btn-outline" style="font-size:11px" onclick="_tkEditSalary()">✏️ ویرایش</button>' +
-    '</div>';
-  }).catch(function(){});
-}
+    var dims = sc.dimensions || {};
+    var final = sc.final || 0;
+    var color = _tkScoreColor(final);
 
-window._tkEditSalary = function() {
-  var cur = _tkSalaryData ? _tkSalaryData.salary_amount : '';
-  var val = prompt('حقوق پایه (تومان):', cur||'30000000');
-  if (val === null) return;
-  _tkAPI('PUT', '/salary/'+encodeURIComponent(_tkEmployee), {salary_amount: parseFloat(val)||0}).then(function(){
-    showToast('✅ حقوق ذخیره شد');
-    _tkLoadSalary();
-  }).catch(function(e){ showToast('⚠ ' + e.message); });
-};
+    var dimRows = [
+      { key: 'customs',   icon: '📦', label: 'ترخیص گمرکی',   d: dims.customs,
+        detail: dims.customs ? dims.customs.count + ' از ' + dims.customs.target + ' مورد' + (dims.customs.avgDays ? ' · میانگین ' + dims.customs.avgDays + ' روز' : '') : '—' },
+      { key: 'report',    icon: '📋', label: 'گزارش روزانه',   d: dims.report,
+        detail: dims.report ? dims.report.count + ' از ' + dims.report.workingDays + ' روز' : '—' },
+      { key: 'admin',     icon: '📁', label: 'پیگیری اداری',   d: dims.admin,
+        detail: dims.admin ? dims.admin.done + ' از ' + dims.admin.target + ' وظیفه' : '—' },
+      { key: 'supplier',  icon: '🔍', label: 'تامین‌کننده',    d: dims.supplier,
+        detail: dims.supplier ? dims.supplier.count + ' از ' + dims.supplier.target + ' سورس' : '—' },
+      { key: 'finance',   icon: '💰', label: 'بهبود مالی',     d: dims.finance,
+        detail: dims.finance ? _tkFmt(dims.finance.total) + ' از ' + _tkFmt(dims.finance.target) + ' ریال' : '—' },
+      { key: 'team',      icon: '👥', label: 'مشارکت تیمی',    d: dims.team,
+        detail: dims.team ? dims.team.done + ' از ' + dims.team.total + ' وظیفه' : '—' },
+      { key: 'warehouse', icon: '🏭', label: 'تطبیق انبار',    d: dims.warehouse,
+        detail: dims.warehouse
+          ? (dims.warehouse.submitted ? (dims.warehouse.resolved ? '✅ تطبیق داده شده' : '⏳ ثبت شده، در انتظار') : '❌ ثبت نشده')
+          : '❌ ثبت نشده' }
+    ];
 
-window._tkChangeMonth = function(v) {
-  _tkMonth = v.slice(0,7);
-  var inp = document.getElementById('tkMonthInp');
-  if (inp) inp.value = _tkMonth;
-  _tkLoadAll().then(_tkRenderView);
-};
+    var html = '<div style="background:#fff;border-radius:16px;padding:24px;border:1px solid #e2e8f0;margin-bottom:16px;text-align:center">' +
+      '<div style="font-size:.9rem;color:#6b7280;margin-bottom:8px">نمره کلی · ' + _tkMonth + '</div>' +
+      '<div style="font-size:3.5rem;font-weight:800;color:' + color + '">' + final + '</div>' +
+      '<div style="font-size:.85rem;color:#9ca3af;margin-bottom:16px">از ۱۰۰</div>' +
+      '<div style="max-width:400px;margin:0 auto">' + _tkBar(final) + '</div>' +
+      (final >= 80
+        ? '<div style="margin-top:12px;color:#10b981;font-size:.9rem">✅ آستانه پاداش (۸۰) تکمیل شد</div>'
+        : '<div style="margin-top:12px;color:#f59e0b;font-size:.85rem">برای دریافت پاداش به ' + (80 - final).toFixed(1) + ' امتیاز دیگر نیاز است</div>') +
+      '</div>';
 
-window._tkOpenDeductModal = function(indicatorId, indicatorLabel, defPts) {
-  var body = '<div class="m-2col">' +
-    '<div style="grid-column:1/-1"><label>شاخص</label><input class="m-inp" value="'+esc(indicatorLabel)+'" disabled></div>' +
-    '<div><label>امتیاز کسر *</label><input id="dedPts" class="m-inp" type="number" min="1" max="100" value="'+defPts+'"></div>' +
-    '<div><label>دلیل *</label><input id="dedReason" class="m-inp" placeholder="توضیح کوتاه..."></div>' +
-  '</div>';
-  var foot = '<button class="btn-secondary" onclick="closeModal(\'tkDedModal\')">انصراف</button>' +
-    '<button class="btn-primary" onclick="_tkSubmitDeduction(\''+indicatorId+'\')">ثبت</button>';
-  openModal('tkDedModal', '− ثبت کسر امتیاز', body, foot);
-};
+    html += '<div style="background:#fff;border-radius:12px;padding:20px;border:1px solid #e2e8f0;margin-bottom:16px">' +
+      '<h3 style="margin:0 0 16px;font-size:.95rem;font-weight:600">جزئیات نمره</h3>';
 
-window._tkSubmitDeduction = function(ind) {
-  var pts = parseInt((document.getElementById('dedPts')||{}).value||0);
-  var reason = (document.getElementById('dedReason')||{}).value||'';
-  if (!pts || !reason.trim()) { showToast('⚠ همه فیلدها الزامی'); return; }
-  _tkAPI('POST', '/deductions', {
-    employee: _tkEmployee, month: _tkMonth,
-    indicator: ind, points: pts, reason: reason.trim()
-  }).then(function(){
-    closeModal('tkDedModal');
-    showToast('✅ کسر ثبت شد');
-    _tkLoadAll().then(_tkRenderView);
-  }).catch(function(e){ showToast('⚠ ' + e.message); });
-};
-
-window._tkDeleteDeduction = function(id) {
-  if (!confirm('این کسر حذف شود؟')) return;
-  _tkAPI('DELETE', '/deductions/'+id).then(function(){
-    showToast('حذف شد');
-    _tkLoadAll().then(_tkRenderView);
-  }).catch(function(e){ showToast('⚠ ' + e.message); });
-};
-
-window._tkFinalizeMonth = function() {
-  if (!confirm('نهایی کردن ماه ' + _tkMonth + '؟\nبعد از نهایی کردن، نمرات قفل می‌شوند.')) return;
-  _tkAPI('POST', '/finalize/'+encodeURIComponent(_tkEmployee)+'/'+encodeURIComponent(_tkMonth), {}).then(function(r){
-    var bonus = r.bonus ? _tkFmt(r.bonus) + ' تومان' : 'صفر';
-    showToast((r.live.gate_passed ? '✅ دروازه باز — پاداش: ' : '🔴 دروازه بسته — پاداش: ') + bonus, 4000);
-    _tkLoadAll().then(_tkRenderView);
-  }).catch(function(e){ showToast('⚠ ' + e.message); });
-};
-
-// ── Projects View ─────────────────────────────────────────────────────────
-function _tkRenderProjects() {
-  var area = document.getElementById('tkViewArea');
-  if (!area) return;
-  var isManager = _tkIsManager();
-
-  var html = '<div class="tk-projects-grid">';
-  Object.keys(_TK_PROJECTS).forEach(function(type) {
-    var proj = _TK_PROJECTS[type];
-    var milestones = _tkMilestones.filter(function(m){ return m.project_type === type; });
-    var totalBonus = milestones.filter(function(m){ return ['approved','paid'].includes(m.status); })
-      .reduce(function(s,m){ return s + parseFloat(m.bonus_amount||0); }, 0);
-
-    html += '<div class="tk-proj-card">' +
-      '<div class="tk-proj-head">' +
-        '<span class="tk-proj-icon">'+proj.icon+'</span>' +
-        '<span class="tk-proj-label">'+esc(proj.label)+'</span>' +
-      '</div>' +
-      '<div class="tk-proj-desc">'+esc(proj.desc)+'</div>' +
-      '<div class="tk-proj-metric">متریک: '+esc(proj.metric)+'</div>' +
-      (totalBonus ? '<div class="tk-proj-bonus">پاداش تأیید شده: '+_tkFmt(totalBonus)+' ت</div>' : '') +
-      '<div class="tk-proj-milestones">' +
-      (milestones.length ? milestones.map(function(m){
-        var stColor = {pending:'#94a3b8',achieved:'#f59e0b',approved:'#22c55e',paid:'#6366f1',cancelled:'#ef4444'};
-        var stLabel = {pending:'ثبت شده',achieved:'محقق شده',approved:'تأیید شد',paid:'پرداخت شد',cancelled:'لغو'};
-        return '<div class="tk-milestone">' +
-          '<span class="tk-ms-status" style="background:'+(stColor[m.status]||'#94a3b8')+'20;color:'+(stColor[m.status]||'#94a3b8')+'">'+esc(stLabel[m.status]||m.status)+'</span>' +
-          '<span class="tk-ms-title">'+esc(m.title)+'</span>' +
-          (m.bonus_amount ? '<span class="tk-ms-bonus">'+_tkFmt(m.bonus_amount)+' ت</span>' : '') +
-          (isManager && m.status === 'pending' ?
-            '<button class="tk-icon-btn" onclick="_tkApproveMilestone(\''+m.id+'\')">✓</button>' +
-            '<button class="tk-icon-btn" onclick="_tkRejectMilestone(\''+m.id+'\')">✕</button>' : '') +
-          (isManager && m.status === 'approved' ?
-            '<button class="tk-icon-btn" onclick="_tkPayMilestone(\''+m.id+'\')">💳</button>' : '') +
+    dimRows.forEach(function(row) {
+      var score = row.d ? row.d.score : 0;
+      var weight = row.d ? row.d.weight : 0;
+      var contribution = Math.round(score * weight) / 100;
+      html += '<div style="margin-bottom:14px">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">' +
+          '<span style="font-size:.87rem;font-weight:600;cursor:pointer;color:#6366f1" onclick="window._tkSetTab(\'' + row.key + '\')">' + row.icon + ' ' + row.label + '</span>' +
+          '<span style="font-size:.82rem;color:#6b7280">' + row.detail + '</span>' +
+        '</div>' +
+        '<div style="display:flex;align-items:center;gap:8px">' +
+          _tkBar(score) +
+          '<span style="min-width:40px;font-size:.82rem;color:' + _tkScoreColor(score) + ';font-weight:700">' + score + '٪</span>' +
+        '</div>' +
+        '<div style="font-size:.74rem;color:#9ca3af;margin-top:2px;text-align:left;direction:ltr">وزن ' + weight + '٪ → ' + contribution.toFixed(1) + ' امتیاز</div>' +
         '</div>';
-      }).join('') : '<div style="color:var(--text-muted);font-size:11px">هنوز دستاوردی ثبت نشده</div>') +
+    });
+
+    html += '</div>';
+
+    // Formula explanation
+    html += '<div style="background:#f8fafc;border-radius:12px;padding:14px;border:1px solid #e2e8f0;font-size:.8rem;color:#64748b;margin-bottom:16px">' +
+      '<b>📐 نحوه محاسبه:</b> نمره هر شاخص = (واقعی ÷ هدف) × ۱۰۰ · ' +
+      'نمره کلی = جمع (نمره × وزن) ÷ مجموع وزن‌ها · ' +
+      'برای ترخیص: اگر میانگین روزها بیشتر از هدف باشد، نمره کاهش می‌یابد' +
+      '</div>';
+
+    if (_tkIsManager()) {
+      html += '<div id="tkTargetsWrap">' + _tkTargetsForm() + '</div>';
+    }
+
+    cont.innerHTML = html;
+  }
+
+  function _tkTargetsForm() {
+    var tg = _tkTargets || _tkDefaultTargets();
+    return '<div style="background:#fff;border-radius:12px;padding:20px;border:1px solid #e2e8f0">' +
+      '<h3 style="margin:0 0 14px;font-size:.9rem;font-weight:600">⚙️ تنظیم اهداف ماه (مدیر)</h3>' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">' +
+        _tkTargetInput('customs_target', 'هدف ترخیص (تعداد)', tg.customs_target) +
+        _tkTargetInput('customs_days_target', 'حداکثر روز هر ترخیص', tg.customs_days_target) +
+        _tkTargetInput('customs_weight', 'وزن ترخیص (٪)', tg.customs_weight) +
+        _tkTargetInput('report_weight', 'وزن گزارش روزانه (٪)', tg.report_weight) +
+        _tkTargetInput('admin_target', 'هدف پیگیری اداری (تعداد)', tg.admin_target) +
+        _tkTargetInput('admin_weight', 'وزن پیگیری اداری (٪)', tg.admin_weight) +
+        _tkTargetInput('supplier_target', 'هدف تامین‌کننده (تعداد)', tg.supplier_target) +
+        _tkTargetInput('supplier_weight', 'وزن تامین‌کننده (٪)', tg.supplier_weight) +
+        _tkTargetInput('finance_target', 'هدف بهبود مالی (ریال)', tg.finance_target) +
+        _tkTargetInput('finance_weight', 'وزن بهبود مالی (٪)', tg.finance_weight) +
+        _tkTargetInput('team_weight', 'وزن مشارکت تیمی (٪)', tg.team_weight) +
+        _tkTargetInput('warehouse_weight', 'وزن تطبیق انبار (٪)', tg.warehouse_weight) +
       '</div>' +
-      '<button class="tk-btn tk-btn-outline" style="width:100%;margin-top:8px;font-size:12px" onclick="_tkOpenMilestoneModal(\''+type+'\')">+ ثبت دستاورد</button>' +
-    '</div>';
-  });
-  html += '</div>';
-  area.innerHTML = html;
-}
+      '<button onclick="window._tkSaveTargets()" style="margin-top:14px;' + _tkBtnStyle() + '">ذخیره اهداف</button>' +
+      '</div>';
+  }
 
-window._tkOpenMilestoneModal = function(type) {
-  var proj = _TK_PROJECTS[type];
-  var body = '<div class="m-2col">' +
-    '<div style="grid-column:1/-1"><label>پروژه</label><input class="m-inp" value="'+esc(proj.label)+'" disabled></div>' +
-    '<div style="grid-column:1/-1"><label>عنوان دستاورد *</label><input id="msTitle" class="m-inp" placeholder="توضیح کوتاه..."></div>' +
-    '<div><label>مقدار متریک</label><input id="msMetric" class="m-inp" type="number" placeholder="'+esc(proj.metric)+'"></div>' +
-    '<div><label>واحد</label><input id="msUnit" class="m-inp" value="'+esc(proj.unit)+'" placeholder="rial/dollar/days/count"></div>' +
-    '<div><label>پاداش پیشنهادی (تومان)</label><input id="msBonus" class="m-inp" type="number" min="0"></div>' +
-    '<div><label>تاریخ تحقق (شمسی)</label><input id="msDate" class="m-inp" readonly onclick="openJDP(this,function(v){document.getElementById(\'msDate\').value=v})" style="cursor:pointer"></div>' +
-    '<div style="grid-column:1/-1"><label>توضیحات</label><textarea id="msDesc" class="m-inp" rows="2" placeholder="جزئیات بیشتر..."></textarea></div>' +
-  '</div>';
-  var foot = '<button class="btn-secondary" onclick="closeModal(\'tkMsModal\')">انصراف</button>' +
-    '<button class="btn-primary" onclick="_tkSubmitMilestone(\''+type+'\')">ثبت</button>';
-  openModal('tkMsModal', proj.icon + ' ثبت دستاورد — ' + proj.label, body, foot);
-};
+  function _tkTargetInput(key, label, val) {
+    return '<div><label style="font-size:.78rem;color:#6b7280;display:block;margin-bottom:3px">' + label + '</label>' +
+      '<input id="tkt_' + key + '" type="number" value="' + (val || 0) + '" ' +
+      'style="' + _tkInputStyle('100%') + '"></div>';
+  }
 
-window._tkSubmitMilestone = function(type) {
-  var title = (document.getElementById('msTitle')||{}).value||'';
-  if (!title.trim()) { showToast('⚠ عنوان الزامی'); return; }
-  _tkAPI('POST', '/milestones', {
-    employee: _tkEmployee, project_type: type,
-    title: title.trim(),
-    description: (document.getElementById('msDesc')||{}).value||null,
-    metric_value: parseFloat((document.getElementById('msMetric')||{}).value)||null,
-    metric_unit: (document.getElementById('msUnit')||{}).value||null,
-    bonus_amount: parseFloat((document.getElementById('msBonus')||{}).value)||null,
-    achieved_at: (document.getElementById('msDate')||{}).value||null
-  }).then(function(){
-    closeModal('tkMsModal');
-    showToast('✅ دستاورد ثبت شد');
-    _tkLoadAll().then(_tkRenderView);
-  }).catch(function(e){ showToast('⚠ ' + e.message); });
-};
+  window._tkSaveTargets = function() {
+    var tg = {};
+    ['customs_target', 'customs_days_target', 'customs_weight', 'report_weight',
+      'admin_target', 'admin_weight', 'supplier_target', 'supplier_weight',
+      'finance_target', 'finance_weight', 'team_weight', 'warehouse_weight'].forEach(function(k) {
+      var el = document.getElementById('tkt_' + k);
+      if (el) tg[k] = parseFloat(el.value) || 0;
+    });
+    _tkAPI('POST', '/targets/' + encodeURIComponent(_tkEmployee) + '/' + encodeURIComponent(_tkMonth), tg)
+      .then(function() {
+        if (typeof showToast === 'function') showToast('✅ اهداف ذخیره شد');
+        _tkLoadAndRender();
+      })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
 
-window._tkApproveMilestone = function(id) {
-  _tkAPI('PUT', '/milestones/'+id, {status:'approved'}).then(function(){
-    showToast('✅ تأیید شد');
-    _tkLoadAll().then(_tkRenderView);
-  }).catch(function(e){ showToast('⚠ ' + e.message); });
-};
-window._tkRejectMilestone = function(id) {
-  _tkAPI('PUT', '/milestones/'+id, {status:'cancelled'}).then(function(){
-    showToast('رد شد');
-    _tkLoadAll().then(_tkRenderView);
-  }).catch(function(e){ showToast('⚠ ' + e.message); });
-};
-window._tkPayMilestone = function(id) {
-  _tkAPI('PUT', '/milestones/'+id, {status:'paid'}).then(function(){
-    showToast('✅ پرداخت ثبت شد');
-    _tkLoadAll().then(_tkRenderView);
-  }).catch(function(e){ showToast('⚠ ' + e.message); });
-};
+  // ── Customs clearances ─────────────────────────────────────────────────────
+  function _tkRenderCustoms(cont, list) {
+    var dim = _tkScore && _tkScore.dimensions && _tkScore.dimensions.customs;
+    var html = _tkDimHeader('📦 ترخیص گمرکی', dim,
+      'هر ترخیص گمرکی که تکمیل می‌شود یک مورد ثبت کنید. زمان تکمیل در نمره‌دهی تأثیر دارد — اگر از هدف بیشتر شود نمره کاهش می‌یابد.');
 
-// ── Styles ────────────────────────────────────────────────────────────────
-function _addTKStyles() {
-  if (document.getElementById('_tk_styles')) return;
-  var s = document.createElement('style');
-  s.id = '_tk_styles';
-  s.textContent = `
-.tk-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px}
-.tk-tabs{display:flex;gap:4px;background:var(--bg-raised);border-radius:8px;padding:4px}
-.tk-tab{background:none;border:none;padding:7px 14px;border-radius:6px;cursor:pointer;font-family:Vazirmatn,sans-serif;font-size:12px;font-weight:600;color:var(--text-muted);transition:all .15s}
-.tk-tab:hover{background:var(--bg-input)}
-.tk-tab.active{background:#6366f1;color:#fff}
-.tk-btn{border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-family:Vazirmatn,sans-serif;font-size:12px;font-weight:600;transition:all .15s}
-.tk-btn-primary{background:#6366f1;color:#fff}
-.tk-btn-primary:hover{background:#5254cc}
-.tk-btn-outline{background:var(--bg-raised);color:var(--text-secondary);border:1px solid var(--border-input)}
-.tk-btn-outline:hover{border-color:#6366f1;color:#6366f1}
-.tk-icon-btn{background:none;border:1px solid var(--border-input);border-radius:4px;padding:2px 6px;cursor:pointer;font-size:11px;color:var(--text-muted)}
-.tk-icon-btn:hover{border-color:#6366f1;color:#6366f1}
-.btn-danger{background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:6px;padding:6px 12px;cursor:pointer;font-family:Vazirmatn,sans-serif;font-size:12px}
+    html += '<div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e2e8f0;margin-bottom:14px">' +
+      '<h4 style="margin:0 0 12px;font-size:.9rem;color:#374151">+ ثبت ترخیص جدید</h4>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">' +
+        '<div><label style="font-size:.78rem;color:#6b7280;display:block;margin-bottom:3px">عنوان / محموله</label>' +
+        '<input id="tkc_title" placeholder="مثلاً: ترخیص دستگاه X" style="' + _tkInputStyle(220) + '"></div>' +
+        '<div><label style="font-size:.78rem;color:#6b7280;display:block;margin-bottom:3px">تاریخ شروع (جلالی)</label>' +
+        '<input id="tkc_start" placeholder="مثلاً: ' + _tkToday() + '" value="' + _tkToday() + '" style="' + _tkInputStyle(120) + '"></div>' +
+        '<div><label style="font-size:.78rem;color:#6b7280;display:block;margin-bottom:3px">حداکثر روز مجاز</label>' +
+        '<input id="tkc_days" type="number" value="' + ((_tkTargets && _tkTargets.customs_days_target) || 10) + '" style="' + _tkInputStyle(80) + '"></div>' +
+        '<button onclick="window._tkAddClearance()" style="' + _tkBtnStyle() + '">ثبت</button>' +
+      '</div></div>';
 
-/* Kanban */
-.tk-task-header{margin-bottom:12px}
-.tk-kanban{display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;min-height:300px}
-.tk-col{min-width:220px;max-width:280px;flex:0 0 240px;background:var(--bg-raised);border-radius:10px;padding:10px}
-.tk-col-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding:6px 8px;border-radius:6px;background:var(--bg-input)}
-.tk-col-title{font-size:12px;font-weight:700;color:var(--text-primary)}
-.tk-col-count{font-size:10px;padding:1px 7px;border-radius:10px;font-weight:700}
-.tk-col-body{display:flex;flex-direction:column;gap:8px}
-.tk-card{background:var(--bg-primary);border-radius:8px;padding:10px;cursor:pointer;border:1px solid var(--border-input);transition:box-shadow .15s}
-.tk-card:hover{box-shadow:0 2px 8px rgba(99,102,241,.2);border-color:#6366f1}
-.tk-card-title{font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:6px}
-.tk-card-center{font-size:10px;color:#6366f1;margin-bottom:4px;cursor:pointer;text-decoration:underline dotted}
-.tk-card-meta{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px}
-.tk-pill{font-size:10px;padding:1px 7px;border-radius:10px;font-weight:600}
-.tk-sla{font-size:10px;font-weight:600;padding:1px 7px;border-radius:10px}
-.sla-ok{background:#dcfce720;color:#16a34a}
-.sla-warn{background:#fef9c320;color:#ca8a04}
-.sla-over{background:#fee2e220;color:#dc2626}
-.tk-progress-wrap{height:4px;background:var(--bg-raised);border-radius:2px;margin:4px 0;overflow:hidden}
-.tk-progress-bar{height:100%;border-radius:2px;transition:width .3s}
-.tk-card-actions{margin-top:6px;display:flex;gap:4px}
-.tk-add-card{background:none;border:1px dashed var(--border-input);border-radius:6px;padding:6px;width:100%;cursor:pointer;color:var(--text-muted);font-size:11px;font-family:Vazirmatn,sans-serif;margin-top:4px}
-.tk-add-card:hover{border-color:#6366f1;color:#6366f1}
+    if (!list.length) {
+      html += '<div style="text-align:center;padding:30px;color:#9ca3af;background:#f8fafc;border-radius:12px">هنوز ترخیصی در این ماه ثبت نشده</div>';
+    } else {
+      html += list.map(function(item) {
+        var st = item.status;
+        var statusLabel = st === 'completed' ? '✅ تکمیل' : st === 'delayed' ? '⚠️ تأخیر' : '🔄 در حال انجام';
+        var statusColor = st === 'completed' ? '#10b981' : st === 'delayed' ? '#f59e0b' : '#6366f1';
+        return '<div style="background:#fff;border-radius:10px;padding:14px 16px;border:1px solid #e2e8f0;margin-bottom:8px">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
+            '<div>' +
+              '<div style="font-size:.9rem;font-weight:600">' + esc(item.title) + '</div>' +
+              '<div style="font-size:.78rem;color:#6b7280;margin-top:3px">' +
+                (item.start_date ? 'شروع: ' + item.start_date : '') +
+                (item.end_date ? ' · پایان: ' + item.end_date : '') +
+                (item.actual_days ? ' · ' + item.actual_days + ' روز' : '') +
+              '</div>' +
+            '</div>' +
+            '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+              '<span style="font-size:.8rem;color:' + statusColor + ';background:' + statusColor + '18;padding:3px 10px;border-radius:99px">' + statusLabel + '</span>' +
+              (st === 'in_progress'
+                ? '<button onclick="window._tkCompleteClearance(\'' + item.id + '\')" style="padding:4px 10px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;font-size:.78rem">تکمیل</button>'
+                : '') +
+              '<button onclick="window._tkDelClearance(\'' + item.id + '\')" style="border:none;background:none;cursor:pointer;color:#ef4444;font-size:.8rem;padding:4px">حذف</button>' +
+            '</div>' +
+          '</div></div>';
+      }).join('');
+    }
 
-/* Stages */
-.tk-stage{background:var(--bg-raised);border-radius:6px;padding:8px;margin-bottom:6px}
-.tk-stage-head{display:flex;align-items:center;gap:6px;margin-bottom:6px}
-.tk-stage-inp{flex:1;border:none;background:transparent;font-family:Vazirmatn,sans-serif;font-size:13px;font-weight:600;color:var(--text-primary);outline:none;border-bottom:1px dashed var(--border-input)}
-.tk-ops{margin-right:16px;display:flex;flex-direction:column;gap:4px}
-.tk-op{display:flex;align-items:center;gap:6px}
-.tk-op-inp{flex:1;border:none;background:transparent;font-family:Vazirmatn,sans-serif;font-size:12px;color:var(--text-secondary);outline:none;border-bottom:1px dashed var(--border-input)}
-.tk-add-op{background:none;border:1px dashed var(--border-input);border-radius:4px;padding:3px 8px;cursor:pointer;color:var(--text-muted);font-size:11px;font-family:Vazirmatn,sans-serif;margin-top:4px}
+    cont.innerHTML = html;
+  }
 
-/* KPI */
-.tk-kpi-header{margin-bottom:16px;padding:12px;background:var(--bg-raised);border-radius:8px}
-.tk-salary-box{background:#f0f4ff;border:1px solid #c7d2fe;border-radius:8px;padding:10px 14px;margin-bottom:12px}
-.tk-salary-inner{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.tk-kpi-gate{border:2px solid;border-radius:12px;padding:20px;text-align:center;margin-bottom:20px}
-.tk-gate-score{font-size:48px;font-weight:900;line-height:1}
-.tk-gate-label{font-size:14px;font-weight:700;margin-top:6px}
-.tk-gate-sub{font-size:11px;color:var(--text-muted);margin-top:4px}
-.tk-indicators{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px}
-.tk-ind-card{background:var(--bg-raised);border-radius:8px;padding:12px}
-.tk-ind-title{font-size:11px;font-weight:600;color:var(--text-primary);margin-bottom:8px;line-height:1.4}
-.tk-ind-gauge-wrap{display:flex;align-items:center;gap:8px}
-.tk-ind-gauge-bg{flex:1;height:8px;background:var(--bg-input);border-radius:4px;overflow:hidden}
-.tk-ind-gauge-fill{height:100%;border-radius:4px;transition:width .5s}
-.tk-ind-score{font-size:18px;font-weight:900;min-width:36px;text-align:left}
-.tk-section-title{font-size:13px;font-weight:700;color:var(--text-primary);margin:16px 0 8px}
-.tk-table{width:100%;border-collapse:collapse;font-size:12px}
-.tk-table th,.tk-table td{padding:7px 10px;border-bottom:1px solid var(--border-input);text-align:right}
-.tk-table th{font-weight:700;background:var(--bg-raised);color:var(--text-muted)}
-.tk-sparkline{display:flex;gap:8px;align-items:flex-end;padding:12px;background:var(--bg-raised);border-radius:8px}
-.tk-spark-bar-wrap{display:flex;flex-direction:column;align-items:center;gap:2px;flex:1}
-.tk-spark-bar{width:24px;border-radius:3px 3px 0 0;transition:height .3s;min-height:4px}
-.tk-spark-label{font-size:10px;color:var(--text-muted)}
-.tk-spark-score{font-size:11px;font-weight:700}
+  window._tkAddClearance = function() {
+    var title = (document.getElementById('tkc_title') || {}).value.trim();
+    var start = (document.getElementById('tkc_start') || {}).value.trim();
+    var days = parseInt((document.getElementById('tkc_days') || {}).value) || 10;
+    if (!title) { if (typeof showToast === 'function') showToast('عنوان الزامی است'); return; }
+    _tkAPI('POST', '/clearances', { employee: _tkEmployee, jalali_month: _tkMonth, title: title, start_date: start, target_days: days })
+      .then(function() { _tkLoadAndRender(); })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
 
-/* Projects */
-.tk-projects-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
-.tk-proj-card{background:var(--bg-raised);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px}
-.tk-proj-head{display:flex;align-items:center;gap:8px}
-.tk-proj-icon{font-size:22px}
-.tk-proj-label{font-size:13px;font-weight:700;color:var(--text-primary)}
-.tk-proj-desc{font-size:11px;color:var(--text-muted);line-height:1.5}
-.tk-proj-metric{font-size:11px;color:#6366f1;font-weight:600}
-.tk-proj-bonus{font-size:12px;color:#22c55e;font-weight:700;background:#dcfce720;border-radius:6px;padding:4px 8px}
-.tk-proj-milestones{display:flex;flex-direction:column;gap:4px;flex:1}
-.tk-milestone{display:flex;align-items:center;gap:6px;font-size:11px;flex-wrap:wrap}
-.tk-ms-status{padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700}
-.tk-ms-title{flex:1;color:var(--text-secondary)}
-.tk-ms-bonus{color:#22c55e;font-weight:700}
-.m-inp{width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid var(--border-input);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-family:Vazirmatn,sans-serif;font-size:12px}
-.m-inp:focus{outline:none;border-color:#6366f1}
-.m-2col{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.m-2col label{display:block;font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:4px}
-`;
-  document.head.appendChild(s);
-}
+  window._tkCompleteClearance = function(id) {
+    _tkAPI('PUT', '/clearances/' + id, { status: 'completed', end_date: _tkToday() })
+      .then(function() { _tkLoadAndRender(); })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  window._tkDelClearance = function(id) {
+    _tkAPI('DELETE', '/clearances/' + id)
+      .then(function() { _tkLoadAndRender(); })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  // ── Daily reports ──────────────────────────────────────────────────────────
+  function _tkRenderReport(cont, list) {
+    var dim = _tkScore && _tkScore.dimensions && _tkScore.dimensions.report;
+    var html = _tkDimHeader('📋 گزارش روزانه', dim,
+      'هر روز کاری یک گزارش کوتاه ثبت کنید. فقط یک گزارش در روز امکان‌پذیر است. ۲۶ روز کاری در ماه در نظر گرفته می‌شود.');
+
+    var today = _tkToday();
+    var todayReport = list.find(function(r) { return r.report_date === today; });
+
+    if (!todayReport) {
+      html += '<div style="background:#fff;border-radius:12px;padding:16px;border:2px solid #6366f1;margin-bottom:14px">' +
+        '<h4 style="margin:0 0 12px;font-size:.9rem;color:#6366f1">📝 گزارش امروز (' + today + ')</h4>' +
+        '<div style="display:flex;flex-direction:column;gap:8px">' +
+          '<textarea id="tkr_summary" placeholder="خلاصه فعالیت‌های امروز..." style="' + _tkTextareaStyle() + '" rows="2"></textarea>' +
+          '<textarea id="tkr_activities" placeholder="جزئیات کارهای انجام شده..." style="' + _tkTextareaStyle() + '" rows="2"></textarea>' +
+          '<textarea id="tkr_issues" placeholder="مشکلات و موارد پیگیری..." style="' + _tkTextareaStyle() + '" rows="1"></textarea>' +
+          '<button onclick="window._tkSubmitReport()" style="' + _tkBtnStyle() + ';align-self:flex-start">ثبت گزارش امروز</button>' +
+        '</div></div>';
+    } else {
+      html += '<div style="background:#d1fae5;border-radius:12px;padding:14px;margin-bottom:14px;color:#065f46;font-size:.88rem">' +
+        '✅ گزارش امروز (' + today + ') ثبت شده است</div>';
+    }
+
+    if (!list.length) {
+      html += '<div style="text-align:center;padding:30px;color:#9ca3af;background:#f8fafc;border-radius:12px">هنوز گزارشی در این ماه ثبت نشده</div>';
+    } else {
+      html += '<div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e2e8f0">' +
+        '<h4 style="margin:0 0 12px;font-size:.88rem;color:#374151">گزارش‌های این ماه (' + list.length + ' روز)</h4>' +
+        list.slice().reverse().map(function(r) {
+          return '<div style="border-bottom:1px solid #f1f5f9;padding:10px 0">' +
+            '<div style="font-size:.82rem;font-weight:600;color:#374151">' + r.report_date + '</div>' +
+            (r.summary ? '<div style="font-size:.8rem;color:#6b7280;margin-top:2px">' + esc(r.summary) + '</div>' : '') +
+            '</div>';
+        }).join('') + '</div>';
+    }
+
+    cont.innerHTML = html;
+  }
+
+  window._tkSubmitReport = function() {
+    var summary = (document.getElementById('tkr_summary') || {}).value.trim();
+    var activities = (document.getElementById('tkr_activities') || {}).value.trim();
+    var issues = (document.getElementById('tkr_issues') || {}).value.trim();
+    _tkAPI('POST', '/reports', {
+      employee: _tkEmployee, jalali_month: _tkMonth,
+      report_date: _tkToday(), summary: summary, activities: activities, issues: issues
+    })
+      .then(function() { if (typeof showToast === 'function') showToast('✅ گزارش ثبت شد'); _tkLoadAndRender(); })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  // ── Suppliers ──────────────────────────────────────────────────────────────
+  function _tkRenderSupplier(cont, list) {
+    var dim = _tkScore && _tkScore.dimensions && _tkScore.dimensions.supplier;
+    var html = _tkDimHeader('🔍 توسعه تامین‌کننده', dim,
+      'سورس‌های جدیدی که در ایران نماینده ندارند و مرتبط با حوزه کاری هستند. مدیر باید تأیید کند تا در نمره محاسبه شود.');
+
+    html += '<div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e2e8f0;margin-bottom:14px">' +
+      '<h4 style="margin:0 0 12px;font-size:.9rem;color:#374151">+ معرفی سورس جدید</h4>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">' +
+        '<div><label style="font-size:.78rem;color:#6b7280;display:block;margin-bottom:3px">نام شرکت / برند</label>' +
+        '<input id="tks_name" placeholder="نام تامین‌کننده" style="' + _tkInputStyle(200) + '"></div>' +
+        '<div><label style="font-size:.78rem;color:#6b7280;display:block;margin-bottom:3px">کشور</label>' +
+        '<input id="tks_country" placeholder="مثلاً: آلمان" style="' + _tkInputStyle(100) + '"></div>' +
+        '<div><label style="font-size:.78rem;color:#6b7280;display:block;margin-bottom:3px">حوزه محصول</label>' +
+        '<input id="tks_cat" placeholder="دسته‌بندی" style="' + _tkInputStyle(150) + '"></div>' +
+        '<button onclick="window._tkAddSupplier()" style="' + _tkBtnStyle() + '">ثبت</button>' +
+      '</div></div>';
+
+    if (!list.length) {
+      html += '<div style="text-align:center;padding:30px;color:#9ca3af;background:#f8fafc;border-radius:12px">هنوز سورسی معرفی نشده</div>';
+    } else {
+      html += list.map(function(s) {
+        var approved = !!s.approved_by;
+        return '<div style="background:#fff;border-radius:10px;padding:14px;border:1px solid #e2e8f0;margin-bottom:8px">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
+            '<div>' +
+              '<div style="font-size:.9rem;font-weight:600">' + esc(s.company_name) + '</div>' +
+              '<div style="font-size:.78rem;color:#6b7280">' + esc(s.country || '') + (s.product_category ? ' · ' + esc(s.product_category) : '') + '</div>' +
+            '</div>' +
+            '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+              (approved
+                ? '<span style="font-size:.78rem;color:#10b981;background:#d1fae5;padding:3px 10px;border-radius:99px">✅ تأیید شده</span>'
+                : '<span style="font-size:.78rem;color:#f59e0b;background:#fef3c7;padding:3px 10px;border-radius:99px">⏳ در انتظار تأیید</span>') +
+              (_tkIsManager() && !approved ? '<button onclick="window._tkApproveSupplier(\'' + s.id + '\')" style="padding:4px 10px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;font-size:.78rem">تأیید</button>' : '') +
+              '<button onclick="window._tkDelSupplier(\'' + s.id + '\')" style="border:none;background:none;cursor:pointer;color:#ef4444;font-size:.8rem;padding:4px">حذف</button>' +
+            '</div>' +
+          '</div></div>';
+      }).join('');
+    }
+
+    cont.innerHTML = html;
+  }
+
+  window._tkAddSupplier = function() {
+    var name = (document.getElementById('tks_name') || {}).value.trim();
+    var country = (document.getElementById('tks_country') || {}).value.trim();
+    var cat = (document.getElementById('tks_cat') || {}).value.trim();
+    if (!name) { if (typeof showToast === 'function') showToast('نام الزامی است'); return; }
+    _tkAPI('POST', '/suppliers', { employee: _tkEmployee, jalali_month: _tkMonth, company_name: name, country: country, product_category: cat })
+      .then(function() { _tkLoadAndRender(); })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  window._tkApproveSupplier = function(id) {
+    _tkAPI('PUT', '/suppliers/' + id, { approved: true })
+      .then(function() { _tkLoadAndRender(); })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  window._tkDelSupplier = function(id) {
+    _tkAPI('DELETE', '/suppliers/' + id)
+      .then(function() { _tkLoadAndRender(); })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  // ── Finance improvements ───────────────────────────────────────────────────
+  function _tkRenderFinance(cont, list) {
+    var dim = _tkScore && _tkScore.dimensions && _tkScore.dimensions.finance;
+    var html = _tkDimHeader('💰 بهبود مالی', dim,
+      'کارهایی که منجر به افزایش سود یا کاهش هزینه شده‌اند. مبلغ تأثیر را وارد کنید. مدیر باید تأیید کند تا در نمره محاسبه شود.');
+
+    html += '<div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e2e8f0;margin-bottom:14px">' +
+      '<h4 style="margin:0 0 12px;font-size:.9rem;color:#374151">+ ثبت بهبود مالی</h4>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">' +
+        '<div><label style="font-size:.78rem;color:#6b7280;display:block;margin-bottom:3px">عنوان</label>' +
+        '<input id="tkf_title" placeholder="توضیح کوتاه" style="' + _tkInputStyle(220) + '"></div>' +
+        '<div><label style="font-size:.78rem;color:#6b7280;display:block;margin-bottom:3px">نوع</label>' +
+        '<select id="tkf_type" style="' + _tkInputStyle(130) + '">' +
+          '<option value="cost_reduction">کاهش هزینه</option>' +
+          '<option value="revenue_increase">افزایش درآمد</option>' +
+        '</select></div>' +
+        '<div><label style="font-size:.78rem;color:#6b7280;display:block;margin-bottom:3px">مبلغ (ریال)</label>' +
+        '<input id="tkf_amount" type="number" placeholder="0" style="' + _tkInputStyle(130) + '"></div>' +
+        '<button onclick="window._tkAddFinance()" style="' + _tkBtnStyle() + '">ثبت</button>' +
+      '</div></div>';
+
+    if (!list.length) {
+      html += '<div style="text-align:center;padding:30px;color:#9ca3af;background:#f8fafc;border-radius:12px">هنوز موردی ثبت نشده</div>';
+    } else {
+      var totalAmt = list.reduce(function(s, r) { return s + (parseFloat(r.amount) || 0); }, 0);
+      var verifiedAmt = list.filter(function(r) { return r.verified_by; }).reduce(function(s, r) { return s + (parseFloat(r.amount) || 0); }, 0);
+      html += '<div style="background:#f0fdf4;border-radius:10px;padding:12px 16px;margin-bottom:10px;font-size:.85rem;color:#166534">' +
+        'جمع ثبت‌شده: ' + _tkFmt(totalAmt) + ' ریال · تأیید شده: ' + _tkFmt(verifiedAmt) + ' ریال</div>';
+      html += list.map(function(f) {
+        var verified = !!f.verified_by;
+        var typeLabel = f.type === 'revenue_increase' ? 'افزایش درآمد' : 'کاهش هزینه';
+        return '<div style="background:#fff;border-radius:10px;padding:14px;border:1px solid #e2e8f0;margin-bottom:8px">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">' +
+            '<div>' +
+              '<div style="font-size:.9rem;font-weight:600">' + esc(f.title) + '</div>' +
+              '<div style="font-size:.78rem;color:#6b7280">' + typeLabel + ' · ' + _tkFmt(f.amount) + ' ریال</div>' +
+            '</div>' +
+            '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+              (verified
+                ? '<span style="font-size:.78rem;color:#10b981;background:#d1fae5;padding:3px 10px;border-radius:99px">✅ تأیید</span>'
+                : '<span style="font-size:.78rem;color:#f59e0b;background:#fef3c7;padding:3px 10px;border-radius:99px">⏳ انتظار</span>') +
+              (_tkIsManager() && !verified ? '<button onclick="window._tkVerifyFinance(\'' + f.id + '\')" style="padding:4px 10px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;font-size:.78rem">تأیید</button>' : '') +
+              '<button onclick="window._tkDelFinance(\'' + f.id + '\')" style="border:none;background:none;cursor:pointer;color:#ef4444;font-size:.8rem;padding:4px">حذف</button>' +
+            '</div>' +
+          '</div></div>';
+      }).join('');
+    }
+
+    cont.innerHTML = html;
+  }
+
+  window._tkAddFinance = function() {
+    var title = (document.getElementById('tkf_title') || {}).value.trim();
+    var type = (document.getElementById('tkf_type') || {}).value;
+    var amount = parseFloat((document.getElementById('tkf_amount') || {}).value) || 0;
+    if (!title) { if (typeof showToast === 'function') showToast('عنوان الزامی است'); return; }
+    _tkAPI('POST', '/finance', { employee: _tkEmployee, jalali_month: _tkMonth, title: title, type: type, amount: amount })
+      .then(function() { _tkLoadAndRender(); })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  window._tkVerifyFinance = function(id) {
+    _tkAPI('PUT', '/finance/' + id, { verified: true })
+      .then(function() { _tkLoadAndRender(); })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  window._tkDelFinance = function(id) {
+    _tkAPI('DELETE', '/finance/' + id)
+      .then(function() { _tkLoadAndRender(); })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  // ── Warehouse reconciliation ───────────────────────────────────────────────
+  function _tkRenderWarehouse(cont, data) {
+    var dim = _tkScore && _tkScore.dimensions && _tkScore.dimensions.warehouse;
+    var html = _tkDimHeader('🏭 تطبیق انبار ماهانه', dim,
+      'یک بار در ماه سه موجودی را مقایسه کنید: اداره کل (مجازی) · انبار واقعی · نرم‌افزار WMS. اگر اعداد تطبیق داشتند و تیک بزنید، نمره کامل (۱۰۰) ثبت می‌شود.');
+
+    var d = data || {};
+    html += '<div style="background:#fff;border-radius:12px;padding:20px;border:1px solid #e2e8f0">' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin-bottom:16px">' +
+        '<div><label style="font-size:.8rem;color:#6b7280;display:block;margin-bottom:4px">📄 اداره کل (مجازی)</label>' +
+        '<input id="tkw_gov" type="number" value="' + (d.gov_count || 0) + '" style="' + _tkInputStyle('100%') + '"></div>' +
+        '<div><label style="font-size:.8rem;color:#6b7280;display:block;margin-bottom:4px">🏭 انبار واقعی</label>' +
+        '<input id="tkw_real" type="number" value="' + (d.real_count || 0) + '" style="' + _tkInputStyle('100%') + '"></div>' +
+        '<div><label style="font-size:.8rem;color:#6b7280;display:block;margin-bottom:4px">💻 نرم‌افزار WMS</label>' +
+        '<input id="tkw_soft" type="number" value="' + (d.software_count || 0) + '" style="' + _tkInputStyle('100%') + '"></div>' +
+      '</div>' +
+      '<div style="margin-bottom:12px"><label style="font-size:.8rem;color:#6b7280;display:block;margin-bottom:4px">مغایرت‌ها و توضیحات</label>' +
+      '<textarea id="tkw_disc" rows="2" style="' + _tkTextareaStyle() + '">' + esc(d.discrepancies || '') + '</textarea></div>' +
+      '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">' +
+        '<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer">' +
+          '<input type="checkbox" id="tkw_resolved"' + (d.resolved ? ' checked' : '') + '> مغایرت‌ها رفع شده / اعداد تطبیق دارند' +
+        '</label>' +
+        '<button onclick="window._tkSaveWarehouse()" style="' + _tkBtnStyle() + '">ذخیره تطبیق ماه</button>' +
+      '</div></div>';
+
+    cont.innerHTML = html;
+  }
+
+  window._tkSaveWarehouse = function() {
+    var gov = parseInt((document.getElementById('tkw_gov') || {}).value) || 0;
+    var real = parseInt((document.getElementById('tkw_real') || {}).value) || 0;
+    var soft = parseInt((document.getElementById('tkw_soft') || {}).value) || 0;
+    var disc = (document.getElementById('tkw_disc') || {}).value.trim();
+    var resolved = !!(document.getElementById('tkw_resolved') || {}).checked;
+    _tkAPI('PUT', '/warehouse/' + encodeURIComponent(_tkEmployee) + '/' + encodeURIComponent(_tkMonth),
+      { gov_count: gov, real_count: real, software_count: soft, discrepancies: disc, resolved: resolved })
+      .then(function() { if (typeof showToast === 'function') showToast('✅ تطبیق ذخیره شد'); _tkLoadAndRender(); })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  // ── Admin tasks ────────────────────────────────────────────────────────────
+  function _tkRenderAdmin(cont, tasks) {
+    var dim = _tkScore && _tkScore.dimensions && _tkScore.dimensions.admin;
+    var html = _tkDimHeader('📁 پیگیری اداری', dim,
+      'وظایف اداری این کارشناس که در سیستم تخصیص داده شده‌اند. وظایف تکمیل‌شده در نمره محاسبه می‌شوند.');
+    var myTasks = tasks.filter(function(t) { return t.assigned_to === _tkEmployee; });
+    var adminTasks = myTasks.filter(function(t) {
+      return t.category === 'admin' || t.category === 'پیگیری اداری' || !t.category;
+    });
+    if (!adminTasks.length) {
+      html += '<div style="text-align:center;padding:30px;color:#9ca3af;background:#f8fafc;border-radius:12px">' +
+        'وظیفه اداری برای این کارشناس در این ماه ثبت نشده<br><span style="font-size:.8rem">وظایف از تب وظایف اصلی مدیریت می‌شوند</span>' +
+        '</div>';
+    } else {
+      html += '<div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e2e8f0">' +
+        adminTasks.map(function(t) {
+          var done = t.status === 'done' || !!t.completed_at;
+          return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f1f5f9">' +
+            '<span style="font-size:1rem">' + (done ? '✅' : '⬜') + '</span>' +
+            '<div style="flex:1">' +
+              '<div style="font-size:.87rem;' + (done ? 'text-decoration:line-through;color:#9ca3af' : '') + '">' + esc(t.title) + '</div>' +
+              (t.deadline ? '<div style="font-size:.75rem;color:#9ca3af">مهلت: ' + t.deadline + '</div>' : '') +
+            '</div>' +
+            '</div>';
+        }).join('') +
+        '</div>';
+    }
+    cont.innerHTML = html;
+  }
+
+  // ── Team tasks ─────────────────────────────────────────────────────────────
+  function _tkRenderTeam(cont, tasks) {
+    var dim = _tkScore && _tkScore.dimensions && _tkScore.dimensions.team;
+    var html = _tkDimHeader('👥 مشارکت تیمی', dim,
+      'نسبت وظایف تیمی که این کارشناس تکمیل کرده است. وظایف از تب وظایف تخصیص داده می‌شوند.');
+    var myTasks = tasks.filter(function(t) { return t.assigned_to === _tkEmployee; });
+    var done = myTasks.filter(function(t) { return t.status === 'done'; });
+    html += '<div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e2e8f0">' +
+      '<div style="display:flex;gap:20px;margin-bottom:12px">' +
+        '<div style="text-align:center"><div style="font-size:1.5rem;font-weight:700;color:#374151">' + myTasks.length + '</div><div style="font-size:.78rem;color:#6b7280">تخصیص داده شده</div></div>' +
+        '<div style="text-align:center"><div style="font-size:1.5rem;font-weight:700;color:#10b981">' + done.length + '</div><div style="font-size:.78rem;color:#6b7280">تکمیل شده</div></div>' +
+        '<div style="text-align:center"><div style="font-size:1.5rem;font-weight:700;color:#ef4444">' + (myTasks.length - done.length) + '</div><div style="font-size:.78rem;color:#6b7280">باقی‌مانده</div></div>' +
+      '</div>';
+    if (myTasks.length > 0) {
+      html += _tkBar(done.length / myTasks.length * 100);
+    }
+    html += '</div>';
+    cont.innerHTML = html;
+  }
+
+})();
