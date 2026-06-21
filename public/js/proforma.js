@@ -151,6 +151,11 @@ function _pfActions(pf) {
     btns.push('<button onclick="pfReject(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #dc2626;border-radius:5px;background:#fef2f2;color:#b91c1c;cursor:pointer">رد</button>');
   }
 
+  // Issue Invoice (manager, approved only)
+  if (isManager && pf.status === 'approved') {
+    btns.push('<button onclick="pfIssueInvoice(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #7c3aed;border-radius:5px;background:#f5f3ff;color:#6d28d9;cursor:pointer" title="صدور فاکتور رسمی">🧾 فاکتور</button>');
+  }
+
   // Reopen (manager or owner, rejected/cancelled)
   if (['rejected','cancelled'].includes(pf.status) && (isManager || pf.createdBy === currentUser)) {
     btns.push('<button onclick="pfAction(\'' + pf.id + '\',\'reopen\')" style="padding:3px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px;background:white;cursor:pointer">بازگشایی</button>');
@@ -162,6 +167,27 @@ function _pfActions(pf) {
   }
 
   return '<span class="row-acts">' + btns.join(' ') + '</span>';
+}
+
+async function pfIssueInvoice(pfId) {
+  var pf = _pfList.find(function(p){ return p.id === pfId; });
+  if (!pf) return;
+  try {
+    var r = await fetch('/api/invoices/from-proforma/' + pfId, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jalali_date: pf.jalaliDate, tax_pct: 9 })
+    });
+    var data = await r.json();
+    if (!r.ok) { showToast('❌ ' + (data.error || 'خطا')); return; }
+    if (data.already) {
+      showToast('ℹ️ فاکتور این پیش‌فاکتور قبلاً صادر شده: ' + data.invoice.invoice_no);
+    } else {
+      showToast('✅ فاکتور ' + data.invoice_no + ' صادر شد');
+    }
+  } catch(e) {
+    showToast('❌ خطا: ' + e.message);
+  }
 }
 
 async function pfDelete(id) {

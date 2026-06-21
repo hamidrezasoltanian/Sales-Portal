@@ -1009,6 +1009,59 @@ async function initSchema() {
   await query(`CREATE INDEX IF NOT EXISTS idx_tkpi_finance_emp_month ON trade_finance_items(employee,jalali_month)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_tkpi_warehec_emp_month ON trade_warehouse_rec(employee,jalali_month)`).catch(()=>{});
 
+  // ════════════════════════════════════════
+  // INVOICES — from approved proformas
+  // ════════════════════════════════════════
+  await query(`
+    CREATE TABLE IF NOT EXISTS invoices (
+      id          TEXT PRIMARY KEY,
+      invoice_no  TEXT UNIQUE,
+      proforma_id TEXT,
+      jalali_date TEXT NOT NULL,
+      center_key  TEXT,
+      center_name TEXT,
+      items       JSONB DEFAULT '[]',
+      subtotal    DECIMAL(15,2) DEFAULT 0,
+      tax_pct     DECIMAL(5,2) DEFAULT 9,
+      tax_amt     DECIMAL(15,2) DEFAULT 0,
+      total       DECIMAL(15,2) DEFAULT 0,
+      status      TEXT DEFAULT 'issued',
+      created_by  TEXT,
+      notes       TEXT,
+      created_at  TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS invoice_payments (
+      id            TEXT PRIMARY KEY,
+      invoice_id    TEXT REFERENCES invoices(id),
+      amount        DECIMAL(15,2) NOT NULL,
+      method        TEXT DEFAULT 'transfer',
+      ref_no        TEXT,
+      jalali_date   TEXT NOT NULL,
+      registered_by TEXT,
+      notes         TEXT,
+      created_at    TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_invoices_proforma ON invoices(proforma_id)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_invoice_payments_inv ON invoice_payments(invoice_id)`).catch(()=>{});
+
+  // ════════════════════════════════════════
+  // SALES TARGETS — monthly per employee
+  // ════════════════════════════════════════
+  await query(`
+    CREATE TABLE IF NOT EXISTS sales_targets (
+      id            TEXT PRIMARY KEY,
+      employee      TEXT NOT NULL,
+      month         TEXT NOT NULL,
+      target_amount DECIMAL(15,2) NOT NULL DEFAULT 0,
+      created_by    TEXT,
+      updated_at    TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(employee, month)
+    )
+  `);
+
   // Faradis accounting integration cache
   await query(`
     CREATE TABLE IF NOT EXISTS faradis_sales_cache (

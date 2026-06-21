@@ -113,6 +113,64 @@ router.post('/finalize-all/:month', requireAuth, requireSuperAdmin, async (req, 
   }
 });
 
+// GET /api/payroll/targets?month=YYYY/MM
+router.get('/targets', requireAuth, async (req, res) => {
+  try {
+    const { month } = req.query;
+    if (!month) return res.status(400).json({ error: 'پارامتر month الزامی است' });
+    const r = await query('SELECT * FROM sales_targets WHERE month=$1 ORDER BY employee', [month]);
+    res.json(r.rows);
+  } catch (e) {
+    console.error('[payroll/targets GET]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+// PUT /api/payroll/targets/:employee/:month
+router.put('/targets/:employee/:month', requireAuth, async (req, res) => {
+  try {
+    if (!['مدیر', 'سوپر ادمین'].includes(req.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
+    const { employee, month } = req.params;
+    const { target_amount } = req.body;
+    if (target_amount === undefined) return res.status(400).json({ error: 'target_amount الزامی است' });
+    const id = 'tgt_' + employee + '_' + month.replace('/', '');
+    await query(
+      `INSERT INTO sales_targets (id, employee, month, target_amount, created_by, updated_at)
+       VALUES ($1,$2,$3,$4,$5,NOW())
+       ON CONFLICT (employee, month) DO UPDATE SET target_amount=$4, created_by=$5, updated_at=NOW()`,
+      [id, employee, month, parseFloat(target_amount) || 0, req.user.username]
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[payroll/targets PUT]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+// GET /api/payroll/actuals?month=YYYY/MM — actual sales from proformas for the month
+router.get('/actuals', requireAuth, async (req, res) => {
+  try {
+    const { month } = req.query;
+    if (!month) return res.status(400).json({ error: 'پارامتر month الزامی است' });
+    const r = await query(
+      `SELECT p.created_by AS employee,
+              u.display_name,
+              COALESCE(SUM(p.total),0) AS actual_amount,
+              COUNT(p.id) AS proforma_count
+       FROM proformas p
+       LEFT JOIN app_users u ON u.username = p.created_by
+       WHERE p.status='approved' AND p.jalali_date LIKE $1
+       GROUP BY p.created_by, u.display_name
+       ORDER BY actual_amount DESC`,
+      [month + '%']
+    );
+    res.json(r.rows);
+  } catch (e) {
+    console.error('[payroll/actuals GET]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
 // GET /api/payroll/records
 router.get('/records', requireAuth, requireSuperAdmin, async (req, res) => {
   const { month, employee } = req.query;
