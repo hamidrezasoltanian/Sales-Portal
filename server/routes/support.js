@@ -4,10 +4,7 @@ const express = require('express');
 const router  = express.Router();
 const { query } = require('../db');
 
-function requireAuth(req, res, next) {
-  if (!req.session || !req.session.user) return res.status(401).json({ error: 'Unauthorized' });
-  next();
-}
+const { requireAuth } = require('../auth');
 
 function isManagerRole(role) {
   return ['مدیر', 'سوپر ادمین'].includes(role);
@@ -17,7 +14,7 @@ function isManagerRole(role) {
 router.get('/', requireAuth, async function(req, res) {
   try {
     const { status, assigned_to, category, center_key, limit = 50, offset = 0 } = req.query;
-    const user = req.session.user;
+    const user = req.user;
     const isMgr = isManagerRole(user.role);
 
     const conditions = [];
@@ -71,7 +68,7 @@ router.get('/', requireAuth, async function(req, res) {
 // ── GET /api/support/stats ───────────────────────────────────────────────────
 router.get('/stats', requireAuth, async function(req, res) {
   try {
-    const user = req.session.user;
+    const user = req.user;
     const isMgr = isManagerRole(user.role);
     const todayStr = new Date().toISOString().slice(0, 10);
 
@@ -116,13 +113,13 @@ router.post('/', requireAuth, async function(req, res) {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING *`,
       [id, title, center_key || null, center_name || null,
-       req.session.user.username, assigned_to || null,
+       req.user.username, assigned_to || null,
        category || 'other', parseInt(priority) || 2,
        description || null, slaDeadline]
     );
 
     // Push Telegram notification to assigned person
-    if (assigned_to && assigned_to !== req.session.user.username) {
+    if (assigned_to && assigned_to !== req.user.username) {
       try {
         const notifId = 'ntf_' + Date.now();
         await query(
@@ -133,7 +130,7 @@ router.post('/', requireAuth, async function(req, res) {
       } catch(_) {}
     }
 
-    try { require('../routes/events').broadcast('support-updated', { by: req.session.user.username }); } catch(_) {}
+    try { require('../routes/events').broadcast('support-updated', { by: req.user.username }); } catch(_) {}
     res.status(201).json(r.rows[0]);
   } catch(e) {
     console.error('[support POST /]', e.message);
@@ -144,7 +141,7 @@ router.post('/', requireAuth, async function(req, res) {
 // ── GET /api/support/:id  — ticket detail + comments ────────────────────────
 router.get('/:id', requireAuth, async function(req, res) {
   try {
-    const user = req.session.user;
+    const user = req.user;
     const isMgr = isManagerRole(user.role);
     const r = await query('SELECT * FROM support_tickets WHERE id = $1', [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'تیکت یافت نشد' });
@@ -172,7 +169,7 @@ router.get('/:id', requireAuth, async function(req, res) {
 // ── PUT /api/support/:id  — update ticket ───────────────────────────────────
 router.put('/:id', requireAuth, async function(req, res) {
   try {
-    const user = req.session.user;
+    const user = req.user;
     const isMgr = isManagerRole(user.role);
     const { status, assigned_to, priority, resolution, category, title, description } = req.body;
 
@@ -238,7 +235,7 @@ router.put('/:id', requireAuth, async function(req, res) {
 // ── POST /api/support/:id/comment  — add comment ────────────────────────────
 router.post('/:id/comment', requireAuth, async function(req, res) {
   try {
-    const user = req.session.user;
+    const user = req.user;
     const isMgr = isManagerRole(user.role);
     const { body, is_internal } = req.body;
     if (!body) return res.status(400).json({ error: 'متن کامنت خالی است' });

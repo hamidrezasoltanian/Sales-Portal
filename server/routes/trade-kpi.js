@@ -3,10 +3,7 @@ const express = require('express');
 const router = express.Router();
 const { query } = require('../db');
 
-function requireAuth(req, res, next) {
-  if (!req.session || !req.session.user) return res.status(401).json({ error: 'Unauthorized' });
-  next();
-}
+const { requireAuth } = require('../auth');
 function isManager(role) { return ['مدیر', 'سوپر ادمین'].includes(role); }
 function isSuperAdmin(role) { return role === 'سوپر ادمین'; }
 function canAccessTrade(role) { return ['مدیر', 'سوپر ادمین', 'کارشناس بازرگانی'].includes(role); }
@@ -15,7 +12,7 @@ function uid(prefix) { return (prefix||'t') + '_' + Date.now() + '_' + Math.rand
 // ── Tasks ────────────────────────────────────────────────────────────────
 router.get('/tasks', requireAuth, async (req, res) => {
   try {
-    const user = req.session.user;
+    const user = req.user;
     if (!canAccessTrade(user.role)) return res.status(403).json({ error: 'دسترسی ندارید' });
     const { status, category, assigned_to } = req.query;
     let where = [], params = [];
@@ -31,7 +28,7 @@ router.get('/tasks', requireAuth, async (req, res) => {
 
 router.post('/tasks', requireAuth, async (req, res) => {
   try {
-    const user = req.session.user;
+    const user = req.user;
     if (!canAccessTrade(user.role)) return res.status(403).json({ error: 'دسترسی ندارید' });
     const { title, category, assigned_to, deadline, priority, center_key, center_name, notes, status, stages, milestone_id } = req.body;
     if (!title) return res.status(400).json({ error: 'عنوان الزامی' });
@@ -50,7 +47,7 @@ router.post('/tasks', requireAuth, async (req, res) => {
 
 router.put('/tasks/:id', requireAuth, async (req, res) => {
   try {
-    const user = req.session.user;
+    const user = req.user;
     if (!canAccessTrade(user.role)) return res.status(403).json({ error: 'دسترسی ندارید' });
     const { id } = req.params;
     if (!isManager(user.role)) {
@@ -77,7 +74,7 @@ router.put('/tasks/:id', requireAuth, async (req, res) => {
 
 router.delete('/tasks/:id', requireAuth, async (req, res) => {
   try {
-    if (!isManager(req.session.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
+    if (!isManager(req.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
     await query('DELETE FROM trade_tasks WHERE id=$1', [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -97,7 +94,7 @@ async function calcLiveKPI(employee, month) {
 
 router.get('/kpi/:employee/:month', requireAuth, async (req, res) => {
   try {
-    const user = req.session.user;
+    const user = req.user;
     const { employee, month } = req.params;
     if (!isManager(user.role) && user.username !== employee) return res.status(403).json({ error: 'دسترسی ندارید' });
     const fin = await query('SELECT * FROM trade_kpi_monthly WHERE employee=$1 AND month=$2', [employee, month]);
@@ -110,7 +107,7 @@ router.get('/kpi/:employee/:month', requireAuth, async (req, res) => {
 
 router.get('/kpi-history/:employee', requireAuth, async (req, res) => {
   try {
-    const user = req.session.user;
+    const user = req.user;
     const { employee } = req.params;
     if (!isManager(user.role) && user.username !== employee) return res.status(403).json({ error: 'دسترسی ندارید' });
     const { rows } = await query('SELECT * FROM trade_kpi_monthly WHERE employee=$1 ORDER BY month DESC LIMIT 12', [employee]);
@@ -120,13 +117,13 @@ router.get('/kpi-history/:employee', requireAuth, async (req, res) => {
 
 router.post('/deductions', requireAuth, async (req, res) => {
   try {
-    if (!isManager(req.session.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
+    if (!isManager(req.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
     const { employee, month, indicator, points, reason, ref_task_id } = req.body;
     if (!employee || !month || !indicator || !points || !reason) return res.status(400).json({ error: 'اطلاعات ناقص' });
     const id = uid('ded');
     await query(
       'INSERT INTO trade_kpi_deductions (id,employee,month,indicator,points,reason,ref_task_id,registered_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
-      [id, employee, month, indicator, parseInt(points), reason, ref_task_id||null, req.session.user.username]
+      [id, employee, month, indicator, parseInt(points), reason, ref_task_id||null, req.user.username]
     );
     res.json({ ok: true, id });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -134,7 +131,7 @@ router.post('/deductions', requireAuth, async (req, res) => {
 
 router.delete('/deductions/:id', requireAuth, async (req, res) => {
   try {
-    if (!isManager(req.session.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
+    if (!isManager(req.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
     await query('DELETE FROM trade_kpi_deductions WHERE id=$1', [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -142,7 +139,7 @@ router.delete('/deductions/:id', requireAuth, async (req, res) => {
 
 router.post('/finalize/:employee/:month', requireAuth, async (req, res) => {
   try {
-    if (!isManager(req.session.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
+    if (!isManager(req.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
     const { employee, month } = req.params;
     const { notes } = req.body;
     const live = await calcLiveKPI(employee, month);
@@ -165,7 +162,7 @@ router.post('/finalize/:employee/:month', requireAuth, async (req, res) => {
 // ── Milestones ───────────────────────────────────────────────────────────
 router.get('/milestones', requireAuth, async (req, res) => {
   try {
-    const user = req.session.user;
+    const user = req.user;
     if (!canAccessTrade(user.role)) return res.status(403).json({ error: 'دسترسی ندارید' });
     const { rows } = isManager(user.role)
       ? await query('SELECT * FROM trade_milestones ORDER BY created_at DESC')
@@ -176,7 +173,7 @@ router.get('/milestones', requireAuth, async (req, res) => {
 
 router.post('/milestones', requireAuth, async (req, res) => {
   try {
-    const user = req.session.user;
+    const user = req.user;
     if (!canAccessTrade(user.role)) return res.status(403).json({ error: 'دسترسی ندارید' });
     const { employee, project_type, title, description, metric_value, metric_unit, bonus_amount, achieved_at, notes } = req.body;
     if (!project_type || !title) return res.status(400).json({ error: 'اطلاعات ناقص' });
@@ -193,7 +190,7 @@ router.post('/milestones', requireAuth, async (req, res) => {
 
 router.put('/milestones/:id', requireAuth, async (req, res) => {
   try {
-    const user = req.session.user;
+    const user = req.user;
     if (!canAccessTrade(user.role)) return res.status(403).json({ error: 'دسترسی ندارید' });
     const { status, notes, bonus_amount } = req.body;
     if (status && ['approved','paid'].includes(status) && !isManager(user.role)) return res.status(403).json({ error: 'فقط مدیر' });
@@ -210,7 +207,7 @@ router.put('/milestones/:id', requireAuth, async (req, res) => {
 // ── Salary (super-admin only) ────────────────────────────────────────────
 router.get('/salary/:employee', requireAuth, async (req, res) => {
   try {
-    if (!isSuperAdmin(req.session.user.role)) return res.status(403).json({ error: 'فقط سوپر ادمین' });
+    if (!isSuperAdmin(req.user.role)) return res.status(403).json({ error: 'فقط سوپر ادمین' });
     const { rows } = await query('SELECT salary_amount, salary_level FROM employees WHERE username=$1', [req.params.employee]);
     res.json(rows[0] || { salary_amount: null, salary_level: null });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -218,7 +215,7 @@ router.get('/salary/:employee', requireAuth, async (req, res) => {
 
 router.put('/salary/:employee', requireAuth, async (req, res) => {
   try {
-    if (!isSuperAdmin(req.session.user.role)) return res.status(403).json({ error: 'فقط سوپر ادمین' });
+    if (!isSuperAdmin(req.user.role)) return res.status(403).json({ error: 'فقط سوپر ادمین' });
     const { salary_amount } = req.body;
     await query('UPDATE employees SET salary_amount=$1 WHERE username=$2', [salary_amount, req.params.employee]);
     res.json({ ok: true });
@@ -235,7 +232,7 @@ router.get('/settings', requireAuth, async (req, res) => {
 
 router.put('/settings', requireAuth, async (req, res) => {
   try {
-    if (!isManager(req.session.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
+    if (!isManager(req.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
     await query(
       "INSERT INTO app_data (key,value) VALUES ('trade_settings',$1::jsonb) ON CONFLICT(key) DO UPDATE SET value=$1::jsonb, updated_at=NOW()",
       [JSON.stringify(req.body)]
@@ -247,7 +244,7 @@ router.put('/settings', requireAuth, async (req, res) => {
 // ── Trade employees list (for manager to select target employee) ───────────
 router.get('/employees', requireAuth, async (req, res) => {
   try {
-    if (!isManager(req.session.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
+    if (!isManager(req.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
     const { rows } = await query("SELECT username, full_name, position FROM employees WHERE active=true AND department='بازرگانی'");
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }

@@ -4,10 +4,7 @@ const express = require('express');
 const router  = express.Router();
 const { query } = require('../db');
 
-function requireAuth(req, res, next) {
-  if (!req.session || !req.session.user) return res.status(401).json({ error: 'Unauthorized' });
-  next();
-}
+const { requireAuth } = require('../auth');
 
 function isManagerRole(role) {
   return ['مدیر', 'سوپر ادمین'].includes(role);
@@ -32,7 +29,7 @@ router.get('/employees', requireAuth, async function(req, res) {
 // ── POST /api/hr/employees ───────────────────────────────────────────────────
 router.post('/employees', requireAuth, async function(req, res) {
   try {
-    if (!isManagerRole(req.session.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
+    if (!isManagerRole(req.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
     const { username, full_name, national_id, hire_date, department, position, manager, phone, salary_level, employment_type, notes } = req.body;
     if (!full_name) return res.status(400).json({ error: 'نام الزامی است' });
 
@@ -74,7 +71,7 @@ router.get('/employees/:id', requireAuth, async function(req, res) {
 // ── PUT /api/hr/employees/:id ────────────────────────────────────────────────
 router.put('/employees/:id', requireAuth, async function(req, res) {
   try {
-    if (!isManagerRole(req.session.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
+    if (!isManagerRole(req.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
     const { full_name, national_id, hire_date, department, position, manager, phone, salary_level, employment_type, notes, active } = req.body;
 
     const r = await query(
@@ -105,7 +102,7 @@ router.put('/employees/:id', requireAuth, async function(req, res) {
 // ── GET /api/hr/leave ────────────────────────────────────────────────────────
 router.get('/leave', requireAuth, async function(req, res) {
   try {
-    const user = req.session.user;
+    const user = req.user;
     const isMgr = isManagerRole(user.role);
     const { status, employee } = req.query;
 
@@ -136,7 +133,7 @@ router.get('/leave', requireAuth, async function(req, res) {
 // ── POST /api/hr/leave ───────────────────────────────────────────────────────
 router.post('/leave', requireAuth, async function(req, res) {
   try {
-    const user = req.session.user;
+    const user = req.user;
     const { type, from_date, to_date, days, reason } = req.body;
     if (!from_date || !to_date) return res.status(400).json({ error: 'تاریخ الزامی است' });
 
@@ -169,13 +166,13 @@ router.post('/leave', requireAuth, async function(req, res) {
 // ── PUT /api/hr/leave/:id ────────────────────────────────────────────────────
 router.put('/leave/:id', requireAuth, async function(req, res) {
   try {
-    if (!isManagerRole(req.session.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
+    if (!isManagerRole(req.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
     const { status } = req.body;
     if (!['approved', 'rejected'].includes(status)) return res.status(400).json({ error: 'وضعیت نامعتبر' });
 
     const r = await query(
       `UPDATE leave_requests SET status = $2, approved_by = $3 WHERE id = $1 RETURNING *`,
-      [req.params.id, status, req.session.user.username]
+      [req.params.id, status, req.user.username]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'درخواست یافت نشد' });
 
@@ -209,7 +206,7 @@ router.put('/leave/:id', requireAuth, async function(req, res) {
 // ── GET /api/hr/leave/balance/:employee ──────────────────────────────────────
 router.get('/leave/balance/:employee', requireAuth, async function(req, res) {
   try {
-    const user = req.session.user;
+    const user = req.user;
     if (!isManagerRole(user.role) && user.username !== req.params.employee) {
       return res.status(403).json({ error: 'دسترسی ندارید' });
     }
