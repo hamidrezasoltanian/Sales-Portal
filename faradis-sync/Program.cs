@@ -140,9 +140,13 @@ namespace FaradisSync
                 StateName1  NVARCHAR(200),
                 CityName1   NVARCHAR(200),
                 Address1    NVARCHAR(1000),
-                PostCode1   NVARCHAR(50),
+                PostCode1   NVARCHAR(500),
                 TypeName    NVARCHAR(200)
             )");
+
+            // اصلاح جداول موجود با ستون‌های کوچک‌تر
+            Exec(conn, @"IF EXISTS (SELECT * FROM sys.columns WHERE object_id=OBJECT_ID('customers') AND name='PostCode1' AND max_length < 1000)
+                ALTER TABLE customers ALTER COLUMN PostCode1 NVARCHAR(500)");
 
             Exec(conn, @"IF NOT EXISTS (SELECT * FROM sys.tables WHERE name='phones')
             CREATE TABLE phones (
@@ -355,7 +359,8 @@ namespace FaradisSync
         static string GetCustomersQ() => @"
             SELECT CompanyNum, CompanyName, CompanyCode, Saver,
                    Phone1, Mobile1, StateName1, CityName1,
-                   LEFT(Address1, 1000) AS Address1, PostCode1, TypeName
+                   LEFT(Address1, 1000) AS Address1,
+                   LEFT(PostCode1, 500) AS PostCode1, TypeName
             FROM VCompany";
 
         static string GetPhonesQ() => @"
