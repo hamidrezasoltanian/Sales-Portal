@@ -211,4 +211,69 @@ async function fetchFactors() {
   return r.recordset;
 }
 
-module.exports = { getPool, fetchSalesByMonth, fetchMarketerSummary, fetchSalesTrend, testConnection, isConfigured, fetchCustomers, fetchFactors };
+async function fetchStuffs() {
+  const p = await getPool();
+  const r = await p.request().query(`
+    SELECT StuffNum,
+           COALESCE(StuffCode, '') AS StuffCode,
+           COALESCE(StuffName, '') AS StuffName,
+           COALESCE(Unit1Name, '') AS UnitName
+    FROM Stuff
+    WHERE COALESCE(IsDelete, 0) = 0
+    ORDER BY StuffNum
+  `);
+  return r.recordset;
+}
+
+async function fetchFactorRows() {
+  const p = await getPool();
+  const r = await p.request().query(`
+    SELECT fr.FactorRowNum,
+           fr.FactorNum,
+           fr.StuffNum,
+           COALESCE(s.StuffName, '') AS StuffName,
+           COALESCE(fr.Count1, 0) AS Count1,
+           COALESCE(fr.Price, 0) AS Price,
+           COALESCE(fr.TotalPrice, 0) AS TotalPrice
+    FROM FactorRow fr
+    INNER JOIN Factor f ON f.FactorNum = fr.FactorNum
+    LEFT JOIN Stuff s ON s.StuffNum = fr.StuffNum
+    WHERE COALESCE(f.IsDelete, 0) = 0
+      AND f.FactorType IN (1, 2)
+    ORDER BY fr.FactorNum DESC
+  `);
+  return r.recordset;
+}
+
+async function fetchInventory() {
+  const p = await getPool();
+  const r = await p.request().query(`
+    SELECT ss.StoreNum,
+           COALESCE(st.StoreName, '') AS StoreName,
+           ss.StuffNum,
+           COALESCE(s.StuffName, '') AS StuffName,
+           COALESCE(s.StuffCode, '') AS StuffCode,
+           COALESCE(ss.CountAll, 0) AS CountAll
+    FROM StoreStuff ss
+    LEFT JOIN Store st ON st.StoreNum = ss.StoreNum
+    LEFT JOIN Stuff s ON s.StuffNum = ss.StuffNum
+    WHERE COALESCE(ss.CountAll, 0) != 0
+    ORDER BY ss.StuffNum
+  `);
+  return r.recordset;
+}
+
+async function fetchFollowers() {
+  const p = await getPool();
+  const r = await p.request().query(`
+    SELECT FollowerNum,
+           COALESCE(FollowerCode, '') AS FollowerCode,
+           COALESCE(FollowerName, '') AS FollowerName
+    FROM Follower
+    WHERE COALESCE(IsDelete, 0) = 0
+    ORDER BY FollowerNum
+  `);
+  return r.recordset;
+}
+
+module.exports = { getPool, fetchSalesByMonth, fetchMarketerSummary, fetchSalesTrend, testConnection, isConfigured, fetchCustomers, fetchFactors, fetchStuffs, fetchFactorRows, fetchInventory, fetchFollowers };

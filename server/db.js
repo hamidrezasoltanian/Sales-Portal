@@ -1190,6 +1190,58 @@ async function initSchema() {
   await query(`CREATE INDEX IF NOT EXISTS idx_faradis_factors_company ON faradis_factors_cache(company_num)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_faradis_factors_month ON faradis_factors_cache(jalali_month)`);
 
+  // Faradis products
+  await query(`
+    CREATE TABLE IF NOT EXISTS faradis_stuffs_cache (
+      stuff_num BIGINT PRIMARY KEY,
+      stuff_code TEXT,
+      stuff_name TEXT,
+      unit_name TEXT,
+      synced_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  // Faradis invoice line items (with product reference)
+  await query(`
+    CREATE TABLE IF NOT EXISTS faradis_factor_rows_cache (
+      factor_row_num BIGINT PRIMARY KEY,
+      factor_num BIGINT NOT NULL,
+      stuff_num BIGINT,
+      stuff_name TEXT,
+      count1 DECIMAL(15,3) DEFAULT 0,
+      price DECIMAL(15,2) DEFAULT 0,
+      total_price DECIMAL(15,2) DEFAULT 0,
+      synced_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_ffr_factor ON faradis_factor_rows_cache(factor_num)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_ffr_stuff ON faradis_factor_rows_cache(stuff_num)`);
+
+  // Faradis inventory (aggregated per store+product)
+  await query(`
+    CREATE TABLE IF NOT EXISTS faradis_inventory_cache (
+      store_num BIGINT NOT NULL,
+      store_name TEXT,
+      stuff_num BIGINT NOT NULL,
+      stuff_name TEXT,
+      stuff_code TEXT,
+      count_all DECIMAL(15,3) DEFAULT 0,
+      synced_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (store_num, stuff_num)
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_fi_stuff ON faradis_inventory_cache(stuff_num)`);
+
+  // Faradis followers/marketers list
+  await query(`
+    CREATE TABLE IF NOT EXISTS faradis_followers_cache (
+      follower_num BIGINT PRIMARY KEY,
+      follower_code TEXT,
+      follower_name TEXT,
+      synced_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
   // Cache of CRM centers pushed from frontend (avoids dependency on centers_master)
   await query(`
     CREATE TABLE IF NOT EXISTS crm_centers_cache (

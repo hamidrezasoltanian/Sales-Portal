@@ -88,6 +88,9 @@ function _fmBuildShell() {
     +     '<button id="fmSyncBtn" onclick="window._fmDoSync()" style="'
     +       'padding:6px 14px;border-radius:7px;border:none;background:#6366f1;color:#fff;'
     +       'cursor:pointer;font-family:inherit;font-size:12px;font-weight:600">🔄 دریافت مشتریان فرادیس</button>'
+    +     '<button id="fdSyncAllBtn" onclick="window._fdSyncAll()" style="'
+    +       'padding:6px 14px;border-radius:7px;border:none;background:#374151;color:#fff;'
+    +       'cursor:pointer;font-family:inherit;font-size:12px;font-weight:600">🔄 Sync همه</button>'
     +     '<button id="fmSyncFactorsBtn" onclick="window._fmDoSyncFactors()" style="'
     +       'padding:6px 14px;border-radius:7px;border:none;background:#059669;color:#fff;'
     +       'cursor:pointer;font-family:inherit;font-size:12px;font-weight:600">📊 دریافت فاکتورها</button>'
@@ -98,6 +101,9 @@ function _fmBuildShell() {
     +   _fmTabBtn('pending','⏳ در انتظار')
     +   _fmTabBtn('approved','✅ تایید شده')
     +   _fmTabBtn('search','🔍 جستجو')
+    +   _fmTabBtn('team','👥 تیم فروش')
+    +   _fmTabBtn('inventory','📦 موجودی')
+    +   _fmTabBtn('followers','🗺 نگاشت')
     + '</div>'
     + '<div id="fmTabContent"></div>'
     + '</div>';
@@ -118,7 +124,7 @@ window._fmSwitchTab = _fmSwitchTab;
 function _fmSwitchTab(tab) {
   _fmState.tab = tab;
   // Update tab button styles
-  ['pending','approved','search'].forEach(function(t) {
+  ['pending','approved','search','team','inventory','followers'].forEach(function(t) {
     var btn = document.getElementById('fmTabBtn_' + t);
     if (!btn) return;
     var active = t === tab;
@@ -141,6 +147,18 @@ function _fmSwitchTab(tab) {
     _fmLoadLinks();
   } else if (tab === 'search') {
     _fmRenderSearch();
+  } else if (tab === 'team') {
+    content.innerHTML = '<div id="fdTeamContainer"></div>';
+    if (typeof renderFdTeamSales === 'function') renderFdTeamSales('fdTeamContainer');
+  } else if (tab === 'inventory') {
+    content.innerHTML = '<div style="margin-bottom:12px;display:flex;gap:8px">'
+      + '<button onclick="window._fdSyncInventory()" style="padding:6px 14px;border-radius:7px;border:none;background:#6366f1;color:#fff;cursor:pointer;font-family:inherit;font-size:12px">🔄 Sync موجودی فرادیس</button>'
+      + '<button onclick="window._fdSyncStuffs()" style="padding:6px 14px;border-radius:7px;border:none;background:#6366f1;color:#fff;cursor:pointer;font-family:inherit;font-size:12px">🔄 Sync محصولات</button>'
+      + '</div><div id="fdInventoryContainer"></div>';
+    if (typeof renderFdInventory === 'function') renderFdInventory('fdInventoryContainer');
+  } else if (tab === 'followers') {
+    content.innerHTML = '<div id="fdFollowersContainer"></div>';
+    if (typeof renderFdFollowers === 'function') renderFdFollowers('fdFollowersContainer');
   }
 }
 
@@ -571,7 +589,12 @@ function _fmRenderApproved() {
       + '<td style="padding:8px 10px;font-size:11px">' + _fmEsc(l.confirmed_by || '') + '</td>'
       + '<td style="padding:8px 10px"><button onclick="window._fmDeleteLink(' + l.id + ')" style="'
       + 'padding:3px 10px;border-radius:5px;border:1px solid #ef4444;background:none;color:#ef4444;'
-      + 'cursor:pointer;font-family:inherit;font-size:11px">🗑</button></td>'
+      + 'cursor:pointer;font-family:inherit;font-size:11px">🗑</button>'
+      + '<button onclick="window._fdShowCenterProducts(\'' + _fmEscAttr(l.crm_center_key) + '\',this)" style="padding:3px 8px;border-radius:5px;border:1px solid #059669;background:none;color:#059669;cursor:pointer;font-family:inherit;font-size:10px">📦</button>'
+      + '<div style="display:none"></div>'
+      + '<button onclick="window._fdShowEnrichment(\'' + _fmEscAttr(l.crm_center_key) + '\',this)" style="padding:3px 8px;border-radius:5px;border:1px solid #6366f1;background:none;color:#6366f1;cursor:pointer;font-family:inherit;font-size:10px">📋</button>'
+      + '<div style="display:none"></div>'
+      + '</td>'
       + '</tr>';
   });
   html += '</tbody></table></div>';
@@ -766,5 +789,21 @@ function _fmConfColor(conf) {
   if (conf >= 40) return '#d97706';
   return '#6b7280';
 }
+
+window._fdSyncInventory = function() {
+  fetch('/api/faradis-data/sync-inventory', { method: 'POST' })
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (typeof showToast === 'function') showToast(d.ok ? '✅ ' + d.count + ' ردیف موجودی' : '❌ ' + d.error, 4000);
+      if (d.ok && typeof renderFdInventory === 'function') renderFdInventory('fdInventoryContainer');
+    }).catch(function(e){ if (typeof showToast === 'function') showToast('❌ ' + e.message, 4000); });
+};
+window._fdSyncStuffs = function() {
+  fetch('/api/faradis-data/sync-stuffs', { method: 'POST' })
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (typeof showToast === 'function') showToast(d.ok ? '✅ ' + d.count + ' محصول' : '❌ ' + d.error, 4000);
+    }).catch(function(e){ if (typeof showToast === 'function') showToast('❌ ' + e.message, 4000); });
+};
 
 })(); // end IIFE
