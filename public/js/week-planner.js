@@ -232,7 +232,7 @@
 
     var users = typeof _DEFAULT_MEMBERS !== 'undefined' ? _DEFAULT_MEMBERS : [];
     var experts = users.filter(function(u) {
-      return u.active !== false && ['کارشناس فروش','کارشناس بازرگانی'].includes(u.role);
+      return u.active !== false;
     });
 
     var weeks = typeof wpGetWeeks === 'function' ? wpGetWeeks() : [];
@@ -388,7 +388,7 @@
     var selectedCount = selectedKeys.length;
 
     var tableRows = filtered.map(function(c) {
-      var checked = !!_wpState.selected[c.rkey];
+      var checked = (c.rkey in _wpState.selected);
       var dayOverride = (typeof _wpState.selected[c.rkey] === 'string') ? _wpState.selected[c.rkey] : '';
       var dayOpts = '<option value="">پخش خودکار</option>' +
         workDays.map(function(d) {
