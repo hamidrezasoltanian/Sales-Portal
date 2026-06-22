@@ -79,6 +79,8 @@ app.use('/api/payroll', require('./routes/payroll'));
 app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/faradis', require('./routes/faradis'));
+const faradisMatch = require('./routes/faradis-match');
+app.use('/api/faradis-match', faradisMatch);
 
 // Health check
 app.get('/api/health', function (req, res) {

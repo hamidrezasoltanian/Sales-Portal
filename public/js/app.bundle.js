@@ -1143,6 +1143,8 @@ function switchTab(tab){
   if(tab==='reports'&&typeof renderReportsPanel==='function')renderReportsPanel();
   var _wpp=document.getElementById('weekPlannerPanel');if(_wpp)_wpp.style.display=(tab==='week-planner')?'':'none';
   if(tab==='week-planner'&&typeof renderWeekPlannerPanel==='function')renderWeekPlannerPanel();
+  var _fmp=document.getElementById('faradisMatchPanel');if(_fmp)_fmp.style.display=(tab==='faradis-match')?'':'none';
+  if(tab==='faradis-match'&&typeof renderFaradisMatchPanel==='function')renderFaradisMatchPanel();
   // update mobile nav
   (function(){document.querySelectorAll('.mob-tab').forEach(function(btn){var fn=btn.getAttribute('onclick')||'';var m=fn.match(/switchTab\('([^']+)'\)/);if(m)btn.classList.toggle('active',m[1]===tab);});})();
   function _safeRender(fn, tabName) {

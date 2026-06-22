@@ -70,6 +70,7 @@
     <button class="tab-btn sb-manager-wrap" id="tab_reports" onclick="switchTab('reports')" title="گزارش‌های تحلیلی" style="display:none"><span class="sb-icon">📊</span><span class="sb-label">گزارش‌ها</span></button>
     <button class="tab-btn sb-super-wrap" onclick="openPayrollPanel()" title="گزارش حقوق و پورسانت" style="display:none"><span class="sb-icon">💵</span><span class="sb-label">حقوق و پورسانت</span></button>
     <button class="tab-btn sb-manager-wrap" id="tab_week_planner" onclick="switchTab('week-planner')" title="تخصیص برنامه هفتگی" style="display:none"><span class="sb-icon">📋</span><span class="sb-label">تخصیص برنامه</span></button>
+    <button class="tab-btn sb-manager-wrap" id="tab_faradis_match" onclick="switchTab('faradis-match')" title="تطبیق فرادیس" style="display:none"><span class="sb-icon">🔗</span><span class="sb-label">تطبیق</span></button>
   </div>
 </nav>
 <div class="content-area">
@@ -306,6 +307,7 @@
 <script src="/js/reports.js?v=20260620b"></script>
 <script src="/js/expert-dashboard.js?v=20260621a"></script>
   <script src="/js/week-planner.js?v=20260621a"></script>
+<script src="/js/faradis-match.js?v=20260622a"></script>
 
 <!-- JS -->
 
@@ -702,6 +704,9 @@
 <div id="reportsPanel" style="display:none;padding:16px">
   <div id="reportsRoot"></div>
 </div>
+
+<!-- FARADIS MATCH PANEL -->
+<div id="faradisMatchPanel" style="display:none;padding:12px 14px"></div>
 
 <div id="centerContactPopup" class="contact-popup">
   <div id="ccp-name" class="contact-popup-name"></div>
