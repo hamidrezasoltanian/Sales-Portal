@@ -1171,6 +1171,25 @@ async function initSchema() {
     )
   `);
 
+  await query(`
+    CREATE TABLE IF NOT EXISTS faradis_factors_cache (
+      factor_num BIGINT PRIMARY KEY,
+      factor_code TEXT,
+      factor_date TIMESTAMPTZ,
+      jalali_date TEXT,
+      jalali_month TEXT,
+      factor_type INT DEFAULT 1,
+      marketer_num TEXT,
+      visitor_num TEXT,
+      company_num BIGINT,
+      company_name TEXT,
+      total_amount DECIMAL(15,2) DEFAULT 0,
+      synced_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_faradis_factors_company ON faradis_factors_cache(company_num)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_faradis_factors_month ON faradis_factors_cache(jalali_month)`);
+
   // Cache of CRM centers pushed from frontend (avoids dependency on centers_master)
   await query(`
     CREATE TABLE IF NOT EXISTS crm_centers_cache (

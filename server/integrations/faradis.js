@@ -186,4 +186,29 @@ async function fetchCustomers() {
   return r.recordset;
 }
 
-module.exports = { getPool, fetchSalesByMonth, fetchMarketerSummary, fetchSalesTrend, testConnection, isConfigured, fetchCustomers };
+async function fetchFactors() {
+  const p = await getPool();
+  const r = await p.request().query(`
+    SELECT
+      f.FactorNum,
+      COALESCE(f.FactorCode, '') AS FactorCode,
+      f.FactorDate,
+      f.FactorType,
+      COALESCE(f.MarketerNum, '') AS MarketerNum,
+      COALESCE(f.VisitorNum, '') AS VisitorNum,
+      f.CompanyNum,
+      COALESCE(vc.CompanyName, '') AS CompanyName,
+      COALESCE(SUM(fr.TotalPrice), 0) AS TotalAmount
+    FROM Factor f
+    LEFT JOIN FactorRow fr ON fr.FactorNum = f.FactorNum
+    LEFT JOIN VCompany vc ON vc.CompanyNum = f.CompanyNum
+    WHERE COALESCE(f.IsDelete, 0) = 0
+      AND f.FactorType IN (1, 2)
+    GROUP BY f.FactorNum, f.FactorCode, f.FactorDate, f.FactorType,
+             f.MarketerNum, f.VisitorNum, f.CompanyNum, vc.CompanyName
+    ORDER BY f.FactorDate DESC
+  `);
+  return r.recordset;
+}
+
+module.exports = { getPool, fetchSalesByMonth, fetchMarketerSummary, fetchSalesTrend, testConnection, isConfigured, fetchCustomers, fetchFactors };

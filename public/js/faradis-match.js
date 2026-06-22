@@ -10,7 +10,9 @@ var _fmState = {
   suggestions: [],       // current page of suggestions
   currentIdx: 0,         // index in suggestions array
   selectedSugIdx: 0,     // which suggestion is selected for current center
-  offset: 0,
+  centerOffset: 0,       // track center-level pagination
+  hasMore: true,         // whether more center batches exist
+  totalUnlinked: 0,      // total unlinked count
   loading: false,
   status: null,          // {customers_cached, total_links, pending_estimate}
   links: [],             // approved links
@@ -86,6 +88,9 @@ function _fmBuildShell() {
     +     '<button id="fmSyncBtn" onclick="window._fmDoSync()" style="'
     +       'padding:6px 14px;border-radius:7px;border:none;background:#6366f1;color:#fff;'
     +       'cursor:pointer;font-family:inherit;font-size:12px;font-weight:600">🔄 دریافت مشتریان فرادیس</button>'
+    +     '<button id="fmSyncFactorsBtn" onclick="window._fmDoSyncFactors()" style="'
+    +       'padding:6px 14px;border-radius:7px;border:none;background:#059669;color:#fff;'
+    +       'cursor:pointer;font-family:inherit;font-size:12px;font-weight:600">📊 دریافت فاکتورها</button>'
     +     '<div id="fmStatusBar" style="font-size:12px;color:var(--text-muted)">در حال بارگذاری…</div>'
     +   '</div>'
     + '</div>'
@@ -124,8 +129,10 @@ function _fmSwitchTab(tab) {
   var content = document.getElementById('fmTabContent');
   if (!content) return;
   if (tab === 'pending') {
-    _fmState.offset = 0;
+    _fmState.centerOffset = 0;
+    _fmState.hasMore = true;
     _fmState.currentIdx = 0;
+    _fmState.selectedSugIdx = 0;
     _fmState.suggestions = [];
     _fmLoadSuggestions();
   } else if (tab === 'approved') {
@@ -153,7 +160,8 @@ function _fmLoadStatus() {
       bar.innerHTML = '<span style="font-weight:600;color:#6366f1">' + linked + '</span>'
         + '<span style="color:var(--text-muted)">/' + total + ' تطبیق</span>'
         + ' <span style="color:var(--text-muted);font-size:11px">(' + pct + '%)</span>'
-        + ' | مشتریان فرادیس: <span style="font-weight:600">' + (d.customers_cached || 0) + '</span>';
+        + ' | مشتریان فرادیس: <span style="font-weight:600">' + (d.customers_cached || 0) + '</span>'
+        + ' | فاکتورها: <span style="font-weight:600">' + (d.factors_cached || 0) + '</span>';
     })
     .catch(function(e) {
       var bar = document.getElementById('fmStatusBar');
@@ -174,8 +182,10 @@ window._fmDoSync = function() {
       if (typeof showToast === 'function') showToast('✅ ' + d.count + ' مشتری از فرادیس دریافت شد');
       _fmLoadStatus();
       if (_fmState.tab === 'pending') {
-        _fmState.offset = 0;
+        _fmState.centerOffset = 0;
+        _fmState.hasMore = true;
         _fmState.currentIdx = 0;
+        _fmState.selectedSugIdx = 0;
         _fmState.suggestions = [];
         _fmLoadSuggestions();
       }
@@ -194,15 +204,21 @@ function _fmLoadSuggestions() {
   if (_fmState.loading) return;
   _fmState.loading = true;
   content.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)">⏳ در حال بارگذاری پیشنهادات…</div>';
-  fetch('/api/faradis-match/suggestions?offset=' + _fmState.offset + '&limit=20')
+  fetch('/api/faradis-match/suggestions?center_offset=' + _fmState.centerOffset + '&batch_size=100')
     .then(function(r){ return r.json(); })
     .then(function(data) {
       _fmState.loading = false;
-      if (!Array.isArray(data)) {
-        content.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444">خطا: ' + (data.error || 'پاسخ نامعتبر') + '</div>';
+      if (data.error) {
+        content.innerHTML = '<div style="text-align:center;padding:40px;color:#ef4444">خطا: ' + _fmEsc(data.error) + '</div>';
         return;
       }
-      _fmState.suggestions = data;
+      var results = data.results || [];
+      _fmState.hasMore = data.has_more || false;
+      _fmState.totalUnlinked = data.total_unlinked || 0;
+      if (results.length > 0) {
+        _fmState.centerOffset = data.next_center_offset || (_fmState.centerOffset + 100);
+      }
+      _fmState.suggestions = results;
       _fmState.currentIdx = 0;
       _fmState.selectedSugIdx = 0;
       _fmRenderPending();
@@ -217,19 +233,25 @@ function _fmRenderPending() {
   var content = document.getElementById('fmTabContent');
   if (!content) return;
   var sugs = _fmState.suggestions;
+
+  // Empty: show "all done" or auto-load next batch
   if (!sugs || sugs.length === 0) {
+    if (_fmState.hasMore) {
+      // Auto-advance to next batch of centers
+      _fmLoadSuggestions();
+      return;
+    }
     content.innerHTML = '<div style="text-align:center;padding:60px 20px">'
       + '<div style="font-size:48px;margin-bottom:12px">🎉</div>'
       + '<div style="font-size:16px;font-weight:700;color:var(--text-primary);margin-bottom:8px">همه مراکز بررسی شدند!</div>'
       + '<div style="font-size:13px;color:var(--text-muted)">مراکز بیشتری برای تطبیق وجود ندارد.</div>'
-      + '<button onclick="window._fmLoadMore()" style="margin-top:16px;padding:8px 20px;border-radius:7px;border:1px solid var(--border);background:var(--bg-raised);cursor:pointer;font-family:inherit;font-size:13px">🔄 بارگذاری بیشتر</button>'
+      + '<button onclick="window._fmRestart()" style="margin-top:16px;padding:8px 20px;border-radius:7px;border:1px solid var(--border);background:var(--bg-raised);cursor:pointer;font-family:inherit;font-size:13px">🔄 شروع مجدد</button>'
       + '</div>';
     return;
   }
   var idx = _fmState.currentIdx;
   if (idx >= sugs.length) {
-    // Reload next page
-    _fmState.offset += sugs.length;
+    // Current batch exhausted, load next batch
     _fmLoadSuggestions();
     return;
   }
@@ -336,9 +358,11 @@ window._fmSkip = function() {
   _fmRenderPending();
 };
 
-window._fmLoadMore = function() {
-  _fmState.offset = 0;
+window._fmRestart = function() {
+  _fmState.centerOffset = 0;
+  _fmState.hasMore = true;
   _fmState.currentIdx = 0;
+  _fmState.selectedSugIdx = 0;
   _fmState.suggestions = [];
   _fmLoadSuggestions();
 };

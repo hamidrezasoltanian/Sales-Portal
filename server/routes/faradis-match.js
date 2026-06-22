@@ -80,6 +80,31 @@ function computeConfidence(crmName, customer) {
   return Math.min(100, score);
 }
 
+// ── Gregorian → Jalali (server-side) ─────────────────────────────────────
+
+function gregToJalali(date) {
+  if (!date) return ['', ''];
+  const d = date instanceof Date ? date : new Date(date);
+  if (isNaN(d.getTime())) return ['', ''];
+  const gy = d.getFullYear(), gm = d.getMonth() + 1, gd = d.getDate();
+  const g_d_m = [0,31,59,90,120,151,181,212,243,273,304,334];
+  const gy2 = gm > 2 ? gy + 1 : gy;
+  let days = 355666 + (365 * gy) + Math.floor((gy2 + 3) / 4)
+    - Math.floor((gy2 + 99) / 100) + Math.floor((gy2 + 399) / 400)
+    + gd + g_d_m[gm - 1];
+  let jy = -1595 + 33 * Math.floor(days / 12053);
+  days %= 12053;
+  jy += 4 * Math.floor(days / 1461);
+  days %= 1461;
+  if (days > 365) { jy += Math.floor((days - 1) / 365); days = (days - 1) % 365; }
+  const jm = days < 186 ? 1 + Math.floor(days / 31) : 7 + Math.floor((days - 186) / 30);
+  const jd = 1 + (days < 186 ? days % 31 : (days - 186) % 30);
+  const p2 = n => String(n).padStart(2, '0');
+  const dateStr = jy + '/' + p2(jm) + '/' + p2(jd);
+  const monthStr = jy + '/' + p2(jm);
+  return [dateStr, monthStr];
+}
+
 // ── Helper: parse centers from DB ─────────────────────────────────────────
 
 async function loadCRMCenters() {
@@ -239,6 +264,7 @@ router.get('/status', requireAuth, requireManager, async function(req, res) {
   try {
     const cached = await query('SELECT COUNT(*) FROM faradis_customers_cache');
     const links = await query('SELECT COUNT(*) FROM center_faradis_link');
+    const factors = await query('SELECT COUNT(*) FROM faradis_factors_cache');
     const centers = await loadCRMCenters();
     const linkedKeys = new Set();
     (await query('SELECT crm_center_key FROM center_faradis_link')).rows.forEach(function(r){
@@ -249,6 +275,7 @@ router.get('/status', requireAuth, requireManager, async function(req, res) {
       customers_cached: parseInt(cached.rows[0].count),
       total_links: parseInt(links.rows[0].count),
       pending_estimate: pending,
+      factors_cached: parseInt(factors.rows[0].count),
     });
   } catch (e) {
     console.error('[faradis-match] status error:', e.message);
@@ -260,15 +287,12 @@ router.get('/status', requireAuth, requireManager, async function(req, res) {
 
 router.get('/suggestions', requireAuth, requireManager, async function(req, res) {
   try {
-    const offset = parseInt(req.query.offset) || 0;
-    const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+    const centerOffset = parseInt(req.query.center_offset) || 0;
+    const batchSize = Math.min(parseInt(req.query.batch_size) || 100, 500);
 
     const centers = await loadCRMCenters();
-
-    // Get linked and rejected
     const linkedRows = await query('SELECT crm_center_key FROM center_faradis_link');
     const linkedKeys = new Set(linkedRows.rows.map(function(r){ return r.crm_center_key; }));
-
     const rejectedRows = await query('SELECT crm_center_key, faradis_company_num FROM center_faradis_rejected');
     const rejectedMap = {};
     rejectedRows.rows.forEach(function(r) {
@@ -276,23 +300,23 @@ router.get('/suggestions', requireAuth, requireManager, async function(req, res)
       rejectedMap[r.crm_center_key].add(String(r.faradis_company_num));
     });
 
-    // Get all cached Faradis customers
     const custRows = await query(
       'SELECT company_num, company_name, company_code, phone, state_name, city_name FROM faradis_customers_cache ORDER BY company_num'
     );
     const customers = custRows.rows;
 
     if (customers.length === 0) {
-      return res.json([]);
+      return res.json({ results: [], next_center_offset: 0, has_more: false, total_unlinked: 0 });
     }
 
-    const results = [];
     const unlinked = centers.filter(function(c){ return !linkedKeys.has(c.key); });
+    const batch = unlinked.slice(centerOffset, centerOffset + batchSize);
+    const nextCenterOffset = centerOffset + batchSize;
+    const hasMore = nextCenterOffset < unlinked.length;
 
-    for (const center of unlinked) {
+    const results = [];
+    for (const center of batch) {
       const rejectedForCenter = rejectedMap[center.key] || new Set();
-
-      // Score all customers
       const scored = customers
         .filter(function(c){ return !rejectedForCenter.has(String(c.company_num)); })
         .map(function(c) {
@@ -308,21 +332,13 @@ router.get('/suggestions', requireAuth, requireManager, async function(req, res)
         })
         .sort(function(a, b){ return b.confidence - a.confidence; })
         .slice(0, 3);
-
       const best = scored[0];
       if (!best || best.confidence < 20) continue;
-
-      results.push({
-        crm_key: center.key,
-        crm_name: center.name,
-        suggestions: scored,
-      });
+      results.push({ crm_key: center.key, crm_name: center.name, suggestions: scored });
     }
 
-    // Sort by best confidence descending, then paginate
     results.sort(function(a, b){ return b.suggestions[0].confidence - a.suggestions[0].confidence; });
-    const page = results.slice(offset, offset + limit);
-    res.json(page);
+    res.json({ results, next_center_offset: nextCenterOffset, has_more: hasMore, total_unlinked: unlinked.length });
   } catch (e) {
     console.error('[faradis-match] suggestions error:', e.message);
     res.status(500).json({ error: e.message });
@@ -403,6 +419,75 @@ router.get('/search', requireAuth, requireManager, async function(req, res) {
     res.json(rows.rows);
   } catch (e) {
     console.error('[faradis-match] search error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── POST /api/faradis-match/sync-factors ─────────────────────────────────
+
+router.post('/sync-factors', requireAuth, requireManager, async function(req, res) {
+  try {
+    if (!faradis.isConfigured()) {
+      return res.status(503).json({ error: 'اتصال به فرادیس پیکربندی نشده است' });
+    }
+    const factors = await faradis.fetchFactors();
+    let count = 0;
+    for (const f of factors) {
+      const [jalaliDate, jalaliMonth] = gregToJalali(f.FactorDate);
+      await query(
+        `INSERT INTO faradis_factors_cache
+           (factor_num, factor_code, factor_date, jalali_date, jalali_month,
+            factor_type, marketer_num, visitor_num, company_num, company_name, total_amount, synced_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
+         ON CONFLICT (factor_num) DO UPDATE SET
+           factor_code=$2, factor_date=$3, jalali_date=$4, jalali_month=$5,
+           factor_type=$6, marketer_num=$7, visitor_num=$8, company_num=$9,
+           company_name=$10, total_amount=$11, synced_at=NOW()`,
+        [
+          f.FactorNum, f.FactorCode || '', f.FactorDate || null, jalaliDate, jalaliMonth,
+          f.FactorType || 1, f.MarketerNum || '', f.VisitorNum || '',
+          f.CompanyNum, f.CompanyName || '', f.TotalAmount || 0,
+        ]
+      );
+      count++;
+    }
+    res.json({ ok: true, count });
+  } catch (e) {
+    console.error('[faradis-match] sync-factors error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /api/faradis-match/factors/:company_num ───────────────────────────
+// Get all factors for a Faradis company (linked center's sales history)
+
+router.get('/factors/:company_num', requireAuth, requireManager, async function(req, res) {
+  try {
+    const companyNum = parseInt(req.params.company_num);
+    if (isNaN(companyNum)) return res.status(400).json({ error: 'company_num نامعتبر' });
+    const rows = await query(
+      `SELECT factor_num, factor_code, jalali_date, jalali_month, factor_type, total_amount
+       FROM faradis_factors_cache
+       WHERE company_num = $1
+       ORDER BY factor_date DESC
+       LIMIT 200`,
+      [companyNum]
+    );
+    const summary = await query(
+      `SELECT jalali_month,
+              SUM(CASE WHEN factor_type=1 THEN total_amount ELSE 0 END) AS invoiced,
+              SUM(CASE WHEN factor_type=2 THEN total_amount ELSE 0 END) AS quoted,
+              COUNT(CASE WHEN factor_type=1 THEN 1 END) AS invoice_count,
+              COUNT(CASE WHEN factor_type=2 THEN 1 END) AS quote_count
+       FROM faradis_factors_cache
+       WHERE company_num = $1
+       GROUP BY jalali_month
+       ORDER BY jalali_month DESC
+       LIMIT 24`,
+      [companyNum]
+    );
+    res.json({ factors: rows.rows, monthly: summary.rows });
+  } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
