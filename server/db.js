@@ -1303,6 +1303,46 @@ async function initSchema() {
     )
   `);
 
+  // Faradis مطالبات cache
+  await query(`
+    CREATE TABLE IF NOT EXISTS faradis_receivables_cache (
+      company_num BIGINT PRIMARY KEY,
+      company_name TEXT DEFAULT '',
+      company_code TEXT DEFAULT '',
+      total_sales DECIMAL(18,2) DEFAULT 0,
+      total_returns DECIMAL(18,2) DEFAULT 0,
+      total_received DECIMAL(18,2) DEFAULT 0,
+      balance DECIMAL(18,2) DEFAULT 0,
+      synced_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  // Faradis برگشت‌های فروش cache
+  await query(`
+    CREATE TABLE IF NOT EXISTS faradis_returns_cache (
+      factor_num BIGINT PRIMARY KEY,
+      factor_date TIMESTAMPTZ,
+      company_num BIGINT,
+      company_name TEXT DEFAULT '',
+      total_amount DECIMAL(18,2) DEFAULT 0,
+      synced_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_fret_company ON faradis_returns_cache(company_num)`);
+
+  // Faradis خریدها cache
+  await query(`
+    CREATE TABLE IF NOT EXISTS faradis_purchases_cache (
+      factor_num BIGINT PRIMARY KEY,
+      factor_date TIMESTAMPTZ,
+      company_num BIGINT,
+      company_name TEXT DEFAULT '',
+      total_amount DECIMAL(18,2) DEFAULT 0,
+      synced_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_fpurch_company ON faradis_purchases_cache(company_num)`);
+
   console.log('[DB] Schema initialized');
 }
 

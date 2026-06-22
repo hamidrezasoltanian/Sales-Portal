@@ -332,4 +332,91 @@ window._fdShowEnrichment = function(crmKey, btn) {
     });
 };
 
+// ── مطالبات tab renderer ──────────────────────────────────────────────────
+
+window.renderFdReceivables = function(containerId) {
+  var el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">در حال بارگذاری…</div>';
+  fetch('/api/faradis-data/receivables')
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (!d.ok) { el.innerHTML = '<div style="padding:20px;color:#ef4444">خطا: ' + _fdEsc(d.error||'') + '</div>'; return; }
+      var rows = d.rows || [];
+      var totalBalance = rows.reduce(function(s,r){ return s + Number(r.balance); }, 0);
+      var html = '<div style="margin-bottom:12px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">'
+        + '<div style="font-size:13px;color:var(--text-muted)">مجموع: <b>' + rows.length + '</b> مشتری</div>'
+        + '<div style="font-size:13px;color:' + (totalBalance>0?'#ef4444':'#059669') + '">جمع مانده: <b>' + _fdFmt(Math.abs(totalBalance)) + '</b> ریال</div>'
+        + '</div>'
+        + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+        + '<thead><tr style="background:var(--bg-raised)">'
+        + '<th style="padding:8px 10px;border-bottom:2px solid var(--border);text-align:right">مشتری فرادیس</th>'
+        + '<th style="padding:8px 10px;border-bottom:2px solid var(--border);text-align:right">مرکز CRM</th>'
+        + '<th style="padding:8px 10px;border-bottom:2px solid var(--border);text-align:left">فروش کل</th>'
+        + '<th style="padding:8px 10px;border-bottom:2px solid var(--border);text-align:left">برگشتی</th>'
+        + '<th style="padding:8px 10px;border-bottom:2px solid var(--border);text-align:left">دریافتی</th>'
+        + '<th style="padding:8px 10px;border-bottom:2px solid var(--border);text-align:left">مانده بدهکار</th>'
+        + '</tr></thead><tbody>';
+      rows.forEach(function(r) {
+        var bal = Number(r.balance);
+        var balColor = bal > 0 ? '#ef4444' : '#059669';
+        var crmCell = r.crm_center_name
+          ? '<span style="background:#6366f120;color:#6366f1;padding:2px 6px;border-radius:4px;font-size:10px">' + _fdEsc(r.crm_center_name) + '</span>'
+          : '<span style="color:var(--text-muted);font-size:10px">لینک نشده</span>';
+        html += '<tr style="border-bottom:1px solid var(--border)">'
+          + '<td style="padding:8px 10px"><div style="font-weight:600">' + _fdEsc(r.company_name||'') + '</div>'
+          + '<div style="font-size:10px;color:var(--text-muted)">' + _fdEsc(r.company_code||'') + '</div></td>'
+          + '<td style="padding:8px 10px">' + crmCell + '</td>'
+          + '<td style="padding:8px 10px;text-align:left;direction:ltr">' + _fdFmt(r.total_sales) + '</td>'
+          + '<td style="padding:8px 10px;text-align:left;direction:ltr;color:#f59e0b">' + _fdFmt(r.total_returns) + '</td>'
+          + '<td style="padding:8px 10px;text-align:left;direction:ltr;color:#059669">' + _fdFmt(r.total_received) + '</td>'
+          + '<td style="padding:8px 10px;text-align:left;direction:ltr"><b style="color:' + balColor + '">' + _fdFmt(Math.abs(bal)) + '</b></td>'
+          + '</tr>';
+      });
+      html += '</tbody></table></div>';
+      el.innerHTML = html;
+    })
+    .catch(function(e){ el.innerHTML = '<div style="padding:20px;color:#ef4444">' + _fdEsc(e.message) + '</div>'; });
+};
+
+window._fdSyncReceivables = function() {
+  fetch('/api/faradis-data/sync-receivables', { method: 'POST' })
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (typeof showToast === 'function') showToast(d.ok ? '✅ ' + d.count + ' مطالبه' : '❌ ' + (d.error||'خطا'), 4000);
+      if (d.ok && typeof window.renderFdReceivables === 'function') {
+        var el = document.getElementById('fdReceivablesContainer');
+        if (el) window.renderFdReceivables('fdReceivablesContainer');
+      }
+    }).catch(function(e){ if (typeof showToast === 'function') showToast('❌ ' + e.message, 4000); });
+};
+
+window._fdShowReceivable = function(crmKey, btn) {
+  var detail = btn.nextElementSibling;
+  if (!detail) return;
+  if (detail.style.display !== 'none') { detail.style.display = 'none'; btn.textContent = '💰 مطالبه'; return; }
+  btn.textContent = '⏳';
+  detail.style.display = '';
+  detail.innerHTML = '<div style="font-size:11px;padding:6px">بارگذاری…</div>';
+  fetch('/api/faradis-data/receivables/' + encodeURIComponent(crmKey))
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      btn.textContent = '💰 مطالبه';
+      if (!d.ok || !d.data) {
+        detail.innerHTML = '<div style="font-size:11px;padding:6px;color:var(--text-muted)">اطلاعات مطالبه یافت نشد</div>';
+        return;
+      }
+      var r = d.data;
+      var bal = Number(r.balance);
+      detail.innerHTML = '<div style="font-size:11px;padding:8px;background:var(--bg-raised);border-radius:6px;margin-top:4px">'
+        + '<div>فروش: <b>' + _fdFmt(r.total_sales) + '</b></div>'
+        + '<div>برگشتی: <b style="color:#f59e0b">' + _fdFmt(r.total_returns) + '</b></div>'
+        + '<div>دریافتی: <b style="color:#059669">' + _fdFmt(r.total_received) + '</b></div>'
+        + '<hr style="border:none;border-top:1px solid var(--border);margin:4px 0">'
+        + '<div>مانده: <b style="color:' + (bal>0?'#ef4444':'#059669') + ';font-size:13px">' + _fdFmt(Math.abs(bal)) + ' ریال</b></div>'
+        + '</div>';
+    })
+    .catch(function(e){ btn.textContent = '💰 مطالبه'; detail.innerHTML = '<div style="font-size:11px;color:#ef4444;padding:4px">' + _fdEsc(e.message) + '</div>'; });
+};
+
 })();

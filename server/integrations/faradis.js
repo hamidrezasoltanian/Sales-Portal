@@ -276,8 +276,96 @@ async function fetchFollowers() {
   return r.recordset;
 }
 
+// برگشت از فروش (Sales Returns — FactorType=2)
+async function fetchReturns(companyNum) {
+  const p = await getPool();
+  let q = `SELECT f.FactorNum, f.FactorDate, f.CompanyNum,
+    COALESCE(vc.CompanyName,'') AS CompanyName,
+    COALESCE(SUM(fr.TotalPrice),0) AS TotalAmount
+    FROM Factor f
+    LEFT JOIN FactorRow fr ON fr.FactorNum = f.FactorNum
+    LEFT JOIN VCompany vc ON vc.CompanyNum = f.CompanyNum
+    WHERE COALESCE(f.IsDelete,0)=0 AND f.FactorType=2`;
+  const req = p.request();
+  if (companyNum) { q += ' AND f.CompanyNum=@cn'; req.input('cn', sql.BigInt, companyNum); }
+  q += ' GROUP BY f.FactorNum, f.FactorDate, f.CompanyNum, vc.CompanyName ORDER BY f.FactorDate DESC';
+  const r = await req.query(q);
+  return r.recordset;
+}
+
+// خریدها (Purchases — FactorType=3)
+async function fetchPurchases(companyNum) {
+  const p = await getPool();
+  let q = `SELECT f.FactorNum, f.FactorDate, f.CompanyNum,
+    COALESCE(vc.CompanyName,'') AS CompanyName,
+    COALESCE(SUM(fr.TotalPrice),0) AS TotalAmount
+    FROM Factor f
+    LEFT JOIN FactorRow fr ON fr.FactorNum = f.FactorNum
+    LEFT JOIN VCompany vc ON vc.CompanyNum = f.CompanyNum
+    WHERE COALESCE(f.IsDelete,0)=0 AND f.FactorType=3`;
+  const req = p.request();
+  if (companyNum) { q += ' AND f.CompanyNum=@cn'; req.input('cn', sql.BigInt, companyNum); }
+  q += ' GROUP BY f.FactorNum, f.FactorDate, f.CompanyNum, vc.CompanyName ORDER BY f.FactorDate DESC';
+  const r = await req.query(q);
+  return r.recordset;
+}
+
+// مطالبات — per customer balance: sales - returns - payments_received
+async function fetchReceivablesSummary() {
+  const p = await getPool();
+  // First try to get receipts from Receive table (graceful fallback)
+  let receiveMap = {};
+  try {
+    const rv = await p.request().query(`
+      SELECT CompanyNum, COALESCE(SUM(Amount),0) AS TotalReceived
+      FROM Receive WHERE COALESCE(IsDelete,0)=0
+      GROUP BY CompanyNum
+    `);
+    rv.recordset.forEach(r => { receiveMap[r.CompanyNum] = Number(r.TotalReceived); });
+  } catch(e) {
+    // Receive table might not exist or have different name — continue without it
+    try {
+      const rv2 = await p.request().query(`
+        SELECT CompanyNum, COALESCE(SUM(TotalAmount),0) AS TotalReceived
+        FROM Receive WHERE COALESCE(IsDelete,0)=0
+        GROUP BY CompanyNum
+      `);
+      rv2.recordset.forEach(r => { receiveMap[r.CompanyNum] = Number(r.TotalReceived); });
+    } catch(e2) { /* no receipt table found */ }
+  }
+
+  // Sales and returns per company
+  const r = await p.request().query(`
+    SELECT f.CompanyNum,
+      COALESCE(vc.CompanyName,'') AS CompanyName,
+      COALESCE(vc.CompanyCode,'') AS CompanyCode,
+      SUM(CASE WHEN f.FactorType=1 THEN COALESCE(fr.TotalPrice,0) ELSE 0 END) AS TotalSales,
+      SUM(CASE WHEN f.FactorType=2 THEN COALESCE(fr.TotalPrice,0) ELSE 0 END) AS TotalReturns
+    FROM Factor f
+    LEFT JOIN FactorRow fr ON fr.FactorNum = f.FactorNum
+    LEFT JOIN VCompany vc ON vc.CompanyNum = f.CompanyNum
+    WHERE COALESCE(f.IsDelete,0)=0 AND f.FactorType IN (1,2)
+    GROUP BY f.CompanyNum, vc.CompanyName, vc.CompanyCode
+  `);
+
+  return r.recordset.map(row => {
+    const received = receiveMap[row.CompanyNum] || 0;
+    const balance = Number(row.TotalSales) - Number(row.TotalReturns) - received;
+    return {
+      company_num: row.CompanyNum,
+      company_name: row.CompanyName,
+      company_code: row.CompanyCode,
+      total_sales: Number(row.TotalSales),
+      total_returns: Number(row.TotalReturns),
+      total_received: received,
+      balance: balance,
+    };
+  }).filter(r => r.balance !== 0); // only non-zero balances
+}
+
 module.exports = {
   getPool, fetchSalesByMonth, fetchMarketerSummary, fetchSalesTrend,
   testConnection, isConfigured, fetchCustomers, fetchFactors,
   fetchStuffs, fetchFactorRows, fetchInventory, fetchFollowers,
+  fetchReturns, fetchPurchases, fetchReceivablesSummary,
 };

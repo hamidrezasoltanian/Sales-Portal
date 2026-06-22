@@ -107,6 +107,7 @@ function _fmBuildShell() {
     +   _fmTabBtn('team','👥 تیم فروش')
     +   _fmTabBtn('inventory','📦 موجودی')
     +   _fmTabBtn('mapping','🗺 نگاشت')
+    +   _fmTabBtn('receivables','💰 مطالبات')
     + '</div>'
     + '<div id="fmTabContent"></div>'
     + '</div>';
@@ -127,7 +128,7 @@ window._fmSwitchTab = _fmSwitchTab;
 function _fmSwitchTab(tab) {
   _fmState.tab = tab;
   // Update tab button styles
-  ['pending','approved','search','team','inventory','mapping'].forEach(function(t) {
+  ['pending','approved','search','team','inventory','mapping','receivables'].forEach(function(t) {
     var btn = document.getElementById('fmTabBtn_' + t);
     if (!btn) return;
     var active = t === tab;
@@ -173,7 +174,15 @@ function _fmSwitchTab(tab) {
       window.renderFdFollowers('fmTabContent');
     } else {
       content.innerHTML = '<div style="padding:20px;color:#ef4444">ماژول faradis-data.js بارگذاری نشده</div>';
-    }  }
+    }
+  } else if (tab === 'receivables') {
+    content.innerHTML = '<div style="margin-bottom:12px;display:flex;gap:8px">'
+      + '<button onclick="window._fdSyncReceivables && window._fdSyncReceivables()" style="padding:6px 14px;border-radius:7px;border:none;background:#ef4444;color:#fff;cursor:pointer;font-family:inherit;font-size:12px">🔄 Sync مطالبات</button>'
+      + '</div><div id="fdReceivablesContainer"></div>';
+    if (typeof window.renderFdReceivables === 'function') {
+      window.renderFdReceivables('fdReceivablesContainer');
+    }
+  }
 }
 
 // ── Status bar ────────────────────────────────────────────────────────────
@@ -606,6 +615,8 @@ function _fmRenderApproved() {
       + '<button onclick="window._fdShowCenterProducts && window._fdShowCenterProducts(\'' + _fmEscAttr(l.crm_center_key) + '\',this)" style="padding:3px 8px;border-radius:5px;border:1px solid #6366f1;background:none;color:#6366f1;cursor:pointer;font-family:inherit;font-size:10px">📦 محصولات</button>'
       + '<div style="display:none"></div>'
       + '<button onclick="window._fdShowEnrichment && window._fdShowEnrichment(\'' + _fmEscAttr(l.crm_center_key) + '\',this)" style="padding:3px 8px;border-radius:5px;border:1px solid #059669;background:none;color:#059669;cursor:pointer;font-family:inherit;font-size:10px">📋 اطلاعات</button>'
+      + '<div style="display:none"></div>'
+      + '<button onclick="window._fdShowReceivable && window._fdShowReceivable(\'' + _fmEscAttr(l.crm_center_key) + '\',this)" style="padding:3px 8px;border-radius:5px;border:1px solid #ef4444;background:none;color:#ef4444;cursor:pointer;font-family:inherit;font-size:10px">💰 مطالبه</button>'
       + '<div style="display:none"></div>'
       + '</td>'
       + '<td style="padding:8px 10px"><button onclick="window._fmDeleteLink(' + l.id + ')" style="'

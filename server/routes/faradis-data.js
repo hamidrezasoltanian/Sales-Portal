@@ -143,6 +143,38 @@ router.post('/sync-all', requireAuth, requireManager, async function(req, res) {
     [r.StoreNum, r.StoreName||'', r.StuffNum, r.StuffName||'', r.StuffCode||'', r.CountAll||0]
   ));
 
+  // Sync receivables summary
+  try {
+    const recvRows = await faradis.fetchReceivablesSummary();
+    await query('DELETE FROM faradis_receivables_cache');
+    for (const r of recvRows) {
+      await query(`INSERT INTO faradis_receivables_cache
+        (company_num,company_name,company_code,total_sales,total_returns,total_received,balance,synced_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,NOW())`,
+        [r.company_num,r.company_name,r.company_code,r.total_sales,r.total_returns,r.total_received,r.balance]);
+    }
+    results['receivables'] = { ok: true, count: recvRows.length };
+  } catch(e) {
+    results['receivables'] = { ok: false, error: e.message };
+    console.error('[faradis-data] sync-all receivables', e.message);
+  }
+
+  // Sync returns
+  try {
+    const retRows = await faradis.fetchReturns();
+    await query('DELETE FROM faradis_returns_cache');
+    for (const r of retRows) {
+      const d = r.FactorDate ? new Date(r.FactorDate) : null;
+      await query(`INSERT INTO faradis_returns_cache (factor_num,factor_date,company_num,company_name,total_amount,synced_at)
+        VALUES($1,$2,$3,$4,$5,NOW()) ON CONFLICT(factor_num) DO UPDATE SET factor_date=$2,total_amount=$5,synced_at=NOW()`,
+        [r.FactorNum, d, r.CompanyNum, r.CompanyName, r.TotalAmount]);
+    }
+    results['returns'] = { ok: true, count: retRows.length };
+  } catch(e) {
+    results['returns'] = { ok: false, error: e.message };
+    console.error('[faradis-data] sync-all returns', e.message);
+  }
+
   res.json(results);
 });
 
@@ -337,6 +369,110 @@ router.get('/users', requireAuth, requireManager, async function(req, res) {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ── POST /api/faradis-data/sync-receivables ───────────────────────────────
+
+router.post('/sync-receivables', requireAuth, requireManager, async function(req, res) {
+  if (!faradis.isConfigured()) return res.json({ ok: false, error: 'Faradis not configured' });
+  try {
+    const rows = await faradis.fetchReceivablesSummary();
+    await query('DELETE FROM faradis_receivables_cache');
+    for (const r of rows) {
+      await query(`INSERT INTO faradis_receivables_cache
+        (company_num,company_name,company_code,total_sales,total_returns,total_received,balance,synced_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,NOW())`,
+        [r.company_num,r.company_name,r.company_code,r.total_sales,r.total_returns,r.total_received,r.balance]);
+    }
+    res.json({ ok: true, count: rows.length });
+  } catch(e) { res.json({ ok: false, error: e.message }); }
+});
+
+// ── GET /api/faradis-data/receivables ─────────────────────────────────────
+
+router.get('/receivables', requireAuth, requireManager, async function(req, res) {
+  try {
+    const r = await query(`
+      SELECT rc.*,
+             cfl.crm_center_key, cfl.crm_center_name
+      FROM faradis_receivables_cache rc
+      LEFT JOIN center_faradis_link cfl ON cfl.faradis_company_num = rc.company_num
+      ORDER BY ABS(rc.balance) DESC
+      LIMIT 500
+    `);
+    res.json({ ok: true, rows: r.rows });
+  } catch(e) { res.json({ ok: false, error: e.message }); }
+});
+
+// ── GET /api/faradis-data/receivables/:crm_key ────────────────────────────
+
+router.get('/receivables/:crm_key', requireAuth, requireManager, async function(req, res) {
+  try {
+    const link = await query('SELECT faradis_company_num FROM center_faradis_link WHERE crm_center_key=$1', [req.params.crm_key]);
+    if (!link.rows.length) return res.json({ ok: false, error: 'not_linked' });
+    const companyNum = link.rows[0].faradis_company_num;
+    const r = await query('SELECT * FROM faradis_receivables_cache WHERE company_num=$1', [companyNum]);
+    res.json({ ok: true, data: r.rows[0] || null });
+  } catch(e) { res.json({ ok: false, error: e.message }); }
+});
+
+// ── POST /api/faradis-data/sync-returns ───────────────────────────────────
+
+router.post('/sync-returns', requireAuth, requireManager, async function(req, res) {
+  if (!faradis.isConfigured()) return res.json({ ok: false, error: 'Faradis not configured' });
+  try {
+    const rows = await faradis.fetchReturns();
+    await query('DELETE FROM faradis_returns_cache');
+    for (const r of rows) {
+      const d = r.FactorDate ? new Date(r.FactorDate) : null;
+      await query(`INSERT INTO faradis_returns_cache (factor_num,factor_date,company_num,company_name,total_amount,synced_at)
+        VALUES($1,$2,$3,$4,$5,NOW()) ON CONFLICT(factor_num) DO UPDATE SET factor_date=$2,total_amount=$5,synced_at=NOW()`,
+        [r.FactorNum, d, r.CompanyNum, r.CompanyName, r.TotalAmount]);
+    }
+    res.json({ ok: true, count: rows.length });
+  } catch(e) { res.json({ ok: false, error: e.message }); }
+});
+
+// ── GET /api/faradis-data/returns/:crm_key ────────────────────────────────
+
+router.get('/returns/:crm_key', requireAuth, requireManager, async function(req, res) {
+  try {
+    const link = await query('SELECT faradis_company_num FROM center_faradis_link WHERE crm_center_key=$1', [req.params.crm_key]);
+    if (!link.rows.length) return res.json({ ok: false, error: 'not_linked' });
+    const r = await query('SELECT * FROM faradis_returns_cache WHERE company_num=$1 ORDER BY factor_date DESC LIMIT 50', [link.rows[0].faradis_company_num]);
+    res.json({ ok: true, rows: r.rows });
+  } catch(e) { res.json({ ok: false, error: e.message }); }
+});
+
+// ── POST /api/faradis-data/sync-purchases ─────────────────────────────────
+
+router.post('/sync-purchases', requireAuth, requireManager, async function(req, res) {
+  if (!faradis.isConfigured()) return res.json({ ok: false, error: 'Faradis not configured' });
+  try {
+    const rows = await faradis.fetchPurchases();
+    await query('DELETE FROM faradis_purchases_cache');
+    for (const r of rows) {
+      const d = r.FactorDate ? new Date(r.FactorDate) : null;
+      await query(`INSERT INTO faradis_purchases_cache (factor_num,factor_date,company_num,company_name,total_amount,synced_at)
+        VALUES($1,$2,$3,$4,$5,NOW()) ON CONFLICT(factor_num) DO UPDATE SET factor_date=$2,total_amount=$5,synced_at=NOW()`,
+        [r.FactorNum, d, r.CompanyNum, r.CompanyName, r.TotalAmount]);
+    }
+    res.json({ ok: true, count: rows.length });
+  } catch(e) { res.json({ ok: false, error: e.message }); }
+});
+
+// ── GET /api/faradis-data/purchases-summary ───────────────────────────────
+
+router.get('/purchases-summary', requireAuth, requireManager, async function(req, res) {
+  try {
+    const r = await query(`
+      SELECT company_num, company_name, COUNT(*) AS count, SUM(total_amount) AS total
+      FROM faradis_purchases_cache
+      GROUP BY company_num, company_name
+      ORDER BY total DESC LIMIT 100
+    `);
+    res.json({ ok: true, rows: r.rows });
+  } catch(e) { res.json({ ok: false, error: e.message }); }
 });
 
 module.exports = router;
