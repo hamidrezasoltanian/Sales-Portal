@@ -20,6 +20,7 @@
     filterScheduled: 'unscheduled',
     filterProvId: '',
     sortBy: 'priority',
+    visibleCount: 80,
   };
 
   // ── helpers ──────────────────────────────────────────────────────────────
@@ -393,7 +394,9 @@
     var selectedKeys = Object.keys(_wpState.selected);
     var selectedCount = selectedKeys.length;
 
-    var tableRows = filtered.map(function(c) {
+    var visibleFiltered = filtered.slice(0, _wpState.visibleCount);
+    var hasMore = filtered.length > _wpState.visibleCount;
+    var tableRows = visibleFiltered.map(function(c) {
       var checked = (c.rkey in _wpState.selected);
       var dayOverride = (typeof _wpState.selected[c.rkey] === 'string') ? _wpState.selected[c.rkey] : '';
       var dayOpts = '<option value="">پخش خودکار</option>' +
@@ -487,7 +490,7 @@
               '<th style="padding:8px 10px;text-align:right;font-size:.78rem;font-weight:600">پیگیری / آخرین تماس</th>' +
               '<th style="padding:8px 10px;text-align:right;font-size:.78rem;font-weight:600">روز (اختیاری)</th>' +
             '</tr></thead>' +
-            '<tbody>'+(tableRows||'<tr><td colspan="5" style="padding:32px;text-align:center;color:#9ca3af">مرکزی با این فیلترها پیدا نشد</td></tr>')+'</tbody>' +
+            '<tbody>'+(tableRows||'<tr><td colspan="5" style="padding:32px;text-align:center;color:#9ca3af">مرکزی با این فیلترها پیدا نشد</td></tr>')+(hasMore ? '<tr><td colspan="5" style="padding:12px;text-align:center"><button onclick="window._wpShowMore()" style="padding:7px 22px;border:1px solid #6366f1;border-radius:7px;font-family:inherit;font-size:.83rem;cursor:pointer;background:#fff;color:#6366f1">نمایش '+(filtered.length-_wpState.visibleCount)+' مرکز دیگر از '+(filtered.length)+' مرکز</button></td></tr>' : '')+'</tbody>' +
           '</table>' +
         '</div>' +
 
@@ -548,6 +551,11 @@
       '<span style="font-size:.8rem;color:#6b7280;margin-right:12px">برای '+esc(expertName)+' — '+range.start+'</span>';
   }
 
+  window._wpShowMore = function() {
+    _wpState.visibleCount += 80;
+    _wpRenderList(_computeRange());
+  };
+
   // ── event handlers ────────────────────────────────────────────────────────
 
   window._wpSetMode = function(m) {
@@ -573,6 +581,7 @@
     if (key === 'scheduled')    _wpState.filterScheduled = val;
     if (key === 'prov')         _wpState.filterProvId = val;
     if (key === 'sort')         _wpState.sortBy = val;
+    _wpState.visibleCount = 80;
     _wpRenderList(_computeRange());
   };
 
@@ -589,6 +598,7 @@
     if (!range.start||!range.end) { if (typeof showToast==='function') showToast('بازه زمانی را تعریف کنید'); return; }
     _loadCenters(expertId);
     _wpState.selected = {};
+    _wpState.visibleCount = 80;
     _wpState.filterScheduled = 'unscheduled'; // default: show unscheduled
     _wpRenderList(range);
   };
@@ -596,7 +606,7 @@
   window._wpToggle = function(rkey, checked) {
     if (checked) { _wpState.selected[rkey] = _wpState.selected[rkey] || ''; }
     else { delete _wpState.selected[rkey]; }
-    _wpUpdateSummaryArea();
+    requestAnimationFrame(_wpUpdateSummaryArea);
   };
 
   window._wpSetDay = function(rkey, day) {
