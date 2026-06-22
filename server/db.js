@@ -1131,6 +1131,46 @@ async function initSchema() {
   await query(`CREATE INDEX IF NOT EXISTS idx_faradis_sales_month ON faradis_sales_cache(jalali_month)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_faradis_sales_username ON faradis_sales_cache(crm_username)`);
 
+  await query(`
+    CREATE TABLE IF NOT EXISTS faradis_customers_cache (
+      company_num BIGINT PRIMARY KEY,
+      company_name TEXT,
+      company_code TEXT,
+      phone TEXT,
+      mobile TEXT,
+      state_name TEXT,
+      city_name TEXT,
+      address TEXT,
+      type_name TEXT,
+      synced_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS center_faradis_link (
+      id SERIAL PRIMARY KEY,
+      crm_center_key TEXT UNIQUE NOT NULL,
+      crm_center_name TEXT,
+      faradis_company_num BIGINT,
+      faradis_company_name TEXT,
+      matched_by TEXT DEFAULT 'manual',
+      confidence INT DEFAULT 100,
+      confirmed_by TEXT,
+      confirmed_at TIMESTAMPTZ DEFAULT NOW(),
+      notes TEXT
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS center_faradis_rejected (
+      crm_center_key TEXT,
+      faradis_company_num BIGINT,
+      rejected_by TEXT,
+      rejected_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (crm_center_key, faradis_company_num)
+    )
+  `);
+
   console.log('[DB] Schema initialized');
 }
 

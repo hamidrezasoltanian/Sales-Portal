@@ -173,4 +173,17 @@ function isConfigured() {
   return !!(sql && process.env.FARADIS_SERVER && process.env.FARADIS_PASSWORD);
 }
 
-module.exports = { getPool, fetchSalesByMonth, fetchMarketerSummary, fetchSalesTrend, testConnection, isConfigured };
+async function fetchCustomers() {
+  const p = await getPool();
+  const r = await p.request().query(`
+    SELECT CompanyNum, CompanyName, CompanyCode,
+           COALESCE(Phone1,'') AS Phone1, COALESCE(Mobile1,'') AS Mobile1,
+           COALESCE(StateName1,'') AS StateName1, COALESCE(CityName1,'') AS CityName1,
+           LEFT(COALESCE(Address1,''), 500) AS Address1, COALESCE(TypeName,'') AS TypeName
+    FROM VCompany
+    ORDER BY CompanyNum
+  `);
+  return r.recordset;
+}
+
+module.exports = { getPool, fetchSalesByMonth, fetchMarketerSummary, fetchSalesTrend, testConnection, isConfigured, fetchCustomers };
