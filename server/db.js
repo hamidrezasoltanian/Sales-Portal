@@ -536,6 +536,23 @@ async function initSchema() {
   await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS key VARCHAR(600)`).catch(()=>{});
   await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS value JSONB`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_we_updated ON week_entries(updated_at DESC)`).catch(()=>{});
+  // Proper column-based schema for week-entries route
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS id TEXT`).catch(()=>{});
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS week_id VARCHAR(20)`).catch(()=>{});
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS rec_key VARCHAR(400)`).catch(()=>{});
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS rtype VARCHAR(20)`).catch(()=>{});
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS rid VARCHAR(300)`).catch(()=>{});
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS scheduled_date VARCHAR(12)`).catch(()=>{});
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS action_type VARCHAR(20) DEFAULT 'call'`).catch(()=>{});
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS added_by VARCHAR(100)`).catch(()=>{});
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS center_name VARCHAR(300)`).catch(()=>{});
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS week_tag_id VARCHAR(100)`).catch(()=>{});
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS done BOOLEAN DEFAULT false`).catch(()=>{});
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS done_date VARCHAR(12)`).catch(()=>{});
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`).catch(()=>{});
+  await query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_we_id ON week_entries(id) WHERE id IS NOT NULL`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_we_week_id ON week_entries(week_id)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_we_added_by ON week_entries(added_by)`).catch(()=>{});
 
   // ════════════════════════════════════════
   // NOTIFICATIONS — extracted from DB.notifications blob
