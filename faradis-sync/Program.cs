@@ -47,6 +47,12 @@ namespace FaradisSync
             LoadHashes();
             InitSchema();
 
+            // نمایش ستون‌های Factor و FactorRow برای تشخیص نام‌های صحیح
+            Print("\n--- ستون‌های جداول فروش در فرادیس ---", ConsoleColor.Yellow);
+            ShowColumns("Factor");
+            ShowColumns("FactorRow");
+            Print("--------------------------------------\n", ConsoleColor.Yellow);
+
             int loop = 0;
             while (true)
             {
@@ -147,6 +153,8 @@ namespace FaradisSync
             // اصلاح جداول موجود با ستون‌های کوچک‌تر
             Exec(conn, @"IF EXISTS (SELECT * FROM sys.columns WHERE object_id=OBJECT_ID('customers') AND name='PostCode1' AND max_length < 1000)
                 ALTER TABLE customers ALTER COLUMN PostCode1 NVARCHAR(500)");
+            Exec(conn, @"IF EXISTS (SELECT * FROM sys.columns WHERE object_id=OBJECT_ID('addresses') AND name='PostCode' AND max_length < 1000)
+                ALTER TABLE addresses ALTER COLUMN PostCode NVARCHAR(500)");
 
             Exec(conn, @"IF NOT EXISTS (SELECT * FROM sys.tables WHERE name='phones')
             CREATE TABLE phones (
@@ -167,7 +175,7 @@ namespace FaradisSync
                 CityName    NVARCHAR(200),
                 RegionName  NVARCHAR(200),
                 Address     NVARCHAR(1000),
-                PostCode    NVARCHAR(50),
+                PostCode    NVARCHAR(500),
                 IsDefault   BIT
             )");
 
@@ -370,7 +378,8 @@ namespace FaradisSync
 
         static string GetAddressesQ() => @"
             SELECT CompanyNum, CountryName, StateName, CityName, RegionName,
-                   LEFT(Address, 1000) AS Address, PostCode, IsDefault
+                   LEFT(Address, 1000) AS Address,
+                   LEFT(PostCode, 500) AS PostCode, IsDefault
             FROM CompanyRegion
             WHERE IsDelete = 0";
 
@@ -454,6 +463,26 @@ namespace FaradisSync
         static void SaveHashes()
         {
             try { File.WriteAllText(HashFile, JsonConvert.SerializeObject(Hashes, Formatting.None)); } catch { }
+        }
+
+        static void ShowColumns(string tableName)
+        {
+            try
+            {
+                var cols = new List<string>();
+                using var conn = Open(SrcConn);
+                using var cmd = new SqlCommand(
+                    $"SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS " +
+                    $"WHERE TABLE_NAME='{tableName}' ORDER BY ORDINAL_POSITION", conn);
+                using var dr = cmd.ExecuteReader();
+                while (dr.Read())
+                    cols.Add($"{dr.GetString(0)} ({dr.GetString(1)})");
+                Print($"{tableName}: {string.Join(", ", cols)}", ConsoleColor.Yellow);
+            }
+            catch (Exception ex)
+            {
+                Print($"{tableName}: خطا — {ex.Message}", ConsoleColor.Red);
+            }
         }
 
         static void Print(string msg, ConsoleColor color = ConsoleColor.Gray)
