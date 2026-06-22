@@ -88,6 +88,15 @@
     var centers = [];
     var weekEntries = db.weekEntries || {};
 
+    // Pre-build scheduled set for O(1) lookup instead of O(n) .some() per center
+    var _wpScheduledSet = new Set();
+    Object.values(weekEntries).forEach(function(we) {
+      if (!we.done && we.scheduledDate && _wpState.weekId && _wpState.weekEnd &&
+          we.scheduledDate >= _wpState.weekId && we.scheduledDate <= _wpState.weekEnd) {
+        _wpScheduledSet.add(we.rtype + '_' + we.rid);
+      }
+    });
+
     if (typeof getAllProvinces === 'function') {
       getAllProvinces().forEach(function(p) {
         var rtype = typeof getProvType === 'function' ? getProvType(p.id) : (p.id === 'tehran' ? 'center' : 'pc');
@@ -104,10 +113,7 @@
           var lastContactDate = e._lastContactDate || '';
           var daysSince = lastChangeMs ? Math.round((Date.now() - lastChangeMs) / 86400000) : null;
 
-          var alreadyScheduled = Object.values(weekEntries).some(function(we) {
-            return we.rtype === rtype && we.rid === c.id && !we.done &&
-              we.scheduledDate >= _wpState.weekId && we.scheduledDate <= _wpState.weekEnd;
-          });
+          var alreadyScheduled = _wpScheduledSet.has(rtype + '_' + c.id);
 
           centers.push({
             id: c.id, rtype: rtype, rkey: rtype+'_'+c.id,
@@ -467,8 +473,8 @@
           '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.82rem">' +
             '<input type="checkbox" id="wpSelectAll" onchange="window._wpSelectAll(this.checked)" style="width:15px;height:15px"> انتخاب همه نمایش‌یافته‌ها' +
           '</label>' +
-          '<span style="font-size:.82rem;color:#6366f1;font-weight:600">'+selectedCount+' انتخاب شده</span>' +
-          (selectedCount > 0 ? '<button onclick="window._wpClearAll()" style="padding:3px 10px;border:1px solid #e2e8f0;border-radius:6px;font-family:inherit;font-size:.78rem;cursor:pointer;background:#fff">پاک‌کردن</button>' : '') +
+          '<span id="wpSelCount" style="font-size:.82rem;color:#6366f1;font-weight:600">'+selectedCount+' انتخاب شده</span>' +
+          '<button id="wpClearBtn" onclick="window._wpClearAll()" style="padding:3px 10px;border:1px solid #e2e8f0;border-radius:6px;font-family:inherit;font-size:.78rem;cursor:pointer;background:#fff;display:'+(selectedCount>0?'inline':'none')+'">پاک‌کردن</button>' +
         '</div>' +
 
         // table
@@ -485,11 +491,61 @@
           '</table>' +
         '</div>' +
 
-        (previewHtml
-          ? '<div style="padding:16px 18px;border-top:1px solid #f1f5f9;background:#f0fdf4">'+previewHtml+'</div>'
-          : '') +
+        '<div id="wpPreviewArea" style="padding:16px 18px;border-top:1px solid #f1f5f9;background:#f0fdf4;display:'+(selectedCount>0?'':'none')+'">'+previewHtml+'</div>' +
 
       '</div>';
+  }
+
+
+  // Partial update: only refresh count badge + preview without re-rendering the table
+  function _wpUpdateSummaryArea() {
+    var range = _computeRange();
+    var workDays = _workDays(range.start, range.end);
+    var selectedKeys = Object.keys(_wpState.selected);
+    var selectedCount = selectedKeys.length;
+
+    // update count badge
+    var badge = document.getElementById('wpSelCount');
+    if (badge) badge.textContent = selectedCount + ' انتخاب شده';
+
+    // show/hide clear button
+    var clearBtn = document.getElementById('wpClearBtn');
+    if (clearBtn) clearBtn.style.display = selectedCount > 0 ? '' : 'none';
+
+    // update preview + submit area
+    var previewEl = document.getElementById('wpPreviewArea');
+    if (!previewEl) return;
+
+    if (selectedCount === 0) { previewEl.style.display = 'none'; return; }
+
+    var withDay    = selectedKeys.filter(function(k){ return _wpState.selected[k]; });
+    var withoutDay = selectedKeys.filter(function(k){ return !_wpState.selected[k]; });
+    var autoSpread = _autoSpread(withoutDay, workDays);
+    var dayBuckets = {};
+    workDays.forEach(function(d){ dayBuckets[d] = []; });
+    withDay.forEach(function(k){ var d=_wpState.selected[k]; if(!dayBuckets[d])dayBuckets[d]=[]; dayBuckets[d].push(k); });
+    withoutDay.forEach(function(k){ var d=autoSpread[k]; if(!dayBuckets[d])dayBuckets[d]=[]; dayBuckets[d].push(k); });
+
+    var members = typeof _DEFAULT_MEMBERS !== 'undefined' ? _DEFAULT_MEMBERS : [];
+    var expertMember = members.find(function(u){ return u.id === _wpState.expertId; });
+    var expertName = expertMember ? expertMember.name : _wpState.expertId;
+
+    previewEl.style.display = '';
+    previewEl.innerHTML =
+      '<div style="font-size:.83rem;font-weight:600;color:#374151;margin-bottom:8px">پیش‌نمایش توزیع:</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">' +
+        workDays.map(function(d) {
+          var n = (dayBuckets[d]||[]).length;
+          return '<div style="flex:1;min-width:80px;background:#f8fafc;border-radius:8px;padding:8px 10px;border:1px solid #e2e8f0;text-align:center">' +
+            '<div style="font-size:.7rem;font-weight:700;color:#374151;margin-bottom:3px">'+_dayLabel(d)+'</div>' +
+            '<div style="font-size:1.2rem;font-weight:800;color:'+(n>5?'#ef4444':n>0?'#6366f1':'#d1d5db')+'">'+n+'</div>' +
+            '<div style="font-size:.65rem;color:#9ca3af">مرکز</div></div>';
+        }).join('') +
+      '</div>' +
+      '<button onclick="window._wpSubmit()" style="padding:10px 28px;background:#10b981;color:white;border:none;border-radius:8px;font-family:inherit;font-size:.95rem;cursor:pointer;font-weight:700">' +
+        '✅ افزودن '+selectedCount+' مرکز به برنامه' +
+      '</button>' +
+      '<span style="font-size:.8rem;color:#6b7280;margin-right:12px">برای '+esc(expertName)+' — '+range.start+'</span>';
   }
 
   // ── event handlers ────────────────────────────────────────────────────────
@@ -540,12 +596,12 @@
   window._wpToggle = function(rkey, checked) {
     if (checked) { _wpState.selected[rkey] = _wpState.selected[rkey] || ''; }
     else { delete _wpState.selected[rkey]; }
-    _wpRenderList(_computeRange());
+    _wpUpdateSummaryArea();
   };
 
   window._wpSetDay = function(rkey, day) {
-    if (_wpState.selected[rkey] !== undefined) _wpState.selected[rkey] = day;
-    _wpRenderList(_computeRange());
+    if (rkey in _wpState.selected) _wpState.selected[rkey] = day;
+    _wpUpdateSummaryArea();
   };
 
   window._wpSelectAll = function(checked) {
@@ -562,7 +618,8 @@
 
   window._wpClearAll = function() {
     _wpState.selected = {};
-    _wpRenderList(_computeRange());
+    document.querySelectorAll('#wpCenterList input[type=checkbox]').forEach(function(cb){ cb.checked = false; });
+    _wpUpdateSummaryArea();
   };
 
   window._wpSubmit = function() {
