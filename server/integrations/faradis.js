@@ -241,12 +241,24 @@ async function fetchStuffs() {
     `SELECT StuffNum, COALESCE(StuffCode,'') AS StuffCode, COALESCE(StuffName,'') AS StuffName, COALESCE(UnitName,'') AS UnitName FROM VStuff ORDER BY StuffNum`,
   ];
   let lastErr;
-  for (const sql of attempts) {
+  for (const q of attempts) {
     try {
-      const r = await p.request().query(sql);
+      const r = await p.request().query(q);
+      console.log('[faradis] fetchStuffs succeeded with:', q.slice(0, 80));
       return r.recordset;
     } catch(e) { lastErr = e; }
   }
+  // Dynamic discovery: find the unit column name in Stuff table
+  try {
+    const cols = await p.request().query(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='Stuff' ORDER BY ORDINAL_POSITION`);
+    const colNames = cols.recordset.map(function(c) { return c.COLUMN_NAME; });
+    const unitCol = colNames.find(function(c) { return c.toLowerCase().includes('unit'); });
+    const delCol = colNames.includes('IsDelete') ? ' WHERE COALESCE(IsDelete,0)=0' : '';
+    const unitSel = unitCol ? `COALESCE(${unitCol},'')` : "''";
+    const r = await p.request().query(`SELECT StuffNum, COALESCE(StuffCode,'') AS StuffCode, COALESCE(StuffName,'') AS StuffName, ${unitSel} AS UnitName FROM Stuff${delCol} ORDER BY StuffNum`);
+    console.log('[faradis] fetchStuffs dynamic: unitCol=', unitCol || 'none');
+    return r.recordset;
+  } catch(e2) { lastErr = e2; }
   throw lastErr;
 }
 
@@ -273,6 +285,9 @@ async function fetchFactorRows() {
 async function fetchInventory() {
   const p = await getPool();
   const attempts = [
+    // CarStuff — confirmed table name in this Faradis installation
+    `SELECT cs.StoreNum, COALESCE(st.StoreName,'') AS StoreName, cs.StuffNum, COALESCE(s.StuffName,'') AS StuffName, COALESCE(s.StuffCode,'') AS StuffCode, COALESCE(cs.Count1,0) AS CountAll FROM CarStuff cs LEFT JOIN Store st ON st.StoreNum=cs.StoreNum LEFT JOIN Stuff s ON s.StuffNum=cs.StuffNum WHERE COALESCE(cs.Count1,0)!=0`,
+    `SELECT cs.StoreNum, COALESCE(st.StoreName,'') AS StoreName, cs.StuffNum, COALESCE(s.StuffName,'') AS StuffName, COALESCE(s.StuffCode,'') AS StuffCode, COALESCE(cs.CountAll,0) AS CountAll FROM CarStuff cs LEFT JOIN Store st ON st.StoreNum=cs.StoreNum LEFT JOIN Stuff s ON s.StuffNum=cs.StuffNum WHERE COALESCE(cs.CountAll,0)!=0`,
     // StoreStuff variants
     `SELECT ss.StoreNum, COALESCE(st.StoreName,'') AS StoreName, ss.StuffNum, COALESCE(s.StuffName,'') AS StuffName, COALESCE(s.StuffCode,'') AS StuffCode, COALESCE(ss.CountAll,0) AS CountAll FROM StoreStuff ss LEFT JOIN Store st ON st.StoreNum=ss.StoreNum LEFT JOIN Stuff s ON s.StuffNum=ss.StuffNum WHERE COALESCE(ss.CountAll,0)!=0`,
     `SELECT ss.StoreNum, COALESCE(st.StoreName,'') AS StoreName, ss.StuffNum, COALESCE(s.StuffName,'') AS StuffName, COALESCE(s.StuffCode,'') AS StuffCode, COALESCE(ss.Count1,0) AS CountAll FROM StoreStuff ss LEFT JOIN Store st ON st.StoreNum=ss.StoreNum LEFT JOIN Stuff s ON s.StuffNum=ss.StuffNum WHERE COALESCE(ss.Count1,0)!=0`,
@@ -344,6 +359,17 @@ async function fetchInventory() {
 async function fetchFollowers() {
   const p = await getPool();
   const attempts = [
+    // Car-prefix variants (confirmed naming convention in this Faradis installation)
+    `SELECT MarketerNum AS FollowerNum, COALESCE(MarketerCode,'') AS FollowerCode, COALESCE(MarketerName,'') AS FollowerName FROM CarMarketer WHERE COALESCE(IsDelete,0)=0 ORDER BY MarketerNum`,
+    `SELECT MarketerNum AS FollowerNum, COALESCE(MarketerCode,'') AS FollowerCode, COALESCE(MarketerName,'') AS FollowerName FROM CarMarketer ORDER BY MarketerNum`,
+    `SELECT VisitorNum AS FollowerNum, COALESCE(VisitorCode,'') AS FollowerCode, COALESCE(VisitorName,'') AS FollowerName FROM CarVisitor WHERE COALESCE(IsDelete,0)=0 ORDER BY VisitorNum`,
+    `SELECT VisitorNum AS FollowerNum, COALESCE(VisitorCode,'') AS FollowerCode, COALESCE(VisitorName,'') AS FollowerName FROM CarVisitor ORDER BY VisitorNum`,
+    `SELECT FollowerNum, COALESCE(FollowerCode,'') AS FollowerCode, COALESCE(FollowerName,'') AS FollowerName FROM CarFollower WHERE COALESCE(IsDelete,0)=0 ORDER BY FollowerNum`,
+    `SELECT FollowerNum, COALESCE(FollowerCode,'') AS FollowerCode, COALESCE(FollowerName,'') AS FollowerName FROM CarFollower ORDER BY FollowerNum`,
+    `SELECT BazaryabNum AS FollowerNum, COALESCE(BazaryabCode,'') AS FollowerCode, COALESCE(BazaryabName,'') AS FollowerName FROM CarBazaryab WHERE COALESCE(IsDelete,0)=0 ORDER BY BazaryabNum`,
+    `SELECT BazaryabNum AS FollowerNum, COALESCE(BazaryabCode,'') AS FollowerCode, COALESCE(BazaryabName,'') AS FollowerName FROM CarBazaryab ORDER BY BazaryabNum`,
+    `SELECT PersonNum AS FollowerNum, COALESCE(PersonCode,'') AS FollowerCode, COALESCE(PersonName,'') AS FollowerName FROM CarPerson WHERE COALESCE(IsDelete,0)=0 ORDER BY PersonNum`,
+    `SELECT PersonNum AS FollowerNum, COALESCE(PersonCode,'') AS FollowerCode, COALESCE(PersonName,'') AS FollowerName FROM CarPerson ORDER BY PersonNum`,
     // Follower table variants
     `SELECT FollowerNum, COALESCE(FollowerCode,'') AS FollowerCode, COALESCE(FollowerName,'') AS FollowerName FROM Follower WHERE COALESCE(IsDelete,0)=0 ORDER BY FollowerNum`,
     `SELECT FollowerNum, COALESCE(FollowerCode,'') AS FollowerCode, COALESCE(FollowerName,'') AS FollowerName FROM Follower ORDER BY FollowerNum`,
@@ -472,6 +498,13 @@ async function fetchReceivablesSummary() {
   // Find payment receipts — try many possible table/column names
   let receiveMap = {};
   const receiveAttempts = [
+    // Car-prefix variants (confirmed naming convention in this Faradis installation)
+    `SELECT CompanyNum, COALESCE(SUM(Amount),0) AS TotalReceived FROM CarReceive WHERE COALESCE(IsDelete,0)=0 GROUP BY CompanyNum`,
+    `SELECT CompanyNum, COALESCE(SUM(Amount),0) AS TotalReceived FROM CarReceive GROUP BY CompanyNum`,
+    `SELECT CompanyNum, COALESCE(SUM(Amount),0) AS TotalReceived FROM CarDariyaft WHERE COALESCE(IsDelete,0)=0 GROUP BY CompanyNum`,
+    `SELECT CompanyNum, COALESCE(SUM(Amount),0) AS TotalReceived FROM CarDariyaft GROUP BY CompanyNum`,
+    `SELECT CompanyNum, COALESCE(SUM(Amount),0) AS TotalReceived FROM CarPayment WHERE COALESCE(IsDelete,0)=0 GROUP BY CompanyNum`,
+    `SELECT CompanyNum, COALESCE(SUM(Amount),0) AS TotalReceived FROM CarCashIn WHERE COALESCE(IsDelete,0)=0 GROUP BY CompanyNum`,
     // Receive table with Amount
     `SELECT CompanyNum, COALESCE(SUM(Amount),0) AS TotalReceived FROM Receive WHERE COALESCE(IsDelete,0)=0 GROUP BY CompanyNum`,
     `SELECT CompanyNum, COALESCE(SUM(Amount),0) AS TotalReceived FROM Receive GROUP BY CompanyNum`,
