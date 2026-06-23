@@ -264,9 +264,8 @@ function _fmLoadSuggestions() {
       var results = data.results || [];
       _fmState.hasMore = data.has_more || false;
       _fmState.totalUnlinked = data.total_unlinked || 0;
-      if (results.length > 0) {
-        _fmState.centerOffset = data.next_center_offset || (_fmState.centerOffset + 100);
-      }
+      // Always advance offset so empty batches don't cause infinite loop
+      _fmState.centerOffset = data.next_center_offset || (_fmState.centerOffset + 100);
       _fmState.suggestions = results;
       _fmState.currentIdx = 0;
       _fmState.selectedSugIdx = 0;
@@ -286,7 +285,23 @@ function _fmRenderPending() {
   // Empty: show "all done" or auto-load next batch
   if (!sugs || sugs.length === 0) {
     if (_fmState.hasMore) {
-      // Auto-advance to next batch of centers
+      // No matches in this batch — auto-advance, show progress while loading
+      var scanned = _fmState.centerOffset || 0;
+      var total = _fmState.totalUnlinked || 0;
+      var pct = total > 0 ? Math.min(100, Math.round(scanned * 100 / total)) : 0;
+      var content2 = document.getElementById('fmTabContent');
+      if (content2) {
+        content2.innerHTML = '<div style="padding:30px 20px">'
+          + '<div style="display:flex;justify-content:space-between;margin-bottom:4px">'
+          + '<span style="font-size:12px;color:var(--text-muted)">در حال اسکن… <b>' + scanned + '</b> از <b>' + total + '</b> مرکز بررسی شده</span>'
+          + '<span style="font-size:12px;color:var(--text-muted)">' + pct + '٪</span>'
+          + '</div>'
+          + '<div style="background:var(--border);border-radius:4px;height:6px;margin-bottom:16px">'
+          + '<div style="background:#6366f1;height:6px;border-radius:4px;width:' + pct + '%;transition:width 0.5s"></div>'
+          + '</div>'
+          + '<div style="text-align:center;color:var(--text-muted);font-size:13px">در این دسته تطبیق مناسبی یافت نشد — دسته بعدی…</div>'
+          + '</div>';
+      }
       _fmLoadSuggestions();
       return;
     }
@@ -308,11 +323,23 @@ function _fmRenderPending() {
   var sug = item.suggestions[_fmState.selectedSugIdx] || item.suggestions[0];
   var total = sugs.length;
 
-  var html = '<div style="margin-bottom:12px;font-size:12px;color:var(--text-muted);display:flex;justify-content:space-between;align-items:center">'
-    + '<span>مرکز ' + (idx + 1) + ' از ' + total + '</span>'
-    + '<div style="display:flex;gap:6px">'
+  // نمایش پیشرفت کلی
+  var scannedSoFar = _fmState.centerOffset || 0;
+  var totalUnlinked = _fmState.totalUnlinked || 0;
+  var progressPct = totalUnlinked > 0 ? Math.min(100, Math.round(scannedSoFar * 100 / totalUnlinked)) : 0;
+
+  var html = '<div style="margin-bottom:14px">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+    + '<span style="font-size:12px;color:var(--text-muted)">اسکن شده: <b>' + scannedSoFar + '</b> از <b>' + totalUnlinked + '</b> مرکز</span>'
+    + '<span style="font-size:11px;color:var(--text-muted)">پیشنهاد ' + (idx + 1) + ' از ' + total + ' در این دسته</span>'
+    + '</div>'
+    + '<div style="background:var(--border);border-radius:4px;height:5px;margin-bottom:10px">'
+    + '<div style="background:#6366f1;height:5px;border-radius:4px;width:' + progressPct + '%;transition:width 0.3s"></div>'
+    + '</div>'
+    + '<div style="display:flex;justify-content:flex-end;gap:6px">'
     + '<button onclick="window._fmSkip()" style="padding:5px 14px;border-radius:6px;border:1px solid var(--border);background:var(--bg-raised);cursor:pointer;font-family:inherit;font-size:12px">⏭ بعدی</button>'
-    + '</div></div>';
+    + '</div>'
+    + '</div>';
 
   // Main matching card
   html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">';
