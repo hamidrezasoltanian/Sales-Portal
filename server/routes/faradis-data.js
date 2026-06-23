@@ -607,4 +607,38 @@ router.put('/user-commission-pct', requireAuth, requireManager, async function(r
   } catch(e) { res.json({ ok: false, error: e.message }); }
 });
 
+
+// GET /api/faradis-data/center-persons/:crm_key
+// Returns all Faradis entries with same company_name as the linked company — these are the "persons/contacts"
+router.get('/center-persons/:crm_key', requireAuth, requireManager, async function(req, res) {
+  try {
+    const link = await query(
+      'SELECT faradis_company_num FROM center_faradis_link WHERE crm_center_key = $1',
+      [req.params.crm_key]
+    );
+    if (!link.rows.length) return res.json({ ok: true, linked: false, persons: [] });
+    const companyNum = link.rows[0].faradis_company_num;
+
+    const primary = await query(
+      'SELECT company_name FROM faradis_customers_cache WHERE company_num = $1',
+      [companyNum]
+    );
+    if (!primary.rows.length) return res.json({ ok: true, linked: true, persons: [] });
+    const companyName = primary.rows[0].company_name;
+
+    // All entries with same name = the contacts/persons under this company
+    const r = await query(
+      `SELECT company_num, company_code, phone, mobile, address, city_name, state_name
+       FROM faradis_customers_cache
+       WHERE company_name = $1
+       ORDER BY company_num`,
+      [companyName]
+    );
+    res.json({ ok: true, linked: true, company_name: companyName, persons: r.rows });
+  } catch(e) {
+    console.error('[faradis-data] center-persons:', e.message);
+    res.json({ ok: false, error: e.message });
+  }
+});
+
 module.exports = router;

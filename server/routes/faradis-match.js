@@ -305,6 +305,23 @@ router.get('/suggestions', requireAuth, requireManager, async function(req, res)
     );
     const customers = custRows.rows;
 
+    // Deduplicate customers by normalized company name
+    // If many Faradis entries share the same name, keep best representative and note siblings
+    const _custByNorm = {};
+    for (const c of customers) {
+      const norm = normalizeName(c.company_name || '');
+      if (!norm) continue;
+      if (!_custByNorm[norm]) {
+        _custByNorm[norm] = { ...c, sibling_nums: [] };
+      } else {
+        _custByNorm[norm].sibling_nums.push(c.company_num);
+        // prefer entry that has phone data
+        if (!_custByNorm[norm].phone && c.phone) _custByNorm[norm].phone = c.phone;
+        if (!_custByNorm[norm].mobile && c.mobile) _custByNorm[norm].mobile = c.mobile;
+      }
+    }
+    const dedupedCustomers = Object.values(_custByNorm);
+
     if (customers.length === 0) {
       return res.json({ results: [], next_center_offset: 0, has_more: false, total_unlinked: 0 });
     }
@@ -317,7 +334,7 @@ router.get('/suggestions', requireAuth, requireManager, async function(req, res)
     const results = [];
     for (const center of batch) {
       const rejectedForCenter = rejectedMap[center.key] || new Set();
-      const scored = customers
+      const scored = dedupedCustomers
         .filter(function(c){ return !rejectedForCenter.has(String(c.company_num)); })
         .map(function(c) {
           return {

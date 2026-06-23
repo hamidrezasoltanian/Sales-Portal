@@ -304,30 +304,55 @@ window._fdShowEnrichment = function(crmKey, btn) {
   if (!detail) return;
   if (detail.style.display !== 'none') {
     detail.style.display = 'none';
-    btn.textContent = '📋 تماس';
+    btn.textContent = '📋 اطلاعات';
     return;
   }
   btn.textContent = '⏳';
   detail.style.display = '';
-  fetch('/api/faradis-data/center-enrichment/' + encodeURIComponent(crmKey))
+  detail.innerHTML = '<div style="font-size:11px;color:var(--text-muted);padding:6px">بارگذاری…</div>';
+
+  fetch('/api/faradis-data/center-persons/' + encodeURIComponent(crmKey))
     .then(function(r){ return r.json(); })
     .then(function(d) {
-      btn.textContent = '📋 تماس';
+      btn.textContent = '📋 اطلاعات';
       if (!d.linked) {
         detail.innerHTML = '<div style="font-size:11px;color:var(--text-muted);padding:4px">لینک ندارد</div>';
         return;
       }
-      var lines = [
-        d.phone ? 'تلفن: <b>' + _fdEsc(d.phone) + '</b>' : '',
-        d.mobile ? 'موبایل: <b>' + _fdEsc(d.mobile) + '</b>' : '',
-        (d.city || d.state) ? 'شهر: <b>' + _fdEsc([d.city, d.state].filter(Boolean).join(' / ')) + '</b>' : '',
-        d.address ? 'آدرس: ' + _fdEsc(d.address.slice(0, 100)) : '',
-      ].filter(Boolean);
-      detail.innerHTML = '<div style="font-size:11px;color:var(--text-secondary);padding:4px 6px;line-height:2">'
-        + (lines.length ? lines.join('<br>') : 'اطلاعات تماسی ثبت نشده') + '</div>';
+      var persons = d.persons || [];
+      if (!persons.length) {
+        detail.innerHTML = '<div style="font-size:11px;color:var(--text-muted);padding:4px">اطلاعاتی یافت نشد</div>';
+        return;
+      }
+      var html = '<div style="font-size:11px;color:var(--text-secondary);padding:4px 0">';
+      html += '<div style="font-weight:700;color:var(--text-primary);margin-bottom:6px">' + _fdEsc(d.company_name) + '</div>';
+      persons.forEach(function(p, pi) {
+        var phones = [];
+        if (p.phone) phones.push(p.phone);
+        if (p.mobile) phones.push(p.mobile);
+        var locParts = [p.city_name, p.state_name].filter(Boolean);
+        html += '<div style="border:1px solid var(--border);border-radius:6px;padding:6px 8px;margin-bottom:6px;background:var(--bg-raised)">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px">';
+        html += '<div>';
+        if (p.company_code) html += '<span style="font-size:10px;color:var(--text-muted)">کد: ' + _fdEsc(p.company_code) + '</span> ';
+        if (locParts.length) html += '<span style="font-size:10px;color:var(--text-muted)">' + _fdEsc(locParts.join(' / ')) + '</span>';
+        html += '</div>';
+        if (phones.length) {
+          html += '<button onclick="window._fdImportContact(\'' + _fdEsc(crmKey) + '\',' + pi + ',' + JSON.stringify(phones) + ')" '
+            + 'style="padding:2px 8px;border-radius:4px;border:none;background:#6366f1;color:#fff;cursor:pointer;font-family:inherit;font-size:10px">📥 وارد کردن</button>';
+        }
+        html += '</div>';
+        if (phones.length) {
+          html += '<div style="margin-top:4px">' + phones.map(function(ph){ return '<span style="background:#f0f9ff;border-radius:3px;padding:1px 6px;margin-left:4px;font-family:monospace;font-size:11px;direction:ltr;display:inline-block">' + _fdEsc(ph) + '</span>'; }).join('') + '</div>';
+        }
+        if (p.address) html += '<div style="margin-top:3px;font-size:10px;color:var(--text-muted)">' + _fdEsc(p.address.slice(0,80)) + '</div>';
+        html += '</div>';
+      });
+      html += '</div>';
+      detail.innerHTML = html;
     })
     .catch(function(e) {
-      btn.textContent = '📋 تماس';
+      btn.textContent = '📋 اطلاعات';
       detail.innerHTML = '<div style="color:#ef4444;font-size:11px;padding:4px">خطا</div>';
     });
 };
@@ -592,6 +617,26 @@ window._fdSaveCommPct = function(username) {
     .then(function(d) {
       if (typeof showToast === 'function') showToast(d.ok ? '✅ ذخیره شد' : '❌ ' + (d.error||'خطا'), 3000);
     }).catch(function(e){ if(typeof showToast==='function') showToast('❌ ' + e.message, 3000); });
+};
+
+
+// Import a Faradis contact (phone/mobile) into CRM center contacts
+window._fdImportContact = function(crmKey, personIndex, phones) {
+  // Parse CRM key to rtype/rid
+  var rtype, rid;
+  if (crmKey.startsWith('c_')) { rtype = 'center'; rid = crmKey.slice(2); }
+  else if (crmKey.startsWith('pc_')) { rtype = 'pc'; rid = crmKey.slice(3); }
+  else { if(typeof showToast==='function') showToast('کلید مرکز نامعتبر', 3000); return; }
+
+  if (typeof _getContacts === 'undefined' || typeof _saveContacts === 'undefined') {
+    if (typeof showToast === 'function') showToast('لطفاً ابتدا مودال مرکز را باز کنید', 3000);
+    return;
+  }
+  var contacts = _getContacts(rtype, rid);
+  var validPhones = (phones || []).filter(function(p){ return p && p.trim(); });
+  contacts.push({ name: '', title: 'مخاطب فرادیس ' + (personIndex + 1), phones: validPhones });
+  _saveContacts(rtype, rid, contacts);
+  if (typeof showToast === 'function') showToast('✅ مخاطب اضافه شد — در مودال مرکز قابل ویرایش است', 3000);
 };
 
 })();
