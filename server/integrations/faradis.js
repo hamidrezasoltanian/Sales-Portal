@@ -230,16 +230,22 @@ async function fetchFactors() {
 
 async function fetchStuffs() {
   const p = await getPool();
-  const r = await p.request().query(`
-    SELECT StuffNum,
-           COALESCE(StuffCode, '') AS StuffCode,
-           COALESCE(StuffName, '') AS StuffName,
-           COALESCE(Unit1Name, '') AS UnitName
-    FROM Stuff
-    WHERE COALESCE(IsDelete, 0) = 0
-    ORDER BY StuffNum
-  `);
-  return r.recordset;
+  // Try with IsDelete filter first, fall back to no filter
+  for (const whereClause of ['WHERE COALESCE(IsDelete,0)=0', 'WHERE COALESCE(Deleted,0)=0', '']) {
+    try {
+      const r = await p.request().query(`
+        SELECT StuffNum,
+               COALESCE(StuffCode,'') AS StuffCode,
+               COALESCE(StuffName,'') AS StuffName,
+               COALESCE(Unit1Name,'') AS UnitName
+        FROM Stuff ${whereClause} ORDER BY StuffNum
+      `);
+      return r.recordset;
+    } catch(e) {
+      if (!whereClause) throw e; // last attempt failed
+    }
+  }
+  return [];
 }
 
 async function fetchFactorRows() {
@@ -264,33 +270,61 @@ async function fetchFactorRows() {
 
 async function fetchInventory() {
   const p = await getPool();
-  const r = await p.request().query(`
-    SELECT ss.StoreNum,
-           COALESCE(st.StoreName, '') AS StoreName,
-           ss.StuffNum,
-           COALESCE(s.StuffName, '') AS StuffName,
-           COALESCE(s.StuffCode, '') AS StuffCode,
-           COALESCE(ss.CountAll, 0) AS CountAll
-    FROM StoreStuff ss
-    LEFT JOIN Store st ON st.StoreNum = ss.StoreNum
-    LEFT JOIN Stuff s ON s.StuffNum = ss.StuffNum
-    WHERE COALESCE(ss.CountAll, 0) != 0
-    ORDER BY ss.StuffNum
-  `);
-  return r.recordset;
+  // Try different table/column combinations for inventory
+  const attempts = [
+    // StoreStuff with CountAll
+    `SELECT ss.StoreNum, COALESCE(st.StoreName,'') AS StoreName, ss.StuffNum,
+            COALESCE(s.StuffName,'') AS StuffName, COALESCE(s.StuffCode,'') AS StuffCode,
+            COALESCE(ss.CountAll,0) AS CountAll
+     FROM StoreStuff ss LEFT JOIN Store st ON st.StoreNum=ss.StoreNum
+     LEFT JOIN Stuff s ON s.StuffNum=ss.StuffNum WHERE COALESCE(ss.CountAll,0)!=0`,
+    // StoreStuff with Count1
+    `SELECT ss.StoreNum, COALESCE(st.StoreName,'') AS StoreName, ss.StuffNum,
+            COALESCE(s.StuffName,'') AS StuffName, COALESCE(s.StuffCode,'') AS StuffCode,
+            COALESCE(ss.Count1,0) AS CountAll
+     FROM StoreStuff ss LEFT JOIN Store st ON st.StoreNum=ss.StoreNum
+     LEFT JOIN Stuff s ON s.StuffNum=ss.StuffNum WHERE COALESCE(ss.Count1,0)!=0`,
+    // WareHouseStuff or Inventory table
+    `SELECT ws.WareHouseNum AS StoreNum, COALESCE(w.WareHouseName,'') AS StoreName, ws.StuffNum,
+            COALESCE(s.StuffName,'') AS StuffName, COALESCE(s.StuffCode,'') AS StuffCode,
+            COALESCE(ws.CountAll,0) AS CountAll
+     FROM WareHouseStuff ws LEFT JOIN WareHouse w ON w.WareHouseNum=ws.WareHouseNum
+     LEFT JOIN Stuff s ON s.StuffNum=ws.StuffNum WHERE COALESCE(ws.CountAll,0)!=0`,
+    // VInventory view
+    `SELECT 1 AS StoreNum, '' AS StoreName, StuffNum,
+            COALESCE(StuffName,'') AS StuffName, COALESCE(StuffCode,'') AS StuffCode,
+            COALESCE(CountAll,0) AS CountAll
+     FROM VInventory WHERE COALESCE(CountAll,0)!=0`,
+  ];
+  let lastErr;
+  for (const sql of attempts) {
+    try {
+      const r = await p.request().query(sql);
+      return r.recordset;
+    } catch(e) { lastErr = e; }
+  }
+  console.error('[faradis] fetchInventory all attempts failed:', lastErr && lastErr.message);
+  throw lastErr;
 }
 
 async function fetchFollowers() {
   const p = await getPool();
-  const r = await p.request().query(`
-    SELECT FollowerNum,
-           COALESCE(FollowerCode, '') AS FollowerCode,
-           COALESCE(FollowerName, '') AS FollowerName
-    FROM Follower
-    WHERE COALESCE(IsDelete, 0) = 0
-    ORDER BY FollowerNum
-  `);
-  return r.recordset;
+  // Try Follower table with various delete flags, then Marketer table as fallback
+  const attempts = [
+    `SELECT FollowerNum, COALESCE(FollowerCode,'') AS FollowerCode, COALESCE(FollowerName,'') AS FollowerName FROM Follower WHERE COALESCE(IsDelete,0)=0 ORDER BY FollowerNum`,
+    `SELECT FollowerNum, COALESCE(FollowerCode,'') AS FollowerCode, COALESCE(FollowerName,'') AS FollowerName FROM Follower WHERE COALESCE(Deleted,0)=0 ORDER BY FollowerNum`,
+    `SELECT FollowerNum, COALESCE(FollowerCode,'') AS FollowerCode, COALESCE(FollowerName,'') AS FollowerName FROM Follower ORDER BY FollowerNum`,
+    `SELECT MarketerNum AS FollowerNum, COALESCE(MarketerCode,'') AS FollowerCode, COALESCE(MarketerName,'') AS FollowerName FROM Marketer WHERE COALESCE(IsDelete,0)=0 ORDER BY MarketerNum`,
+    `SELECT MarketerNum AS FollowerNum, COALESCE(MarketerCode,'') AS FollowerCode, COALESCE(MarketerName,'') AS FollowerName FROM Marketer ORDER BY MarketerNum`,
+  ];
+  let lastErr;
+  for (const sql of attempts) {
+    try {
+      const r = await p.request().query(sql);
+      return r.recordset;
+    } catch(e) { lastErr = e; }
+  }
+  throw lastErr;
 }
 
 // برگشت از فروش (Sales Returns — FactorType=2)

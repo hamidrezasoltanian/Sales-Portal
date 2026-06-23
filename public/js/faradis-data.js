@@ -27,9 +27,12 @@ window._fdSyncAll = function() {
       if (btn) { btn.disabled = false; btn.textContent = '🔄 Sync همه'; }
       if (d.error) { if (typeof showToast === 'function') showToast('❌ ' + d.error, 4000); return; }
       var parts = Object.entries(d).map(function(kv) {
-        return kv[1].ok ? kv[0]+':'+kv[1].count : kv[0]+':❌';
+        if (kv[1].ok) return kv[0] + ':' + kv[1].count;
+        var err = (kv[1].error || '').slice(0, 60);
+        return kv[0] + ':❌ ' + err;
       });
-      if (typeof showToast === 'function') showToast('✅ ' + parts.join(' | '), 6000);
+      var hasError = Object.values(d).some(function(v){ return !v.ok; });
+      if (typeof showToast === 'function') showToast((hasError ? '⚠️ ' : '✅ ') + parts.join(' | '), 10000);
     })
     .catch(function(e) {
       if (btn) { btn.disabled = false; btn.textContent = '🔄 Sync همه'; }
