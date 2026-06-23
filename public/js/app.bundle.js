@@ -3170,12 +3170,12 @@ function rebuildFilters(){
   var fo=document.getElementById('fOwner');
   if(fo&&fo.children.length<=1){Object.keys(USERS).forEach(function(u){var o=document.createElement('option');o.value=u;o.textContent=USERS[u];fo.appendChild(o);});}
   var ft=document.getElementById('fTag');
-  if(ft){ft.innerHTML='<option value="">همه برچسب‌ها</option>';(DB.tags||[]).forEach(function(t){var o=document.createElement('option');o.value=t.id;o.textContent=t.name;ft.appendChild(o);});}
+  if(ft){var _ftV=ft.value;ft.innerHTML='<option value="">همه برچسب‌ها</option>';(DB.tags||[]).forEach(function(t){var o=document.createElement('option');o.value=t.id;o.textContent=t.name;ft.appendChild(o);});if(_ftV)ft.value=_ftV;}
   // banner filters
   var bu=document.getElementById('bannerUser');
   if(bu&&bu.children.length<=1){Object.keys(USERS).forEach(function(u){var o=document.createElement('option');o.value=u;o.textContent=USERS[u];bu.appendChild(o);});}
   var btg=document.getElementById('bannerTag');
-  if(btg){btg.innerHTML='<option value="">همه برچسب‌ها</option>';(DB.tags||[]).forEach(function(t){var o=document.createElement('option');o.value=t.id;o.textContent=t.name;btg.appendChild(o);});}
+  if(btg){var _btgV=btg.value;btg.innerHTML='<option value="">همه برچسب‌ها</option>';(DB.tags||[]).forEach(function(t){var o=document.createElement('option');o.value=t.id;o.textContent=t.name;btg.appendChild(o);});if(_btgV)btg.value=_btgV;}
 }
 
 // ════════════════════════ TAGS ════════════════════════
