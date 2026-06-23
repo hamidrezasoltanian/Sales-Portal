@@ -84,9 +84,63 @@ app.use('/api/faradis-match', faradisMatch);
 const faradisData = require('./routes/faradis-data');
 app.use('/api/faradis-data', faradisData);
 
-// Health check
-app.get('/api/health', function (req, res) {
-  res.json({ ok: true, time: new Date().toISOString() });
+// Health check — بدون auth، قابل دسترس از هر جا
+app.get('/api/health', async function (req, res) {
+  const start = Date.now();
+  const result = {
+    ok: true,
+    time: new Date().toISOString(),
+    uptime_sec: Math.floor(process.uptime()),
+    checks: {}
+  };
+
+  // ── PostgreSQL ────────────────────────────────────────────────────────
+  try {
+    const { query } = require('./db');
+    const r = await Promise.race([
+      query('SELECT 1 AS ok'),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000))
+    ]);
+    result.checks.postgres = { ok: true };
+  } catch (e) {
+    result.checks.postgres = { ok: false, error: e.message };
+    result.ok = false;
+  }
+
+  // ── Faradis (اتصال به SQL Server) ────────────────────────────────────
+  try {
+    const faradis = require('./integrations/faradis');
+    if (!faradis.isConfigured()) {
+      result.checks.faradis = { ok: null, note: 'not configured' };
+    } else {
+      const r = await Promise.race([
+        faradis.testConnection(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000))
+      ]);
+      result.checks.faradis = { ok: true, server_time: r && r.now };
+    }
+  } catch (e) {
+    result.checks.faradis = { ok: false, error: e.message };
+    // فرادیس down بودنش OK رو خراب نمی‌کنه (optional dependency)
+  }
+
+  // ── آخرین sync فرادیس ────────────────────────────────────────────────
+  try {
+    const { query } = require('./db');
+    const r = await query(`
+      SELECT
+        (SELECT COUNT(*) FROM faradis_customers_cache)  AS customers,
+        (SELECT COUNT(*) FROM faradis_factors_cache)    AS factors,
+        (SELECT COUNT(*) FROM faradis_receivables_cache) AS receivables,
+        (SELECT MAX(synced_at) FROM faradis_factors_cache) AS last_sync
+    `);
+    result.checks.faradis_cache = r.rows[0];
+  } catch (e) {
+    result.checks.faradis_cache = { error: e.message };
+  }
+
+  result.elapsed_ms = Date.now() - start;
+  res.status(result.ok ? 200 : 503).json(result);
 });
 
 // WMS page — serve wms.html (auth handled client-side via /api/auth/me check)
