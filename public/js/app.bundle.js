@@ -152,16 +152,19 @@ async function loadDB(){
     var _sp2=document.getElementById('loadingSpinner');if(_sp2)_sp2.style.display='none';
   }
 }
-function _saveDBNow(){
+function _saveDBNow(isRetry){
   var payload=JSON.parse(JSON.stringify(DB));
   if(_dbServerTs)payload._clientTs=_dbServerTs;
   var seq=++_saveSeq; // capture sequence; ignore late-resolving responses
   return fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json','X-Cid':_sseClientId},body:JSON.stringify(payload)})
     .then(function(r){
       if(r.status===409){
-        showToast('⚠ کاربر دیگری تغییراتی ذخیره کرده — صفحه بارگذاری می‌شود',5000);
-        setTimeout(function(){location.reload();},5500);
-        return;
+        if(isRetry){showToast('❌ خطا در ذخیره — لطفاً صفحه را رفرش کنید',5000);return;}
+        showToast('⚠ در حال هماهنگ با سرور...',2000);
+        return fetch('/api/data/db').then(function(fr){return fr.json();}).then(function(fresh){
+          if(fresh&&fresh._serverTs)_dbServerTs=fresh._serverTs;
+          return _saveDBNow(true);
+        }).catch(function(){showToast('❌ خطا در ذخیره — لطفاً صفحه را رفرش کنید',5000);});
       }
       return r.json().then(function(result){
         if(result&&result._serverTs&&seq===_saveSeq)_dbServerTs=result._serverTs;
@@ -3055,12 +3058,12 @@ function rebuildFilters(){
   var fo=document.getElementById('fOwner');
   if(fo&&fo.children.length<=1){Object.keys(USERS).forEach(function(u){var o=document.createElement('option');o.value=u;o.textContent=USERS[u];fo.appendChild(o);});}
   var ft=document.getElementById('fTag');
-  if(ft){ft.innerHTML='<option value="">همه برچسب‌ها</option>';(DB.tags||[]).forEach(function(t){var o=document.createElement('option');o.value=t.id;o.textContent=t.name;ft.appendChild(o);});}
+  if(ft){var _ftV=ft.value;ft.innerHTML='<option value="">همه برچسب‌ها</option>';(DB.tags||[]).forEach(function(t){var o=document.createElement('option');o.value=t.id;o.textContent=t.name;ft.appendChild(o);});if(_ftV)ft.value=_ftV;}
   // banner filters
   var bu=document.getElementById('bannerUser');
   if(bu&&bu.children.length<=1){Object.keys(USERS).forEach(function(u){var o=document.createElement('option');o.value=u;o.textContent=USERS[u];bu.appendChild(o);});}
   var btg=document.getElementById('bannerTag');
-  if(btg){btg.innerHTML='<option value="">همه برچسب‌ها</option>';(DB.tags||[]).forEach(function(t){var o=document.createElement('option');o.value=t.id;o.textContent=t.name;btg.appendChild(o);});}
+  if(btg){var _btgV=btg.value;btg.innerHTML='<option value="">همه برچسب‌ها</option>';(DB.tags||[]).forEach(function(t){var o=document.createElement('option');o.value=t.id;o.textContent=t.name;btg.appendChild(o);});if(_btgV)btg.value=_btgV;}
 }
 
 // ════════════════════════ TAGS ════════════════════════
