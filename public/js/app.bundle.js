@@ -7287,6 +7287,8 @@ function tkDrop(ev,statusId){
   t.done=(statusId==='done');
   t.doneAt=t.done?todayStr():'';
   saveDB();
+  fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({status:t.status,done:t.done,doneAt:t.doneAt})}).catch(function(){});
   renderTasksPanel();
 }
 
@@ -7329,6 +7331,8 @@ function tkQuickToggle(tid){
     t.activity.push({type:'status',text:'«'+prevLabel+'» → انجام شد ✓',by:currentUser,at:new Date().toISOString()});
   }
   saveDB();
+  fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({status:t.status,done:t.done,doneAt:t.doneAt||null,activity:t.activity})}).catch(function(){});
   renderTasksPanel();
 }
 
@@ -7581,6 +7585,8 @@ function tkToggleSub(tid,sid){
   var s=_tkFindSub(t.subtasks,sid);if(!s)return;
   s.done=!s.done;
   saveDB();
+  fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({subtasks:t.subtasks})}).catch(function(){});
   var tree=document.getElementById('tkSubTree');
   if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
 }
@@ -7596,6 +7602,8 @@ function tkEditSubTitle(tid,sid){
     if(nv===null)return;
     s.title=nv.trim()||s.title;
     saveDB();
+    fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({subtasks:t.subtasks})}).catch(function(){});
     var tree=document.getElementById('tkSubTree');if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
     return;
   }
@@ -7606,6 +7614,8 @@ function tkEditSubTitle(tid,sid){
   var save=function(){
     if(saved)return;saved=true;
     s.title=inp.value.trim()||s.title;saveDB();
+    fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({subtasks:t.subtasks})}).catch(function(){});
     var tree=document.getElementById('tkSubTree');if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
   };
   inp.addEventListener('blur',save);
@@ -7629,6 +7639,8 @@ function tkDelSub(tid,sid){
   var t=_tkFindTask(tid);if(!t)return;
   _tkDelSubFrom(t.subtasks,sid);
   saveDB();
+  fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({subtasks:t.subtasks})}).catch(function(){});
   var tree=document.getElementById('tkSubTree');
   if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
 }
@@ -7640,7 +7652,10 @@ function _toggleTask(tid){
   t.status=(t.status==='done')?'todo':'done';
   t.done=(t.status==='done');
   t.doneAt=t.done?todayStr():'';
-  saveDB();renderTasksPanel();
+  saveDB();
+  fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({status:t.status,done:t.done,doneAt:t.doneAt||null})}).catch(function(){});
+  renderTasksPanel();
 }
 function _deleteTask(tid){tkDeleteTask(tid);}
 
