@@ -55,8 +55,16 @@ router.get('/db', async (req, res) => {
 // PUT /api/data/db
 router.put('/db', async (req, res) => {
   const body = req.body;
-  if (!body || typeof body !== 'object') {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return res.status(400).json({ error: 'داده نامعتبر' });
+  }
+  // Reject payloads that look nothing like a CRM DB (must have at least one known top-level key)
+  const KNOWN_KEYS = ['edits','notes','tags','weekEntries','tasks','notifications','changeLog',
+                      'settings','events','checklist','kpiTargets','salesLog','callLog','visitLog',
+                      '_clientTs','_serverTs','_weDeletedKeys'];
+  const hasKnown = Object.keys(body).some(k => KNOWN_KEYS.includes(k));
+  if (!hasKnown && Object.keys(body).length > 0) {
+    return res.status(400).json({ error: 'ساختار داده نامعتبر' });
   }
 
   // Use a transaction + FOR UPDATE to make conflict check atomic (fixes TOCTOU race)
@@ -200,6 +208,7 @@ router.post('/history/:id/restore', requireManager, async (req, res) => {
        ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
       [JSON.stringify(hist.rows[0].value), req.user.username]
     );
+    console.log(`[data/history restore] id=${id} by=${req.user.username}`);
     return res.json({ ok: true });
   } catch (e) {
     console.error('[data/history restore]', e.message);

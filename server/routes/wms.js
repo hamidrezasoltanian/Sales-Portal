@@ -85,13 +85,13 @@ router.get('/', requireAuth, async (req, res) => {
   try {
     const [products, warehouses, counterparties, lots, transactions, purchaseOrders, recalls] =
       await Promise.all([
-        query('SELECT * FROM wms_products ORDER BY name'),
-        query('SELECT * FROM wms_warehouses ORDER BY name'),
-        query('SELECT * FROM wms_counterparties ORDER BY name'),
-        query('SELECT * FROM wms_lots ORDER BY created_at'),
-        query('SELECT * FROM wms_transactions ORDER BY txn_date DESC'),
-        query('SELECT * FROM wms_purchase_orders ORDER BY created_at DESC'),
-        query('SELECT * FROM wms_recalls ORDER BY created_at DESC'),
+        query('SELECT * FROM wms_products WHERE active = true ORDER BY name'),
+        query('SELECT * FROM wms_warehouses WHERE active = true ORDER BY name'),
+        query('SELECT * FROM wms_counterparties WHERE active = true ORDER BY name'),
+        query('SELECT * FROM wms_lots ORDER BY created_at DESC LIMIT 2000'),
+        query('SELECT * FROM wms_transactions ORDER BY txn_date DESC LIMIT 1000'),
+        query('SELECT * FROM wms_purchase_orders ORDER BY created_at DESC LIMIT 500'),
+        query('SELECT * FROM wms_recalls WHERE status != $1 ORDER BY created_at DESC LIMIT 200', ['resolved']),
       ]);
 
     const settingsRows = await query('SELECT key, value FROM wms_settings');
