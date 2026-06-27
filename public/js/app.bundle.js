@@ -9748,6 +9748,9 @@ function renderManagerPanel(){
         +'<div style="background:#22c55e;height:100%;width:'+Math.min(100,conv)+'%"></div></div>'
         +'<span style="font-size:11px;margin-right:4px">'+conv+'%</span>'
       +'</td>'
+      +'<td style="text-align:center;padding:8px">'
+        +'<button onclick="event.stopPropagation();openExpertReport(\''+m.id+'\')" style="font-size:10px;padding:2px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:5px;cursor:pointer;font-family:inherit">📊 گزارش</button>'
+      +'</td>'
       +'</tr>';
   });
   html+='</tbody></table></div></div>';
@@ -10450,7 +10453,13 @@ function openExpertReport(memberId){
     var totalAmount=entries.reduce(function(s,e){return s+(e.doneAmount||0);},0);
     var calls=entries.filter(function(e){return (e.actionType||'call')==='call';}).length;
     var visits=entries.filter(function(e){return e.actionType==='visit';}).length;
+    var _rptAllMem=((DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS).filter(function(x){return x.active!==false;});
+    var _rptMemOpts=_rptAllMem.map(function(x){return'<option value="'+esc(x.id)+'"'+(x.id===memberId?' selected':'')+'>'+esc(x.name||x.id)+'</option>';}).join('');
     var body='<div style="font-size:12px">';
+    body+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;background:var(--bg-raised);border-radius:8px;padding:8px 12px">';
+    body+='<span style="font-size:11px;font-weight:700;color:var(--text-secondary)">👤 کارشناس:</span>';
+    body+='<select id="rptMember" onchange="openExpertReport(this.value)" style="padding:4px 8px;border:1px solid var(--border-input);border-radius:5px;font-family:inherit;font-size:12px;background:var(--bg-input);color:var(--text-primary)">'+_rptMemOpts+'</select>';
+    body+='</div>';
     body+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">';
     body+='<label style="font-size:11px">از: <input type="text" id="rptFrom" value="'+fromDate+'" readonly class="fd-inp" style="cursor:pointer;padding:4px 8px;border:1px solid var(--border-input);border-radius:5px;font-family:inherit;font-size:11px"></label>';
     body+='<label style="font-size:11px">تا: <input type="text" id="rptTo" value="'+toDate+'" readonly class="fd-inp" style="cursor:pointer;padding:4px 8px;border:1px solid var(--border-input);border-radius:5px;font-family:inherit;font-size:11px"></label>';
