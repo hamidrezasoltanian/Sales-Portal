@@ -88,8 +88,8 @@ router.get('/', requireAuth, async (req, res) => {
         query('SELECT * FROM wms_products WHERE active = true ORDER BY name'),
         query('SELECT * FROM wms_warehouses WHERE active = true ORDER BY name'),
         query('SELECT * FROM wms_counterparties WHERE active = true ORDER BY name'),
-        query('SELECT * FROM wms_lots ORDER BY created_at DESC LIMIT 2000'),
-        query('SELECT * FROM wms_transactions ORDER BY txn_date DESC LIMIT 1000'),
+        query('SELECT * FROM wms_lots WHERE qty > 0 ORDER BY created_at DESC LIMIT 2000'),
+        query('SELECT * FROM wms_transactions ORDER BY txn_date DESC LIMIT 500'),
         query('SELECT * FROM wms_purchase_orders ORDER BY created_at DESC LIMIT 500'),
         query('SELECT * FROM wms_recalls WHERE status != $1 ORDER BY created_at DESC LIMIT 200', ['resolved']),
       ]);

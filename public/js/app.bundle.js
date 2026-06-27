@@ -1491,12 +1491,18 @@ function _renderManagerDash(el){
   var EXPERTS=Object.keys(USERS).filter(function(uid){return uid!=='guest'&&USERS[uid];});
   var statusCounts={};
   var ownerStats={};
+  var totalActive=0;
   EXPERTS.forEach(function(uid){
     ownerStats[uid]={uid:uid,name:USERS[uid],contracts:0,meetings:0,overdue:0,total:0,overdueItems:[]};
   });
+  var atRisk=[];
+  var _cutoffTs=Date.now()-21*24*3600*1000;
+  var _cutoffStr=msToJ(_cutoffTs);
+  var validK=_getAllValidRecKeys?_getAllValidRecKeys():new Set();
 
   _getEditsKeys().forEach(function(k){
     var e=DB.edits[k];var st=e.status||'بدون تماس';
+    if(st!=='غیرفعال')totalActive++;
     statusCounts[st]=(statusCounts[st]||0)+1;
     var ow=e.owner||'';
     if(ow&&ownerStats[ow]){
@@ -1509,6 +1515,17 @@ function _renderManagerDash(el){
         ownerStats[ow].overdueItems.push({recKey:k,fd:fd,name:getRecLabel(k)});
       }
     }
+    // atRisk in same pass
+    if(validK.size&&!validK.has(k))return;
+    if(st!=='قرارداد بسته شد'&&st!=='غیرفعال'){
+      var pot=parseInt(e.potential||1);if(pot<=2){
+        var fd2=e.followupDate||'';
+        if(!fd2||fd2<_cutoffStr){
+          var pts=k.split('_');var tp=pts[0];var id=pts.slice(1).join('_');
+          atRisk.push({recKey:k,rtype:tp,id:id,name:getRecLabel(k),pot:pot,fd:fd2,owner:ow||''});
+        }
+      }
+    }
   });
   EXPERTS.forEach(function(uid){
     var s=ownerStats[uid];
@@ -1519,27 +1536,12 @@ function _renderManagerDash(el){
   var pipelineTotal=Object.values(statusCounts).reduce(function(s,v){return s+v;},0)||1;
   var contracted=statusCounts['قرارداد بسته شد']||0;
   var overdueTotal=EXPERTS.reduce(function(s,u){return s+ownerStats[u].overdue;},0);
-  var totalActive=_getEditsKeys().filter(function(k){var e=DB.edits[k];return e&&e.status&&e.status!=='غیرفعال';}).length;
   var totalCenters=CENTERS.length+Object.values(PC_RAW).reduce(function(s,a){return s+a.length;},0)+(DB.extra||[]).length;
   var _pipelineActive=0;
   STATUS_LIST.forEach(function(st){if(st!=='بدون تماس'&&st!=='غیرفعال'&&st!=='قرارداد بسته شد')_pipelineActive+=statusCounts[st]||0;});
   var _convBase=contracted+_pipelineActive;var _convRate=_convBase>0?Math.round(contracted/_convBase*100):0;
 
-  // مراکز در خطر: P3/P4 با followupDate قدیمی‌تر از ۲۱ روز یا بدون تاریخ
-  var atRisk=[];
-  var _cutoffTs=Date.now()-21*24*3600*1000;
-  var _cutoffStr=msToJ(_cutoffTs);
-  var validK=_getAllValidRecKeys?_getAllValidRecKeys():new Set();
-  _getEditsKeys().forEach(function(k){
-    if(validK.size&&!validK.has(k))return;
-    var e=DB.edits[k];var st=e.status||'بدون تماس';
-    if(st==='قرارداد بسته شد'||st==='غیرفعال')return;
-    var pot=parseInt(e.potential||1);if(pot>2)return;
-    var fd=e.followupDate||'';
-    if(fd&&fd>=_cutoffStr)return; // has a recent followup date — OK
-    var pts=k.split('_');var tp=pts[0];var id=pts.slice(1).join('_');
-    atRisk.push({recKey:k,rtype:tp,id:id,name:getRecLabel(k),pot:pot,fd:fd,owner:e.owner||''});
-  });
+  // مراکز در خطر: computed in first pass above
   atRisk.sort(function(a,b){return b.pot-a.pot||(!a.fd&&b.fd?-1:a.fd&&!b.fd?1:a.fd<b.fd?-1:1);});
 
   // وظایف ارجاع‌شده
@@ -1937,7 +1939,7 @@ function _renderExpertDash(el){
   _collectCenters(CENTERS,'center');
   Object.keys(_PC_CACHE||{}).forEach(function(pv){
     if(pv==='tehran')return;
-    (_PC_CACHE[pv]||[]).forEach(function(r){_collectCenters([r],'pc');});
+    _collectCenters(_PC_CACHE[pv]||[],'pc');
   });
   var _mainIds=new Set(CENTERS.map(function(c){return c.id;}));
   (DB.extra||[]).forEach(function(r){
