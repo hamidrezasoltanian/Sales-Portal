@@ -1635,11 +1635,30 @@ button:active:not(:disabled){transform:scale(.97)}
 /* Row action hover — de-emphasize until hover */
 .row-acts{opacity:.25;transition:opacity .15s;white-space:nowrap;display:inline-flex;gap:3px}
 tr:hover .row-acts,.row-acts:focus-within{opacity:1}
-/* Mobile: hide sidebar, restore full width */
-@media(max-width:768px){
+/* Tablet ≤900px: hide sidebar — content fills full width */
+@media(max-width:900px){
   .sidebar{display:none!important}
   .content-area{margin-right:0!important}
   .top-bar{margin-right:0!important}
+}
+/* Tablet-specific province page fixes */
+@media(max-width:900px){
+  /* Collapse verbose filter labels — saves space */
+  .filters-bar .fl{display:none!important}
+  /* Show the filter-collapse toggle button when rendered visible */
+  #filterToggleBtn{display:block}
+  /* Quick filters: single scrollable row, no wrapping */
+  #quickFilters{overflow-x:auto;flex-wrap:nowrap!important;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding:4px 8px}
+  #quickFilters::-webkit-scrollbar{display:none}
+  /* Province grid: 3 cols on mid-tablet, 2 on small */
+  .prov-grid{grid-template-columns:repeat(auto-fill,minmax(180px,1fr))}
+  /* Dashboard KPI rows — responsive via class */
+  .dash-kpi-row{grid-template-columns:repeat(2,1fr)!important}
+  .dash-kpi-2col{grid-template-columns:1fr!important}
+  /* Filters bar: compact at tablet */
+  .filters-bar select,.filters-bar input[type=text]{font-size:11px;padding:4px 6px}
+  /* allCentersToggle buttons: compact */
+  #allCentersToggle .vb{font-size:11px;padding:4px 7px}
 }
 
 /* ── Quick followup date buttons ─────────────────────────────────────────── */

@@ -1252,10 +1252,22 @@ function openProvince(provId){
   if(_isExpert()){['fOwner','lblOw'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});}
   var qf=document.getElementById('quickFilters');if(qf)qf.style.display='flex';
   ['srch','fPot','fStatus','fLead','fOwner','fTag'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
+  // On tablet: collapse filter section by default, show toggle button
+  var _ftb=document.getElementById('filterToggleBtn');var _fcol=document.getElementById('filterCollapsible');
+  if(window.innerWidth<=900){if(_ftb)_ftb.style.display='block';if(_fcol){_fcol.style.display='none';if(_ftb)_ftb.textContent='🔽 فیلترها';}}
+  else{if(_ftb)_ftb.style.display='none';if(_fcol)_fcol.style.display='contents';}
   rebuildFilters();
   renderProvTable();
 }
 
+function toggleFiltersCollapse(){
+  var col=document.getElementById('filterCollapsible');
+  var btn=document.getElementById('filterToggleBtn');
+  if(!col)return;
+  var hidden=col.style.display==='none';
+  col.style.display=hidden?'contents':'none';
+  if(btn)btn.textContent=hidden?'🔼 فیلترها':'🔽 فیلترها';
+}
 function backToProvinces(){
   _currentProvId=null;
   try{localStorage.removeItem('_spid');}catch(e){}
@@ -1541,7 +1553,7 @@ function _renderManagerDash(el){
   doneTasks.sort(function(a,b){return a.doneAt>b.doneAt?-1:1;});
 
   // ── ردیف ۱: آمار کلی ──
-  var R1='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px">';
+  var R1='<div class="dash-kpi-row" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px">';
   R1+=_dashKpiCard(totalCenters,'کل مراکز','🏥','#0ea5e9','در '+getAllProvinces().length+' استان');
   R1+=_dashKpiCard(totalActive,'مراکز فعال','📞','#f59e0b','از کل مراکز');
   R1+=_dashKpiCard(overdueTotal,'پیگیری معوق','🔴','#ef4444',EXPERTS.filter(function(u){return ownerStats[u].overdue>0;}).length+' کارشناس');
@@ -1549,7 +1561,7 @@ function _renderManagerDash(el){
   R1+='</div>';
 
   // ── ردیف ۲: معوقات per expert + مراکز در خطر ──
-  var R2='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">';
+  var R2='<div class="dash-kpi-2col" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">';
 
   // معوقات به تفکیک کارشناس
   var sortedExp=EXPERTS.slice().sort(function(a,b){return ownerStats[b].overdue-ownerStats[a].overdue;});
@@ -1599,7 +1611,7 @@ function _renderManagerDash(el){
   R2+='</div></div>';
 
   // ── ردیف ۳: وظایف ارجاع‌شده + pipeline ──
-  var R3='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  var R3='<div class="dash-kpi-2col" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
 
   // وظایف ارجاع‌شده
   R3+='<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px">'
@@ -1754,14 +1766,14 @@ function _renderExpertUserPanel(el){
   }
 
   // KPI ردیف
-  html+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">';
+  html+='<div class="dash-kpi-row" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">';
   html+=_dashKpiCard(callsWeek,'تماس این هفته','📞','#0ea5e9','هدف: '+callTarget,callPct);
   html+=_dashKpiCard(visitsWeek,'ویزیت این هفته','🚗','#8b5cf6','هدف: '+visitTarget,visitPct);
   html+=_dashKpiCard(contractsMonth,'قرارداد این ماه','✅','#22c55e','هدف: '+contractTarget,contractPct);
   html+='</div>';
 
   // برنامه امروز + pipeline
-  html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+  html+='<div class="dash-kpi-2col" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
 
   // برنامه امروز
   html+='<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px 12px">'
