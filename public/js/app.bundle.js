@@ -1058,11 +1058,38 @@ function _buildPCCache(){
   if(_chg)try{localStorage.setItem('_cnc',JSON.stringify(_CNC));}catch(e){}
 }function getProvCenters(provId){
   _buildPCCache();
+  var overrides=DB.provOverrides||{};
+  var hasOverrides=Object.keys(overrides).length>0;
   var useHardcoded=!(DB.hiddenProvs&&DB.hiddenProvs[provId]);
-  var base=useHardcoded?(_PC_CACHE[provId]||[]):[];
-  var extras=(DB.extra||[]).filter(function(c){return c.province_id===provId;});
-  if(!extras.length)return base; // no copy needed
-  return base.concat(extras);
+  var base=useHardcoded?(_PC_CACHE[provId]||[]).filter(function(c){
+    if(!hasOverrides)return true;
+    var rt=(provId==='tehran'?'center':'pc')+'_'+c.id;
+    return !overrides[rt]||overrides[rt]===provId;
+  }):[];
+  var extras=(DB.extra||[]).filter(function(c){
+    if(hasOverrides){var ek='extra_'+c.id;if(overrides[ek]&&overrides[ek]!==provId)return false;if(overrides[ek]===provId)return true;}
+    return c.province_id===provId;
+  });
+  // Centers from other provinces moved here via override
+  var movedIn=[];
+  if(hasOverrides){
+    Object.keys(overrides).forEach(function(rk){
+      if(overrides[rk]!==provId)return;
+      var parts=rk.split('_');var rt=parts[0];var cid=parts.slice(1).join('_');
+      if(rt==='center'){
+        var found=(window.CENTERS||[]).find(function(x){return String(x.id)===cid;});
+        if(found&&provId!=='tehran')movedIn.push(Object.assign({},found,{province_id:provId,rtype:'center'}));
+      } else if(rt==='pc'){
+        Object.keys(_PC_CACHE).forEach(function(pid){
+          if(pid===provId)return;
+          var fc=(_PC_CACHE[pid]||[]).find(function(x){return x.id===cid;});
+          if(fc)movedIn.push(Object.assign({},fc,{province_id:provId}));
+        });
+      }
+    });
+  }
+  if(!extras.length&&!movedIn.length)return base;
+  return base.concat(extras).concat(movedIn);
 }
 function clearPCCache(){_PC_CACHE=null;}
 function isStalled(type,id){
@@ -2618,6 +2645,13 @@ function getFiltered(){
     if(_quickFilter==='noowner'){return !(e.owner||r.owner);}
     if(_quickFilter==='stalled')return isStalled(rtype,r.id);
     if(_quickFilter==='pot1'){return (e.potential||r.potential)==1;}
+    if(_quickFilter==='inweek'){
+      var _rk=rtype+'_'+r.id;
+      return Object.keys(DB.weekEntries||{}).some(function(k){
+        var we=DB.weekEntries[k];
+        return (we.rtype===rtype&&we.rid===String(r.id))||(we.recKey&&(we.recKey===_rk||we.recKey.indexOf(':::'+rtype+':::'+r.id)>=0));
+      });
+    }
     return true;
   });
 }
@@ -4441,6 +4475,7 @@ function openCenterModal(rtype,id){
     +'<button style="background:#faf5ff;color:#7c3aed;border:1px solid #d8b4fe;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openPreCallBrief(\''+rtype+'\',' +'\''+r.id+'\')">🎯 خلاصه</button>'
     +'<button style="background:#f0f9ff;color:#0369a1;border:1px solid #7dd3fc;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openCenterAudit(\''+recK(rtype,r.id)+'\',\''+esc(displayName)+'\')">📋 تاریخچه</button>'
     +'<button style="background:#f0fdf4;color:#15803d;border:1px solid #86efac;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openMergeCenterModal(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">🔀 ادغام</button>'
+    +(_isManager()?'<button style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openChangeProvinceModal(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">🗺 تغییر استان</button>':'')
     +'<button class="btn-secondary" onclick="closeModal(\'cm_'+id+'\')">بستن</button>'
     +'<button class="btn-primary" onclick="openAssignWeekForCenter(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">📋 اضافه به هفته</button>';
   // ── مطالبات section ──
@@ -4533,6 +4568,38 @@ function doMergeCenter(srcType,srcId,srcName,tgtType,tgtId,tgtName){
     else showToast('\u274C خطا: '+(d.error||'نامشخص'));
   })
   .catch(function(){showToast('\u274C خطای ارتباط');});
+}
+
+function openChangeProvinceModal(rtype,id,name){
+  if(!_isManager()){showToast('⚠ فقط مدیران دسترسی دارند');return;}
+  _buildPCCache();
+  var DB_provOverrides=DB.provOverrides||{};
+  var rkey=rtype+'_'+id;
+  var currentPO=DB_provOverrides[rkey]||'';
+  var provList=getAllProvinces();
+  var provOpts=provList.map(function(p){return '<option value="'+p.id+'"'+(currentPO===p.id?' selected':'')+'>'+esc(p.name)+'</option>';}).join('');
+  var body='<div style="font-size:12px">'
+    +'<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:8px 12px;margin-bottom:12px">⚠ تغییر استان در دیتابیس دشما ذخیره می‌شود.</div>'
+    +'<label style="display:block;margin-bottom:8px">استان جدید برای <strong>'+esc(name)+'</strong>:</label>'
+    +'<select id="_cprovSel" style="width:100%;padding:8px;border:1px solid var(--border-input);border-radius:6px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)">'
+    +'<option value="">— بدون تغییر (پیش‌فرض) —</option>'
+    +provOpts
+    +'</select></div>';
+  openModal('_cprovModal','🗺 تغییر استان',body,'<button class="btn-secondary" onclick="closeModal(\'_cprovModal\')">لغو</button><button class="btn-primary" onclick="_doChangeProvince(\''+rtype+'\',\''+id+'\')">\u0630\u062e\u06cc\u0631\u0647 \u2705</button>',{lg:false});
+}
+function _doChangeProvince(rtype,id){
+  var sel=document.getElementById('_cprovSel');
+  if(!sel)return;
+  var newProv=sel.value;
+  DB.provOverrides=DB.provOverrides||{};
+  var rkey=rtype+'_'+id;
+  if(newProv)DB.provOverrides[rkey]=newProv;
+  else delete DB.provOverrides[rkey];
+  clearPCCache();
+  saveDB();
+  closeModal('_cprovModal');
+  showToast('\u2705 \u0627\u0633\u062a\u0627\u0646 \u062a\u063a\u06cc\u06cc\u0631 \u06a9\u0631\u062f');
+  setTimeout(function(){renderDashboard();if(currentTab==='provinces')renderTable();},300);
 }
 
 function confirmDeleteCenter(rtype,id,name){
@@ -6829,7 +6896,7 @@ function sendReminderToExpert(expertUser){
 
 
 // ════════════════════════ CHANGE LOG PAGE ════════════════════
-var _clFilters = {date:'today', owner:'', search:'', field:''};
+var _clFilters = {date:'today', owner:'', search:'', field:'', from:'', to:''};
 var _clAutoRefreshTimer = null;
 
 function renderChangelog(){
@@ -6861,6 +6928,10 @@ function renderChangelog(){
       var todayP = today.split('/').map(Number);
       if(jd[0] !== todayP[0] || jd[1] !== todayP[1]) return false;
     }
+    if(_clFilters.date === 'custom'){
+      if(_clFilters.from && jdStr < _clFilters.from) return false;
+      if(_clFilters.to && jdStr > _clFilters.to) return false;
+    }
     // فیلتر کارشناس
     if(_clFilters.owner && l.by !== _clFilters.owner) return false;
     // فیلتر فیلد
@@ -6885,12 +6956,14 @@ function renderChangelog(){
     + '<div class="cl-head">'
     + '<strong style="font-size:14px;white-space:nowrap">🗃 لاگ تغییرات</strong>'
     + '<div class="cl-filters">'
-    + '<select class="cl-filter" onchange="_clFilters.date=this.value;renderChangelog()">'
+    + '<select class="cl-filter" onchange="_clFilters.date=this.value;if(this.value!==\'custom\'){_clFilters.from=\'\';_clFilters.to=\'\';} renderChangelog()">'
     + '<option value="today"'+(  _clFilters.date==='today'?' selected':'')+'>امروز</option>'
     + '<option value="week"'+(_clFilters.date==='week'?' selected':'')+'>۷ روز اخیر</option>'
     + '<option value="month"'+(_clFilters.date==='month'?' selected':'')+'>این ماه</option>'
     + '<option value="all"'+(_clFilters.date==='all'?' selected':'')+'>همه</option>'
+    + '<option value="custom"'+(_clFilters.date==='custom'?' selected':'')+'>بازه دلخواه</option>'
     + '</select>'
+    + (_clFilters.date==='custom'?'<input type="text" class="cl-filter fd-inp" id="clFrom" value="'+esc(_clFilters.from||'')+'" placeholder="از تاریخ" readonly style="cursor:pointer;min-width:90px"><input type="text" class="cl-filter fd-inp" id="clTo" value="'+esc(_clFilters.to||'')+'" placeholder="تا تاریخ" readonly style="cursor:pointer;min-width:90px">':'')
     + '<select class="cl-filter" onchange="_clFilters.owner=this.value;renderChangelog()">'
     + '<option value="">همه کارشناسان</option>'
     + Object.keys(USERS).filter(function(u){return u!=='guest';}).map(function(u){
@@ -6944,6 +7017,16 @@ function renderChangelog(){
   }
   html += '</div>';
   el.innerHTML = html;
+
+  // Wire up custom date pickers
+  if(_clFilters.date==='custom'){
+    setTimeout(function(){
+      var fi=document.getElementById('clFrom');
+      var ti=document.getElementById('clTo');
+      if(fi)openJDP(fi,function(v){_clFilters.from=v;fi.value=v;renderChangelog();});
+      if(ti)openJDP(ti,function(v){_clFilters.to=v;ti.value=v;renderChangelog();});
+    },50);
+  }
 
   // auto-refresh every 30s
   clearTimeout(_clAutoRefreshTimer);
@@ -10117,7 +10200,7 @@ function openManagerDrilldown(memberId){
       var doneEntries=Object.keys(DB.weekEntries||{}).map(function(k){return DB.weekEntries[k];})
         .filter(function(we){var r2=we.rtype||(we.recKey?we.recKey.split('_')[0]:'');var i2=we.rid||(we.recKey?we.recKey.split('_')[1]:'');return r2===rt&&i2===c.id&&we.done&&(we.doneNote||we.doneResult||we.doneObstacle||we.doneAmount);})
         .sort(function(a,b){return (b.doneDate||'')<(a.doneDate||'')?-1:1;}).slice(0,5);
-      centers.push({rtype:rt,id:c.id,name:e.nameOverride||c.name||'?',status:e.status||'بدون تماس',followupDate:fd,isOverdue:isOverdue,potential:e.potential||c.potential||4,noteArr:noteArr,recentLog:recentLog,rkey:rkey,doneEntries:doneEntries});
+      centers.push({rtype:rt,id:c.id,name:e.nameOverride||c.name||'?',status:e.status||'بدون تماس',lead:e.lead||c.lead||'سرنخ',followupDate:fd,isOverdue:isOverdue,potential:e.potential||c.potential||4,noteArr:noteArr,recentLog:recentLog,rkey:rkey,doneEntries:doneEntries});
     });
   });
   centers.sort(function(a,b){
@@ -10131,12 +10214,47 @@ function openManagerDrilldown(memberId){
   var stColors={'بدون تماس':'#94a3b8','تماس اولیه':'#0ea5e9','ملاقات انجام شد':'#f59e0b','پیشنهاد ارسال شد':'#0284c7','قرارداد بسته شد':'#22c55e','غیرفعال':'#dc2626'};
   var grouped={};
   centers.forEach(function(c){grouped[c.status]=(grouped[c.status]||0)+1;});
+  // ── قیف فروش (لید→سرنخ→فرصت→مشتری) ──
+  var funnelStages=['لید','سرنخ','فرصت','مشتری'];
+  var funnelColors={'لید':'#f59e0b','سرنخ':'#0ea5e9','فرصت':'#8b5cf6','مشتری':'#22c55e'};
+  var funnelCounts={};
+  funnelStages.forEach(function(s){funnelCounts[s]=0;});
+  centers.forEach(function(c){if(funnelCounts[c.lead]!==undefined)funnelCounts[c.lead]++;});
+  var totalForFunnel=centers.length||1;
   var body='<div style="font-size:12px">';
-  body+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">';
+  // status badges
+  body+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">';
   Object.keys(grouped).forEach(function(st){
     body+='<span style="padding:3px 10px;border-radius:20px;font-size:11px;background:'+(stColors[st]||'#e2e8f0')+'22;color:'+(stColors[st]||'#555')+';border:1px solid '+(stColors[st]||'#e2e8f0')+'44">'+esc(st)+': '+grouped[st]+'</span>';
   });
   body+='</div>';
+  // Sales funnel
+  body+='<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:12px">';
+  body+='<div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">📊 قیف فروش ('+centers.length+' مرکز)</div>';
+  body+='<div style="display:flex;gap:0;align-items:stretch">';
+  funnelStages.forEach(function(s,idx){
+    var cnt=funnelCounts[s]||0;
+    var pct=Math.round(cnt/totalForFunnel*100);
+    var clr=funnelColors[s]||'#94a3b8';
+    var arrow=idx<funnelStages.length-1?'<div style="display:flex;align-items:center;color:var(--text-muted);font-size:16px;padding:0 2px">›</div>':'';
+    body+='<div style="flex:1;text-align:center;padding:6px 4px;border:1px solid '+clr+'33;border-radius:6px;background:'+clr+'11;margin-left:2px">';
+    body+='<div style="font-size:16px;font-weight:700;color:'+clr+'">'+cnt+'</div>';
+    body+='<div style="font-size:10px;color:'+clr+';font-weight:600">'+esc(s)+'</div>';
+    body+='<div style="font-size:10px;color:var(--text-muted)">'+pct+'٪</div>';
+    body+='</div>';
+    if(arrow)body+=arrow;
+  });
+  body+='</div>';
+  // نرخ تبدیل
+  var lid=funnelCounts['لید']||0;var sar=funnelCounts['سرنخ']||0;var fur=funnelCounts['فرصت']||0;var msh=funnelCounts['مشتری']||0;
+  body+='<div style="font-size:10px;color:var(--text-muted);margin-top:6px;display:flex;gap:10px;flex-wrap:wrap">';
+  if(lid)body+='<span>لید→سرنخ: <b style="color:#0ea5e9">'+Math.round(sar/(lid+sar+fur+msh)*100||0)+'٪</b></span>';
+  if(sar)body+='<span>سرنخ→فرصت: <b style="color:#8b5cf6">'+Math.round(fur/(sar+fur+msh)*100||0)+'٪</b></span>';
+  if(fur)body+='<span>فرصت→مشتری: <b style="color:#22c55e">'+Math.round(msh/(fur+msh)*100||0)+'٪</b></span>';
+  body+='</div>';
+  body+='</div>';
+  // Lead conversion timing
+  body+=renderLeadTimingHtml(memberId);
   if(!centers.length){
     body+='<div style="text-align:center;padding:30px;color:var(--text-muted)">مرکزی تخصیص داده نشده</div>';
   } else {
@@ -10329,6 +10447,36 @@ function openExpertReport(memberId){
     body+='<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#16a34a">'+visits+'</div><div style="font-size:11px;color:#16a34a">ملاقات</div></div>';
     body+='<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#92400e">'+(totalAmount?totalAmount+'M':'—')+'</div><div style="font-size:11px;color:#92400e">مبلغ (M)</div></div>';
     body+='</div>';
+    // قیف فروش برای این کارشناس
+    body+='<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:12px">';
+    body+='<div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:6px">📊 قیف فروش (وضعیت فعلی مراکز)</div>';
+    var _fStages=['لید','سرنخ','فرصت','مشتری'];
+    var _fColors={'لید':'#f59e0b','سرنخ':'#0ea5e9','فرصت':'#8b5cf6','مشتری':'#22c55e'};
+    var _fCnts={};_fStages.forEach(function(s){_fCnts[s]=0;});
+    _buildPCCache();
+    getAllProvinces().forEach(function(p){
+      var rt=getProvType(p.id);
+      getProvCenters(p.id).forEach(function(c){
+        var e=getE(rt,c.id);
+        if((e.owner||c.owner||'')!==memberId)return;
+        var lead=e.lead||c.lead||'سرنخ';
+        if(_fCnts[lead]!==undefined)_fCnts[lead]++;
+      });
+    });
+    var _fTotal=Object.values(_fCnts).reduce(function(a,b){return a+b;},0)||1;
+    body+='<div style="display:flex;gap:2px;align-items:stretch">';
+    _fStages.forEach(function(s){
+      var cnt=_fCnts[s]||0;var pct=Math.round(cnt/_fTotal*100);var clr=_fColors[s];
+      body+='<div style="flex:1;text-align:center;padding:5px 3px;border:1px solid '+clr+'33;border-radius:5px;background:'+clr+'11">';
+      body+='<div style="font-size:15px;font-weight:700;color:'+clr+'">'+cnt+'</div>';
+      body+='<div style="font-size:10px;font-weight:600;color:'+clr+'">'+esc(s)+'</div>';
+      body+='<div style="font-size:10px;color:var(--text-muted)">'+pct+'٪</div>';
+      body+='</div>';
+      if(s!=='مشتری')body+='<div style="display:flex;align-items:center;color:var(--text-muted);font-size:14px;padding:0 1px">›</div>';
+    });
+    body+='</div>';
+    body+='</div>';
+    body+=renderLeadTimingHtml(memberId);
     body+='<div id="rptBody">'+buildExpertReportHtml(memberId,fromDate,toDate)+'</div>';
     body+='</div>';
     var notifFoot='<button class="btn-secondary" onclick="closeModal(\'expertReport\')">بستن</button>';
@@ -10380,6 +10528,70 @@ function buildExpertReportHtml(memberId,fromDate,toDate){
     html+='</tr>';
   });
   html+='</tbody></table></div>';
+  return html;
+}
+
+function computeLeadStageTiming(memberId){
+  // Returns per-stage average days for this expert, using changeLog transitions
+  _buildPCCache();
+  var STAGES=['لید','سرنخ','فرصت','مشتری'];
+  var stagePairs=[['لید','سرنخ'],['سرنخ','فرصت'],['فرصت','مشتری']];
+  var timings={'لید→سرنخ':[],'سرنخ→فرصت':[],'فرصت→مشتری':[]};
+  var centerLogs={};
+  // Build per-center lead change log for centers owned by this member
+  getAllProvinces().forEach(function(p){
+    var rt=getProvType(p.id);
+    getProvCenters(p.id).forEach(function(c){
+      var e=getE(rt,c.id);
+      if((e.owner||c.owner||'')!==memberId)return;
+      var rkey=rt+'_'+c.id;
+      var logs=(DB.changeLog||[]).filter(function(l){return l.rkey===rkey&&l.field==='lead'&&l.at;})
+        .map(function(l){return{at:new Date(l.at).getTime(),val:l.val};})
+        .sort(function(a,b){return a.at-b.at;});
+      if(logs.length)centerLogs[rkey]=logs;
+    });
+  });
+  // For each center, find transition times
+  Object.keys(centerLogs).forEach(function(rkey){
+    var logs=centerLogs[rkey];
+    stagePairs.forEach(function(pair){
+      var fromStage=pair[0],toStage=pair[1];
+      var key=fromStage+'→'+toStage;
+      var enterFrom=null;
+      logs.forEach(function(l){
+        if(l.val===fromStage)enterFrom=l.at;
+        else if(l.val===toStage&&enterFrom){
+          timings[key].push(Math.round((l.at-enterFrom)/(86400*1000)));
+          enterFrom=null;
+        }
+      });
+    });
+  });
+  var result={};
+  Object.keys(timings).forEach(function(k){
+    var arr=timings[k];
+    result[k]=arr.length?Math.round(arr.reduce(function(a,b){return a+b;},0)/arr.length):null;
+    result[k+'_count']=arr.length;
+  });
+  return result;
+}
+
+function renderLeadTimingHtml(memberId){
+  var t=computeLeadStageTiming(memberId);
+  var pairs=[['لید→سرنخ','#f59e0b→#0ea5e9','#f59e0b'],['سرنخ→فرصت','#0ea5e9→#8b5cf6','#0ea5e9'],['فرصت→مشتری','#8b5cf6→#22c55e','#8b5cf6']];
+  var html='<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:12px">';
+  html+='<div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">⏱ میانگین زمان تبدیل (روز)</div>';
+  html+='<div style="display:flex;gap:8px;flex-wrap:wrap">';
+  pairs.forEach(function(p){
+    var key=p[0];var clr=p[2];
+    var days=t[key];var cnt=t[key+'_count']||0;
+    html+='<div style="flex:1;min-width:90px;border:1px solid '+clr+'33;border-radius:6px;padding:7px 10px;background:'+clr+'0d;text-align:center">';
+    html+='<div style="font-size:14px;font-weight:700;color:'+clr+'">'+(days!==null?days+' روز':'—')+'</div>';
+    html+='<div style="font-size:10px;color:var(--text-muted)">'+esc(key)+'</div>';
+    html+='<div style="font-size:10px;color:var(--text-muted)">'+cnt+' نمونه</div>';
+    html+='</div>';
+  });
+  html+='</div></div>';
   return html;
 }
 
@@ -12536,6 +12748,42 @@ function renderKPIPanel(){
     +'</div>'
     // forecast row
     +(data.dayElapsed>0&&_kpiMonth===currentJMonth()?'<div style="width:100%;margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.15);font-size:11px;color:rgba(255,255,255,.7);display:flex;gap:16px;flex-wrap:wrap">'      +'<span>📈 پیش‌بینی پایان ماه: <strong style="color:#fbbf24">'+Math.round(data.forecast.overall||0)+'</strong> / 100</span>'      +'<span>⏱ '+data.dayElapsed+' روز کاری گذشته از '+data.dayTotal+'</span>'      +'</div>':'')    +'</div>';
+
+  // ── قیف فروش در KPI
+  (function(){
+    var FSTAGES=['لید','سرنخ','فرصت','مشتری'];
+    var FCOLORS={'لید':'#f59e0b','سرنخ':'#0ea5e9','فرصت':'#8b5cf6','مشتری':'#22c55e'};
+    var fCnts={};FSTAGES.forEach(function(s){fCnts[s]=0;});
+    _buildPCCache();
+    getAllProvinces().forEach(function(p){
+      var rt=getProvType(p.id);
+      getProvCenters(p.id).forEach(function(c){
+        var e=getE(rt,c.id);
+        if((e.owner||c.owner||'')!==_kpiUser)return;
+        var lead=e.lead||c.lead||'سرنخ';
+        if(fCnts[lead]!==undefined)fCnts[lead]++;
+      });
+    });
+    var fTotal=Object.values(fCnts).reduce(function(a,b){return a+b;},0)||1;
+    html+='<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">';
+    // Funnel
+    html+='<div style="flex:1;min-width:200px;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:10px 14px">';
+    html+='<div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:7px">📊 قیف فروش</div>';
+    html+='<div style="display:flex;gap:2px;align-items:stretch">';
+    FSTAGES.forEach(function(s,idx){
+      var cnt=fCnts[s]||0;var pct=Math.round(cnt/fTotal*100);var clr=FCOLORS[s];
+      html+='<div style="flex:1;text-align:center;padding:6px 3px;border:1px solid '+clr+'33;border-radius:5px;background:'+clr+'0d">';
+      html+='<div style="font-size:16px;font-weight:700;color:'+clr+'">'+cnt+'</div>';
+      html+='<div style="font-size:10px;font-weight:600;color:'+clr+'">'+esc(s)+'</div>';
+      html+='<div style="font-size:10px;color:var(--text-muted)">'+pct+'٪</div>';
+      html+='</div>';
+      if(idx<FSTAGES.length-1)html+='<div style="display:flex;align-items:center;color:var(--text-muted);font-size:13px;padding:0 1px">›</div>';
+    });
+    html+='</div></div>';
+    // Lead timing
+    html+=renderLeadTimingHtml(_kpiUser);
+    html+='</div>';
+  })();
 
   // ── KPI Cards
   // find best and worst KPI indices
