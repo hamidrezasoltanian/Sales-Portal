@@ -4439,24 +4439,32 @@ function openCenterModal(rtype,id){
   _recentCenters.unshift({key:_rcKey,rtype:rtype,id:id,name:_getCenterName(rtype,id),ts:Date.now()});
   if(_recentCenters.length>8)_recentCenters=_recentCenters.slice(0,8);
   var prov=_currentProvId;
-  if(!prov){
-    // باید استان را پیدا کنیم
-    getAllProvinces().some(function(p){
-      var pt=getProvType(p.id);
-      if(pt===rtype||rtype==='center'&&p.id==='tehran'){
-        var c=getProvCenters(p.id).find(function(x){return String(x.id)===String(id);});
-        if(c){prov=p.id;return true;}
-      }else if(pt==='pc'&&rtype==='pc'){
-        var c2=getProvCenters(p.id).find(function(x){return String(x.id)===String(id);});
-        if(c2){prov=p.id;return true;}
-      }
-      return false;
-    });
-  }
-  // For PC centers: ID encodes the province (format: 'provId||n') — use it directly
+  // For PC centers: ID encodes the province (format: 'provId||n') — extract first
   if(rtype==='pc'&&typeof id==='string'&&id.indexOf('||')>=0){
-    var _pcProv=id.split('||')[0];
-    if(_pcProv&&_pcProv!==prov){prov=_pcProv;}
+    prov=id.split('||')[0]||prov;
+  }
+  if(!prov){
+    // Search PC cache FIRST (before DB.extra) to avoid ID collisions with extra centers
+    if(rtype==='pc'){
+      _buildPCCache();
+      Object.keys(_PC_CACHE||{}).some(function(pid){
+        if(pid==='tehran')return false;
+        var found=(_PC_CACHE[pid]||[]).find(function(x){return String(x.id)===String(id);});
+        if(found){prov=pid;return true;}
+        return false;
+      });
+    }
+    if(!prov){
+      // Fall back to full province search (includes DB.extra)
+      getAllProvinces().some(function(p){
+        var pt=getProvType(p.id);
+        if(pt===rtype||rtype==='center'&&p.id==='tehran'){
+          var c=getProvCenters(p.id).find(function(x){return String(x.id)===String(id);});
+          if(c){prov=p.id;return true;}
+        }
+        return false;
+      });
+    }
   }
   var centers=getProvCenters(prov||'tehran');
   var r=centers.find(function(x){return String(x.id)===String(id);});
