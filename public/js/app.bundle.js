@@ -10829,7 +10829,7 @@ function openExpertReport(memberId){
   // Compute default date range: first and last day of current month
   var monParts=mon.split('/');
   var fromDefault=monParts[0]+'/'+monParts[1]+'/01';
-  var lastDay=jMonthDays(parseInt(monParts[0]),parseInt(monParts[1]));
+  var lastDay=jDIM(parseInt(monParts[0]),parseInt(monParts[1]));
   var toDefault=monParts[0]+'/'+monParts[1]+'/'+p2(lastDay);
   function buildReport(fromDate,toDate){
     var entries=Object.keys(DB.weekEntries||{}).map(function(k){return DB.weekEntries[k];})
