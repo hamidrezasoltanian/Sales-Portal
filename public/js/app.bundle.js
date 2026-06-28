@@ -9420,7 +9420,16 @@ function openSettings(){
       +'</div>';
   }).join('');
 
-  var body='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px">'
+  var body='<div style="margin-bottom:14px;background:linear-gradient(135deg,#f0f9ff,#faf5ff);border:1px solid #bae6fd;border-radius:10px;padding:12px 16px">'
+    +'<div style="font-size:11px;font-weight:700;color:#0c4a6e;margin-bottom:10px">⚡ دسترسی سریع به تنظیمات</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px">'
+    +'<button onclick="closeModal(\'settingsModal\');openUserMgmt()" style="display:flex;flex-direction:column;align-items:center;gap:3px;background:#fff;border:1px solid #c7d2fe;border-radius:8px;padding:8px;cursor:pointer;font-size:11px;font-family:inherit;color:#4338ca">👥<span>مدیریت کاربران</span></button>'
+    +(_isManager()?'<button onclick="switchTab(\'kpi\');closeModal(\'settingsModal\')" style="display:flex;flex-direction:column;align-items:center;gap:3px;background:#fff;border:1px solid #bbf7d0;border-radius:8px;padding:8px;cursor:pointer;font-size:11px;font-family:inherit;color:#16a34a">📊<span>پنل KPI</span></button>':'')
+    +'<button onclick="openTkColumnsModal();closeModal(\'settingsModal\')" style="display:flex;flex-direction:column;align-items:center;gap:3px;background:#fff;border:1px solid #fde68a;border-radius:8px;padding:8px;cursor:pointer;font-size:11px;font-family:inherit;color:#92400e">📌<span>ستون‌های وظایف</span></button>'
+    +(_isManager()?'<button onclick="closeModal(\'settingsModal\');openDailyMonitor()" style="display:flex;flex-direction:column;align-items:center;gap:3px;background:#fff;border:1px solid #fbcfe8;border-radius:8px;padding:8px;cursor:pointer;font-size:11px;font-family:inherit;color:#9d174d">📋<span>گزارش روزانه</span></button>':'')
+    +(_isManager()?'<button onclick="closeModal(\'settingsModal\');openOverdueList()" style="display:flex;flex-direction:column;align-items:center;gap:3px;background:#fff;border:1px solid #fca5a5;border-radius:8px;padding:8px;cursor:pointer;font-size:11px;font-family:inherit;color:#991b1b">⚠️<span>معوقات</span></button>':'')
+    +'</div></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px">'
     +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">نام شرکت</label>'
     +'<input id="stgCompanyName" class="ed-inp" style="width:100%" value="'+esc(companyName)+'" placeholder="نام شرکت"></div>'
     +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">توضیحات/اطلاعات شرکت</label>'
@@ -9544,6 +9553,28 @@ function openSettings(){
     + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
     + '<input type="checkbox" id="stgNtGeneral" style="accent-color:var(--brand)" ' + _npChk('general') + '>📩 پیام‌های مستقیم مدیر</label>'
     + '</div></div>';
+  // ── KPI targets quick-access (manager only)
+  if(_isManager()){
+    var _kpiExperts=(typeof umGetActive==='function'?umGetActive():[]).filter(function(m){return m.id!=='guest'&&m.role!=='مدیر'&&m.role!=='سوپر ادمین';});
+    body+='<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">';
+    body+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">';
+    body+='<div><div style="font-size:12px;font-weight:700;color:var(--text-primary)">🎯 اهداف KPI کارشناسان</div>';
+    body+='<div style="font-size:11px;color:var(--text-muted)">تنظیم اهداف ماهانه تماس، ویزیت و فروش برای هر کارشناس</div></div>';
+    body+='<button onclick="switchTab(\'kpi\');closeModal(\'settingsModal\')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:11px;font-family:inherit">📊 رفتن به KPI</button>';
+    body+='</div>';
+    body+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px">';
+    _kpiExperts.forEach(function(m){
+      var t=(typeof getKPITarget==='function')?getKPITarget(m.id,currentJMonth()):{callsPerDay:10,visitsPerWeek:5};
+      body+='<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:8px 10px">';
+      body+='<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">';
+      body+='<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+(m.color||'#94a3b8')+';flex-shrink:0"></span>';
+      body+='<span style="font-size:11px;font-weight:700;color:var(--text-primary)">'+esc(m.name)+'</span></div>';
+      body+='<div style="font-size:10px;color:var(--text-muted);margin-bottom:6px">📞 '+t.callsPerDay+'/روز  •  🚗 '+t.visitsPerWeek+'/هفته</div>';
+      body+='<button onclick="closeModal(\'settingsModal\');openKPITargets(\''+m.id+'\',\''+currentJMonth()+'\')" style="width:100%;background:var(--brand);color:#fff;border:none;border-radius:5px;padding:4px 8px;cursor:pointer;font-size:10px;font-family:inherit">🎯 تنظیم هدف ماه جاری</button>';
+      body+='</div>';
+    });
+    body+='</div></div>';
+  }
   // ── Onboarding tutorial section
   var _obIsDisabled = DB.settings&&DB.settings.onboardingDisabled&&DB.settings.onboardingDisabled[currentUser];
   body += '<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">'
@@ -10561,12 +10592,38 @@ function buildExpertReportHtml(memberId,fromDate,toDate){
     })
     .sort(function(a,b){return (a.doneDate||'')<(b.doneDate||'')?-1:1;});
   if(!entries.length)return '<div style="text-align:center;padding:20px;color:var(--text-muted)">فعالیتی در این بازه ثبت نشده</div>';
+  var _FLBL={status:'وضعیت',lead:'مرحله',followupDate:'پیگیری',potential:'پتانسیل',competitor:'رقیب',owner:'مسئول'};
+  var _FCLR={status:'#6366f1',lead:'#0ea5e9',followupDate:'#f59e0b',potential:'#8b5cf6',competitor:'#ef4444',owner:'#22c55e'};
+  var DAY=86400000;
   var html='<div style="max-height:50vh;overflow-y:auto">';
   html+='<table style="width:100%;border-collapse:collapse;font-size:11px">';
-  html+='<thead><tr style="background:var(--bg-raised)"><th style="padding:6px 8px;text-align:right">تاریخ</th><th style="padding:6px 8px;text-align:right">مرکز</th><th style="padding:6px 8px">نوع</th><th style="padding:6px 8px;text-align:right">نتیجه</th><th style="padding:6px 8px;text-align:right">یادداشت</th><th style="padding:6px 8px;text-align:right">مانع</th><th style="padding:6px 8px">مبلغ</th></tr></thead><tbody>';
+  html+='<thead><tr style="background:var(--bg-raised)"><th style="padding:6px 8px;text-align:right">تاریخ</th><th style="padding:6px 8px;text-align:right">مرکز</th><th style="padding:6px 8px">نوع</th><th style="padding:6px 8px;text-align:right">نتیجه</th><th style="padding:6px 8px;text-align:right">یادداشت</th><th style="padding:6px 8px;text-align:right">مانع</th><th style="padding:6px 8px">مبلغ</th><th style="padding:6px 8px;text-align:right" title="تغییرات فیلدهای مرکز در روز فعالیت">🔄 تغییرات</th></tr></thead><tbody>';
   entries.forEach(function(we,i){
     var bg=i%2===0?'var(--bg-card)':'var(--bg-raised)';
     var typeLabel=(we.actionType==='visit')?'🤝 ملاقات':'📞 تماس';
+    var changesHtml='<span style="color:var(--text-muted)">—</span>';
+    if(we.doneDate&&we.rtype&&we.rid){
+      try{
+        var rkey=(we.rtype||'center')+'_'+(we.rid||'');
+        var dp=we.doneDate.split('/');
+        var doneMs=jMs(parseInt(dp[0]),parseInt(dp[1]),parseInt(dp[2]));
+        var clChanges=(DB.changeLog||[]).filter(function(cl){
+          if(cl.rkey!==rkey)return false;
+          var ms=new Date(cl.at).getTime();
+          return ms>=doneMs-DAY&&ms<=doneMs+2*DAY&&(cl.field in _FLBL);
+        });
+        if(clChanges.length){
+          changesHtml='<div style="display:flex;flex-wrap:wrap;gap:3px">';
+          clChanges.forEach(function(cl){
+            var clr=_FCLR[cl.field]||'#94a3b8';
+            var lbl=_FLBL[cl.field]||cl.field;
+            var val=(cl.val||'').toString().slice(0,15);
+            changesHtml+='<span title="'+esc(lbl)+': '+esc(cl.val||'')+'" style="display:inline-block;padding:1px 5px;border-radius:4px;font-size:9px;background:'+clr+'22;color:'+clr+';border:1px solid '+clr+'44;white-space:nowrap">'+esc(lbl)+': '+esc(val)+'</span>';
+          });
+          changesHtml+='</div>';
+        }
+      }catch(_e){}
+    }
     html+='<tr style="background:'+bg+';border-bottom:1px solid var(--border)">';
     html+='<td style="padding:5px 8px;white-space:nowrap">'+esc(we.doneDate||'')+'</td>';
     html+='<td style="padding:5px 8px">'+esc(we.centerName||'')+'</td>';
@@ -10575,6 +10632,7 @@ function buildExpertReportHtml(memberId,fromDate,toDate){
     html+='<td style="padding:5px 8px">'+esc(we.doneNote||'—')+'</td>';
     html+='<td style="padding:5px 8px;color:#dc2626">'+esc(we.doneObstacle||'—')+'</td>';
     html+='<td style="padding:5px 8px;text-align:center;color:#16a34a">'+((we.doneAmount)?we.doneAmount+'M':'—')+'</td>';
+    html+='<td style="padding:5px 8px">'+changesHtml+'</td>';
     html+='</tr>';
   });
   html+='</tbody></table></div>';
