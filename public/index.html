@@ -7,7 +7,7 @@
 <!-- cache-bust: v2.1 -->
 <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(function(){});}</script>
 <!-- Vazirmatn از jsDelivr — npm package، بدون Google dependency -->
-<link rel="stylesheet" href="/css/app.css?v=20260628a">
+<link rel="stylesheet" href="/css/app.css?v=20260628b">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" onerror="console.warn('XLSX CDN failed - only TSV format supported offline')"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
 </head>
@@ -125,6 +125,12 @@
   <span class="fl" id="lblTg" style="display:none">برچسب:</span>
   <select id="fTag" onchange="renderTable()" style="display:none"><option value="">همه</option></select>
   </div>
+  <select id="provSortSel" style="display:none;padding:4px 7px;border:1px solid var(--border-input);border-radius:5px;font-size:11px;background:var(--bg-input);color:var(--text-primary);font-family:inherit" onchange="renderTable()">
+    <option value="default">⇅ ترتیب پیش‌فرض</option>
+    <option value="alpha">الفبا</option>
+    <option value="potential">پتانسیل</option>
+    <option value="owner">کارشناس</option>
+  </select>
   <select id="sortSel" style="display:none;padding:4px 7px;border:1px solid var(--border-input);border-radius:5px;font-size:11px;background:var(--bg-input);color:var(--text-primary);font-family:inherit" onchange="setCenterSortFromSel(this.value)">
     <option value="">⇅ مرتب‌سازی</option>
     <option value="name_asc">نام ↑ (الف→ی)</option>
@@ -163,6 +169,7 @@
   <button onclick="bulkChangeStatus()" style="background:#f59e0b;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">&#x1F504; تغییر وضعیت</button>
   <button onclick="bulkSetFollowup()" style="background:#ec4899;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">&#x1F4C5; تاریخ پیگیری</button>
   <button onclick="bulkExport()" style="background:#22c55e;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">&#x2B07; خروجی</button>
+  <button onclick="bulkDeleteCenters()" style="background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">&#x1F5D1; حذف</button>
   <button onclick="clearCenterSelection()" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">&#x2715; انصراف</button>
 </div>
 <!-- QUICK FILTERS -->
@@ -291,16 +298,16 @@
 
 <!-- DATA -->
 <!-- Core utilities (extracted from app.js — copy-only, bundle still has all code) -->
-<script src="/js/modules/auth-ui.js?v=20260628a"></script>
-<script src="/js/modules/storage.js?v=20260628a"></script>
-<script src="/js/modules/user-mgmt.js?v=20260628a"></script>
-<script src="/js/modules/tab-nav.js?v=20260628a"></script>
-<script src="/js/modules/banner.js?v=20260628a"></script>
-<script src="/js/modules/week-plan.js?v=20260628a"></script>
-<script src="/js/modules/notifications.js?v=20260628a"></script>
+<script src="/js/modules/auth-ui.js?v=20260628b"></script>
+<script src="/js/modules/storage.js?v=20260628b"></script>
+<script src="/js/modules/user-mgmt.js?v=20260628b"></script>
+<script src="/js/modules/tab-nav.js?v=20260628b"></script>
+<script src="/js/modules/banner.js?v=20260628b"></script>
+<script src="/js/modules/week-plan.js?v=20260628b"></script>
+<script src="/js/modules/notifications.js?v=20260628b"></script>
 <!-- bundled from 20 modules — rebuild with: python3 scripts/build-bundle.py -->
-<script src="/js/app.bundle.js?v=20260628a"></script>
-<script src="/js/proforma.js?v=20260628a"></script>
+<script src="/js/app.bundle.js?v=20260628b"></script>
+<script src="/js/proforma.js?v=20260628b"></script>
 <script src="/js/support.js?v=20260619a"></script>
 <script src="/js/hr.js?v=20260619a"></script>
 <script src="/js/trade-kpi.js?v=20260620a"></script>

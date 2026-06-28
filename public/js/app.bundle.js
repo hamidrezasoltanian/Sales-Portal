@@ -1205,7 +1205,7 @@ function switchTab(tab){
   if(tab==='provinces'){
     _safeRender(function(){renderDashboard();renderBanner();},'provinces');
     if(!_currentProvId){
-      var toShow=['srch','fOwner','lblOw','fType','fTag','lblTg'];
+      var toShow=['srch','fOwner','lblOw','fType','fTag','lblTg','provSortSel'];
       toShow.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='';});
       if(_isExpert()){['fOwner','lblOw'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});}
       var pg=document.getElementById('allCentersToggle');if(pg)pg.style.display='';
@@ -1289,7 +1289,7 @@ function backToProvinces(){
   var pb=document.getElementById('provBackBtn');if(pb)pb.style.display='none';
   var ab=document.getElementById('addCenterBtn');if(ab)ab.style.display='none';
   var hd=document.getElementById('provViewHead');if(hd)hd.textContent='';
-  ['srch','fPot','lblPot','fStatus','lblSt','fLead','lblLd','fOwner','lblOw','fTag','lblTg','viewSw','csvBtn','printBtn','hardToggleBtn','xlsBtn','savePresetBtn','filterPresetSel','sortSel'].forEach(function(id){
+  ['srch','fPot','lblPot','fStatus','lblSt','fLead','lblLd','fOwner','lblOw','fTag','lblTg','viewSw','csvBtn','printBtn','hardToggleBtn','xlsBtn','savePresetBtn','filterPresetSel','sortSel','provSortSel'].forEach(function(id){
     var el=document.getElementById(id);if(el)el.style.display='none';
   });
   var qf=document.getElementById('quickFilters');if(qf)qf.style.display='none';
@@ -2736,6 +2736,11 @@ function renderProvList(){
     if(effectiveProvOwner&&p.id!=='tehran'){var e2=getE('pc',p.id);var ow=e2.owner||p.owner||'';if(ow!==effectiveProvOwner)return false;}
     return true;
   });
+  // ترتیب‌بندی استان‌ها
+  var _provSort=document.getElementById('provSortSel')?document.getElementById('provSortSel').value:'default';
+  if(_provSort==='alpha'){filtProvs=filtProvs.slice().sort(function(a,b){return a.name<b.name?-1:a.name>b.name?1:0;});}
+  else if(_provSort==='potential'){filtProvs=filtProvs.slice().sort(function(a,b){return (a.potential||9)-(b.potential||9);});}
+  else if(_provSort==='owner'){filtProvs=filtProvs.slice().sort(function(a,b){var oa=USERS[(getE('pc',a.id).owner||a.owner||'')]||'ω';var ob=USERS[(getE('pc',b.id).owner||b.owner||'')]||'ω';return oa<ob?-1:oa>ob?1:0;});}
   var rows=filtProvs.map(function(p){
     var e=getE('pc',p.id);
     var owner=e.owner||p.owner||'';
@@ -16350,6 +16355,67 @@ function bulkExport(){
   XLSX.utils.book_append_sheet(wb,ws,'مراکز');
   XLSX.writeFile(wb,'centers_selected_'+todayStr().replace(/\//g,'-')+'.xlsx');
 }
+function bulkDeleteCenters(){
+  var keys=Array.from(_selectedCenters);
+  if(!keys.length)return;
+  var extraCount=keys.filter(function(k){return k.indexOf('_new_')>=0;}).length;
+  var baseCount=keys.length-extraCount;
+  var body='<div style="text-align:center;padding:10px 0">'
+    +'<div style="font-size:36px;margin-bottom:12px">🗑</div>'
+    +'<div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:8px">حذف گروهی مراکز</div>'
+    +'<div style="font-size:13px;color:var(--text-muted);margin-bottom:14px">'+keys.length+' مرکز انتخاب شده</div>'
+    +(baseCount?'<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:7px;padding:10px;font-size:12px;color:#991b1b;text-align:right;margin-bottom:8px">'+baseCount+' مرکز از دیتابیس اصلی حذف می‌شود. این عمل قابل بازگشت نیست.</div>':'')
+    +(extraCount?'<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:7px;padding:10px;font-size:12px;color:#92400e;text-align:right">'+extraCount+' مرکز دستی (extra) حذف می‌شود.</div>':'')
+    +'</div>';
+  var foot='<button class="btn-secondary" onclick="closeModal(\'bulkDelModal\')">لغو</button>'
+    +'<button style="background:#dc2626;color:#fff;border:none;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600" onclick="_doBulkDelete()">🗑 حذف '+keys.length+' مرکز</button>';
+  openModal('bulkDelModal','حذف گروهی',body,foot);
+}
+
+function _doBulkDelete(){
+  var keys=Array.from(_selectedCenters);
+  closeModal('bulkDelModal');
+  var deleted=0;
+  keys.forEach(function(key){
+    var parts=key.split('_');var rtype=parts[0];var id=parts.slice(1).join('_');
+    var isExtra=(id.indexOf('_new_')>=0);
+    _cleanCenterData(rtype,id);
+    if(isExtra){
+      DB.extra=(DB.extra||[]).filter(function(c){return c.id!==id;});
+    }else if(rtype==='center'){
+      for(var _ci=CENTERS.length-1;_ci>=0;_ci--){
+        var _cc=CENTERS[_ci];var _cid='c_'+(_cc.row||_cc.id||'');
+        if(_cid===id||String(_cc.id)===String(id)){CENTERS.splice(_ci,1);break;}
+      }
+    }else{
+      var _provId=id.split('||')[0];var _row=Number(id.split('||')[1]);
+      PROVINCES.forEach(function(p){
+        if(p.id===_provId){
+          var _pname=p.name.replace(/[ي]/g,'ی').replace(/[ك]/g,'ک');
+          if(PC_RAW[_pname]){PC_RAW[_pname]=PC_RAW[_pname].filter(function(r){return(Array.isArray(r)?r[0]:r.row)!==_row;});}
+          if(PC_RAW[p.id]){PC_RAW[p.id]=PC_RAW[p.id].filter(function(r){return(Array.isArray(r)?r[0]:r.row)!==_row;});}
+        }
+      });
+    }
+    deleted++;
+  });
+  saveDB();
+  clearPCCache();_ALL_PROVS=null;_typeFilterBuilt=false;
+  var _newCENTERS=CENTERS.slice();
+  var _newPC_RAW={};Object.keys(PC_RAW).forEach(function(k){_newPC_RAW[k]=PC_RAW[k];});
+  fetch('/api/data/centers/master',{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({CENTERS:_newCENTERS,PC_RAW:_newPC_RAW})
+  }).then(function(r){
+    if(!r.ok)console.error('[bulk delete] server save failed:',r.status);
+    clearCenterSelection();rebuildFilters();renderTable();
+    showToast('✅ '+deleted+' مرکز حذف شد');
+  }).catch(function(e){
+    console.error('[bulk delete]',e.message);
+    clearCenterSelection();rebuildFilters();renderTable();
+    showToast('✅ '+deleted+' مرکز حذف شد');
+  });
+}
+
 
 // ════════ IMPROVEMENT 2: addDaysToJalali ════════
 function addDaysToJalali(dateStr,days){
