@@ -1,3 +1,4 @@
+/* ═══ public/js/settings.js ═══ */
 // ════════════════════════ SETTINGS ════════════════════════════════════
 
 // ── جابجایی گروهی مراکز ──────────────────────────────────────
@@ -513,7 +514,7 @@ function buildUSERS(){
       USERS={};
       _DEFAULT_MEMBERS=list.map(function(m){
         USERS[m.username]=m.display_name;
-        return{id:m.username,name:m.display_name,role:m.role,color:m.color,phone:m.phone||'',active:m.active};
+        return{id:m.username,name:m.display_name,role:m.role,color:m.color,phone:m.phone||'',active:m.active,commissionPct:m.commission_pct||null};
       });
       // Also sync to DB.settings.members so legacy code works
       if(DB.settings)DB.settings.members=_DEFAULT_MEMBERS;
@@ -693,7 +694,7 @@ function getCenterById(rtype,id){
 }
 function setE(type,id,field,val){var k=recK(type,id);if(!DB.edits[k])DB.edits[k]={};
   if(!_undoSuppressed){var _prevVal=DB.edits[k][field];_undoStack.push({type:type,id:id,field:field,val:_prevVal});if(_undoStack.length>MAX_UNDO)_undoStack.shift();_redoStack=[];}
-  if(!_undoSuppressed){DB.changeLog=DB.changeLog||[];DB.changeLog.push({at:new Date().toISOString(),by:currentUser,rkey:type+'_'+id,field:field,val:val});if(DB.changeLog.length>500)DB.changeLog=DB.changeLog.slice(-500);}
+  if(!_undoSuppressed){DB.changeLog=DB.changeLog||[];DB.changeLog.push({at:new Date().toISOString(),by:currentUser,rkey:type+'_'+id,field:field,val:val});if(DB.changeLog.length>500)DB.changeLog=DB.changeLog.slice(-500);fetch('/api/changelog',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({at:new Date().toISOString(),by:currentUser,rkey:type+'_'+id,field:field,val:val})}).catch(function(){});}
   var _auditFields=['status','owner','lead','potential','followupDate','contactName','contactTitle','phones','address'];
   if(_auditFields.indexOf(field)>=0){
     var _oldV=DB.edits[k][field]!==undefined?DB.edits[k][field]:'';
@@ -704,8 +705,110 @@ function setE(type,id,field,val){var k=recK(type,id);if(!DB.edits[k])DB.edits[k]
       }).catch(function(){});
     }
   }
-  DB.edits[k][field]=val;DB.edits[k]._ts=nowTs();
-  if(field==='status'&&val==='غیرفعال'&&!_undoSuppressed)setTimeout(function(){_promptLostReason(type,id);},400);if(field==='status'||field==='lead'||field==='potential')DB.edits[k]._lastActivity=nowTs();if(field==='status')DB.edits[k]._statusChangedTs=nowTs();if(field==='followupDate'&&val){(function(){var _p=(val+'').split('/').map(Number);if(_p.length!==3||isNaN(_p[0]))return;var _ndMs=jMs(_p[0],_p[1],_p[2]);Object.keys(DB.weekEntries||{}).forEach(function(_wk){var _we=DB.weekEntries[_wk];if(_we.rtype!==type||_we.rid!==id||_we.done)return;var _wId=_wk.split(':::')[0];var _mWk=(typeof wpGetWeeks==='function'?wpGetWeeks():[]).find(function(w){return w.id===_wId;});if(!_mWk)return;var _wsMs=jMs(_mWk.wsArr[0],_mWk.wsArr[1],_mWk.wsArr[2]);var _weMs=jMs(_mWk.weArr[0],_mWk.weArr[1],_mWk.weArr[2]);if(_ndMs>=_wsMs&&_ndMs<=_weMs)_we.scheduledDate=val;});})();}saveDB();flashRow(id);if(currentTab==='kpi'&&(field==='status'||field==='lead'||field==='owner'))setTimeout(renderKPIPanel,300);if(field==='followupDate'&&currentTab==='weekplan')setTimeout(renderWeekPlan,50);if(field==='owner'&&val&&typeof sendNotif==='function'){(function(){var _oldOwner=(DB.edits[k]||{})._prevOwner||'';if(val!==_oldOwner&&val!==currentUser){var _cn=_getCenterName(type,id);sendNotif(val,'مرکز "'+_cn+'" به شما واگذار شد',type+'_'+id);}DB.edits[k]._prevOwner=val;})();}var _cFields=['contactName','contactTitle','phones','address','contacts'];if(_cFields.indexOf(field)>=0){  var _ce=DB.edits[k];  fetch('/api/contacts/'+encodeURIComponent(k),{method:'PUT',headers:{'Content-Type':'application/json'},    body:JSON.stringify({centerName:_getCenterName(type,id),      contacts:_ce.contacts||[],address:_ce.address||''})  }).catch(function(){});}}
+  DB.edits[k][field]=val;DB.edits[k]._ts=nowTs();_invalidateEditsCache();
+  if(field==='status'&&val==='غیرفعال'&&!_undoSuppressed)setTimeout(function(){_promptLostReason(type,id);},400);
+  if(field==='status'||field==='lead'||field==='potential')DB.edits[k]._lastActivity=nowTs();
+  if(field==='status')DB.edits[k]._statusChangedTs=nowTs();
+  if(field==='followupDate'&&val){
+    (function(){
+      var _p=(val+'').split('/').map(Number);
+      if(_p.length!==3||isNaN(_p[0]))return;
+      var _ndMs=jMs(_p[0],_p[1],_p[2]);
+      Object.keys(DB.weekEntries||{}).forEach(function(_wk){
+        var _we=DB.weekEntries[_wk];
+        if(_we.rtype!==type||_we.rid!==id||_we.done)return;
+        var _wId=_wk.split(':::')[0];
+        var _mWk=(wpGetWeeks()||[]).find(function(w){return w.id===_wId;});
+        if(!_mWk)return;
+        var _wsMs=jMs(_mWk.wsArr[0],_mWk.wsArr[1],_mWk.wsArr[2]);
+        var _weMs=jMs(_mWk.weArr[0],_mWk.weArr[1],_mWk.weArr[2]);
+        if(_ndMs>=_wsMs&&_ndMs<=_weMs)_we.scheduledDate=val;
+      });
+      // Automatically schedule a week entry for this future week if it doesn't exist
+      var foundWeek=null;
+      var yrs=[_p[0]-1,_p[0],_p[0]+1];
+      for(var i=0;i<yrs.length;i++){
+        var yr=yrs[i];
+        var wks=typeof getYearWeeks==='function'?getYearWeeks(yr):[];
+        for(var j=0;j<wks.length;j++){
+          var wk=wks[j];
+          var wsMs=jMs(wk.wsArr[0],wk.wsArr[1],wk.wsArr[2]);
+          var weMs=jMs(wk.weArr[0],wk.weArr[1],wk.weArr[2]);
+          if(_ndMs>=wsMs&&_ndMs<=weMs){foundWeek=wk;break;}
+        }
+        if(foundWeek)break;
+      }
+      if(foundWeek){
+        var newKey=wpEntryKey(foundWeek.id,type,id);
+        if(!DB.weekEntries[newKey]){
+          var cname=_getCenterName(type,id)||(type+'_'+id);
+          DB.weekEntries[newKey]={
+            scheduledDate:val,
+            done:false,
+            doneDate:null,
+            rtype:type,
+            rid:id,
+            recKey:type+'_'+id,
+            centerName:cname,
+            actionType:'call',
+            addedBy:currentUser
+          };
+          (function(_k,_we){
+            var _pts=_k.split(':::');
+            fetch('/api/week-entries',{
+              method:'POST',
+              headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({
+                id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),
+                weekId:_pts[0],
+                recKey:_pts[1],
+                rtype:_we.rtype,
+                rid:_we.rid,
+                scheduledDate:_we.scheduledDate||null,
+                actionType:_we.actionType||'call',
+                done:false,
+                doneDate:null,
+                addedBy:_we.addedBy||currentUser,
+                centerName:_we.centerName||''
+              })
+            }).then(function(r){return r.ok?r.json():null;}).then(function(d){
+              if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;
+            }).catch(function(){});
+          })(newKey,DB.weekEntries[newKey]);
+        } else {
+          DB.weekEntries[newKey].scheduledDate=val;
+        }
+      }
+    })();
+  }
+  saveDB();
+  flashRow(id);
+  if(currentTab==='kpi'&&(field==='status'||field==='lead'||field==='owner'))setTimeout(renderKPIPanel,300);
+  if(currentTab==='manager'&&(field==='status'||field==='lead'||field==='owner'||field==='followupDate'))setTimeout(renderManagerPanel,300);
+  if(field==='followupDate'&&currentTab==='weekplan')setTimeout(renderWeekPlan,50);
+  if(field==='owner'&&val&&typeof sendNotif==='function'){
+    (function(){
+      var _oldOwner=(DB.edits[k]||{})._prevOwner||'';
+      if(val!==_oldOwner&&val!==currentUser){
+        var _cn=_getCenterName(type,id);
+        sendNotif(val,'مرکز "'+_cn+'" به شما واگذار شد',type+'_'+id,[],'owner_change',{centerKey:type+'_'+id});
+      }
+      DB.edits[k]._prevOwner=val;
+    })();
+  }
+  var _cFields=['contactName','contactTitle','phones','address','contacts'];
+  if(_cFields.indexOf(field)>=0){
+    var _ce=DB.edits[k];
+    fetch('/api/contacts/'+encodeURIComponent(k),{
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        centerName:_getCenterName(type,id),
+        contacts:_ce.contacts||[],
+        address:_ce.address||''
+      })
+    }).catch(function(){});
+  }}
 function _lrSelect(btn,reason){
   document.querySelectorAll('[data-lrb]').forEach(function(b){
     b.style.background='var(--bg-raised)';b.style.color='var(--text-primary)';b.style.borderColor='var(--border)';

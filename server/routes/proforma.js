@@ -241,8 +241,8 @@ router.post('/:id/action', requireAuth, async (req, res) => {
 
     // Push Telegram notifications (non-blocking, only if enabled in settings)
     try {
-      const settingsRow = await query("SELECT value->'settings'->>'telegramNotify' AS v FROM app_data WHERE key='main'");
-      const notifyEnabled = !settingsRow.rows.length || settingsRow.rows[0].v !== 'false';
+      const settingsRow = await query("SELECT value FROM app_settings WHERE key = 'telegramNotify'");
+      const notifyEnabled = !settingsRow.rows.length || settingsRow.rows[0].value !== false;
       if (!notifyEnabled) throw new Error('telegram notify disabled');
       const bot = require('../bot/telegram');
       if (d.action === 'send') {

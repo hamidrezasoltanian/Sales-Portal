@@ -11,35 +11,123 @@ const router = express.Router();
 // All routes require auth
 router.use(requireAuth);
 
-// GET /api/data/db — single REPEATABLE READ snapshot so blob ts and weekEntries are consistent
+// Helper: load full DB from normalized SQL tables
+async function loadDBFromSQL(client) {
+  const c = client || pool;
+  const [editsR, notesR, tagsR, settingsR, eventsR, checklistR, userKpiR, provKpiR, extraR,
+         salesR, callR, visitR, missionR, provHistR, kpiHistR, weR, metaR, clR, hcpR] = await Promise.all([
+    c.query('SELECT center_key, data FROM center_edits'),
+    c.query('SELECT center_key, notes FROM center_notes'),
+    c.query('SELECT center_key, tags FROM center_tags'),
+    c.query('SELECT key, value FROM app_settings'),
+    c.query('SELECT id, title, description as desc, start_ms as "startMs", all_day as "allDay", color, owner FROM app_events'),
+    c.query('SELECT date, username, items, note FROM daily_checklists'),
+    c.query('SELECT username, month, calls_per_day as "callsPerDay", visits_per_week as "visitsPerWeek", sales_count as "salesCount", sales_amount as "salesAmount", cash_pct as "cashPct" FROM kpi_user_targets'),
+    c.query('SELECT province_id, calls, visits, sales, extra FROM kpi_province_targets'),
+    c.query('SELECT id, row_num as row, name, potential, type, lead, province_id, owner FROM center_extras'),
+    c.query('SELECT id, date, username as "userId", center_name as "centerName", center_key as "centerKey", amount, is_cash as "isCash" FROM sales_log'),
+    c.query('SELECT id, date, username as "userId", count, note FROM call_log'),
+    c.query('SELECT id, date, username as "userId", count, note FROM visit_log'),
+    c.query('SELECT id, username as "userId", month, done, note FROM mission_log'),
+    c.query('SELECT province_id as "provId", province_name as "provName", from_owner as "from", from_name as "fromName", to_owner as "to", to_name as "toName", action_date as "at", action_ts as "ts" FROM province_history ORDER BY id'),
+    c.query('SELECT username as "userId", month, data FROM kpi_history'),
+    c.query('SELECT key, value FROM week_entries').catch(() => ({ rows: [] })),
+    c.query("SELECT updated_at FROM app_data WHERE key = '_db_meta'"),
+    c.query('SELECT at, "by", rkey, field, val FROM change_log ORDER BY at DESC LIMIT 500').catch(() => ({ rows: [] })),
+    c.query('SELECT a.center_key, h.name, h.specialty, a.role as title, h.phones FROM hcp_affiliations a JOIN healthcare_professionals h ON a.hcp_id = h.id').catch(() => ({ rows: [] }))
+  ]);
+
+  const edits = {};
+  editsR.rows.forEach(function(r) { edits[r.center_key] = r.data || {}; edits[r.center_key].contacts = []; });
+  
+  if (hcpR && hcpR.rows) {
+    hcpR.rows.forEach(function(r) {
+      if (!edits[r.center_key]) edits[r.center_key] = { contacts: [] };
+      if (!edits[r.center_key].contacts) edits[r.center_key].contacts = [];
+      edits[r.center_key].contacts.push({
+        name: r.name,
+        title: r.title,
+        phones: r.phones || [],
+        specialty: r.specialty
+      });
+    });
+  }
+
+  const notes = {};
+  notesR.rows.forEach(function(r) { notes[r.center_key] = r.notes; });
+
+  const rTags = {};
+  tagsR.rows.forEach(function(r) { rTags[r.center_key] = r.tags; });
+
+  const kpiTargets = {};
+  const settings = {};
+  settingsR.rows.forEach(function(r) {
+    if (r.key === 'kpi_weights') {
+      kpiTargets.weights = r.value;
+    } else {
+      settings[r.key] = r.value;
+    }
+  });
+  if (settings.anthropicKey) settings.anthropicKey = '***';
+
+  const checklist = {};
+  checklistR.rows.forEach(function(r) {
+    checklist[r.date + '_' + r.username] = { items: r.items, note: r.note };
+  });
+
+  const provinces = {};
+  provKpiR.rows.forEach(function(r) {
+    provinces[r.province_id] = { calls: r.calls, visits: r.visits, sales: r.sales, extra: r.extra };
+  });
+  kpiTargets.provinces = provinces;
+
+  userKpiR.rows.forEach(function(r) {
+    kpiTargets[r.username + ':' + r.month] = {
+      callsPerDay: r.callsPerDay,
+      visitsPerWeek: r.visitsPerWeek,
+      salesCount: r.salesCount,
+      salesAmount: Number(r.salesAmount),
+      cashPct: r.cashPct
+    };
+  });
+
+  const weekEntries = {};
+  weR.rows.forEach(function(r) { weekEntries[r.key] = r.value; });
+
+  const _serverTs = metaR.rows.length && metaR.rows[0].updated_at
+    ? metaR.rows[0].updated_at.toISOString() : null;
+
+  return {
+    edits,
+    notes,
+    rTags,
+    settings,
+    events: eventsR.rows,
+    checklist,
+    kpiTargets,
+    extra: extraR.rows,
+    salesLog: salesR.rows.map(function(r) { return { ...r, amount: Number(r.amount) }; }),
+    callLog: callR.rows,
+    visitLog: visitR.rows,
+    missionLog: missionR.rows,
+    provHistory: provHistR.rows.map(function(r) { return { ...r, ts: Number(r.ts) }; }),
+    kpiHistory: kpiHistR.rows.map(function(r) { return r.data; }),
+    weekEntries,
+    changeLog: clR.rows.map(function(r) {
+      return { at: r.at instanceof Date ? r.at.toISOString() : r.at, by: r.by, rkey: r.rkey, field: r.field, val: r.val };
+    }).reverse(),
+    _serverTs,
+  };
+}
+
+// GET /api/data/db — load from normalized SQL tables
 router.get('/db', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ');
-    const [mainResult, weResult] = await Promise.all([
-      client.query("SELECT value, updated_at FROM app_data WHERE key = 'main'"),
-      client.query("SELECT key, value FROM week_entries").catch(() => ({ rows: [] })),
-    ]);
+    const db = await loadDBFromSQL(client);
     await client.query('COMMIT');
-
-    if (mainResult.rows.length === 0) {
-      return res.json({ weekEntries: {}, _serverTs: null });
-    }
-    const data = mainResult.rows[0].value;
-    const _serverTs = mainResult.rows[0].updated_at ? mainResult.rows[0].updated_at.toISOString() : null;
-
-    const weekEntries = {};
-    weResult.rows.forEach(function(r) { weekEntries[r.key] = r.value; });
-    // SQL week_entries is the single source of truth — blob.weekEntries is ignored here.
-    // Any stale blob entries are migrated to SQL on server startup (_migrateWeekEntriesFromBlob).
-
-    let safe = data;
-    if (data && data.settings && data.settings.anthropicKey) {
-      safe = Object.assign({}, data, {
-        settings: Object.assign({}, data.settings, { anthropicKey: '***' }),
-      });
-    }
-    return res.json(Object.assign({}, safe, { weekEntries, _serverTs }));
+    return res.json(db);
   } catch (e) {
     await client.query('ROLLBACK').catch(function() {});
     console.error('[data/db GET]', e.message);
@@ -49,22 +137,21 @@ router.get('/db', async (req, res) => {
   }
 });
 
-// PUT /api/data/db
+// PUT /api/data/db — split payload into normalized SQL tables
 router.put('/db', async (req, res) => {
   const body = req.body;
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return res.status(400).json({ error: 'داده نامعتبر' });
   }
-  // Reject payloads that look nothing like a CRM DB (must have at least one known top-level key)
-  const KNOWN_KEYS = ['edits','notes','tags','weekEntries','tasks','notifications','changeLog',
-                      'settings','events','checklist','kpiTargets','salesLog','callLog','visitLog',
-                      '_clientTs','_serverTs','_weDeletedKeys'];
+  const KNOWN_KEYS = ['edits','notes','tags','rTags','weekEntries','tasks','notifications',
+                      'changeLog','settings','events','checklist','kpiTargets','salesLog',
+                      'callLog','visitLog','extra','_clientTs','_serverTs','_weDeletedKeys','_mtr',
+                      'missionLog','provHistory','kpiHistory'];
   const hasKnown = Object.keys(body).some(k => KNOWN_KEYS.includes(k));
   if (!hasKnown && Object.keys(body).length > 0) {
     return res.status(400).json({ error: 'ساختار داده نامعتبر' });
   }
 
-  // Use a transaction + FOR UPDATE to make conflict check atomic (fixes TOCTOU race)
   let client;
   try {
     client = await pool.connect();
@@ -72,107 +159,300 @@ router.put('/db', async (req, res) => {
 
     const _clientTs = body._clientTs || null;
 
-    // Lock the current row for the conflict check and weekEntries guard
-    const cur = await client.query("SELECT value, updated_at FROM app_data WHERE key = 'main' FOR UPDATE");
-    const existingRow = cur.rows[0] || null;
-
-    if (_clientTs && existingRow && existingRow.updated_at) {
-      // Timestamp conflict check: reject only if server data is significantly newer
-      // (>5s grace period absorbs SSE propagation lag between tabs)
-      const serverTs = existingRow.updated_at.toISOString();
+    // Conflict detection via _db_meta row (replaces 'main' updated_at)
+    const metaRow = await client.query(
+      "SELECT updated_at FROM app_data WHERE key = '_db_meta' FOR UPDATE"
+    );
+    if (_clientTs && metaRow.rows.length && metaRow.rows[0].updated_at) {
+      const serverTs = metaRow.rows[0].updated_at.toISOString();
       if (serverTs !== _clientTs) {
-        const serverAge = Date.now() - new Date(serverTs).getTime();
-        const clientAge = Date.now() - new Date(_clientTs).getTime();
-        if (serverAge < clientAge - 5000) {
-          // Server is more than 5s newer than client's known version — true conflict
-          await client.query('ROLLBACK');
-          return res.status(409).json({ error: 'تغییرات توسط کاربر دیگری ذخیره شده' });
-        }
-        // Otherwise allow through — client will have SSE-synced the diff already
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'تغییرات توسط کاربر دیگری ذخیره شده' });
       }
     }
 
-    // Strip client-only meta fields before storing
-    let mainData = Object.assign({}, body);
-    delete mainData._clientTs;
-    delete mainData._serverTs;
+    const user = req.user.username;
+    const { edits, notes, rTags, tags, settings, events, checklist, kpiTargets,
+            extra, salesLog, callLog, visitLog, missionLog, provHistory, kpiHistory,
+            weekEntries, _weDeletedKeys, _mtr } = body;
 
-    // Extract weekEntries and explicit deletions — store in SQL table, not blob
-    const incomingWE = mainData.weekEntries || {};
-    delete mainData.weekEntries;
-    const deletedKeys = (Array.isArray(mainData._weDeletedKeys) ? mainData._weDeletedKeys : [])
+    // ── center_edits ──────────────────────────────────────────────────────────
+    if (edits && typeof edits === 'object' && Object.keys(edits).length > 0) {
+      await client.query(
+        `INSERT INTO center_edits (center_key, data, updated_at, updated_by)
+         SELECT key, value, NOW(), $2 FROM jsonb_each($1::jsonb)
+         ON CONFLICT (center_key) DO UPDATE
+           SET data = EXCLUDED.data, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+        [JSON.stringify(edits), user]
+      );
+    }
+
+    // ── center_notes ──────────────────────────────────────────────────────────
+    if (notes && typeof notes === 'object' && Object.keys(notes).length > 0) {
+      await client.query(
+        `INSERT INTO center_notes (center_key, notes, updated_at, updated_by)
+         SELECT key, value, NOW(), $2 FROM jsonb_each($1::jsonb)
+         ON CONFLICT (center_key) DO UPDATE
+           SET notes = EXCLUDED.notes, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+        [JSON.stringify(notes), user]
+      );
+    }
+
+    // ── center_tags ───────────────────────────────────────────────────────────
+    const tagsData = rTags || tags;
+    if (tagsData && typeof tagsData === 'object' && Object.keys(tagsData).length > 0) {
+      await client.query(
+        `INSERT INTO center_tags (center_key, tags, updated_at, updated_by)
+         SELECT key, value, NOW(), $2 FROM jsonb_each($1::jsonb)
+         ON CONFLICT (center_key) DO UPDATE
+           SET tags = EXCLUDED.tags, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+        [JSON.stringify(tagsData), user]
+      );
+    }
+
+    // ── app_settings ──────────────────────────────────────────────────────────
+    if (settings && typeof settings === 'object') {
+      for (const [key, value] of Object.entries(settings)) {
+        if (key === 'anthropicKey' && value === '***') continue;
+        await client.query(
+          `INSERT INTO app_settings (key, value, updated_at, updated_by)
+           VALUES ($1, $2, NOW(), $3)
+           ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW(), updated_by = $3`,
+          [key, JSON.stringify(value), user]
+        );
+      }
+    }
+
+    // ── structured SQL tables saving ─────────────────────────────────────────
+    // 1. events
+    if (events !== undefined && Array.isArray(events)) {
+      await client.query('DELETE FROM app_events');
+      for (const ev of events) {
+        if (!ev || ev.id === undefined) continue;
+        await client.query(
+          `INSERT INTO app_events (id, title, description, start_ms, all_day, color, owner, updated_at, updated_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)`,
+          [ev.id, ev.title || '', ev.desc || '', ev.startMs || 0, !!ev.allDay, ev.color || null, ev.owner || null, user]
+        );
+      }
+    }
+
+    // 2. checklist
+    if (checklist !== undefined && typeof checklist === 'object' && checklist !== null) {
+      await client.query('DELETE FROM daily_checklists');
+      for (const [key, value] of Object.entries(checklist)) {
+        if (!value) continue;
+        const parts = key.split('_');
+        if (parts.length >= 2) {
+          const date = parts[0];
+          const username = parts.slice(1).join('_');
+          const items = value.items || [];
+          const note = value.note || '';
+          await client.query(
+            `INSERT INTO daily_checklists (date, username, items, note, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, NOW(), $5)`,
+            [date, username, JSON.stringify(items), note, user]
+          );
+        }
+      }
+    }
+
+    // 3. extra
+    if (extra !== undefined && Array.isArray(extra)) {
+      await client.query('DELETE FROM center_extras');
+      for (const c of extra) {
+        if (!c || !c.id) continue;
+        await client.query(
+          `INSERT INTO center_extras (id, row_num, name, potential, type, lead, province_id, owner, updated_at, updated_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)`,
+          [c.id, c.row || 0, c.name || '', c.potential || 1, c.type || null, c.lead || 'سرنخ', c.province_id || '', c.owner || null, user]
+        );
+      }
+    }
+
+    // 4. kpiTargets
+    if (kpiTargets !== undefined && typeof kpiTargets === 'object' && kpiTargets !== null) {
+      // 1. Weights
+      if (kpiTargets.weights) {
+        await client.query(
+          `INSERT INTO app_settings (key, value, updated_at, updated_by)
+           VALUES ('kpi_weights', $1, NOW(), $2)
+           ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW(), updated_by=$2`,
+          [JSON.stringify(kpiTargets.weights), user]
+        );
+      }
+      // 2. Provinces
+      await client.query('DELETE FROM kpi_province_targets');
+      if (kpiTargets.provinces && typeof kpiTargets.provinces === 'object') {
+        for (const [provId, targets] of Object.entries(kpiTargets.provinces)) {
+          if (!targets) continue;
+          await client.query(
+            `INSERT INTO kpi_province_targets (province_id, calls, visits, sales, extra, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
+            [provId, targets.calls || 0, targets.visits || 0, targets.sales || 0, targets.extra || 0, user]
+          );
+        }
+      }
+      // 3. User targets
+      await client.query('DELETE FROM kpi_user_targets');
+      for (const [key, value] of Object.entries(kpiTargets)) {
+        if (key === 'weights' || key === 'provinces' || !value) continue;
+        if (key.includes(':')) {
+          const [username, month] = key.split(':');
+          await client.query(
+            `INSERT INTO kpi_user_targets (username, month, calls_per_day, visits_per_week, sales_count, sales_amount, cash_pct, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)`,
+            [username, month, value.callsPerDay || 10, value.visitsPerWeek || 5, value.salesCount || 5, value.salesAmount || 0, value.cashPct || 50, user]
+          );
+        }
+      }
+    }
+
+    // 5. callLog
+    if (callLog !== undefined && Array.isArray(callLog)) {
+      await client.query('DELETE FROM call_log');
+      for (const l of callLog) {
+        if (!l || !l.id) continue;
+        await client.query(
+          `INSERT INTO call_log (id, date, username, count, note, updated_at, updated_by)
+           VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
+          [l.id, l.date || '', l.userId || '', l.count || 0, l.note || null, user]
+        );
+      }
+    }
+
+    // 6. visitLog
+    if (visitLog !== undefined && Array.isArray(visitLog)) {
+      await client.query('DELETE FROM visit_log');
+      for (const l of visitLog) {
+        if (!l || !l.id) continue;
+        await client.query(
+          `INSERT INTO visit_log (id, date, username, count, note, updated_at, updated_by)
+           VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
+          [l.id, l.date || '', l.userId || '', l.count || 0, l.note || null, user]
+        );
+      }
+    }
+
+    // 7. salesLog
+    if (salesLog !== undefined && Array.isArray(salesLog)) {
+      await client.query('DELETE FROM sales_log');
+      for (const l of salesLog) {
+        if (!l || !l.id) continue;
+        await client.query(
+          `INSERT INTO sales_log (id, date, username, center_name, center_key, amount, is_cash, updated_at, updated_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)`,
+          [l.id, l.date || '', l.userId || '', l.centerName || '', l.centerKey || null, l.amount || 0, !!l.isCash, user]
+        );
+      }
+    }
+
+    // 8. missionLog
+    if (missionLog !== undefined && Array.isArray(missionLog)) {
+      await client.query('DELETE FROM mission_log');
+      for (const l of missionLog) {
+        if (!l || !l.id) continue;
+        await client.query(
+          `INSERT INTO mission_log (id, username, month, done, note, updated_at, updated_by)
+           VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
+          [l.id, l.userId || '', l.month || '', !!l.done, l.note || null, user]
+        );
+      }
+    }
+
+    // 9. provHistory
+    if (provHistory !== undefined && Array.isArray(provHistory)) {
+      await client.query('DELETE FROM province_history');
+      for (const h of provHistory) {
+        if (!h) continue;
+        await client.query(
+          `INSERT INTO province_history (province_id, province_name, from_owner, from_name, to_owner, to_name, action_date, action_ts, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+          [h.provId, h.provName || '', h.from || null, h.fromName || null, h.to || null, h.toName || null, h.at || '', h.ts || 0]
+        );
+      }
+    }
+
+    // 10. kpiHistory
+    if (kpiHistory !== undefined && Array.isArray(kpiHistory)) {
+      await client.query('DELETE FROM kpi_history');
+      for (const s of kpiHistory) {
+        if (!s || !s.userId || !s.month) continue;
+        await client.query(
+          `INSERT INTO kpi_history (username, month, data, updated_at)
+           VALUES ($1, $2, $3, NOW())`,
+          [s.userId, s.month, JSON.stringify(s)]
+        );
+      }
+    }
+
+    // ── week_entries ──────────────────────────────────────────────────────────
+    const incomingWE = weekEntries || {};
+    const deletedKeys = (Array.isArray(_weDeletedKeys) ? _weDeletedKeys : [])
       .filter(function(k) { return !incomingWE[k]; });
-    delete mainData._weDeletedKeys;
-
-    // Delete explicitly removed entries
     if (deletedKeys.length > 0) {
-      await query('DELETE FROM week_entries WHERE key = ANY($1::text[])', [deletedKeys]).catch(function(e) {
-        console.warn('[week_entries DELETE]', e.message);
-      });
+      await client.query('DELETE FROM week_entries WHERE key = ANY($1::text[])', [deletedKeys])
+        .catch(function(e) { console.warn('[week_entries DELETE]', e.message); });
     }
-    // Upsert incoming entries to week_entries SQL table
     if (Object.keys(incomingWE).length > 0) {
-      await query(
+      await client.query(
         `INSERT INTO week_entries (key, value, updated_at, updated_by)
-         SELECT e.key, e.value, NOW(), $2
-         FROM jsonb_each($1::jsonb) AS e(key, value)
-         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
-        [JSON.stringify(incomingWE), req.user.username]
-      ).catch(function(e) {
-        // Log but do NOT fall back to blob — that would corrupt the single source of truth
-        console.error('[week_entries upsert FAILED]', e.message);
-        throw e;
-      });
+         SELECT e.key, e.value, NOW(), $2 FROM jsonb_each($1::jsonb) AS e(key, value)
+         ON CONFLICT (key) DO UPDATE
+           SET value = EXCLUDED.value, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+        [JSON.stringify(incomingWE), user]
+      ).catch(function(e) { console.error('[week_entries upsert FAILED]', e.message); throw e; });
     }
 
-    // If body has _mtr key, store separately
-    if (mainData._mtr) {
-      const mtrData = mainData._mtr;
+    // ── _mtr ──────────────────────────────────────────────────────────────────
+    if (_mtr) {
       await client.query(
         `INSERT INTO app_data (key, value, updated_at, updated_by)
          VALUES ('mtr', $1, NOW(), $2)
          ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
-        [JSON.stringify(mtrData), req.user.username]
+        [JSON.stringify(_mtr), user]
       );
-      delete mainData._mtr;
     }
 
-    // Save current version to history before overwriting (keeps 30 days)
-    // Use SAVEPOINT so a missing history table doesn't abort the transaction
+    // ── update _db_meta timestamp (used for conflict detection) ───────────────
+    const upserted = await client.query(
+      `INSERT INTO app_data (key, value, updated_at, updated_by)
+       VALUES ('_db_meta', '{}', NOW(), $1)
+       ON CONFLICT (key) DO UPDATE SET value = '{}', updated_at = NOW(), updated_by = $1
+       RETURNING updated_at`,
+      [user]
+    );
+
+    // Save current version to history (keeps 30 days)
+    // Use SAVEPOINT so history saving failure doesn't block the actual save
     await client.query('SAVEPOINT history_ops');
     try {
+      const dbSnap = {
+        edits, notes, rTags, tags, settings, events, checklist, kpiTargets,
+        extra, salesLog, callLog, visitLog, weekEntries: incomingWE
+      };
       await client.query(
         `INSERT INTO app_data_history (key, value, saved_by)
-         SELECT 'main', value, $1 FROM app_data WHERE key = 'main'`,
-        [req.user.username]
+         VALUES ('main', $1, $2)`,
+        [JSON.stringify(dbSnap), user]
       );
-      // Keep last 30 days of history (not just 30 records)
       await client.query(
         `DELETE FROM app_data_history WHERE key = 'main' AND saved_at < NOW() - INTERVAL '30 days'`
       );
       await client.query('RELEASE SAVEPOINT history_ops');
     } catch (histErr) {
-      await client.query('ROLLBACK TO SAVEPOINT history_ops');
-      console.warn('[data/db PUT history]', histErr.message);
+      console.warn('[history_ops FAILED]', histErr.message);
+      await client.query('ROLLBACK TO SAVEPOINT history_ops').catch(()=>{});
     }
-
-    // Use RETURNING to get exact timestamp written — avoids post-upsert SELECT race
-    const upserted = await client.query(
-      `INSERT INTO app_data (key, value, updated_at, updated_by)
-       VALUES ('main', $1, NOW(), $2)
-       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2
-       RETURNING updated_at`,
-      [JSON.stringify(mainData), req.user.username]
-    );
 
     await client.query('COMMIT');
 
     const _serverTs = upserted.rows[0].updated_at.toISOString();
     const _cid = req.headers['x-cid'] || '';
-    try { if (_broadcast) _broadcast('db-updated', { by: req.user.username, at: Date.now() }, _cid); } catch(e) {}
+    try { if (_broadcast) _broadcast('db-updated', { by: user, at: Date.now() }, _cid); } catch(e) {}
     return res.json({ ok: true, _serverTs });
   } catch (e) {
-    await client.query('ROLLBACK').catch(function() {});
+    if (client) await client.query('ROLLBACK').catch(function() {});
     console.error('[data/db PUT]', e.message);
     return res.status(500).json({ error: 'خطای سرور' });
   } finally {
@@ -197,35 +477,251 @@ router.get('/history', requireManager, async (req, res) => {
 router.post('/history/:id/restore', requireManager, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ error: 'شناسه نامعتبر' });
+  let client;
   try {
     const hist = await query('SELECT value FROM app_data_history WHERE id = $1 AND key = $2', [id, 'main']);
     if (!hist.rows.length) return res.status(404).json({ error: 'نسخه یافت نشد' });
     const snap = hist.rows[0].value || {};
+    const user = req.user.username;
 
-    // If old snapshot has weekEntries in blob, migrate them to SQL table
-    if (snap.weekEntries && typeof snap.weekEntries === 'object') {
-      const blobWE = snap.weekEntries;
-      delete snap.weekEntries;
-      await query(
-        `INSERT INTO week_entries (key, value, updated_at, updated_by)
-         SELECT e.key, e.value, NOW(), $2
-         FROM jsonb_each($1::jsonb) AS e(key, value)
-         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
-        [JSON.stringify(blobWE), req.user.username]
-      ).catch(function(e) { console.warn('[history restore] weekEntries migrate:', e.message); });
-      console.log(`[data/history restore] migrated ${Object.keys(blobWE).length} weekEntries from old snapshot`);
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    // 1. center_edits
+    const edits = snap.edits || {};
+    await client.query('DELETE FROM center_edits');
+    if (Object.keys(edits).length > 0) {
+      await client.query(
+        `INSERT INTO center_edits (center_key, data, updated_at, updated_by)
+         SELECT key, value, NOW(), $2 FROM jsonb_each($1::jsonb)`,
+        [JSON.stringify(edits), user]
+      );
     }
 
-    await query(
-      `INSERT INTO app_data (key, value, updated_at, updated_by) VALUES ('main', $1, NOW(), $2)
-       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
-      [JSON.stringify(snap), req.user.username]
+    // 2. center_notes
+    const notes = snap.notes || {};
+    await client.query('DELETE FROM center_notes');
+    if (Object.keys(notes).length > 0) {
+      await client.query(
+        `INSERT INTO center_notes (center_key, notes, updated_at, updated_by)
+         SELECT key, value, NOW(), $2 FROM jsonb_each($1::jsonb)`,
+        [JSON.stringify(notes), user]
+      );
+    }
+
+    // 3. center_tags
+    const rTags = snap.rTags || snap.tags || {};
+    await client.query('DELETE FROM center_tags');
+    if (Object.keys(rTags).length > 0) {
+      await client.query(
+        `INSERT INTO center_tags (center_key, tags, updated_at, updated_by)
+         SELECT key, value, NOW(), $2 FROM jsonb_each($1::jsonb)`,
+        [JSON.stringify(rTags), user]
+      );
+    }
+
+    // 4. app_settings
+    const settings = snap.settings || {};
+    await client.query('DELETE FROM app_settings');
+    if (Object.keys(settings).length > 0) {
+      for (const [key, value] of Object.entries(settings)) {
+        await client.query(
+          `INSERT INTO app_settings (key, value, updated_at, updated_by)
+           VALUES ($1, $2, NOW(), $3)`,
+          [key, JSON.stringify(value), user]
+        );
+      }
+    }
+
+    // 5. Structured SQL tables restore from snapshot
+    // 1. events
+    if (snap.events !== undefined && Array.isArray(snap.events)) {
+      await client.query('DELETE FROM app_events');
+      for (const ev of snap.events) {
+        if (!ev || ev.id === undefined) continue;
+        await client.query(
+          `INSERT INTO app_events (id, title, description, start_ms, all_day, color, owner, updated_at, updated_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)`,
+          [ev.id, ev.title || '', ev.desc || '', ev.startMs || 0, !!ev.allDay, ev.color || null, ev.owner || null, user]
+        );
+      }
+    }
+
+    // 2. checklist
+    if (snap.checklist !== undefined && typeof snap.checklist === 'object' && snap.checklist !== null) {
+      await client.query('DELETE FROM daily_checklists');
+      for (const [key, value] of Object.entries(snap.checklist)) {
+        if (!value) continue;
+        const parts = key.split('_');
+        if (parts.length >= 2) {
+          const date = parts[0];
+          const username = parts.slice(1).join('_');
+          const items = value.items || [];
+          const note = value.note || '';
+          await client.query(
+            `INSERT INTO daily_checklists (date, username, items, note, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, NOW(), $5)`,
+            [date, username, JSON.stringify(items), note, user]
+          );
+        }
+      }
+    }
+
+    // 3. extra
+    if (snap.extra !== undefined && Array.isArray(snap.extra)) {
+      await client.query('DELETE FROM center_extras');
+      for (const c of snap.extra) {
+        if (!c || !c.id) continue;
+        await client.query(
+          `INSERT INTO center_extras (id, row_num, name, potential, type, lead, province_id, owner, updated_at, updated_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)`,
+          [c.id, c.row || 0, c.name || '', c.potential || 1, c.type || null, c.lead || 'سرنخ', c.province_id || '', c.owner || null, user]
+        );
+      }
+    }
+
+    // 4. kpiTargets
+    if (snap.kpiTargets !== undefined && typeof snap.kpiTargets === 'object' && snap.kpiTargets !== null) {
+      if (snap.kpiTargets.weights) {
+        await client.query(
+          `INSERT INTO app_settings (key, value, updated_at, updated_by)
+           VALUES ('kpi_weights', $1, NOW(), $2)
+           ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW(), updated_by=$2`,
+          [JSON.stringify(snap.kpiTargets.weights), user]
+        );
+      }
+      await client.query('DELETE FROM kpi_province_targets');
+      if (snap.kpiTargets.provinces && typeof snap.kpiTargets.provinces === 'object') {
+        for (const [provId, targets] of Object.entries(snap.kpiTargets.provinces)) {
+          if (!targets) continue;
+          await client.query(
+            `INSERT INTO kpi_province_targets (province_id, calls, visits, sales, extra, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
+            [provId, targets.calls || 0, targets.visits || 0, targets.sales || 0, targets.extra || 0, user]
+          );
+        }
+      }
+      await client.query('DELETE FROM kpi_user_targets');
+      for (const [key, value] of Object.entries(snap.kpiTargets)) {
+        if (key === 'weights' || key === 'provinces' || !value) continue;
+        if (key.includes(':')) {
+          const [username, month] = key.split(':');
+          await client.query(
+            `INSERT INTO kpi_user_targets (username, month, calls_per_day, visits_per_week, sales_count, sales_amount, cash_pct, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)`,
+            [username, month, value.callsPerDay || 10, value.visitsPerWeek || 5, value.salesCount || 5, value.salesAmount || 0, value.cashPct || 50, user]
+          );
+        }
+      }
+    }
+
+    // 5. callLog
+    if (snap.callLog !== undefined && Array.isArray(snap.callLog)) {
+      await client.query('DELETE FROM call_log');
+      for (const l of snap.callLog) {
+        if (!l || !l.id) continue;
+        await client.query(
+          `INSERT INTO call_log (id, date, username, count, note, updated_at, updated_by)
+           VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
+          [l.id, l.date || '', l.userId || '', l.count || 0, l.note || null, user]
+        );
+      }
+    }
+
+    // 6. visitLog
+    if (snap.visitLog !== undefined && Array.isArray(snap.visitLog)) {
+      await client.query('DELETE FROM visit_log');
+      for (const l of snap.visitLog) {
+        if (!l || !l.id) continue;
+        await client.query(
+          `INSERT INTO visit_log (id, date, username, count, note, updated_at, updated_by)
+           VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
+          [l.id, l.date || '', l.userId || '', l.count || 0, l.note || null, user]
+        );
+      }
+    }
+
+    // 7. salesLog
+    if (snap.salesLog !== undefined && Array.isArray(snap.salesLog)) {
+      await client.query('DELETE FROM sales_log');
+      for (const l of snap.salesLog) {
+        if (!l || !l.id) continue;
+        await client.query(
+          `INSERT INTO sales_log (id, date, username, center_name, center_key, amount, is_cash, updated_at, updated_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)`,
+          [l.id, l.date || '', l.userId || '', l.centerName || '', l.centerKey || null, l.amount || 0, !!l.isCash, user]
+        );
+      }
+    }
+
+    // 8. missionLog
+    if (snap.missionLog !== undefined && Array.isArray(snap.missionLog)) {
+      await client.query('DELETE FROM mission_log');
+      for (const l of snap.missionLog) {
+        if (!l || !l.id) continue;
+        await client.query(
+          `INSERT INTO mission_log (id, username, month, done, note, updated_at, updated_by)
+           VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
+          [l.id, l.userId || '', l.month || '', !!l.done, l.note || null, user]
+        );
+      }
+    }
+
+    // 9. provHistory
+    if (snap.provHistory !== undefined && Array.isArray(snap.provHistory)) {
+      await client.query('DELETE FROM province_history');
+      for (const h of snap.provHistory) {
+        if (!h) continue;
+        await client.query(
+          `INSERT INTO province_history (province_id, province_name, from_owner, from_name, to_owner, to_name, action_date, action_ts, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+          [h.provId, h.provName || '', h.from || null, h.fromName || null, h.to || null, h.toName || null, h.at || '', h.ts || 0]
+        );
+      }
+    }
+
+    // 10. kpiHistory
+    if (snap.kpiHistory !== undefined && Array.isArray(snap.kpiHistory)) {
+      await client.query('DELETE FROM kpi_history');
+      for (const s of snap.kpiHistory) {
+        if (!s || !s.userId || !s.month) continue;
+        await client.query(
+          `INSERT INTO kpi_history (username, month, data, updated_at)
+           VALUES ($1, $2, $3, NOW())`,
+          [s.userId, s.month, JSON.stringify(s)]
+        );
+      }
+    }
+
+    // 6. week_entries
+    const weSource = snap.weekEntries || {};
+    await client.query('DELETE FROM week_entries');
+    if (Object.keys(weSource).length > 0) {
+      await client.query(
+        `INSERT INTO week_entries (key, value, updated_at, updated_by)
+         SELECT e.key, e.value, NOW(), $2 FROM jsonb_each($1::jsonb) AS e(key, value)`,
+        [JSON.stringify(weSource), user]
+      );
+    }
+
+    // 7. update _db_meta to new timestamp
+    const upserted = await client.query(
+      `INSERT INTO app_data (key, value, updated_at, updated_by)
+       VALUES ('_db_meta', '{}', NOW(), $1)
+       ON CONFLICT (key) DO UPDATE SET value = '{}', updated_at = NOW(), updated_by = $1
+       RETURNING updated_at`,
+      [user]
     );
-    console.log(`[data/history restore] id=${id} by=${req.user.username}`);
+
+    await client.query('COMMIT');
+    console.log(`[data/history restore] id=${id} by=${user}`);
     return res.json({ ok: true });
   } catch (e) {
+    if (client) await client.query('ROLLBACK').catch(function() {});
     console.error('[data/history restore]', e.message);
     return res.status(500).json({ error: 'خطای سرور' });
+  } finally {
+    if (client) client.release();
   }
 });
 
@@ -309,32 +805,28 @@ router.put('/centers/master', requireManager, async (req, res) => {
   }
 });
 
-// GET /api/data/backup — manager only (contains full DB including sensitive config)
+// GET /api/data/backup — manager only
 router.get('/backup', requireManager, async (req, res) => {
   try {
-    const [mainR, mtrR, usersR, centersR, weR] = await Promise.all([
-      query("SELECT value FROM app_data WHERE key = 'main'"),
+    const [db, mtrR, usersR, centersR] = await Promise.all([
+      loadDBFromSQL(),
       query("SELECT value FROM app_data WHERE key = 'mtr'"),
       query('SELECT username, display_name, role, color, phone, active FROM app_users ORDER BY username'),
       query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS', 'PC_RAW')"),
-      query('SELECT key, value FROM week_entries'),
     ]);
 
     const centers = { CENTERS: [], PC_RAW: {} };
-    centersR.rows.forEach(function (row) {
+    centersR.rows.forEach(function(row) {
       if (row.key === 'CENTERS') centers.CENTERS = row.data;
       else if (row.key === 'PC_RAW') centers.PC_RAW = row.data;
     });
 
-    const weekEntries = {};
-    weR.rows.forEach(function(r) { weekEntries[r.key] = r.value; });
-
     return res.json({
-      db: mainR.rows.length ? mainR.rows[0].value : {},
+      db: db,
       mtr: mtrR.rows.length ? mtrR.rows[0].value : {},
       users: usersR.rows,
       centers: centers,
-      weekEntries: weekEntries,
+      weekEntries: db.weekEntries || {},
       exportedAt: new Date().toISOString(),
     });
   } catch (e) {
@@ -346,38 +838,220 @@ router.get('/backup', requireManager, async (req, res) => {
 // POST /api/data/restore
 router.post('/restore', requireManager, async (req, res) => {
   const { db, mtr, users, centers, weekEntries } = req.body || {};
+  const user = req.user.username;
 
   try {
+    // Restore normalized tables from backup snapshot
     if (db && typeof db === 'object') {
-      // Strip any weekEntries from the blob before storing (SQL table is authoritative)
-      const cleanDb = Object.assign({}, db);
-      delete cleanDb.weekEntries;
-      await query(
-        `INSERT INTO app_data (key, value, updated_at, updated_by)
-         VALUES ('main', $1, NOW(), $2)
-         ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
-        [JSON.stringify(cleanDb), req.user.username]
-      );
+      if (db.edits && typeof db.edits === 'object' && Object.keys(db.edits).length) {
+        await query('DELETE FROM center_edits');
+        await query(
+          `INSERT INTO center_edits (center_key, data, updated_at, updated_by)
+           SELECT key, value, NOW(), $2 FROM jsonb_each($1::jsonb)`,
+          [JSON.stringify(db.edits), user]
+        );
+      }
+      if (db.notes && typeof db.notes === 'object' && Object.keys(db.notes).length) {
+        await query('DELETE FROM center_notes');
+        await query(
+          `INSERT INTO center_notes (center_key, notes, updated_at, updated_by)
+           SELECT key, value, NOW(), $2 FROM jsonb_each($1::jsonb)`,
+          [JSON.stringify(db.notes), user]
+        );
+      }
+      const tagsData = db.rTags || db.tags;
+      if (tagsData && typeof tagsData === 'object' && Object.keys(tagsData).length) {
+        await query('DELETE FROM center_tags');
+        await query(
+          `INSERT INTO center_tags (center_key, tags, updated_at, updated_by)
+           SELECT key, value, NOW(), $2 FROM jsonb_each($1::jsonb)`,
+          [JSON.stringify(tagsData), user]
+        );
+      }
+      if (db.settings && typeof db.settings === 'object') {
+        for (const [key, value] of Object.entries(db.settings)) {
+          await query(
+            `INSERT INTO app_settings (key, value, updated_at, updated_by) VALUES ($1, $2, NOW(), $3)
+             ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW(), updated_by = $3`,
+            [key, JSON.stringify(value), user]
+          );
+        }
+      }
+      // 1. events
+      if (db.events !== undefined && Array.isArray(db.events)) {
+        await query('DELETE FROM app_events');
+        for (const ev of db.events) {
+          if (!ev || ev.id === undefined) continue;
+          await query(
+            `INSERT INTO app_events (id, title, description, start_ms, all_day, color, owner, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)`,
+            [ev.id, ev.title || '', ev.desc || '', ev.startMs || 0, !!ev.allDay, ev.color || null, ev.owner || null, user]
+          );
+        }
+      }
+
+      // 2. checklist
+      if (db.checklist !== undefined && typeof db.checklist === 'object' && db.checklist !== null) {
+        await query('DELETE FROM daily_checklists');
+        for (const [key, value] of Object.entries(db.checklist)) {
+          if (!value) continue;
+          const parts = key.split('_');
+          if (parts.length >= 2) {
+            const date = parts[0];
+            const username = parts.slice(1).join('_');
+            const items = value.items || [];
+            const note = value.note || '';
+            await query(
+              `INSERT INTO daily_checklists (date, username, items, note, updated_at, updated_by)
+               VALUES ($1, $2, $3, $4, NOW(), $5)`,
+              [date, username, JSON.stringify(items), note, user]
+            );
+          }
+        }
+      }
+
+      // 3. extra
+      if (db.extra !== undefined && Array.isArray(db.extra)) {
+        await query('DELETE FROM center_extras');
+        for (const c of db.extra) {
+          if (!c || !c.id) continue;
+          await query(
+            `INSERT INTO center_extras (id, row_num, name, potential, type, lead, province_id, owner, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)`,
+            [c.id, c.row || 0, c.name || '', c.potential || 1, c.type || null, c.lead || 'سرنخ', c.province_id || '', c.owner || null, user]
+          );
+        }
+      }
+
+      // 4. kpiTargets
+      if (db.kpiTargets !== undefined && typeof db.kpiTargets === 'object' && db.kpiTargets !== null) {
+        if (db.kpiTargets.weights) {
+          await query(
+            `INSERT INTO app_settings (key, value, updated_at, updated_by)
+             VALUES ('kpi_weights', $1, NOW(), $2)
+             ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW(), updated_by=$2`,
+            [JSON.stringify(db.kpiTargets.weights), user]
+          );
+        }
+        await query('DELETE FROM kpi_province_targets');
+        if (db.kpiTargets.provinces && typeof db.kpiTargets.provinces === 'object') {
+          for (const [provId, targets] of Object.entries(db.kpiTargets.provinces)) {
+            if (!targets) continue;
+            await query(
+              `INSERT INTO kpi_province_targets (province_id, calls, visits, sales, extra, updated_at, updated_by)
+               VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
+              [provId, targets.calls || 0, targets.visits || 0, targets.sales || 0, targets.extra || 0, user]
+            );
+          }
+        }
+        await query('DELETE FROM kpi_user_targets');
+        for (const [key, value] of Object.entries(db.kpiTargets)) {
+          if (key === 'weights' || key === 'provinces' || !value) continue;
+          if (key.includes(':')) {
+            const [username, month] = key.split(':');
+            await query(
+              `INSERT INTO kpi_user_targets (username, month, calls_per_day, visits_per_week, sales_count, sales_amount, cash_pct, updated_at, updated_by)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)`,
+              [username, month, value.callsPerDay || 10, value.visitsPerWeek || 5, value.salesCount || 5, value.salesAmount || 0, value.cashPct || 50, user]
+            );
+          }
+        }
+      }
+
+      // 5. callLog
+      if (db.callLog !== undefined && Array.isArray(db.callLog)) {
+        await query('DELETE FROM call_log');
+        for (const l of db.callLog) {
+          if (!l || !l.id) continue;
+          await query(
+            `INSERT INTO call_log (id, date, username, count, note, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
+            [l.id, l.date || '', l.userId || '', l.count || 0, l.note || null, user]
+          );
+        }
+      }
+
+      // 6. visitLog
+      if (db.visitLog !== undefined && Array.isArray(db.visitLog)) {
+        await query('DELETE FROM visit_log');
+        for (const l of db.visitLog) {
+          if (!l || !l.id) continue;
+          await query(
+            `INSERT INTO visit_log (id, date, username, count, note, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
+            [l.id, l.date || '', l.userId || '', l.count || 0, l.note || null, user]
+          );
+        }
+      }
+
+      // 7. salesLog
+      if (db.salesLog !== undefined && Array.isArray(db.salesLog)) {
+        await query('DELETE FROM sales_log');
+        for (const l of db.salesLog) {
+          if (!l || !l.id) continue;
+          await query(
+            `INSERT INTO sales_log (id, date, username, center_name, center_key, amount, is_cash, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)`,
+            [l.id, l.date || '', l.userId || '', l.centerName || '', l.centerKey || null, l.amount || 0, !!l.isCash, user]
+          );
+        }
+      }
+
+      // 8. missionLog
+      if (db.missionLog !== undefined && Array.isArray(db.missionLog)) {
+        await query('DELETE FROM mission_log');
+        for (const l of db.missionLog) {
+          if (!l || !l.id) continue;
+          await query(
+            `INSERT INTO mission_log (id, username, month, done, note, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
+            [l.id, l.userId || '', l.month || '', !!l.done, l.note || null, user]
+          );
+        }
+      }
+
+      // 9. provHistory
+      if (db.provHistory !== undefined && Array.isArray(db.provHistory)) {
+        await query('DELETE FROM province_history');
+        for (const h of db.provHistory) {
+          if (!h) continue;
+          await query(
+            `INSERT INTO province_history (province_id, province_name, from_owner, from_name, to_owner, to_name, action_date, action_ts, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+            [h.provId, h.provName || '', h.from || null, h.fromName || null, h.to || null, h.toName || null, h.at || '', h.ts || 0]
+          );
+        }
+      }
+
+      // 10. kpiHistory
+      if (db.kpiHistory !== undefined && Array.isArray(db.kpiHistory)) {
+        await query('DELETE FROM kpi_history');
+        for (const s of db.kpiHistory) {
+          if (!s || !s.userId || !s.month) continue;
+          await query(
+            `INSERT INTO kpi_history (username, month, data, updated_at)
+             VALUES ($1, $2, $3, NOW())`,
+            [s.userId, s.month, JSON.stringify(s)]
+          );
+        }
+      }
     }
 
-    // Restore weekEntries to SQL table
-    if (weekEntries && typeof weekEntries === 'object' && Object.keys(weekEntries).length) {
+    const weSource = (db && db.weekEntries) || weekEntries;
+    if (weSource && typeof weSource === 'object' && Object.keys(weSource).length) {
       await query('DELETE FROM week_entries');
       await query(
         `INSERT INTO week_entries (key, value, updated_at, updated_by)
-         SELECT e.key, e.value, NOW(), $2
-         FROM jsonb_each($1::jsonb) AS e(key, value)
-         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
-        [JSON.stringify(weekEntries), req.user.username]
+         SELECT e.key, e.value, NOW(), $2 FROM jsonb_each($1::jsonb) AS e(key, value)`,
+        [JSON.stringify(weSource), user]
       );
     }
 
     if (mtr && typeof mtr === 'object') {
       await query(
-        `INSERT INTO app_data (key, value, updated_at, updated_by)
-         VALUES ('mtr', $1, NOW(), $2)
+        `INSERT INTO app_data (key, value, updated_at, updated_by) VALUES ('mtr', $1, NOW(), $2)
          ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
-        [JSON.stringify(mtr), req.user.username]
+        [JSON.stringify(mtr), user]
       );
     }
 
@@ -388,24 +1062,23 @@ router.post('/restore', requireManager, async (req, res) => {
           `INSERT INTO app_users (username, display_name, role, color, phone, active)
            VALUES ($1, $2, $3, $4, $5, $6)
            ON CONFLICT (username) DO UPDATE
-           SET display_name = $2, role = $3, color = $4, phone = $5, active = $6`,
-          [u.username, u.display_name || u.username, u.role || 'کارشناس فروش', u.color || '#0ea5e9', u.phone || '', u.active !== false]
+           SET display_name=$2, role=$3, color=$4, phone=$5, active=$6`,
+          [u.username, u.display_name || u.username, u.role || 'کارشناس فروش',
+           u.color || '#0ea5e9', u.phone || '', u.active !== false]
         );
       }
     }
 
     if (centers && centers.CENTERS) {
       await query(
-        `INSERT INTO centers_master (key, data, updated_at)
-         VALUES ('CENTERS', $1, NOW())
+        `INSERT INTO centers_master (key, data, updated_at) VALUES ('CENTERS', $1, NOW())
          ON CONFLICT (key) DO UPDATE SET data = $1, updated_at = NOW()`,
         [JSON.stringify(centers.CENTERS)]
       );
     }
     if (centers && centers.PC_RAW) {
       await query(
-        `INSERT INTO centers_master (key, data, updated_at)
-         VALUES ('PC_RAW', $1, NOW())
+        `INSERT INTO centers_master (key, data, updated_at) VALUES ('PC_RAW', $1, NOW())
          ON CONFLICT (key) DO UPDATE SET data = $1, updated_at = NOW()`,
         [JSON.stringify(centers.PC_RAW)]
       );
@@ -423,13 +1096,15 @@ router.get('/debug/center', requireManager, async (req, res) => {
   const centerId = req.query.id;
   if (!centerId) return res.status(400).json({ error: 'id param required' });
   try {
-    const mainR = await query("SELECT value FROM app_data WHERE key = 'main'");
-    const cmR   = await query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS','PC_RAW')");
-    const db    = mainR.rows[0]?.value || {};
-    const extra = (db.extra || []).filter(x => String(x.id) === String(centerId));
+    const [extraR, editsR, cmR] = await Promise.all([
+      query("SELECT value FROM app_data WHERE key = 'extra'"),
+      query('SELECT data FROM center_edits WHERE center_key = $1', [`pc_${centerId}`]),
+      query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS','PC_RAW')"),
+    ]);
+    const extra = (extraR.rows.length ? extraR.rows[0].value : []).filter(x => String(x.id) === String(centerId));
+    const editsKey = editsR.rows.length ? editsR.rows[0].data : null;
     const cmData = {};
     for (const r of cmR.rows) cmData[r.key] = r.data;
-    // Find in PC_RAW
     const pcRawMatches = [];
     const PC_RAW = cmData['PC_RAW'] || {};
     for (const [provName, entries] of Object.entries(PC_RAW)) {
@@ -437,13 +1112,12 @@ router.get('/debug/center', requireManager, async (req, res) => {
       entries.forEach((r, idx) => {
         const rid = Array.isArray(r) ? r[0] : (r.row ?? r.n ?? idx);
         const rname = Array.isArray(r) ? (r[1]||'') : (r.name||r[1]||'');
-        // This is a simple check; actual id building in client uses provId||rid
         if (String(rid) === String(centerId).split('||')[1]) {
           pcRawMatches.push({ provName, idx, rid, name: rname, raw: r });
         }
       });
     }
-    return res.json({ centerId, extra, pcRawMatches, editsKey: (db.edits||{})[`pc_${centerId}`] });
+    return res.json({ centerId, extra, pcRawMatches, editsKey });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
@@ -495,12 +1169,21 @@ router.post('/centers/merge', requireManager, async (req, res) => {
     const CENTERS = cmData['CENTERS'] || [];
     const PC_RAW  = cmData['PC_RAW']  || {};
 
-    // Load main DB (edits, rTags, notes)
-    const dbRes = await client.query("SELECT value FROM app_data WHERE key='main'");
-    const DB = (dbRes.rows[0]?.value) || {};
-    const edits    = DB.edits    || {};
-    const rTags    = DB.rTags    || {};
-    const noteMap  = DB.notes    || {};
+    // Load center data from normalized tables
+    const [editsRes, tagsRes, notesRes] = await Promise.all([
+      client.query('SELECT center_key, data FROM center_edits WHERE center_key = ANY($1::text[])',
+        [[srcKey, tgtKey]]),
+      client.query('SELECT center_key, tags FROM center_tags WHERE center_key = ANY($1::text[])',
+        [[srcKey, tgtKey]]),
+      client.query('SELECT center_key, notes FROM center_notes WHERE center_key = ANY($1::text[])',
+        [[srcKey, tgtKey]]),
+    ]);
+    const edits   = {};
+    const rTags   = {};
+    const noteMap = {};
+    editsRes.rows.forEach(r  => { edits[r.center_key]   = r.data;  });
+    tagsRes.rows.forEach(r   => { rTags[r.center_key]   = r.tags;  });
+    notesRes.rows.forEach(r  => { noteMap[r.center_key] = r.notes; });
 
     // Build edit keys
     const srcKey = sourceType === 'center' ? `center_${sourceId}` : `pc_${sourceId}`;
@@ -595,7 +1278,33 @@ router.post('/centers/merge', requireManager, async (req, res) => {
       }
     }
 
-    DB.edits = edits; DB.rTags = rTags; DB.notes = noteMap;
+    // Save merged center data back to normalized tables
+    if (edits[tgtKey] !== undefined) {
+      await client.query(
+        `INSERT INTO center_edits (center_key, data, updated_at, updated_by) VALUES ($1, $2, NOW(), $3)
+         ON CONFLICT (center_key) DO UPDATE SET data=$2, updated_at=NOW(), updated_by=$3`,
+        [tgtKey, JSON.stringify(edits[tgtKey] || {}), req.user.username]
+      );
+    }
+    if (edits[srcKey] === undefined) {
+      await client.query('DELETE FROM center_edits WHERE center_key = $1', [srcKey]);
+    }
+    if (rTags[tgtKey] !== undefined) {
+      await client.query(
+        `INSERT INTO center_tags (center_key, tags, updated_at, updated_by) VALUES ($1, $2, NOW(), $3)
+         ON CONFLICT (center_key) DO UPDATE SET tags=$2, updated_at=NOW(), updated_by=$3`,
+        [tgtKey, JSON.stringify(rTags[tgtKey] || []), req.user.username]
+      );
+    }
+    await client.query('DELETE FROM center_tags WHERE center_key = $1', [srcKey]);
+    if (noteMap[tgtKey] !== undefined) {
+      await client.query(
+        `INSERT INTO center_notes (center_key, notes, updated_at, updated_by) VALUES ($1, $2, NOW(), $3)
+         ON CONFLICT (center_key) DO UPDATE SET notes=$2, updated_at=NOW(), updated_by=$3`,
+        [tgtKey, JSON.stringify(noteMap[tgtKey] || []), req.user.username]
+      );
+    }
+    await client.query('DELETE FROM center_notes WHERE center_key = $1', [srcKey]);
 
     // Migrate week_entries: rename keys that reference the source center
     // week_entries key format: "{weekId}:::{rtype}_{rid}" or "{weekId}:::{recKey}"
@@ -633,12 +1342,6 @@ router.post('/centers/merge', requireManager, async (req, res) => {
       `INSERT INTO centers_master (key, data, updated_at) VALUES ('PC_RAW', $1, NOW())
        ON CONFLICT (key) DO UPDATE SET data = $1, updated_at = NOW()`,
       [JSON.stringify(PC_RAW)]
-    );
-    // Save main DB
-    await client.query(
-      `INSERT INTO app_data (key, value, updated_at, updated_by) VALUES ('main', $1, NOW(), $2)
-       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
-      [JSON.stringify(DB), req.user.username]
     );
 
     await client.query('COMMIT');

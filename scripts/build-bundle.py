@@ -26,6 +26,7 @@ FILES = [
     'public/js/kpi.js',
     'public/js/manager-tasks.js',
     'public/js/mtr.js',
+    'public/js/hcp.js',
 ]
 
 OUT = 'public/js/app.bundle.js'

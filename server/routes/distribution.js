@@ -163,9 +163,11 @@ router.post('/proposals', requireManager, async (req, res) => {
   }
 
   try {
-    // Load main DB data
-    const dbResult = await query("SELECT value FROM app_data WHERE key = 'main'");
-    const dbData = dbResult.rows.length ? dbResult.rows[0].value : {};
+    // Load edits from normalized table
+    const editsResult = await query('SELECT center_key, data FROM center_edits');
+    const edits = {};
+    editsResult.rows.forEach(function(r) { edits[r.center_key] = r.data; });
+    const dbData = { edits };
 
     // Compute assignments
     const assignments = computeAssignments(dbData, rules);
@@ -205,29 +207,21 @@ router.put('/proposals/:id/approve', requireManager, async (req, res) => {
     const proposal = propResult.rows[0];
     const assignments = finalAssignments || proposal.assignments || [];
 
-    // Load main DB data
-    const dbResult = await query("SELECT value FROM app_data WHERE key = 'main'");
-    const dbData = dbResult.rows.length ? dbResult.rows[0].value : {};
-
-    if (!dbData.edits) dbData.edits = {};
-
+    // Apply owner changes directly to center_edits
     let changed = 0;
-    assignments.forEach(function (a) {
+    for (const a of assignments) {
       if (a.fromUser !== a.toUser && a.toUser) {
-        if (!dbData.edits[a.recKey]) dbData.edits[a.recKey] = {};
-        dbData.edits[a.recKey].owner = a.toUser;
-        dbData.edits[a.recKey]._ts = Date.now();
+        await query(
+          `INSERT INTO center_edits (center_key, data, updated_at, updated_by)
+           VALUES ($1, jsonb_build_object('owner', $2::text, '_ts', $3::bigint), NOW(), $4)
+           ON CONFLICT (center_key) DO UPDATE
+             SET data = center_edits.data || jsonb_build_object('owner', $2::text, '_ts', $3::bigint),
+                 updated_at = NOW(), updated_by = $4`,
+          [a.recKey, a.toUser, Date.now(), req.user.username]
+        );
         changed++;
       }
-    });
-
-    // Save updated DB
-    await query(
-      `INSERT INTO app_data (key, value, updated_at, updated_by)
-       VALUES ('main', $1, NOW(), $2)
-       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
-      [JSON.stringify(dbData), req.user.username]
-    );
+    }
 
     // Mark proposal as approved
     await query(

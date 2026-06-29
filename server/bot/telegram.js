@@ -94,25 +94,24 @@ function downloadFile(fileId) {
 
 // ── Session persistence ───────────────────────────────────────────────────
 async function loadBotSessions() {
-  const r = await query(`SELECT value FROM app_data WHERE key = 'bot_sessions'`);
-  return r.rows.length ? r.rows[0].value : {};
-}
-
-async function saveBotSessions(map) {
-  await query(
-    `INSERT INTO app_data (key, value, updated_at, updated_by)
-     VALUES ('bot_sessions', $1, NOW(), 'bot')
-     ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW(), updated_by='bot'`,
-    [JSON.stringify(map)]
-  );
+  const r = await query('SELECT chat_id, data FROM bot_sessions');
+  const map = {};
+  r.rows.forEach(function(row) { map[row.chat_id] = row.data; });
+  return map;
 }
 
 async function persistSession(chatId, remove) {
   try {
-    const stored = await loadBotSessions();
-    if (remove) delete stored[chatId];
-    else stored[chatId] = sessions[chatId];
-    await saveBotSessions(stored);
+    if (remove) {
+      await query('DELETE FROM bot_sessions WHERE chat_id = $1', [String(chatId)]);
+    } else {
+      await query(
+        `INSERT INTO bot_sessions (chat_id, data, updated_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (chat_id) DO UPDATE SET data=$2, updated_at=NOW()`,
+        [String(chatId), JSON.stringify(sessions[chatId])]
+      );
+    }
   } catch(e) {}
 }
 
@@ -209,8 +208,8 @@ async function handleUpdate(upd) {
 
     // Restore session
     if (!sessions[chatId]) {
-      const stored = await loadBotSessions();
-      sessions[chatId] = stored[chatId] || { state: ST.AWAIT_USERNAME };
+      const r = await query('SELECT data FROM bot_sessions WHERE chat_id = $1', [String(chatId)]);
+      sessions[chatId] = (r.rows.length ? r.rows[0].data : null) || { state: ST.AWAIT_USERNAME };
       const s = sessions[chatId];
       if (s.state !== ST.IDLE) { s.state = ST.AWAIT_USERNAME; delete s.pendingUser; }
     }
@@ -486,20 +485,7 @@ async function getWeekEntriesForRange(dateFrom, dateTo, username, isMgr) {
   const sqlMap = {};
   sqlRes.rows.forEach(function(r) { sqlMap[r.key] = r.value; });
 
-  // Also include blob entries not yet migrated to SQL
-  try {
-    const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
-    const blob = blobRes.rows[0] && blobRes.rows[0].value;
-    const blobWE = blob && typeof blob.weekEntries === 'object' ? blob.weekEntries : {};
-    Object.keys(blobWE).forEach(function(key) {
-      if (sqlMap[key]) return;
-      const we = blobWE[key];
-      if (!we || !we.scheduledDate) return;
-      if (we.scheduledDate < dateFrom || we.scheduledDate > dateTo) return;
-      if (!isMgr && we.addedBy !== username) return;
-      sqlMap[key] = we;
-    });
-  } catch(_) {}
+  // blob fallback removed — week_entries SQL table is the single source of truth
 
   return Object.entries(sqlMap)
     .map(function(e) { return { key: e[0], value: e[1] }; })
@@ -586,43 +572,64 @@ async function doCompleteEntry(chatId, sess, key, outcome, note, nextDate, cente
     const rkey  = rtype + '_' + rid;
     const actType = we.actionType || 'call';
 
-    // Update blob: KPI log + note + status + followup
+    // Update normalized tables: KPI log + note + status/followup
     await client.query('BEGIN');
-    const blobRes = await client.query("SELECT value FROM app_data WHERE key = 'main' FOR UPDATE");
-    if (!blobRes.rows.length) { await client.query('ROLLBACK'); throw new Error('DB blob not found'); }
-    const blob = blobRes.rows[0].value || {};
 
-    // KPI log
-    if (!blob.callLog)  blob.callLog  = [];
-    if (!blob.visitLog) blob.visitLog = [];
-    const kpiEntry = { id: Date.now(), date: todayStr, userId: sess.username, centerName: cname, centerKey: rkey, note: note || '', count: 1, outcome };
-    if (actType === 'visit') blob.visitLog.push(kpiEntry);
-    else                     blob.callLog.push(kpiEntry);
+    // KPI log → insert into call_log or visit_log table
+    const logNote = (cname ? '[' + cname + '] ' : '') + (outcome ? 'نتیجه: ' + outcome : '') + (note ? ' (توضیح: ' + note + ')' : '');
+    if (actType === 'visit') {
+      await client.query(
+        `INSERT INTO visit_log (id, date, username, count, note, updated_at, updated_by)
+         VALUES ($1, $2, $3, 1, $4, NOW(), $3)`,
+        [Date.now(), todayStr, sess.username, logNote]
+      );
+    } else {
+      await client.query(
+        `INSERT INTO call_log (id, date, username, count, note, updated_at, updated_by)
+         VALUES ($1, $2, $3, 1, $4, NOW(), $3)`,
+        [Date.now(), todayStr, sess.username, logNote]
+      );
+    }
 
-    // Mirror note
+    // Trigger conflict metadata update for browser tabs SSE refresh
+    await client.query(
+      `INSERT INTO app_data (key, value, updated_at, updated_by)
+       VALUES ('_db_meta', '{}', NOW(), $1)
+       ON CONFLICT (key) DO UPDATE SET value = '{}', updated_at = NOW(), updated_by = $1`,
+      [sess.username]
+    );
+
+    // Mirror note → center_notes
     if (note && rid) {
-      if (!blob.notes) blob.notes = {};
-      if (!blob.notes[rkey]) blob.notes[rkey] = [];
       const pfx = actType === 'visit' ? '🤝 نتیجه مراجعه: ' : '📞 نتیجه تماس: ';
-      blob.notes[rkey].push({ text: pfx + note, by: sess.username, at: new Date().toISOString(), date: todayStr });
+      const noteObj = { text: pfx + note, by: sess.username, at: new Date().toISOString(), date: todayStr };
+      await client.query(
+        `INSERT INTO center_notes (center_key, notes, updated_at, updated_by)
+         VALUES ($1, $2::jsonb, NOW(), $3)
+         ON CONFLICT (center_key) DO UPDATE
+           SET notes = center_notes.notes || $2::jsonb, updated_at = NOW(), updated_by = $3`,
+        [rkey, JSON.stringify([noteObj]), sess.username]
+      );
     }
 
-    // Status change + followup
-    if (!blob.edits) blob.edits = {};
-    if (!blob.edits[rkey]) blob.edits[rkey] = {};
-    if (!blob.changeLog) blob.changeLog = [];
-    if (outcome === 'won') {
-      blob.edits[rkey].status = 'قرارداد بسته شد';
-      blob.changeLog.push({ at: new Date().toISOString(), by: sess.username, rkey, field: 'status', val: 'قرارداد بسته شد' });
-    } else if (outcome === 'inactive') {
-      blob.edits[rkey].status = 'غیرفعال';
-      blob.changeLog.push({ at: new Date().toISOString(), by: sess.username, rkey, field: 'status', val: 'غیرفعال' });
-    } else if (outcome === 'followup' && nextDate) {
-      blob.edits[rkey].followupDate = nextDate;
-      blob.changeLog.push({ at: new Date().toISOString(), by: sess.username, rkey, field: 'followupDate', val: nextDate });
+    // Status/followup → center_edits + change_log
+    if (outcome === 'won' || outcome === 'inactive' || (outcome === 'followup' && nextDate)) {
+      const field  = outcome === 'followup' ? 'followupDate' : 'status';
+      const newVal = outcome === 'won' ? 'قرارداد بسته شد' : outcome === 'inactive' ? 'غیرفعال' : nextDate;
+      await client.query(
+        `INSERT INTO center_edits (center_key, data, updated_at, updated_by)
+         VALUES ($1, jsonb_build_object($2::text, $3::text), NOW(), $4)
+         ON CONFLICT (center_key) DO UPDATE
+           SET data = center_edits.data || jsonb_build_object($2::text, $3::text),
+               updated_at = NOW(), updated_by = $4`,
+        [rkey, field, newVal, sess.username]
+      );
+      await client.query(
+        `INSERT INTO change_log (at, by, rkey, field, val) VALUES (NOW(), $1, $2, $3, $4)`,
+        [sess.username, rkey, field, JSON.stringify(newVal)]
+      );
     }
 
-    await client.query("UPDATE app_data SET value = $1, updated_at = NOW() WHERE key = 'main'", [blob]);
     await client.query('COMMIT');
 
     // Notify all open web tabs to reload data
@@ -662,10 +669,12 @@ async function markEntryDone(chatId, sess, key, result, note) {
 async function doCenterBrief(chatId, sess, rtype, rid, entryIdx) {
   const rkey = rtype + '_' + rid;
   try {
-    const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
-    const blob    = blobRes.rows.length ? blobRes.rows[0].value : {};
-    const edit    = (blob.edits || {})[rkey] || {};
-    const notes   = (blob.notes || {})[rkey] || [];
+    const [editsR, notesR] = await Promise.all([
+      query('SELECT data FROM center_edits WHERE center_key = $1', [rkey]),
+      query('SELECT notes FROM center_notes WHERE center_key = $1', [rkey]),
+    ]);
+    const edit    = editsR.rows.length ? editsR.rows[0].data : {};
+    const notes   = notesR.rows.length ? notesR.rows[0].notes : [];
     const lastNote = notes.length ? notes[notes.length - 1] : null;
     const todayStr = toJalali(new Date());
     // Touchpoint count
@@ -730,27 +739,26 @@ async function doCenterBrief(chatId, sess, rtype, rid, entryIdx) {
 
 // ── doSetStatus: change center status from bot ────────────────────────────────
 async function doSetStatus(chatId, sess, rkey, newStatus) {
-  const { pool } = require('../db');
-  const client = await pool.connect();
   try {
-    await client.query('BEGIN');
-    const blobRes = await client.query("SELECT value FROM app_data WHERE key = 'main' FOR UPDATE");
-    if (!blobRes.rows.length) { await client.query('ROLLBACK'); throw new Error('blob not found'); }
-    const blob = blobRes.rows[0].value || {};
-    if (!blob.edits) blob.edits = {};
-    if (!blob.edits[rkey]) blob.edits[rkey] = {};
-    const oldStatus = blob.edits[rkey].status || 'بدون تماس';
-    blob.edits[rkey].status = newStatus;
-    if (!blob.changeLog) blob.changeLog = [];
-    blob.changeLog.push({ at: new Date().toISOString(), by: sess.username, rkey, field: 'status', val: newStatus });
-    await client.query("UPDATE app_data SET value = $1, updated_at = NOW() WHERE key = 'main'", [blob]);
-    await client.query('COMMIT');
-    try { require('./routes/events').broadcast('db-updated', { by: sess.username + ':bot' }); } catch(_) {}
+    const cur = await query('SELECT data FROM center_edits WHERE center_key = $1', [rkey]);
+    const oldStatus = cur.rows.length ? (cur.rows[0].data.status || 'بدون تماس') : 'بدون تماس';
+    await query(
+      `INSERT INTO center_edits (center_key, data, updated_at, updated_by)
+       VALUES ($1, jsonb_build_object('status', $2::text), NOW(), $3)
+       ON CONFLICT (center_key) DO UPDATE
+         SET data = center_edits.data || jsonb_build_object('status', $2::text),
+             updated_at = NOW(), updated_by = $3`,
+      [rkey, newStatus, sess.username]
+    );
+    await query(
+      `INSERT INTO change_log (at, by, rkey, field, val) VALUES (NOW(), $1, $2, 'status', $3)`,
+      [sess.username, rkey, JSON.stringify(newStatus)]
+    );
+    try { require('../routes/events').broadcast('db-updated', { by: sess.username + ':bot' }); } catch(_) {}
     await sendMsg(chatId, '✅ وضعیت تغییر کرد:\n' + oldStatus + ' ← <b>' + newStatus + '</b>', { reply_markup: menuFor(sess) });
   } catch(e) {
-    try { await client.query('ROLLBACK'); } catch(_) {}
     await sendMsg(chatId, '❌ خطا: ' + e.message);
-  } finally { client.release(); }
+  }
 }
 
 // ── 📋 Tasks ──────────────────────────────────────────────────────────────
@@ -774,41 +782,7 @@ async function handleTasks(chatId, sess) {
     rows = r.rows;
   } catch(e) {}
 
-  // Fallback to blob if SQL table has no results
-  if (!rows.length) {
-    try {
-      const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
-      if (blobRes.rows.length) {
-        const blobTasks = (blobRes.rows[0].value || {}).tasks || [];
-        rows = blobTasks
-          .filter(function(t) {
-            return !t.done && (t.owner === sess.username || t.createdBy === sess.username);
-          })
-          .sort(function(a, b) {
-            const aOv = a.dueDate && a.dueDate < todayStr;
-            const bOv = b.dueDate && b.dueDate < todayStr;
-            if (aOv && !bOv) return -1;
-            if (!aOv && bOv) return 1;
-            if (a.dueDate && b.dueDate) return a.dueDate < b.dueDate ? -1 : 1;
-            if (a.dueDate) return -1;
-            if (b.dueDate) return 1;
-            return (b.priority || 2) - (a.priority || 2);
-          })
-          .slice(0, 20)
-          .map(function(t) {
-            return {
-              id: String(t.id),
-              title: t.title,
-              owner: t.owner,
-              due_date: t.dueDate || null,
-              priority: t.priority || 2,
-              status: t.status || 'todo',
-              done: false,
-            };
-          });
-      }
-    } catch(e) {}
-  }
+  // tasks SQL table is the single source of truth — blob fallback removed
 
   if (!rows.length) {
     await sendMsg(chatId, '📋 <b>وظایف من</b>\n\n✅ هیچ وظیفه بازی ندارید!', { reply_markup: menuFor(sess) });
@@ -1284,12 +1258,11 @@ async function handleCallback(cb) {
     if (!center) { await sendMsg(chatId, '❌ مرکز نامشخص.'); return; }
     const rkey = center.rtype + '_' + center.rid;
     try {
-      const [contactsRes, blobRes] = await Promise.all([
+      const [contactsRes, editsR] = await Promise.all([
         query('SELECT * FROM center_contacts WHERE center_key = $1 LIMIT 10', [rkey]),
-        query("SELECT value FROM app_data WHERE key = 'main'"),
+        query('SELECT data FROM center_edits WHERE center_key = $1', [rkey]),
       ]);
-      const blob = (blobRes.rows[0] || {}).value || {};
-      const edit = (blob.edits || {})[rkey] || {};
+      const edit = editsR.rows.length ? editsR.rows[0].data : {};
       const blobContacts = Array.isArray(edit.contacts) ? edit.contacts : [];
       const sqlContacts = contactsRes.rows;
 
@@ -1328,10 +1301,12 @@ async function handleCallback(cb) {
     if (!center) { await sendMsg(chatId, '❌ مرکز نامشخص.'); return; }
     const rkey = center.rtype + '_' + center.rid;
     try {
-      const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
-      const blob = (blobRes.rows[0] || {}).value || {};
-      const changeLog = (blob.changeLog || []).filter(function(e) { return e.rkey === rkey; }).slice(-10).reverse();
-      const notes = ((blob.notes || {})[rkey] || []).slice(-5).reverse();
+      const [clRes, notesR] = await Promise.all([
+        query('SELECT at, by, field, val FROM change_log WHERE rkey = $1 ORDER BY at DESC LIMIT 10', [rkey]),
+        query('SELECT notes FROM center_notes WHERE center_key = $1', [rkey]),
+      ]);
+      const changeLog = clRes.rows.map(r => ({ at: r.at, by: r.by, rkey, field: r.field, val: r.val }));
+      const notes = (notesR.rows.length ? notesR.rows[0].notes : []).slice(-5).reverse();
 
       let text = '📜 <b>تاریخچه ' + center.name + '</b>\n\n';
 
@@ -1712,19 +1687,18 @@ async function searchCentersInDB(searchText, username, isMgr) {
   const q = normFa(searchText);
   if (!q) return [];
 
-  // Load master center data + blob edits in one round-trip
+  // Load master center data + normalized edits
   let CENTERS = [], PC_RAW = {}, edits = {};
   try {
-    const [cmRes, blobRes] = await Promise.all([
+    const [cmRes, editsRes] = await Promise.all([
       query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS', 'PC_RAW')"),
-      query("SELECT value FROM app_data WHERE key = 'main'"),
+      query('SELECT center_key, data FROM center_edits'),
     ]);
     cmRes.rows.forEach(function(r) {
       if (r.key === 'CENTERS') CENTERS = Array.isArray(r.data) ? r.data : [];
       else if (r.key === 'PC_RAW') PC_RAW = (r.data && typeof r.data === 'object') ? r.data : {};
     });
-    const blob = (blobRes.rows[0] || {}).value || {};
-    edits = blob.edits || {};
+    editsRes.rows.forEach(function(r) { edits[r.center_key] = r.data; });
   } catch(e) { console.error('[searchCenters load]', e.message); }
 
   // ── Search Tehran centers (CENTERS array) ──
@@ -1832,11 +1806,9 @@ async function handleCenterInfo(chatId, sess, searchText) {
 
 async function showCenterInfo(chatId, sess, center) {
   try {
-    const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
-    const data = blobRes.rows.length ? blobRes.rows[0].value : {};
-
     const key  = (center.rtype || 'center') + '_' + (center.rid || '');
-    const edit = (data.edits || {})[key] || {};
+    const editsR = await query('SELECT data FROM center_edits WHERE center_key = $1', [key]);
+    const edit = editsR.rows.length ? editsR.rows[0].data : {};
     const todayStr = toJalali(new Date());
 
     const statusLabels = {
@@ -1932,36 +1904,26 @@ async function handleNoteSearchResults(chatId, sess, searchText) {
 
 async function doSaveNote(chatId, sess, center, noteText) {
   const rkey = (center.rtype || 'center') + '_' + (center.rid || '');
-  const client = await require('../db').pool.connect();
   try {
-    await client.query('BEGIN');
-    const cur = await client.query("SELECT value FROM app_data WHERE key = 'main' FOR UPDATE");
-    if (!cur.rows.length) { await client.query('ROLLBACK'); throw new Error('blob not found'); }
-    const blob = cur.rows[0].value || {};
-    if (!blob.notes) blob.notes = {};
-    if (!blob.notes[rkey]) blob.notes[rkey] = [];
-    const noteObj = {
-      text: noteText,
-      by:   sess.username,
-      at:   new Date().toISOString(),
-      date: toJalali(new Date()),
-    };
-    blob.notes[rkey].push(noteObj);
-    // Also append to changeLog
-    if (!blob.changeLog) blob.changeLog = [];
-    blob.changeLog.push({ at: noteObj.at, by: sess.username, rkey, field: 'note', val: noteText.slice(0, 100) });
-    await client.query("UPDATE app_data SET value = $1, updated_at = NOW() WHERE key = 'main'", [blob]);
-    await client.query('COMMIT');
-    try { require('./routes/events').broadcast('db-updated', { by: sess.username + ':bot' }); } catch(_) {}
+    const noteObj = { text: noteText, by: sess.username, at: new Date().toISOString(), date: toJalali(new Date()) };
+    await query(
+      `INSERT INTO center_notes (center_key, notes, updated_at, updated_by)
+       VALUES ($1, $2::jsonb, NOW(), $3)
+       ON CONFLICT (center_key) DO UPDATE
+         SET notes = center_notes.notes || $2::jsonb, updated_at = NOW(), updated_by = $3`,
+      [rkey, JSON.stringify([noteObj]), sess.username]
+    );
+    await query(
+      `INSERT INTO change_log (at, by, rkey, field, val) VALUES (NOW(), $1, $2, 'note', $3)`,
+      [sess.username, rkey, JSON.stringify(noteText.slice(0, 100))]
+    );
+    try { require('../routes/events').broadcast('db-updated', { by: sess.username + ':bot' }); } catch(_) {}
     await sendMsg(chatId,
       '✅ <b>یادداشت ثبت شد!</b>\n\n🏥 ' + center.name + '\n📝 ' + noteText.slice(0, 150),
       { reply_markup: menuFor(sess) }
     );
   } catch(e) {
-    try { await client.query('ROLLBACK'); } catch(_) {}
     await sendMsg(chatId, '❌ خطا در ثبت یادداشت: ' + e.message, { reply_markup: menuFor(sess) });
-  } finally {
-    client.release();
   }
 }
 
@@ -2044,30 +2006,28 @@ async function doSaveFollowup(chatId, sess, center, newDate) {
     return;
   }
   const rkey = (center.rtype || 'center') + '_' + (center.rid || '');
-  const client = await require('../db').pool.connect();
   try {
-    await client.query('BEGIN');
-    const cur = await client.query("SELECT value FROM app_data WHERE key = 'main' FOR UPDATE");
-    if (!cur.rows.length) { await client.query('ROLLBACK'); throw new Error('blob not found'); }
-    const blob = cur.rows[0].value || {};
-    if (!blob.edits) blob.edits = {};
-    if (!blob.edits[rkey]) blob.edits[rkey] = {};
-    const oldDate = blob.edits[rkey].followupDate || '—';
-    blob.edits[rkey].followupDate = newDate;
-    if (!blob.changeLog) blob.changeLog = [];
-    blob.changeLog.push({ at: new Date().toISOString(), by: sess.username, rkey, field: 'followupDate', val: newDate });
-    await client.query("UPDATE app_data SET value = $1, updated_at = NOW() WHERE key = 'main'", [blob]);
-    await client.query('COMMIT');
-    try { require('./routes/events').broadcast('db-updated', { by: sess.username + ':bot' }); } catch(_) {}
+    const cur = await query('SELECT data FROM center_edits WHERE center_key = $1', [rkey]);
+    const oldDate = cur.rows.length ? (cur.rows[0].data.followupDate || '—') : '—';
+    await query(
+      `INSERT INTO center_edits (center_key, data, updated_at, updated_by)
+       VALUES ($1, jsonb_build_object('followupDate', $2::text), NOW(), $3)
+       ON CONFLICT (center_key) DO UPDATE
+         SET data = center_edits.data || jsonb_build_object('followupDate', $2::text),
+             updated_at = NOW(), updated_by = $3`,
+      [rkey, newDate, sess.username]
+    );
+    await query(
+      `INSERT INTO change_log (at, by, rkey, field, val) VALUES (NOW(), $1, $2, 'followupDate', $3)`,
+      [sess.username, rkey, JSON.stringify(newDate)]
+    );
+    try { require('../routes/events').broadcast('db-updated', { by: sess.username + ':bot' }); } catch(_) {}
     await sendMsg(chatId,
       '✅ <b>فالوآپ به‌روز شد!</b>\n\n🏥 ' + center.name + '\n📅 ' + oldDate + ' ← <b>' + newDate + '</b>',
       { reply_markup: menuFor(sess) }
     );
   } catch(e) {
-    try { await client.query('ROLLBACK'); } catch(_) {}
     await sendMsg(chatId, '❌ خطا در ذخیره: ' + e.message, { reply_markup: menuFor(sess) });
-  } finally {
-    client.release();
   }
 }
 
@@ -2117,25 +2077,32 @@ async function handleMyStats(chatId, sess) {
     overdueTasks = r.rows[0]?.overdue || 0;
   } catch(e) {}
 
-  // Overdue centers + call/visit log from blob
+  // Overdue centers + call/visit log from SQL tables
   let overdueCount = 0, calls = 0, visits = 0;
   try {
-    const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
-    if (blobRes.rows.length) {
-      const blob = blobRes.rows[0].value || {};
-      const edits = blob.edits || {};
-      Object.values(edits).forEach(function(e) {
-        if (e.owner === sess.username && e.followupDate && e.followupDate < todayStr
-            && e.status !== 'lost' && e.status !== 'inactive') overdueCount++;
-      });
-      const sevenAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      (blob.callLog  || []).forEach(function(l) {
-        if ((l.by || l.user) === sess.username && new Date(l.at || l.date) >= sevenAgo) calls++;
-      });
-      (blob.visitLog || []).forEach(function(l) {
-        if ((l.by || l.user) === sess.username && new Date(l.at || l.date) >= sevenAgo) visits++;
-      });
-    }
+    const [overdueRes, callRes, visitRes] = await Promise.all([
+      query(
+        `SELECT COUNT(*)::int AS cnt FROM center_edits
+         WHERE (data->>'owner') = $1
+           AND (data->>'followupDate') IS NOT NULL
+           AND (data->>'followupDate') < $2
+           AND (data->>'status') NOT IN ('lost','inactive','غیرفعال','قرارداد بسته شد')`,
+        [sess.username, todayStr]
+      ),
+      query(
+        `SELECT COUNT(*)::int AS cnt FROM call_log
+         WHERE username = $1 AND updated_at >= NOW() - INTERVAL '7 days'`,
+        [sess.username]
+      ),
+      query(
+        `SELECT COUNT(*)::int AS cnt FROM visit_log
+         WHERE username = $1 AND updated_at >= NOW() - INTERVAL '7 days'`,
+        [sess.username]
+      ),
+    ]);
+    overdueCount = (overdueRes.rows[0] || {}).cnt || 0;
+    calls = (callRes.rows[0] || {}).cnt || 0;
+    visits = (visitRes.rows[0] || {}).cnt || 0;
   } catch(e) {}
 
   let text = '📊 <b>آمار من — ' + todayStr + '</b>\n\n';
@@ -2189,19 +2156,19 @@ async function handleTeamReport(chatId, sess) {
     r.rows.forEach(function(row){ notifByUser[row.to_user] = row.cnt; });
   } catch(e) {}
 
-  // Overdue per expert from blob
+  // Overdue per expert from center_edits
   const overdueByOwner = {};
   try {
-    const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
-    if (blobRes.rows.length) {
-      const edits = (blobRes.rows[0].value || {}).edits || {};
-      Object.values(edits).forEach(function(e) {
-        if (!e.followupDate || e.followupDate >= todayStr) return;
-        if (e.status === 'lost' || e.status === 'inactive') return;
-        const ow = e.owner || 'نامشخص';
-        overdueByOwner[ow] = (overdueByOwner[ow] || 0) + 1;
-      });
-    }
+    const r = await query(
+      `SELECT COALESCE(data->>'owner','نامشخص') AS owner, COUNT(*)::int AS cnt
+       FROM center_edits
+       WHERE (data->>'followupDate') IS NOT NULL
+         AND (data->>'followupDate') < $1
+         AND (data->>'status') NOT IN ('lost','inactive','غیرفعال','قرارداد بسته شد')
+       GROUP BY data->>'owner'`,
+      [todayStr]
+    );
+    r.rows.forEach(function(row){ overdueByOwner[row.owner] = row.cnt; });
   } catch(e) {}
 
   // Load ALL active experts from DB so nobody is silently skipped
@@ -2269,31 +2236,26 @@ async function handleOverdueReport(chatId, sess) {
   }
   const todayStr = toJalali(new Date());
 
-  let blob;
-  try {
-    const r = await query("SELECT value FROM app_data WHERE key = 'main'");
-    blob = r.rows.length ? r.rows[0].value : null;
-  } catch(e) { blob = null; }
-
-  if (!blob || !blob.edits) {
-    await sendMsg(chatId, '⚠️ داده‌ای یافت نشد.', { reply_markup: menuFor(sess) });
-    return;
-  }
-
-  // Group overdue centers by owner
+  // Group overdue centers by owner from center_edits
   const byOwner = {};
-  const ACTIVE = ['contacted', 'interested', 'negotiating', 'demo', 'proposal'];
-  Object.entries(blob.edits).forEach(function([key, e]) {
-    if (!e.followupDate || e.followupDate >= todayStr) return;
-    if (e.status === 'lost' || e.status === 'inactive') return;
-    const owner = e.owner || 'نامشخص';
-    if (!byOwner[owner]) byOwner[owner] = [];
-    // Approximate days late from Jalali string (good enough for display)
-    const _fdParts = e.followupDate.split('/').map(Number);
-    const _tdParts = todayStr.split('/').map(Number);
-    const daysLate = jalaliDaysDiff(_tdParts[0],_tdParts[1],_tdParts[2],_fdParts[0],_fdParts[1],_fdParts[2]);
-    byOwner[owner].push({ daysLate, date: e.followupDate });
-  });
+  try {
+    const r = await query(
+      `SELECT data->>'owner' AS owner, data->>'followupDate' AS followup_date
+       FROM center_edits
+       WHERE (data->>'followupDate') IS NOT NULL
+         AND (data->>'followupDate') < $1
+         AND (data->>'status') NOT IN ('lost','inactive','غیرفعال','قرارداد بسته شد')`,
+      [todayStr]
+    );
+    r.rows.forEach(function(row) {
+      const owner = row.owner || 'نامشخص';
+      if (!byOwner[owner]) byOwner[owner] = [];
+      const _fdParts = row.followup_date.split('/').map(Number);
+      const _tdParts = todayStr.split('/').map(Number);
+      const daysLate = jalaliDaysDiff(_tdParts[0],_tdParts[1],_tdParts[2],_fdParts[0],_fdParts[1],_fdParts[2]);
+      byOwner[owner].push({ daysLate, date: row.followup_date });
+    });
+  } catch(e) {}
 
   if (!Object.keys(byOwner).length) {
     await sendMsg(chatId, '✅ <b>گزارش معوق</b>\n\nهیچ مرکز معوقی وجود ندارد! 🎉', { reply_markup: menuFor(sess) });
@@ -2326,18 +2288,7 @@ async function handleWeeklyKPI(chatId, sess) {
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const todayStr = toJalali(new Date());
 
-  let blob;
-  try {
-    const r = await query("SELECT value FROM app_data WHERE key = 'main'");
-    blob = r.rows.length ? r.rows[0].value : null;
-  } catch(e) { blob = null; }
-
-  if (!blob) {
-    await sendMsg(chatId, '⚠️ داده‌ای یافت نشد.', { reply_markup: menuFor(sess) });
-    return;
-  }
-
-  // Collect stats per expert
+  // Collect stats per expert from app_data log keys
   const stats = {};
   function inc(by, field) {
     if (!by) return;
@@ -2345,9 +2296,34 @@ async function handleWeeklyKPI(chatId, sess) {
     stats[by][field]++;
   }
 
-  (blob.callLog   || []).filter(function(l){ return l.at && l.at >= weekAgo; }).forEach(function(l){ inc(l.by || l.user, 'calls'); });
-  (blob.visitLog  || []).filter(function(l){ return l.at && l.at >= weekAgo; }).forEach(function(l){ inc(l.by || l.user, 'visits'); });
-  (blob.salesLog  || []).filter(function(l){ return l.at && l.at >= weekAgo; }).forEach(function(l){ inc(l.by || l.user, 'sales'); });
+  try {
+    const [callRes, visitRes, salesRes] = await Promise.all([
+      query(`SELECT username, COUNT(*)::int AS cnt FROM call_log WHERE updated_at >= NOW() - INTERVAL '7 days' GROUP BY username`),
+      query(`SELECT username, COUNT(*)::int AS cnt FROM visit_log WHERE updated_at >= NOW() - INTERVAL '7 days' GROUP BY username`),
+      query(`SELECT username, COUNT(*)::int AS cnt FROM sales_log WHERE updated_at >= NOW() - INTERVAL '7 days' GROUP BY username`),
+    ]);
+    callRes.rows.forEach(r => {
+      const u = r.username;
+      if (u) {
+        if (!stats[u]) stats[u] = { calls: 0, visits: 0, sales: 0 };
+        stats[u].calls = r.cnt;
+      }
+    });
+    visitRes.rows.forEach(r => {
+      const u = r.username;
+      if (u) {
+        if (!stats[u]) stats[u] = { calls: 0, visits: 0, sales: 0 };
+        stats[u].visits = r.cnt;
+      }
+    });
+    salesRes.rows.forEach(r => {
+      const u = r.username;
+      if (u) {
+        if (!stats[u]) stats[u] = { calls: 0, visits: 0, sales: 0 };
+        stats[u].sales = r.cnt;
+      }
+    });
+  } catch(e) {}
 
   // Week entries done this week — handles both legacy JSONB value column and direct columns
   let weDone = {};
@@ -2499,10 +2475,9 @@ function calcNextJalaliDateBot(jalaliStr, recurring) {
 // ── Get center display name (helper) ─────────────────────────────────────────
 async function getCenterName(rtype, rid) {
   try {
-    const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
-    const blob = (blobRes.rows[0] || {}).value || {};
     const rkey = rtype + '_' + rid;
-    const edit = (blob.edits || {})[rkey] || {};
+    const editRes = await query("SELECT data FROM center_edits WHERE center_key = $1", [rkey]);
+    const edit = (editRes.rows[0] || {}).data || {};
     if (edit.nameOverride) return edit.nameOverride;
 
     const cmRes = await query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS', 'PC_RAW')");
@@ -2525,16 +2500,15 @@ async function getCenterName(rtype, rid) {
 // ── Load all centers from master + edits ─────────────────────────────────────
 async function loadAllCenters() {
   let CENTERS = [], PC_RAW = {}, edits = {};
-  const [cmRes, blobRes] = await Promise.all([
+  const [cmRes, editsRes] = await Promise.all([
     query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS', 'PC_RAW')"),
-    query("SELECT value FROM app_data WHERE key = 'main'"),
+    query("SELECT center_key, data FROM center_edits"),
   ]);
   cmRes.rows.forEach(function(r) {
     if (r.key === 'CENTERS') CENTERS = Array.isArray(r.data) ? r.data : [];
     else if (r.key === 'PC_RAW') PC_RAW = (r.data && typeof r.data === 'object') ? r.data : {};
   });
-  const blob = (blobRes.rows[0] || {}).value || {};
-  edits = blob.edits || {};
+  editsRes.rows.forEach(function(r) { edits[r.center_key] = r.data; });
 
   const centers = [];
 
@@ -2907,21 +2881,25 @@ async function handleManagerDashboard(chatId, sess) {
     r.rows.forEach(function(row) { weekDone[row.expert] = row; });
   } catch(e) {}
 
-  // Overdue + critical from blob
+  // Overdue + critical from center_edits
   let overdueByOwner = {}, overdueTotal = 0, pfCount = 0;
   try {
-    const [blobRes, pfRes] = await Promise.all([
-      query("SELECT value FROM app_data WHERE key = 'main'"),
+    const [overdueRes, pfRes] = await Promise.all([
+      query(
+        `SELECT COALESCE(data->>'owner','نامشخص') AS owner, COUNT(*)::int AS cnt
+         FROM center_edits
+         WHERE (data->>'followupDate') IS NOT NULL
+           AND (data->>'followupDate') < $1
+           AND (data->>'status') NOT IN ('lost','inactive','غیرفعال','قرارداد بسته شد')
+         GROUP BY data->>'owner'`,
+        [todayStr]
+      ),
       query(`SELECT COUNT(*)::int AS cnt FROM proformas WHERE status = 'sent'`),
     ]);
     pfCount = (pfRes.rows[0] || {}).cnt || 0;
-    const blob = (blobRes.rows[0] || {}).value || {};
-    Object.values(blob.edits || {}).forEach(function(e) {
-      if (!e.followupDate || e.followupDate >= todayStr) return;
-      if (e.status === 'غیرفعال' || e.status === 'قرارداد بسته شد') return;
-      overdueTotal++;
-      const ow = e.owner || 'نامشخص';
-      overdueByOwner[ow] = (overdueByOwner[ow] || 0) + 1;
+    overdueRes.rows.forEach(function(row) {
+      overdueByOwner[row.owner] = row.cnt;
+      overdueTotal += row.cnt;
     });
   } catch(e) {}
 
@@ -2972,30 +2950,28 @@ async function handleManagerDashboard(chatId, sess) {
 // ── Set competitor for center ─────────────────────────────────────────────────
 async function doSetCompetitor(chatId, sess, center, competitorName) {
   const rkey = center.rtype + '_' + center.rid;
-  const client = await require('../db').pool.connect();
   try {
-    await client.query('BEGIN');
-    const cur = await client.query("SELECT value FROM app_data WHERE key = 'main' FOR UPDATE");
-    if (!cur.rows.length) { await client.query('ROLLBACK'); throw new Error('blob not found'); }
-    const blob = cur.rows[0].value || {};
-    if (!blob.edits) blob.edits = {};
-    if (!blob.edits[rkey]) blob.edits[rkey] = {};
-    const old = blob.edits[rkey].competitor || '—';
-    blob.edits[rkey].competitor = competitorName;
-    if (!blob.changeLog) blob.changeLog = [];
-    blob.changeLog.push({ at: new Date().toISOString(), by: sess.username, rkey, field: 'competitor', val: competitorName });
-    await client.query("UPDATE app_data SET value = $1, updated_at = NOW() WHERE key = 'main'", [blob]);
-    await client.query('COMMIT');
-    try { require('./routes/events').broadcast('db-updated', { by: sess.username + ':bot' }); } catch(_) {}
+    const oldRes = await query("SELECT data->>'competitor' AS old FROM center_edits WHERE center_key = $1", [rkey]);
+    const old = (oldRes.rows[0] || {}).old || '—';
+    await query(
+      `INSERT INTO center_edits (center_key, data, updated_at, updated_by)
+       VALUES ($1, jsonb_build_object('competitor', $2::text), NOW(), $3)
+       ON CONFLICT (center_key) DO UPDATE
+         SET data = center_edits.data || jsonb_build_object('competitor', $2::text),
+             updated_at = NOW(), updated_by = $3`,
+      [rkey, competitorName, sess.username]
+    );
+    await query(
+      `INSERT INTO change_log (at, by, rkey, field, val) VALUES (NOW(), $1, $2, 'competitor', $3)`,
+      [sess.username, rkey, competitorName]
+    );
+    try { require('../routes/events').broadcast('db-updated', { by: sess.username + ':bot' }); } catch(_) {}
     await sendMsg(chatId,
       '✅ <b>رقیب ثبت شد!</b>\n🏥 ' + center.name + '\n🏴 ' + old + ' ← <b>' + competitorName + '</b>',
       { reply_markup: menuFor(sess) }
     );
   } catch(e) {
-    try { await client.query('ROLLBACK'); } catch(_) {}
     await sendMsg(chatId, '❌ خطا: ' + e.message, { reply_markup: menuFor(sess) });
-  } finally {
-    client.release();
   }
 }
 
@@ -3051,41 +3027,41 @@ async function sendDailyReport() {
       [todayStr]
     ).catch(function(){ return { rows: [] }; });
 
-    // Overdue + done entries from blob
+    // Overdue + done entries from SQL tables
     let overdueTotal = 0;
     const expertOverdue = {};
     const expertDoneNames = {};
     try {
-      const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
-      if (blobRes.rows.length) {
-        const blob = blobRes.rows[0].value || {};
-        const edits = blob.edits || {};
-        Object.values(edits).forEach(function(e) {
-          if (e.followupDate && e.followupDate < todayStr
-              && e.status !== 'قرارداد بسته شد' && e.status !== 'غیرفعال' && e.status !== 'lost') {
-            overdueTotal++;
-            const ow = e.owner || 'نامشخص';
-            expertOverdue[ow] = (expertOverdue[ow] || 0) + 1;
-          }
-        });
-        // Today's done week entries: from SQL + blob merged
-        let weAll = {};
-        try {
-          const weRes2 = await query(
-            `SELECT value FROM week_entries WHERE value->>'scheduledDate' = $1 AND (value->>'done')::boolean = true`,
-            [todayStr]
-          );
-          weRes2.rows.forEach(function(r) { weAll[r.value.addedBy + '_' + r.value.rid] = r.value; });
-        } catch(_) {}
-        Object.assign(weAll, blob.weekEntries || {});  // merge blob entries
-        Object.values(weAll).forEach(function(we) {
-          if (!we.done || we.scheduledDate !== todayStr) return;
-          const owner = we.addedBy || 'نامشخص';
-          if (!expertDoneNames[owner]) expertDoneNames[owner] = [];
-          const cname = we.centerName || we.rid || '';
-          if (cname && expertDoneNames[owner].length < 3) expertDoneNames[owner].push(cname);
-        });
-      }
+      const [overdueRes, weRes2] = await Promise.all([
+        query(
+          `SELECT COALESCE(data->>'owner','نامشخص') AS owner, COUNT(*)::int AS cnt
+           FROM center_edits
+           WHERE (data->>'followupDate') IS NOT NULL
+             AND (data->>'followupDate') < $1
+             AND (data->>'status') NOT IN ('lost','inactive','غیرفعال','قرارداد بسته شد')
+           GROUP BY data->>'owner'`,
+          [todayStr]
+        ),
+        query(
+          `SELECT COALESCE(added_by, value->>'addedBy') AS added_by,
+                  COALESCE(center_name, value->>'centerName') AS center_name,
+                  COALESCE(rid, value->>'rid') AS rid
+           FROM week_entries
+           WHERE COALESCE(scheduled_date, value->>'scheduledDate') = $1
+             AND (done = true OR (value->>'done')::boolean = true)`,
+          [todayStr]
+        ),
+      ]);
+      overdueRes.rows.forEach(function(row) {
+        expertOverdue[row.owner] = row.cnt;
+        overdueTotal += row.cnt;
+      });
+      weRes2.rows.forEach(function(r) {
+        const owner = r.added_by || 'نامشخص';
+        if (!expertDoneNames[owner]) expertDoneNames[owner] = [];
+        const cname = r.center_name || r.rid || '';
+        if (cname && expertDoneNames[owner].length < 3) expertDoneNames[owner].push(cname);
+      });
     } catch(e) {}
 
     const totalToday = weRes.rows.reduce(function(s, r){ return s + r.total; }, 0);
@@ -3155,49 +3131,43 @@ async function sendWeeklyDigest() {
     const todayStr = toJalali(new Date());
     const now = new Date();
 
-    // Overdue aging from blob
+    // Overdue aging from center_edits + call/visit logs from app_data
     let aging = { w1: 0, w2: 0, old: 0 };
     let perExpert = {};
     try {
-      const blobRes = await query("SELECT value FROM app_data WHERE key = 'main'");
-      if (blobRes.rows.length) {
-        const blob = blobRes.rows[0].value || {};
-        const edits = blob.edits || {};
-        Object.values(edits).forEach(function(e) {
-          if (!e.followupDate || e.followupDate >= todayStr) return;
-          if (e.status === 'lost' || e.status === 'غیرفعال' || e.status === 'قرارداد بسته شد') return;
-          // compute days overdue (rough: compare strings in Jalali is OK for same-year)
-          const fd = e.followupDate;
-          const nowParts = todayStr.split('/').map(Number);
-          const fdParts = fd.split('/').map(Number);
-          const diffDays = (nowParts[0]-fdParts[0])*365 + (nowParts[1]-fdParts[1])*30 + (nowParts[2]-fdParts[2]);
-          if (diffDays <= 7) aging.w1++;
-          else if (diffDays <= 30) aging.w2++;
-          else aging.old++;
-          const owner = e.owner || 'نامشخص';
-          if (!perExpert[owner]) perExpert[owner] = { overdue: 0, calls: 0, visits: 0 };
-          perExpert[owner].overdue++;
-        });
-
-        // Last 7 days calls/visits from logs
-        const sevenDaysAgo = new Date(now.getTime() - 7*24*60*60*1000);
-        const callLog = Array.isArray(blob.callLog) ? blob.callLog : [];
-        const visitLog = Array.isArray(blob.visitLog) ? blob.visitLog : [];
-        callLog.forEach(function(l) {
-          if (new Date(l.at || l.date) >= sevenDaysAgo) {
-            const u = l.by || l.user || 'نامشخص';
-            if (!perExpert[u]) perExpert[u] = { overdue: 0, calls: 0, visits: 0 };
-            perExpert[u].calls++;
-          }
-        });
-        visitLog.forEach(function(l) {
-          if (new Date(l.at || l.date) >= sevenDaysAgo) {
-            const u = l.by || l.user || 'نامشخص';
-            if (!perExpert[u]) perExpert[u] = { overdue: 0, calls: 0, visits: 0 };
-            perExpert[u].visits++;
-          }
-        });
-      }
+      const nowParts = todayStr.split('/').map(Number);
+      const [overdueRes, callRes, visitRes] = await Promise.all([
+        query(
+          `SELECT COALESCE(data->>'owner','نامشخص') AS owner, data->>'followupDate' AS fd
+           FROM center_edits
+           WHERE (data->>'followupDate') IS NOT NULL
+             AND (data->>'followupDate') < $1
+             AND (data->>'status') NOT IN ('lost','inactive','غیرفعال','قرارداد بسته شد')`,
+          [todayStr]
+        ),
+        query("SELECT username, COUNT(*)::int AS cnt FROM call_log WHERE updated_at >= NOW() - INTERVAL '7 days' GROUP BY username"),
+        query("SELECT username, COUNT(*)::int AS cnt FROM visit_log WHERE updated_at >= NOW() - INTERVAL '7 days' GROUP BY username"),
+      ]);
+      overdueRes.rows.forEach(function(row) {
+        const fdParts = row.fd.split('/').map(Number);
+        const diffDays = (nowParts[0]-fdParts[0])*365 + (nowParts[1]-fdParts[1])*30 + (nowParts[2]-fdParts[2]);
+        if (diffDays <= 7) aging.w1++;
+        else if (diffDays <= 30) aging.w2++;
+        else aging.old++;
+        const owner = row.owner;
+        if (!perExpert[owner]) perExpert[owner] = { overdue: 0, calls: 0, visits: 0 };
+        perExpert[owner].overdue++;
+      });
+      callRes.rows.forEach(function(row) {
+        const u = row.username || 'نامشخص';
+        if (!perExpert[u]) perExpert[u] = { overdue: 0, calls: 0, visits: 0 };
+        perExpert[u].calls = row.cnt;
+      });
+      visitRes.rows.forEach(function(row) {
+        const u = row.username || 'نامشخص';
+        if (!perExpert[u]) perExpert[u] = { overdue: 0, calls: 0, visits: 0 };
+        perExpert[u].visits = row.cnt;
+      });
     } catch(e) {}
 
     // Done entries this week from SQL

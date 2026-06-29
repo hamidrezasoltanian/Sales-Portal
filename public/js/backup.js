@@ -1,3 +1,4 @@
+/* ═══ public/js/backup.js ═══ */
 // ════════════════════════ EXPORT / BACKUP ════════════
 function exportCSV(){
   if(!_currentProvId){showToast('ابتدا یک استان را باز کنید');return;}
@@ -702,7 +703,7 @@ function renderAllCenters(viewMode){
   var _ftgEl=document.getElementById('fTag');var ftg=_ftgEl&&_ftgEl.value?parseInt(_ftgEl.value):0;
   var effectiveOwner=fo||_globalOwnerFilter||(_isExpert()?currentUser:'');
   var allRows=[];
-  getAllProvinces().forEach(function(p){
+  _getAllowedProvinces(getAllProvinces()).forEach(function(p){
     var tp=getProvType(p.id);
     getProvCenters(p.id).forEach(function(c){
       var e=getE(tp,c.id);

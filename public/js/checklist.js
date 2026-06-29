@@ -1,3 +1,4 @@
+/* ═══ public/js/checklist.js ═══ */
 
 // ── چک‌لیست: آیتم‌های قابل محاسبه اتوماتیک ──────────────────────
 function _ckAutoComputed(){

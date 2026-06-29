@@ -1,3 +1,4 @@
+/* ═══ public/js/dashboard.js ═══ */
 // ════════════════════════ DASHBOARD ═══════════════════
 
 // ════════════════════════ PERSONAL USER DASHBOARD ══════════════
@@ -85,33 +86,29 @@ function _renderManagerUserPanel(el){
       if(!k.startsWith(wpWeekId+':::'))return;
       var we=DB.weekEntries[k];
       var rk=we.recKey||(we.rtype+'_'+we.rid);
-      var owner=(_getOwnerForRecKey?_getOwnerForRecKey(rk):'')||we.addedBy||'';
+      var owner=_getOwnerForRecKey(rk)||we.addedBy||'';
       if(!owner||!expData[owner])return;
       expData[owner].wpPlanned++;
       if(we.done)expData[owner].wpDone++;
     });
   }
 
-  // overdue and contracts per expert
-  Object.keys(DB.edits||{}).forEach(function(k){
-    var e=DB.edits[k];var ow=e.owner||'';if(!ow||!expData[ow])return;
-    var st=e.status||'';
-    if(st!=='قرارداد بسته شد'&&st!=='غیرفعال'){
-      var fd=e.followupDate||'';if(fd&&fd<today)expData[ow].overdue++;
+  // overdue + auto-contract conversions in single pass
+  _getEditsKeys().forEach(function(k){
+    var e=DB.edits[k];var ow=e.owner||'';var st=e.status||'';
+    if(ow&&expData[ow]){
+      if(st!=='قرارداد بسته شد'&&st!=='غیرفعال'){
+        var fd=e.followupDate||'';if(fd&&fd<today)expData[ow].overdue++;
+      }
+      if(st==='قرارداد بسته شد'){
+        var ts=e._statusChangedTs||0;if(ts&&ts>=mb.startTs&&ts<=mb.endTs)expData[ow].contracts++;
+      }
     }
   });
   // contracts this month from salesLog
   (DB.salesLog||[]).forEach(function(l){
     if(!l.date||!l.userId||!expData[l.userId])return;
     if(l.date.slice(0,7)===month)expData[l.userId].contracts++;
-  });
-  // auto-conversions: edits whose _statusChangedTs is this month
-  Object.keys(DB.edits||{}).forEach(function(k){
-    var e=DB.edits[k];
-    if(e.status!=='قرارداد بسته شد')return;
-    var ts=e._statusChangedTs||0;if(!ts||ts<mb.startTs||ts>mb.endTs)return;
-    var owner=e.owner||(_getOwnerForRecKey?_getOwnerForRecKey(k):'')||'';
-    if(expData[owner])expData[owner].contracts++;
   });
 
   var totalPlanned=EXPERTS.reduce(function(s,u){return s+expData[u].wpPlanned;},0);
@@ -159,12 +156,18 @@ function _renderManagerDash(el){
   var EXPERTS=Object.keys(USERS).filter(function(uid){return uid!=='guest'&&USERS[uid];});
   var statusCounts={};
   var ownerStats={};
+  var totalActive=0;
   EXPERTS.forEach(function(uid){
     ownerStats[uid]={uid:uid,name:USERS[uid],contracts:0,meetings:0,overdue:0,total:0,overdueItems:[]};
   });
+  var atRisk=[];
+  var _cutoffTs=Date.now()-21*24*3600*1000;
+  var _cutoffStr=msToJ(_cutoffTs);
+  var validK=_getAllValidRecKeys?_getAllValidRecKeys():new Set();
 
-  Object.keys(DB.edits||{}).forEach(function(k){
+  _getEditsKeys().forEach(function(k){
     var e=DB.edits[k];var st=e.status||'بدون تماس';
+    if(st!=='غیرفعال')totalActive++;
     statusCounts[st]=(statusCounts[st]||0)+1;
     var ow=e.owner||'';
     if(ow&&ownerStats[ow]){
@@ -177,6 +180,17 @@ function _renderManagerDash(el){
         ownerStats[ow].overdueItems.push({recKey:k,fd:fd,name:getRecLabel(k)});
       }
     }
+    // atRisk in same pass
+    if(validK.size&&!validK.has(k))return;
+    if(st!=='قرارداد بسته شد'&&st!=='غیرفعال'){
+      var pot=parseInt(e.potential||1);if(pot<=2){
+        var fd2=e.followupDate||'';
+        if(!fd2||fd2<_cutoffStr){
+          var pts=k.split('_');var tp=pts[0];var id=pts.slice(1).join('_');
+          atRisk.push({recKey:k,rtype:tp,id:id,name:getRecLabel(k),pot:pot,fd:fd2,owner:ow||''});
+        }
+      }
+    }
   });
   EXPERTS.forEach(function(uid){
     var s=ownerStats[uid];
@@ -187,27 +201,12 @@ function _renderManagerDash(el){
   var pipelineTotal=Object.values(statusCounts).reduce(function(s,v){return s+v;},0)||1;
   var contracted=statusCounts['قرارداد بسته شد']||0;
   var overdueTotal=EXPERTS.reduce(function(s,u){return s+ownerStats[u].overdue;},0);
-  var totalActive=Object.values(DB.edits||{}).filter(function(e){return e.status&&e.status!=='غیرفعال';}).length;
   var totalCenters=CENTERS.length+Object.values(PC_RAW).reduce(function(s,a){return s+a.length;},0)+(DB.extra||[]).length;
   var _pipelineActive=0;
   STATUS_LIST.forEach(function(st){if(st!=='بدون تماس'&&st!=='غیرفعال'&&st!=='قرارداد بسته شد')_pipelineActive+=statusCounts[st]||0;});
   var _convBase=contracted+_pipelineActive;var _convRate=_convBase>0?Math.round(contracted/_convBase*100):0;
 
-  // مراکز در خطر: P3/P4 با followupDate قدیمی‌تر از ۲۱ روز یا بدون تاریخ
-  var atRisk=[];
-  var _cutoffTs=Date.now()-21*24*3600*1000;
-  var _cutoffStr=msToJ(_cutoffTs);
-  var validK=_getAllValidRecKeys?_getAllValidRecKeys():new Set();
-  Object.keys(DB.edits||{}).forEach(function(k){
-    if(validK.size&&!validK.has(k))return;
-    var e=DB.edits[k];var st=e.status||'بدون تماس';
-    if(st==='قرارداد بسته شد'||st==='غیرفعال')return;
-    var pot=parseInt(e.potential||1);if(pot>2)return;
-    var fd=e.followupDate||'';
-    if(fd&&fd>=_cutoffStr)return; // has a recent followup date — OK
-    var pts=k.split('_');var tp=pts[0];var id=pts.slice(1).join('_');
-    atRisk.push({recKey:k,rtype:tp,id:id,name:getRecLabel(k),pot:pot,fd:fd,owner:e.owner||''});
-  });
+  // مراکز در خطر: computed in first pass above
   atRisk.sort(function(a,b){return b.pot-a.pot||(!a.fd&&b.fd?-1:a.fd&&!b.fd?1:a.fd<b.fd?-1:1);});
 
   // وظایف ارجاع‌شده
@@ -221,7 +220,7 @@ function _renderManagerDash(el){
   doneTasks.sort(function(a,b){return a.doneAt>b.doneAt?-1:1;});
 
   // ── ردیف ۱: آمار کلی ──
-  var R1='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px">';
+  var R1='<div class="dash-kpi-row" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px">';
   R1+=_dashKpiCard(totalCenters,'کل مراکز','🏥','#0ea5e9','در '+getAllProvinces().length+' استان');
   R1+=_dashKpiCard(totalActive,'مراکز فعال','📞','#f59e0b','از کل مراکز');
   R1+=_dashKpiCard(overdueTotal,'پیگیری معوق','🔴','#ef4444',EXPERTS.filter(function(u){return ownerStats[u].overdue>0;}).length+' کارشناس');
@@ -229,7 +228,7 @@ function _renderManagerDash(el){
   R1+='</div>';
 
   // ── ردیف ۲: معوقات per expert + مراکز در خطر ──
-  var R2='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">';
+  var R2='<div class="dash-kpi-2col" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">';
 
   // معوقات به تفکیک کارشناس
   var sortedExp=EXPERTS.slice().sort(function(a,b){return ownerStats[b].overdue-ownerStats[a].overdue;});
@@ -279,7 +278,7 @@ function _renderManagerDash(el){
   R2+='</div></div>';
 
   // ── ردیف ۳: وظایف ارجاع‌شده + pipeline ──
-  var R3='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  var R3='<div class="dash-kpi-2col" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
 
   // وظایف ارجاع‌شده
   R3+='<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px 16px">'
@@ -386,7 +385,7 @@ function _renderExpertUserPanel(el){
       var we=DB.weekEntries[k];
       if(we.scheduledDate!==today)return;
       var rk=we.recKey||(we.rtype&&we.rid?we.rtype+'_'+we.rid:'');if(!rk)return;
-      var owner=(_getOwnerForRecKey?_getOwnerForRecKey(rk):'')||we.addedBy||'';
+      var owner=_getOwnerForRecKey(rk)||we.addedBy||'';
       if(owner!==currentUser)return;
       var pts=rk.split('_');
       todayItems.push({name:we.centerName||getRecLabel(rk)||'',done:we.done,actionType:we.actionType||'call',rtype:pts[0],id:pts.slice(1).join('_')});
@@ -434,14 +433,14 @@ function _renderExpertUserPanel(el){
   }
 
   // KPI ردیف
-  html+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">';
+  html+='<div class="dash-kpi-row" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">';
   html+=_dashKpiCard(callsWeek,'تماس این هفته','📞','#0ea5e9','هدف: '+callTarget,callPct);
   html+=_dashKpiCard(visitsWeek,'ویزیت این هفته','🚗','#8b5cf6','هدف: '+visitTarget,visitPct);
   html+=_dashKpiCard(contractsMonth,'قرارداد این ماه','✅','#22c55e','هدف: '+contractTarget,contractPct);
   html+='</div>';
 
   // برنامه امروز + pipeline
-  html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+  html+='<div class="dash-kpi-2col" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
 
   // برنامه امروز
   html+='<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px 12px">'
@@ -540,7 +539,17 @@ function quickCallLog(rtype,rid,centerName){
   var id='qcl_'+rid;
   var e=getE(rtype,rid);
   var body='<div style="display:flex;flex-direction:column;gap:10px">'
-    +'<div><label style="font-size:11px;font-weight:700;display:block;margin-bottom:4px">📊 نتیجه تماس</label>'
+    +'<div><label style="font-size:11px;font-weight:700;display:block;margin-bottom:4px">🎯 نوع فعالیت</label>'
+    +'<select id="qcl_type" style="width:100%;padding:6px 8px;border:1px solid var(--border-input);border-radius:6px;font-family:inherit;font-size:12px">'
+    +'<option value="call">📞 تماس</option>'
+    +'<option value="visit">🤝 ملاقات</option>'
+    +'<option value="price_send">📄 ارسال قیمت</option>'
+    +'<option value="sample_send">🧪 ارسال نمونه</option>'
+    +'<option value="committee">🏛 پیگیری کمیته</option>'
+    +'<option value="meeting">👥 جلسه</option>'
+    +'<option value="followup">🔄 پیگیری</option>'
+    +'</select></div>'
+    +'<div><label style="font-size:11px;font-weight:700;display:block;margin-bottom:4px">📊 نتیجه</label>'
     +'<select id="qcl_result" style="width:100%;padding:6px 8px;border:1px solid var(--border-input);border-radius:6px;font-family:inherit;font-size:12px;background:var(--bg-input);color:var(--text-primary)">'
     +'<option value="">-- انتخاب --</option>'
     +'<option>تماس موفق - علاقه‌مند</option>'
@@ -569,14 +578,18 @@ function _submitQCL(rtype,rid,modalId){
   var result=((document.getElementById('qcl_result')||{}).value||'');
   var note=((document.getElementById('qcl_note')||{}).value||'').trim();
   var fd=((document.getElementById('qcl_fd')||{}).value||'');
+  var actType=((document.getElementById('qcl_type')||{}).value||'call');
   if(!result&&!note){showToast('نتیجه یا یادداشت را وارد کنید');return;}
-  var txt=(result?'نتیجه: '+result+(note?'\n'+note:''):note);
+  var actLabel=(ACTION_TYPE_LABELS&&ACTION_TYPE_LABELS[actType])||'📞 تماس';
+  var txt=(result?'['+actLabel+'] نتیجه: '+result+(note?'\n'+note:''):'['+actLabel+'] '+note);
   if(txt){
+    if(!DB.notes)DB.notes={};
     if(!DB.notes[rtype+'_'+rid])DB.notes[rtype+'_'+rid]=[];
     DB.notes[rtype+'_'+rid].unshift({text:txt,by:currentUser,at:new Date().toISOString(),tags:[]});
   }
   if(fd)setE(rtype,rid,'followupDate',fd);
   saveDB();closeModal(modalId);showToast('✓ تماس ثبت شد');
+  if(typeof renderExpertDashboard==='function')renderExpertDashboard();
 }
 function _renderExpertDash(el){
   if(!el)return;
@@ -605,7 +618,7 @@ function _renderExpertDash(el){
   _collectCenters(CENTERS,'center');
   Object.keys(_PC_CACHE||{}).forEach(function(pv){
     if(pv==='tehran')return;
-    (_PC_CACHE[pv]||[]).forEach(function(r){_collectCenters([r],'pc');});
+    _collectCenters(_PC_CACHE[pv]||[],'pc');
   });
   var _mainIds=new Set(CENTERS.map(function(c){return c.id;}));
   (DB.extra||[]).forEach(function(r){
@@ -660,7 +673,7 @@ function _renderExpertDash(el){
       var potScore=(5-parseInt(item.pot||4))*20; // P1=80, P2=60, P3=40, P4=20
       var daysOver=0;
       if(item.fd&&item.fd<today2){
-        var diff=Math.round((new Date()-new Date(item.fd.split('/').join('-')))/86400000);
+        var _fdp=item.fd.split('/').map(Number);var diff=Math.round((Date.now()-jMs(_fdp[0],_fdp[1],_fdp[2]))/86400000);
         daysOver=Math.min(diff,60);
       } else if(!item.fd){
         daysOver=30; // no date = treat as somewhat overdue
@@ -923,7 +936,7 @@ function renderHome(){
           var pot=parseInt(e.potential!==undefined?e.potential:r.potential||4);
           if(pot>3)return;
           var fd=e.followupDate||'';
-          var daysOver=fd&&fd<today?Math.floor((new Date()-new Date(fd.replace(/\//g,'-')))/86400000):0;
+          var daysOver=fd&&fd<today?(function(){var _p=fd.split('/').map(Number);return Math.floor((Date.now()-jMs(_p[0],_p[1],_p[2]))/86400000);}()):0;
           var potScore=(5-pot)*20;
           var stScore={'بدون تماس':5,'تماس اولیه':10,'ملاقات انجام شد':15,'پیشنهاد ارسال شد':12}[st]||0;
           var score=potScore+daysOver*0.5+stScore;

@@ -317,6 +317,69 @@ async function test7_sseDeliversToOtherUser() {
     'user متفاوت: db-updated دریافت شد (' + dbEvents.length + ' events)');
 }
 
+async function test8_hcpAndAffiliationEndpoints() {
+  console.log('\n📋 Test 8: HCP & Affiliations — مدیریت پزشکان و ارتباطات مراکز');
+  const tok = token(TEST_USERS[0]);
+
+  // 1. Create HCP
+  const hcpPayload = {
+    name: 'دکتر تست بهمنی',
+    specialty: 'رادیولوژی مداخله‌ای',
+    rank: 'استاد',
+    medicalCouncilNo: '12345-TEST',
+    phones: ['09129999999'],
+    email: 'test@hcp.com',
+    notes: 'توضیحات تست'
+  };
+  const createHcp = await req('POST', '/api/hcps', hcpPayload, tok);
+  assert(createHcp.status === 201, 'ثبت پزشک جدید موفق بود (201)');
+  assert(createHcp.body.id && createHcp.body.id.startsWith('hcp_'), 'شناسه پزشک hcp_ دارد');
+  const hcpId = createHcp.body.id;
+
+  // 2. Search HCP
+  const searchHcp = await req('GET', '/api/hcps?q=' + encodeURIComponent('بهمنی'), null, tok);
+  assert(searchHcp.status === 200, 'جستجوی پزشکان موفق بود (200)');
+  assert(searchHcp.body.some(h => h.id === hcpId), 'پزشک ثبت شده در نتایج جستجو وجود دارد');
+
+  // 3. Create Affiliation
+  const affPayload = {
+    centerKey: 'center_test_center_1',
+    hcpId: hcpId,
+    role: 'رئیس بخش رادیولوژی',
+    influenceLevel: 'KOL',
+    workingHours: 'شنبه‌ها و دوشنبه‌ها',
+    notes: 'توضیحات ارتباط تست'
+  };
+  const createAff = await req('POST', '/api/hcps/affiliations', affPayload, tok);
+  assert(createAff.status === 201, 'ایجاد ارتباط پزشک با مرکز موفق بود (211/201)');
+  assert(createAff.body.id, 'شناسه ارتباط تولید شده است');
+  const affId = createAff.body.id;
+
+  // 4. Get Center Affiliations
+  const getCenterAffs = await req('GET', '/api/hcps/centers/center_test_center_1/affiliations', null, tok);
+  assert(getCenterAffs.status === 200, 'دریافت ارتباطات مرکز موفق بود (200)');
+  assert(getCenterAffs.body.some(a => a.id === affId), 'ارتباط ایجاد شده در مرکز وجود دارد');
+
+  // 5. Update Affiliation
+  const updateAffPayload = {
+    role: 'مدیر کلینیک رادیولوژی مداخله‌ای',
+    influenceLevel: 'Decision Maker',
+    workingHours: 'یکشنبه‌ها',
+    notes: 'تغییر توضیحات'
+  };
+  const updateAff = await req('PUT', '/api/hcps/affiliations/' + affId, updateAffPayload, tok);
+  assert(updateAff.status === 200, 'ویرایش ارتباط موفق بود (200)');
+  assert(updateAff.body.role === 'مدیر کلینیک رادیولوژی مداخله‌ای', 'سمت ویرایش شد');
+
+  // 6. Delete Affiliation
+  const deleteAff = await req('DELETE', '/api/hcps/affiliations/' + affId, null, tok);
+  assert(deleteAff.status === 200, 'قطع ارتباط موفق بود (200)');
+
+  // 7. Delete HCP
+  const deleteHcp = await req('DELETE', '/api/hcps/' + hcpId, null, tok);
+  assert(deleteHcp.status === 200, 'حذف پزشک موفق بود (200)');
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -361,6 +424,7 @@ async function main() {
     await test5_sseExcludesOwnCid();
     await test6_sseDeliversToDifferentCid();
     await test7_sseDeliversToOtherUser();
+    await test8_hcpAndAffiliationEndpoints();
 
   } catch (err) {
     console.error('\n❌ خطای غیرمنتظره:', err.message);

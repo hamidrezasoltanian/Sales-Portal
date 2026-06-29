@@ -59,37 +59,7 @@ router.get('/', requireAuth, async function (req, res) {
       `SELECT * FROM notifications ${where} ORDER BY at DESC LIMIT 200`,
       params
     );
-    const sqlRows = sqlResult.rows.map(rowToObj);
-    const sqlIds = new Set(sqlRows.map(r => r.id));
-
-    // Fall back / merge with blob notifications (data may not be migrated to SQL yet)
-    let blobRows = [];
-    try {
-      const blobRes = await query(`SELECT value FROM app_data WHERE key = 'main'`);
-      const blob = blobRes.rows[0]?.value;
-      const blobNotifs = Array.isArray(blob?.notifications) ? blob.notifications : [];
-      blobRows = blobNotifs
-        .filter(n => n.id && !sqlIds.has(n.id))
-        .filter(n => !targetUser || n.to === targetUser)
-        .filter(n => req.query.unread !== 'true' || !n.read)
-        .map(n => ({
-          id: n.id,
-          to: n.to || null,
-          msg: n.msg || n.message || '',
-          centerKey: n.centerKey || null,
-          centerKeys: n.centerKeys || null,
-          at: n.at || new Date().toISOString(),
-          read: !!n.read,
-          type: n.type || 'general',
-          meta: n.meta || null,
-        }));
-    } catch (_) {}
-
-    const all = [...sqlRows, ...blobRows]
-      .sort((a, b) => new Date(b.at) - new Date(a.at))
-      .slice(0, 200);
-
-    res.json(all);
+    res.json(sqlResult.rows.map(rowToObj));
   } catch (e) {
     console.error('[notifications GET /]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
@@ -135,38 +105,7 @@ router.post('/', requireAuth, async function (req, res) {
   }
 });
 
-// ── Helper: mark a blob notification read in app_data 'main' ────────────────
-// Most in-app notifications live in the DB blob (DB.notifications), not the SQL
-// table. Marking them read must persist back into the blob, otherwise the next
-// GET re-serves them as unread.
-async function _markBlobNotifRead(id, allForUser) {
-  const client = await require('../db').pool.connect();
-  try {
-    await client.query('BEGIN');
-    const cur = await client.query("SELECT value FROM app_data WHERE key = 'main' FOR UPDATE");
-    if (!cur.rows.length) { await client.query('ROLLBACK'); return 0; }
-    const blob = cur.rows[0].value || {};
-    const notifs = Array.isArray(blob.notifications) ? blob.notifications : [];
-    let changed = 0;
-    notifs.forEach(function (n) {
-      const match = allForUser ? (n.to === allForUser && !n.read) : (n.id === id);
-      if (match && !n.read) { n.read = true; changed++; }
-      else if (match && allForUser) { /* already read */ }
-    });
-    if (changed > 0) {
-      blob.notifications = notifs;
-      await client.query("UPDATE app_data SET value = $1, updated_at = NOW() WHERE key = 'main'", [blob]);
-    }
-    await client.query('COMMIT');
-    return changed;
-  } catch (e) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
-    console.error('[notifications _markBlobNotifRead]', e.message);
-    return 0;
-  } finally {
-    client.release();
-  }
-}
+async function _markBlobNotifRead() { return 0; }
 
 // ── GET /api/notifications/count ──────────────────────────────────────────
 // Lightweight endpoint: returns just the unread count for the current user.
@@ -185,22 +124,7 @@ router.get('/count', requireAuth, async function (req, res) {
       sqlCount = parseInt(r.rows[0].c, 10) || 0;
     }
 
-    // Count from blob (unread only, not already in SQL)
-    let blobCount = 0;
-    try {
-      const blobRes = await query(`SELECT value FROM app_data WHERE key = 'main'`);
-      const blob = blobRes.rows[0]?.value;
-      const blobNotifs = Array.isArray(blob?.notifications) ? blob.notifications : [];
-      // Get SQL ids to avoid double-counting
-      const sqlIds = targetUser
-        ? new Set((await query(`SELECT id FROM notifications WHERE to_user = $1`, [targetUser])).rows.map(r => r.id))
-        : new Set((await query(`SELECT id FROM notifications`)).rows.map(r => r.id));
-      blobCount = blobNotifs.filter(function(n) {
-        return !n.read && !sqlIds.has(n.id) && (!targetUser || n.to === targetUser);
-      }).length;
-    } catch (_) {}
-
-    res.json({ count: sqlCount + blobCount });
+    res.json({ count: sqlCount });
   } catch (e) {
     console.error('[notifications GET /count]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
@@ -250,35 +174,7 @@ router.post('/read-all', requireAuth, async function (req, res) {
   }
 });
 
-// Mark all blob notifications read. If user is null, mark every unread one.
-async function _markBlobReadAll(user) {
-  const client = await require('../db').pool.connect();
-  try {
-    await client.query('BEGIN');
-    const cur = await client.query("SELECT value FROM app_data WHERE key = 'main' FOR UPDATE");
-    if (!cur.rows.length) { await client.query('ROLLBACK'); return 0; }
-    const blob = cur.rows[0].value || {};
-    const notifs = Array.isArray(blob.notifications) ? blob.notifications : [];
-    let changed = 0;
-    notifs.forEach(function (n) {
-      if (n.read) return;
-      if (user && n.to !== user) return;
-      n.read = true; changed++;
-    });
-    if (changed > 0) {
-      blob.notifications = notifs;
-      await client.query("UPDATE app_data SET value = $1, updated_at = NOW() WHERE key = 'main'", [blob]);
-    }
-    await client.query('COMMIT');
-    return changed;
-  } catch (e) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
-    console.error('[notifications _markBlobReadAll]', e.message);
-    return 0;
-  } finally {
-    client.release();
-  }
-}
+async function _markBlobReadAll() { return 0; }
 
 // ── POST /api/notifications/send-pending ─────────────────────────────────
 // Manager manually triggers delivery of pending (autoSend=false) notifications.
@@ -317,29 +213,7 @@ router.delete('/:id', requireAuth, async function (req, res) {
   try {
     const nid = req.params.id;
     const sqlResult = await query('DELETE FROM notifications WHERE id = $1 RETURNING id', [nid]);
-    // Also remove from blob (handles legacy blob-only notifications)
-    const client = await pool.connect();
-    let blobRemoved = 0;
-    try {
-      await client.query('BEGIN');
-      const cur = await client.query("SELECT value FROM app_data WHERE key = 'main' FOR UPDATE");
-      if (cur.rows.length) {
-        const blob = cur.rows[0].value || {};
-        const notifs = Array.isArray(blob.notifications) ? blob.notifications : [];
-        const before = notifs.length;
-        blob.notifications = notifs.filter(function(n) { return n.id !== nid; });
-        blobRemoved = before - blob.notifications.length;
-        if (blobRemoved > 0) {
-          await client.query("UPDATE app_data SET value = $1, updated_at = NOW() WHERE key = 'main'", [blob]);
-        }
-      }
-      await client.query('COMMIT');
-    } catch (_) {
-      try { await client.query('ROLLBACK'); } catch (__) {}
-    } finally {
-      client.release();
-    }
-    if (!sqlResult.rows.length && !blobRemoved) {
+    if (!sqlResult.rows.length) {
       return res.status(404).json({ error: 'اعلان یافت نشد' });
     }
     res.json({ ok: true });

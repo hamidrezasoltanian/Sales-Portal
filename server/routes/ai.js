@@ -14,13 +14,10 @@ router.use(requireAuth);
 async function getApiKey() {
   // 1. environment variable takes priority
   if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY;
-  // 2. fallback: DB.settings.anthropicKey
+  // 2. fallback: app_settings table
   try {
-    const r = await dbQuery("SELECT value FROM app_data WHERE key='main'");
-    if (r.rows.length) {
-      const key = r.rows[0].value?.settings?.anthropicKey;
-      if (key) return key;
-    }
+    const r = await dbQuery("SELECT value FROM app_settings WHERE key = 'anthropicKey'");
+    if (r.rows.length && r.rows[0].value) return r.rows[0].value;
   } catch (_) {}
   return null;
 }

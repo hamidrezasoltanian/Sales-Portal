@@ -1,3 +1,4 @@
+/* ═══ public/js/calendar.js ═══ */
 // ════════════════════════ CALENDAR ════════════════════
 function initEvents(){if(!DB.events)DB.events=[];if(DB.events.length){var _ids=DB.events.map(function(e){return typeof e.id==='number'&&!isNaN(e.id)?e.id:0;});_nextEvId=Math.max.apply(null,_ids)+1;}}
 function collectCalItems(){

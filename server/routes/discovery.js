@@ -9,8 +9,8 @@ const { requireAuth } = require('../auth');
 async function getApiKey() {
   if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY;
   try {
-    const r = await query("SELECT value FROM app_data WHERE key='main'");
-    if (r.rows.length) return r.rows[0].value?.settings?.anthropicKey || null;
+    const r = await query("SELECT value FROM app_settings WHERE key = 'anthropicKey'");
+    if (r.rows.length && r.rows[0].value) return r.rows[0].value;
   } catch (_) {}
   return null;
 }

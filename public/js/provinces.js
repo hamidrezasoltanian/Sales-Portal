@@ -1,3 +1,4 @@
+/* ═══ public/js/provinces.js ═══ */
 // ════════════════════════ TABLE RENDER ════════════════
 function getFiltered(){
   var q=(document.getElementById('srch')||{}).value||'';
@@ -26,6 +27,13 @@ function getFiltered(){
     if(_quickFilter==='noowner'){return !(e.owner||r.owner);}
     if(_quickFilter==='stalled')return isStalled(rtype,r.id);
     if(_quickFilter==='pot1'){return (e.potential||r.potential)==1;}
+    if(_quickFilter==='inweek'){
+      var _rk=rtype+'_'+r.id;
+      return Object.keys(DB.weekEntries||{}).some(function(k){
+        var we=DB.weekEntries[k];
+        return (we.rtype===rtype&&we.rid===String(r.id))||(we.recKey&&(we.recKey===_rk||we.recKey.indexOf(':::'+rtype+':::'+r.id)>=0));
+      });
+    }
     return true;
   });
 }
@@ -58,7 +66,7 @@ function renderTable(){
 
 // ════════════════════════ PROVINCE LIST ══════════════
 function renderProvList(){
-  var provs=getAllProvinces();
+  var provs=_getAllowedProvinces(getAllProvinces());
   // فیلتر search + owner روی province list
   var _plSearch=document.getElementById('srch')?document.getElementById('srch').value:'';
   var _plOwner=document.getElementById('fOwner')?document.getElementById('fOwner').value:_globalOwnerFilter;
@@ -68,10 +76,17 @@ function renderProvList(){
     if(effectiveProvOwner&&p.id!=='tehran'){var e2=getE('pc',p.id);var ow=e2.owner||p.owner||'';if(ow!==effectiveProvOwner)return false;}
     return true;
   });
+  // ترتیب‌بندی استان‌ها
+  var _provSort=document.getElementById('provSortSel')?document.getElementById('provSortSel').value:'default';
+  if(_provSort==='alpha'){filtProvs=filtProvs.slice().sort(function(a,b){return a.name<b.name?-1:a.name>b.name?1:0;});}
+  else if(_provSort==='potential'){filtProvs=filtProvs.slice().sort(function(a,b){return (a.potential||9)-(b.potential||9);});}
+  else if(_provSort==='owner'){filtProvs=filtProvs.slice().sort(function(a,b){var oa=USERS[(getE('pc',a.id).owner||a.owner||'')]||'ω';var ob=USERS[(getE('pc',b.id).owner||b.owner||'')]||'ω';return oa<ob?-1:oa>ob?1:0;});}
   var rows=filtProvs.map(function(p){
     var e=getE('pc',p.id);
     var owner=e.owner||p.owner||'';
-    var ownerName=owner?(USERS[owner]||owner):'بدون مسئول';
+    var _owMem=_DEFAULT_MEMBERS&&_DEFAULT_MEMBERS.find(function(m){return m.id===owner;});
+    var _owInactive=_owMem&&_owMem.active===false;
+    var ownerName=owner?((USERS[owner]||owner)+(_owInactive?' ⚠️ (غیرفعال)':'')):'بدون مسئول';
     var ownerColor=owner&&typeof umGetColor==='function'?umGetColor(owner):'#e2e8f0';
     var isMyProv=(owner===currentUser);
     var dimmed=false; // پنهان نمی‌کنیم، فقط highlight می‌کنیم
@@ -93,7 +108,9 @@ function renderProvList(){
       if(e.followupDate&&e.followupDate<today2&&st!=='قرارداد بسته شد'&&st!=='غیرفعال')overdueCount++;
     });
     var centers=getProvCenters(p.id); // برای تعداد کل مراکز
-    var cls='prov-card'+(p.id==='tehran'?' tehran':'')+(isMyProv&&_globalOwnerFilter?' prov-mine':'')+(dimmed?' prov-dimmed':'');
+    var _heatRatio=centers.length>0?overdueCount/centers.length:0;
+    var _heatCls=contracted>0&&_heatRatio<0.1?' heat-green':_heatRatio>=0.3?' heat-red':_heatRatio>=0.1?' heat-yellow':'';
+    var cls='prov-card'+(p.id==='tehran'?' tehran':'')+(isMyProv&&_globalOwnerFilter?' prov-mine':'')+(dimmed?' prov-dimmed':'')+_heatCls;
     var style=dimmed?'opacity:.4;pointer-events:none':'';
     var ownerColor=owner?(isMyProv||!_globalOwnerFilter?'#0369a1':'#94a3b8'):'#cbd5e1';
     var cntLabel=String(centers.length);
@@ -207,6 +224,12 @@ function renderProvTable(){
     +'<th>هفته</th>'
     +_sortTh('lastActivity','آخرین تماس')
     +'</tr>';
+  (function(){
+    if(document.getElementById('_ctoggle'))document.getElementById('_ctoggle').remove();
+    var _tblParent=tbl?tbl.parentElement:null;
+    if(_tblParent){_tblParent.insertAdjacentHTML('afterbegin','<div style="text-align:left;margin-bottom:4px"><button id="_ctoggle" onclick="toggleCompactTable()" style="font-size:10px;padding:2px 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg-raised);cursor:pointer;color:var(--text-secondary)">'+(_compactTable?'⊞ نمای کامل':'⊟ نمای فشرده')+'</button></div>');}
+    if(tbl){if(_compactTable)tbl.classList.add('compact-mode');else tbl.classList.remove('compact-mode');}
+  })();
   body.innerHTML=data.length?data.map(function(r){
     var e=getE(rtype,r.id);
     var st=e.status||'بدون تماس';var sc=stCls(st);
@@ -214,6 +237,7 @@ function renderProvTable(){
     var pot=e.potential!==undefined?e.potential:r.potential;
     var fd=e.followupDate||'';
     var fdCls='fd-inp'+(fd&&fd<today?' ov':fd&&fd===today?' today':'');
+    var _activeNoDate=!fd&&st!=='غیرفعال'&&st!=='قرارداد بسته شد';
     var notes=DB.notes[recK(rtype,r.id)]||[];
     var lastNote=notes.length?notes[notes.length-1]:null;
     var notePreview=lastNote?'<div style="font-size:9px;color:var(--text-muted);max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px" title="'+esc(lastNote.text||'')+'">'+esc((lastNote.text||'').substring(0,40))+'</div>':'';
@@ -223,6 +247,7 @@ function renderProvTable(){
     else if(isOverdue(rtype,r.id))rowCls='row-overdue';
     else if(fd&&fd<=addDaysToJalali(today,3))rowCls='row-upcoming';
     else if(isStalled(rtype,r.id))rowCls='row-stalled';
+    else if(!fd&&!rowCls)rowCls='row-no-followup';
     // Pin
     var pinned=isPinned(rtype,r.id);
     var pinBtn='<button onclick="event.stopPropagation();togglePin(\''+rtype+'\',\''+r.id+'\')" title="'+(pinned?'رفع پین':'پین')+'" style="background:none;border:none;cursor:pointer;font-size:12px;padding:0 2px;opacity:'+(pinned?'1':'.3')+'" class="pin-btn">⭐</button>';
@@ -232,12 +257,27 @@ function renderProvTable(){
     // Last contact
     var lastTs=e._lastActivity||e._ts||0;
     var daysSince=lastTs?Math.floor((nowTs()-lastTs)/86400000):null;
+    // Contact touchpoint counter from done weekEntries
+    var _recK2=rtype+'_'+r.id;
+    var _tpCalls=0,_tpVisits=0;
+    Object.values(DB.weekEntries||{}).forEach(function(we){
+      if(!we.done)return;
+      if((we.recKey||(we.rtype+'_'+we.rid))!==_recK2)return;
+      if(we.actionType==='visit')_tpVisits++;else _tpCalls++;
+    });
+    var _tpHtml=(_tpCalls||_tpVisits)
+      ?'<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">'
+        +(_tpCalls?'<span style="font-size:9px;background:#e0f2fe;color:#0369a1;border-radius:4px;padding:1px 5px">📞'+_tpCalls+'</span>':'')
+        +(_tpVisits?'<span style="font-size:9px;background:#f0fdf4;color:#166534;border-radius:4px;padding:1px 5px">🤝'+_tpVisits+'</span>':'')
+        +'</div>'
+      :''
     var lastContactHtml=daysSince===null
       ?'<span style="color:var(--text-muted);font-size:10px">—</span>'
       :daysSince===0?'<span style="color:#16a34a;font-size:10px;font-weight:600">امروز</span>'
       :daysSince<=7?'<span style="color:#0ea5e9;font-size:10px">'+daysSince+' روز</span>'
       :daysSince<=30?'<span style="color:#f59e0b;font-size:10px">'+daysSince+' روز</span>'
       :'<span style="color:#dc2626;font-size:10px;font-weight:600">'+daysSince+' روز 🔴</span>';
+    lastContactHtml+=_tpHtml;
     return'<tr data-rowid="'+r.id+'" class="'+rowCls+'">'
       +'<td><input type="checkbox" class="row-cb" data-rid="'+r.id+'" data-rtype="'+rtype+'" onclick="toggleCenterSelect(this,\''+r.id+'\')" style="width:14px;height:14px;cursor:pointer;accent-color:#2563eb"></td>'
       +'<td>'
@@ -248,6 +288,7 @@ function renderProvTable(){
         +(e.competitor?'<span title="رقیب: '+esc(e.competitor)+'" style="display:inline-block;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:9px;padding:1px 7px;font-size:10px;font-weight:700;cursor:help;margin-right:3px">🤖 '+esc(e.competitor)+'</span>':'')
         +(function(){var _mi=typeof MTR_BY_CENTER!=='undefined'?MTR_BY_CENTER[r.id]:null;if(!_mi||!_mi.length)return '';var _ov=_mi.filter(function(x){return x.od>45;});var _warn=_mi.filter(function(x){return x.od>20&&x.od<=45;});var _col=_ov.length?'#dc2626':_warn.length?'#d97706':'#0ea5e9';return '<span title="مطالبات باز" style="background:'+_col+';color:var(--text-primary);border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:5px;cursor:default">💰 '+_mi.length+'</span>';})()
         +'<button class="ctr-link" onclick="openCenterModal(\''+rtype+'\',\''+r.id+'\')">'+esc(r.name)+'</button>'
+        +'<button onclick="event.stopPropagation();openCallFocus(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')" title="پانل تماس سریع" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:.55;vertical-align:middle" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.55">📞</button>'
         +'<button onclick="event.stopPropagation();openPreCallBrief(\''+rtype+'\',\''+r.id+'\')" title="خلاصه قبل تماس" style="background:none;border:none;cursor:pointer;font-size:10px;padding:0 2px;opacity:.6">🎯</button>'
         +phoneHtml
         +(e.phones&&e.phones.length||e.address||e.contactName||(e.contacts&&e.contacts.length)?'<button onclick="event.stopPropagation();showContactPopup(event,\''+rtype+'\',\''+r.id+'\')" title="اطلاعات تماس" style="background:none;border:none;cursor:pointer;font-size:10px;padding:0 2px;color:#0369a1;vertical-align:middle">📋</button>':'')
@@ -257,19 +298,20 @@ function renderProvTable(){
       +(function(){var typeOpts=[''].concat(TYPE_LIST);var curType=e.type||r.type||'';return'<td><select class="ed-inp" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'type\',this.value)" style="width:90px">'+typeOpts.map(function(t){return'<option value="'+t+'"'+(curType===t?' selected':'')+'>'+(t||'-- نوع --')+'</option>';}).join('')+'</select></td>';})()
 
       +'<td><select class="ed-sel '+lc+'" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'lead\',this.value);this.className=\'ed-sel \'+(window.LEAD_CLS[this.value]||\'lead-none\')">'
-        +LEAD_LIST.map(function(l){return'<option'+(l===lead?' selected':'')+'>'+l+'</option>';}).join('')+'</select></td>'
+        +LEAD_LIST.map(function(l){return'<option'+(l===lead?' selected':'')+'>'+l+'</option>';}).join('')+'</select>'+(e.oppGrade?'<span style="font-size:9px;font-weight:700;padding:1px 4px;border-radius:3px;background:'+(e.oppGrade==='A'?'#fef08a;color:#92400e':e.oppGrade==='B'?'#fed7aa;color:#c2410c':'#e2e8f0;color:#475569')+'">'+e.oppGrade+'</span>':'')+(e.oppValue?'<span style="font-size:9px;color:#7c3aed">'+e.oppValue+'M</span>':'')+(e.customerStatus==='dormant'?'<span title="مشتری خوابیده">😴</span>':'')+'</td>'
       +'<td style="white-space:nowrap"><span class="owner-dot" data-uid="'+encodeURIComponent(e.owner||r.owner||'')+'"></span>'
       +'<select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'owner\',this.value);var _d=this.previousElementSibling;if(_d)_d.style.background=window.umGetColor?umGetColor(this.value):\'#e2e8f0\'">'
       +'<option value="">—</option>'
-        +Object.keys(USERS).map(function(u){return'<option value="'+u+'"'+((e.owner||r.owner||'')==u?' selected':'')+'>'+USERS[u]+'</option>';}).join('')+'</select></td>'
+        +(function(){var _act=typeof umGetActive==='function'?umGetActive():[];return _act.map(function(m){return'<option value="'+m.id+'"'+((e.owner||r.owner||'')==m.id?' selected':'')+'>'+m.name+'</option>';}).join('');})()+'</select>'+(function(){var _ow=e.owner||r.owner||'';if(!_ow)return'';var _om=_DEFAULT_MEMBERS&&_DEFAULT_MEMBERS.find(function(mm){return mm.id===_ow;});return(_om&&_om.active===false)?'<span title="مالک غیرفعال" style="font-size:9px;color:#dc2626;background:#fee2e2;border-radius:4px;padding:1px 4px;margin-right:2px">⚠</span>':'';})()+' </td>'
       +'<td><select class="st-sel '+sc+'" onchange="onStatus(\''+rtype+'\',\''+r.id+'\',this)">'
         +STATUS_LIST.map(function(s,i){return'<option class="'+STATUS_CLS[i]+'"'+(s===st?' selected':'')+'>'+s+'</option>';}).join('')+'</select>'
         +'<span class="st-print">'+st+'</span></td>'
-      +'<td><input type="text" class="'+fdCls+'" value="'+fd+'" readonly onclick="openJDP(this,function(v){setE(\''+rtype+'\',\''+r.id+'\',\'followupDate\',v);this.value=v;renderBanner();renderProvTable();}.bind(this))" style="cursor:pointer"></td>'
+      +'<td style="white-space:nowrap">'+(_activeNoDate?'<span title="بدون تاریخ پیگیری" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f97316;margin-left:3px;vertical-align:middle"></span>':'')+'<input type="text" class="'+fdCls+'" value="'+fd+'" readonly onclick="openJDP(this,function(v){setE(\''+rtype+'\',\''+r.id+'\',\'followupDate\',v);this.value=v;renderBanner();renderProvTable();}.bind(this))" style="cursor:pointer;max-width:82px">'+'<button class="qfd-btn" onclick="event.stopPropagation();quickSetFd(\''+rtype+'\',\''+r.id+'\',1)" title="فردا">+۱</button>'+'<button class="qfd-btn" onclick="event.stopPropagation();quickSetFd(\''+rtype+'\',\''+r.id+'\',3)" title="۳ روز">+۳</button>'+'<button class="qfd-btn" onclick="event.stopPropagation();quickSetFd(\''+rtype+'\',\''+r.id+'\',7)" title="هفته">+۷</button></td>'
       +'<td><button class="note-btn'+(notes.length?' has':'')+'" onclick="openNotes(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')">📝'+(notes.length?' '+notes.length:'')+'</button>'
         +'<input style="margin-right:4px;width:100px;border:1px solid var(--border-input);border-radius:4px;padding:2px 5px;font-size:10px;direction:rtl" placeholder="یادداشت سریع" onkeydown="if(event.key===\'Enter\'&&this.value.trim()){addNote(\''+rtype+'\',\''+r.id+'\',this.value,this);}">'
         +notePreview+'</td>'
       +(function(){var _rk2=rtype+'_'+r.id;var _inWk=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk2;});return '<td><button class="btn-assignweek" style="'+(_inWk?'background:#7c3aed':'')+'" onclick="openAssignWeekForCenter(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')">'+(_inWk?'↪ در هفته':'📋 هفته')+'</button></td>';})()
+      +(function(){var _rk3=rtype+'_'+r.id;var _td=todayStr();var _inToday=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk3&&we.scheduledDate===_td;});return _inToday?'':'<button onclick="event.stopPropagation();quickAddToToday(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')" title="اضافه به برنامه امروز" style="font-size:10px;padding:1px 6px;border:1px solid #7c3aed;border-radius:4px;background:#f5f3ff;color:#7c3aed;cursor:pointer;margin-right:3px;font-family:inherit">+امروز</button>';})()
       +'<td>'+lastContactHtml+'</td>'
       +'</tr>';
   }).join(''):'<tr><td colspan="12" style="text-align:center;padding:40px;color:#94a3b8">نتیجه‌ای یافت نشد</td></tr>';
@@ -277,6 +319,51 @@ function renderProvTable(){
   buildPresetSelector();
   _renderCenterStatsBar(data,rtype);
   var _rc=document.getElementById('rowCount');if(_rc)_rc.textContent='نمایش '+data.length+' مرکز';
+}
+function toggleCompactTable(){
+  _compactTable=!_compactTable;
+  var t=document.getElementById('mainTable');
+  if(t){if(_compactTable)t.classList.add('compact-mode');else t.classList.remove('compact-mode');}
+  var btn=document.getElementById('_ctoggle');
+  if(btn)btn.textContent=_compactTable?'⊞ نمای کامل':'⊟ نمای فشرده';
+}
+function quickAddToToday(rtype,id,name){
+  var today=todayStr();
+  var recKey=rtype+'_'+id;
+  var existing=Object.keys(DB.weekEntries||{}).find(function(k){
+    var we=DB.weekEntries[k];
+    return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===recKey&&we.scheduledDate===today;
+  });
+  if(existing){showToast('قبلاً امروز در برنامه هست',1500);return;}
+  var weekId=getWeekId(today);
+  var eKey=weekId+':::'+recKey;
+  if(!DB.weekEntries)DB.weekEntries={};
+  DB.weekEntries[eKey]={rtype:rtype,rid:id,recKey:recKey,centerName:name,scheduledDate:today,actionType:'call',done:false,addedBy:currentUser,weekId:weekId};
+  saveDB();
+  showToast('✅ اضافه شد: '+name,1800);
+  renderProvTable();
+}
+function openCallFocus(rtype,id,name){
+  var e=getE(rtype,id);
+  var notes=DB.notes[recK(rtype,id)]||[];
+  var lastNote=notes.length?notes[notes.length-1]:null;
+  var fd=e.followupDate||'';
+  var lastNoteHtml=lastNote
+    ?'<div style="background:var(--bg-raised);border-radius:6px;padding:8px 10px;font-size:11px;color:var(--text-secondary);max-height:80px;overflow:auto;line-height:1.5">'+esc(lastNote.text||'')+'<div style="font-size:9px;color:var(--text-muted);margin-top:4px">'+esc(lastNote.date||lastNote.at||'')+'</div></div>'
+    :'<div style="color:var(--text-muted);font-size:11px;padding:6px">یادداشتی ثبت نشده</div>';
+  var fdHtml=fd
+    ?'<span style="background:#e0f2fe;color:#0369a1;border-radius:5px;padding:2px 8px;font-size:11px">📅 '+esc(fd)+'</span>'
+    :'<span style="background:#fee2e2;color:#dc2626;border-radius:5px;padding:2px 8px;font-size:11px">⚠️ بدون تاریخ</span>';
+  var bdy='<div style="display:flex;flex-direction:column;gap:10px">'
+    +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><div style="font-size:13px;font-weight:700">'+esc(name)+'</div>'+fdHtml+'</div>'
+    +'<div><div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;font-weight:600">آخرین یادداشت:</div>'+lastNoteHtml+'</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:6px">'
+    +'<button onclick="closeModal(\'cfm\');quickCallLog(\''+rtype+'\',\''+id+'\',\''+esc(name)+'\');" style="flex:1;min-width:90px;padding:7px;background:#0ea5e9;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;font-weight:600">📞 ثبت تماس</button>'
+    +'<button onclick="closeModal(\'cfm\');quickSetFd(\''+rtype+'\',\''+id+'\',7);" style="padding:7px 12px;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit">+۷ روز</button>'
+    +'<button onclick="closeModal(\'cfm\');quickSetFd(\''+rtype+'\',\''+id+'\',30);" style="padding:7px 12px;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit">+۳۰ روز</button>'
+    +'<button onclick="closeModal(\'cfm\');openCenterModal(\''+rtype+'\',\''+id+'\')" style="padding:7px 12px;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit">⚙️ کامل</button>'
+    +'</div></div>';
+  openModal('cfm',esc(name),bdy,'',{});
 }
 function onStatus(type,id,sel){
   var v=sel.value;sel.className='st-sel '+stCls(v);
@@ -509,12 +596,12 @@ function rebuildFilters(){
   var fo=document.getElementById('fOwner');
   if(fo&&fo.children.length<=1){Object.keys(USERS).forEach(function(u){var o=document.createElement('option');o.value=u;o.textContent=USERS[u];fo.appendChild(o);});}
   var ft=document.getElementById('fTag');
-  if(ft){ft.innerHTML='<option value="">همه برچسب‌ها</option>';(DB.tags||[]).forEach(function(t){var o=document.createElement('option');o.value=t.id;o.textContent=t.name;ft.appendChild(o);});}
+  if(ft){var _ftV=ft.value;ft.innerHTML='<option value="">همه برچسب‌ها</option>';(DB.tags||[]).forEach(function(t){var o=document.createElement('option');o.value=t.id;o.textContent=t.name;ft.appendChild(o);});if(_ftV)ft.value=_ftV;}
   // banner filters
   var bu=document.getElementById('bannerUser');
   if(bu&&bu.children.length<=1){Object.keys(USERS).forEach(function(u){var o=document.createElement('option');o.value=u;o.textContent=USERS[u];bu.appendChild(o);});}
   var btg=document.getElementById('bannerTag');
-  if(btg){btg.innerHTML='<option value="">همه برچسب‌ها</option>';(DB.tags||[]).forEach(function(t){var o=document.createElement('option');o.value=t.id;o.textContent=t.name;btg.appendChild(o);});}
+  if(btg){var _btgV=btg.value;btg.innerHTML='<option value="">همه برچسب‌ها</option>';(DB.tags||[]).forEach(function(t){var o=document.createElement('option');o.value=t.id;o.textContent=t.name;btg.appendChild(o);});if(_btgV)btg.value=_btgV;}
 }
 
 // ════════════════════════ TAGS ════════════════════════

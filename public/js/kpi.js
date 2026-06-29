@@ -1,3 +1,4 @@
+/* ═══ public/js/kpi.js ═══ */
 // ═══════════════════════════ KPI MODULE ════════════════════════════
 // ═══════════════════════════════════════════════════════════════════
 
@@ -152,22 +153,8 @@ function getRetentionData(userId){
 }
 function _getOwnerForRecKey(recKey){
   if(!recKey)return'';
-  var e=DB.edits[recKey]||{};
-  if(e.owner)return e.owner;
   var pts=recKey.split('_');var rtype=pts[0];var rid=pts.slice(1).join('_');
-  if(rtype==='center'){
-    var c=CENTERS.find(function(x){return x.id===rid;});
-    if(c&&c.owner)return c.owner;
-  } else if(rtype==='pc'){
-    _buildPCCache();
-    var provId=rid.split('||')[0];
-    var arr=_PC_CACHE[provId]||[];
-    var c2=arr.find(function(x){return x.id===rid;});
-    if(c2&&c2.owner)return c2.owner;
-  }
-  var ex=(DB.extra||[]).find(function(x){return x.id===rid;});
-  if(ex&&ex.owner)return ex.owner;
-  return '';
+  return _wpGetOwner({rtype:rtype,rid:rid});
 }
 function getVisitsMonth(userId,month){
   ensureKPIDB();var b=jMonthBounds(month);
@@ -251,7 +238,7 @@ function calcKPIs(userId,month){
      tip:'قراردادهای بسته‌شده در این ماه',auto:true},
     {id:'retention',name:'نرخ حفظ مشتری',icon:'🤝',weight:_w.retention,score:s2,
      actual:retention.pct,target:90,unit:'درصد',
-     tip:retention.cust+' مشتری فعال از '+retention.total+' مرکز با ویرایش',auto:true},
+     tip:'📊 کل وقت‌ها — '+retention.cust+' مشتری فعال از '+retention.total+' مرکز با ویرایش',auto:true},
     {id:'visits',name:'ویزیت حضوری هفتگی',icon:'🚗',weight:_w.visits,score:s3,
      actual:Math.round(avgVisits*10)/10,target:t.visitsPerWeek,unit:'ویزیت/هفته',
      tip:visitsTip,auto:true},

@@ -1,3 +1,4 @@
+/* ═══ public/js/mtr.js ═══ */
 // ══════════════════════════════════════════════════════════════
 // مطالبات ↔ مراکز — اتصال فاکتورهای باز به صفحه مرکز
 // ══════════════════════════════════════════════════════════════
@@ -2031,6 +2032,17 @@ function mtrLazyInit(){
 
 
 // ════════ IMPROVEMENT 1: Bulk Selection ════════
+function quickSetFd(rtype,rid,days){
+  var t=todayStr();var parts=t.split('/').map(Number);
+  var jy=parts[0],jm=parts[1],jd=parts[2];
+  var mdays=[31,31,31,31,31,31,30,30,30,30,30,29];
+  jd+=days;
+  while(jd>(mdays[jm-1]||30)){jd-=(mdays[jm-1]||30);jm++;if(jm>12){jm=1;jy++;}}
+  var nd=jy+'/'+p2(jm)+'/'+p2(jd);
+  setE(rtype,rid,'followupDate',nd);
+  renderBanner();renderProvTable();
+  showToast('📅 فالوآپ: '+nd,1800);
+}
 function toggleCenterSelect(cb,id){
   var rtype=cb.getAttribute('data-rtype');
   var key=rtype+'_'+id;
@@ -2175,6 +2187,67 @@ function bulkExport(){
   XLSX.utils.book_append_sheet(wb,ws,'مراکز');
   XLSX.writeFile(wb,'centers_selected_'+todayStr().replace(/\//g,'-')+'.xlsx');
 }
+function bulkDeleteCenters(){
+  var keys=Array.from(_selectedCenters);
+  if(!keys.length)return;
+  var extraCount=keys.filter(function(k){return k.indexOf('_new_')>=0;}).length;
+  var baseCount=keys.length-extraCount;
+  var body='<div style="text-align:center;padding:10px 0">'
+    +'<div style="font-size:36px;margin-bottom:12px">🗑</div>'
+    +'<div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:8px">حذف گروهی مراکز</div>'
+    +'<div style="font-size:13px;color:var(--text-muted);margin-bottom:14px">'+keys.length+' مرکز انتخاب شده</div>'
+    +(baseCount?'<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:7px;padding:10px;font-size:12px;color:#991b1b;text-align:right;margin-bottom:8px">'+baseCount+' مرکز از دیتابیس اصلی حذف می‌شود. این عمل قابل بازگشت نیست.</div>':'')
+    +(extraCount?'<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:7px;padding:10px;font-size:12px;color:#92400e;text-align:right">'+extraCount+' مرکز دستی (extra) حذف می‌شود.</div>':'')
+    +'</div>';
+  var foot='<button class="btn-secondary" onclick="closeModal(\'bulkDelModal\')">لغو</button>'
+    +'<button style="background:#dc2626;color:#fff;border:none;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600" onclick="_doBulkDelete()">🗑 حذف '+keys.length+' مرکز</button>';
+  openModal('bulkDelModal','حذف گروهی',body,foot);
+}
+
+function _doBulkDelete(){
+  var keys=Array.from(_selectedCenters);
+  closeModal('bulkDelModal');
+  var deleted=0;
+  keys.forEach(function(key){
+    var parts=key.split('_');var rtype=parts[0];var id=parts.slice(1).join('_');
+    var isExtra=(id.indexOf('_new_')>=0);
+    _cleanCenterData(rtype,id);
+    if(isExtra){
+      DB.extra=(DB.extra||[]).filter(function(c){return c.id!==id;});
+    }else if(rtype==='center'){
+      for(var _ci=CENTERS.length-1;_ci>=0;_ci--){
+        var _cc=CENTERS[_ci];var _cid='c_'+(_cc.row||_cc.id||'');
+        if(_cid===id||String(_cc.id)===String(id)){CENTERS.splice(_ci,1);break;}
+      }
+    }else{
+      var _provId=id.split('||')[0];var _row=Number(id.split('||')[1]);
+      PROVINCES.forEach(function(p){
+        if(p.id===_provId){
+          var _pname=p.name.replace(/[ي]/g,'ی').replace(/[ك]/g,'ک');
+          if(PC_RAW[_pname]){PC_RAW[_pname]=PC_RAW[_pname].filter(function(r){return(Array.isArray(r)?r[0]:r.row)!==_row;});}
+          if(PC_RAW[p.id]){PC_RAW[p.id]=PC_RAW[p.id].filter(function(r){return(Array.isArray(r)?r[0]:r.row)!==_row;});}
+        }
+      });
+    }
+    deleted++;
+  });
+  saveDB();
+  clearPCCache();_ALL_PROVS=null;_typeFilterBuilt=false;
+  var _newCENTERS=CENTERS.slice();
+  var _newPC_RAW={};Object.keys(PC_RAW).forEach(function(k){_newPC_RAW[k]=PC_RAW[k];});
+  fetch('/api/data/centers/master',{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({CENTERS:_newCENTERS,PC_RAW:_newPC_RAW})
+  }).then(function(r){
+    if(!r.ok)console.error('[bulk delete] server save failed:',r.status);
+    clearCenterSelection();rebuildFilters();renderTable();
+    showToast('✅ '+deleted+' مرکز حذف شد');
+  }).catch(function(e){
+    console.error('[bulk delete]',e.message);
+    clearCenterSelection();rebuildFilters();renderTable();
+    showToast('✅ '+deleted+' مرکز حذف شد');
+  });
+}
+
 
 // ════════ IMPROVEMENT 2: addDaysToJalali ════════
 function addDaysToJalali(dateStr,days){

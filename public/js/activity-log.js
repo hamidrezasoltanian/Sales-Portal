@@ -1,3 +1,4 @@
+/* ═══ public/js/activity-log.js ═══ */
 // ════════════════════════ ACTIVITY ═══════════════════
 function renderActivity(){
   var el=document.getElementById('actPanel');if(!el)return;
@@ -150,7 +151,8 @@ function gSearchQuery(q){
         res.push({icon:'🏥',title:esc(name),sub:esc(e.status||'بدون تماس'),action:function(){closeGSearch();openCenterModal('center',cid);}});
       }
     });
-    Object.keys(_PC_CACHE||{}).forEach(function(pv){if(res.length>=12)return;(_PC_CACHE[pv]||[]).forEach(function(c){
+    var _gsAllowedProvs=(window._myPermissions&&window._myPermissions.provinces&&window._myPermissions.provinces.length)?window._myPermissions.provinces:null;
+    Object.keys(_PC_CACHE||{}).forEach(function(pv){if(pv==='tehran')return;if(res.length>=12)return;if(_gsAllowedProvs&&_gsAllowedProvs.indexOf(pv)<0)return;(_PC_CACHE[pv]||[]).forEach(function(c){
       if(res.length>=12)return;
       var name=c.name||c.center_name||'';
       if(fNorm(name).indexOf(qn)!==-1){
@@ -228,16 +230,19 @@ function qsSearch(q){
   (CENTERS||[]).forEach(function(c){
     if(fNorm(c.name||'').indexOf(qn)>=0){
       var e=getE('center',c.id);
-      results.push({type:'مرکز تهران',icon:'🏥',name:c.name,sub:e.status||'بدون تماس',action:"switchTab('provinces');closeQS()"});
+      var _qsCid=String(c.id).replace(/\'/g,"\\'");var _qsCrt='center';
+      results.push({type:'مرکز تهران',icon:'🏥',name:c.name,sub:e.status||'بدون تماس',action:"openCenterModal('"+_qsCrt+"','"+_qsCid+"');closeQS()"});
     }
   });
   // مراکز استانی از cache
   _buildPCCache();
   Object.keys(_PC_CACHE||{}).forEach(function(provId){
+    if(provId==='tehran')return;
     (_PC_CACHE[provId]||[]).forEach(function(c){
       if(fNorm(c.name||'').indexOf(qn)>=0){
         var e=getE('pc',c.id);
-        results.push({type:'مرکز استانی',icon:'🏢',name:c.name,sub:e.status||'بدون تماس',action:"switchTab('provinces');closeQS()"});
+        var _qsPcid=String(c.id).replace(/\'/g,"\\'");
+        results.push({type:'مرکز استانی',icon:'🏢',name:c.name,sub:e.status||'بدون تماس',action:"openCenterModal('pc','"+_qsPcid+"');closeQS()"});
       }
     });
   });
@@ -248,7 +253,8 @@ function qsSearch(q){
     if(ertype==='center'&&_qsMainIds.has(String(c.id)))return;
     if(fNorm(c.name||'').indexOf(qn)>=0){
       var e=getE(ertype,c.id);
-      results.push({type:'مرکز اضافه‌شده',icon:'➕',name:c.name,sub:e.status||'بدون تماس',action:"switchTab('provinces');closeQS()"});
+      var _qsExid=String(c.id).replace(/\'/g,"\\'");var _qsExrt=ertype;
+      results.push({type:'مرکز اضافه‌شده',icon:'➕',name:c.name,sub:e.status||'بدون تماس',action:"openCenterModal('"+_qsExrt+"','"+_qsExid+"');closeQS()"});
     }
   });
   // برنامه هفته

@@ -1,3 +1,4 @@
+/* ═══ public/js/manager-tasks.js ═══ */
 // ════════════════════════ MANAGER TASKS ════════════════════════
 var _mgrTasksOpen = true;
 
@@ -147,9 +148,12 @@ function renderKPIPanel(){
     console.error('KPI error:',err);return;
   }
 
-  var userOpts=Object.keys(USERS).map(function(u){
-    var _uc=window.umGetColor?umGetColor(u):'#0ea5e9';
-    return'<option value="'+u+'"'+(_kpiUser===u?' selected':'')+' data-color="'+_uc+'">'+USERS[u]+'</option>';
+  var _salesMembers=(_DEFAULT_MEMBERS||[]).filter(function(m){return m.role==='کارشناس فروش'&&m.active!==false;});
+  if(!_salesMembers.length)_salesMembers=Object.keys(USERS).map(function(u){return{id:u,name:USERS[u]};});
+  if(!_kpiUser||!_salesMembers.find(function(m){return m.id===_kpiUser;}))_kpiUser=(_salesMembers[0]||{}).id||_kpiUser;
+  var userOpts=_salesMembers.map(function(m){
+    var _uc=window.umGetColor?umGetColor(m.id):'#0ea5e9';
+    return'<option value="'+m.id+'"'+(_kpiUser===m.id?' selected':'')+' data-color="'+_uc+'">'+esc(m.name||m.id)+'</option>';
   }).join('');
   var monthOpts=prevJMonths(12).map(function(m){
     return'<option value="'+m+'"'+(_kpiMonth===m?' selected':'')+'>'+jMonthLabel(m)+'</option>';
@@ -171,6 +175,51 @@ function renderKPIPanel(){
     var alertNames=lowKPIs.map(function(k){return k.icon+' '+k.name;}).join('، ');
     html+='<div style="background:'+alertBg+';border:1px solid '+alertBorder+';border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:'+alertColor+';font-weight:600">'      +'⚠️ هشدار: '+lowKPIs.length+' شاخص زیر ۵۰ هستند: <span style="font-weight:400">'+alertNames+'</span>'      +'</div>';
   }
+
+  // ── هفته‌به‌هفته + هشدار ۰ فعالیت
+  (function(){
+    var now=new Date();
+    var todayJ=todayStr();
+    var thisWeekStart=toJalali(new Date(now.getTime()-6*24*60*60*1000));
+    var lastWeekStart=toJalali(new Date(now.getTime()-13*24*60*60*1000));
+    var lastWeekEnd=toJalali(new Date(now.getTime()-7*24*60*60*1000));
+    function countInRange(log,user,s,e){
+      return (log||[]).filter(function(l){
+        var by=l.by||l.user;var at=l.at?l.at.slice(0,10):'';
+        var jd=at?toJalali(new Date(at)).replace(/-/g,'/'):'';
+        return (!user||by===user)&&jd>=s&&jd<=e;
+      }).length;
+    }
+    var thisW={calls:countInRange(DB.callLog,_kpiUser,thisWeekStart,todayJ),visits:countInRange(DB.visitLog,_kpiUser,thisWeekStart,todayJ)};
+    var lastW={calls:countInRange(DB.callLog,_kpiUser,lastWeekStart,lastWeekEnd),visits:countInRange(DB.visitLog,_kpiUser,lastWeekStart,lastWeekEnd)};
+    var totalThis=thisW.calls+thisW.visits;
+    var totalLast=lastW.calls+lastW.visits;
+    var diff=totalThis-totalLast;
+    var arrow=diff>0?'↑':'↓';var arrowClr=diff>0?'#16a34a':'#dc2626';
+    if(diff===0)arrow='→';if(diff===0)arrowClr='#6366f1';
+    html+='<div style="display:flex;gap:12px;align-items:center;background:var(--bg-raised);border-radius:10px;padding:10px 16px;margin-bottom:14px;flex-wrap:wrap">'
+      +'<span style="font-size:12px;font-weight:700;color:var(--text-secondary)">📊 هفته‌به‌هفته</span>'
+      +'<span style="font-size:12px">📞 '+thisW.calls+(lastW.calls?' <span style="color:'+arrowClr+';font-weight:700">'+arrow+(Math.abs(thisW.calls-lastW.calls)||'')+'</span>':'')+' تماس</span>'
+      +'<span style="font-size:12px">🚗 '+thisW.visits+(lastW.visits?' <span style="color:'+arrowClr+';font-weight:700">'+arrow+(Math.abs(thisW.visits-lastW.visits)||'')+'</span>':'')+' بازدید</span>'
+      +'<span style="font-size:11px;color:var(--text-muted)">هفته گذشته: '+totalLast+' فعالیت</span>'
+      +'</div>';
+    // ─ هشدار ۰ فعالیت
+    if(totalThis===0&&_isManager()){
+      var zeroExperts=Object.keys(USERS).filter(function(u){
+        return (DB.callLog||[]).concat(DB.visitLog||[]).filter(function(l){
+          var by=l.by||l.user;var at=l.at?l.at.slice(0,10):'';
+          var jd=at?toJalali(new Date(at)).replace(/-/g,'/'):'';
+          return by===u&&jd>=thisWeekStart&&jd<=todayJ;
+        }).length===0;
+      });
+      if(zeroExperts.length){
+        html+='<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#991b1b">'
+          +'⚠️ <b>'+zeroExperts.length+' کارشناس</b> این هفته هیچ فعالیتی ثبت نکرده‌اند: '
+          +zeroExperts.map(function(u){return USERS[u]||u;}).join('، ')
+          +'</div>';
+      }
+    }
+  })();
 
   // ── header
   html+='<div class="kpi-header-row" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px">'    +'<h2 style="margin:0;font-size:18px;color:var(--text-primary)">📊 عملکرد KPI</h2>'    +'<select onchange="_kpiUserChange(this.value)" style="padding:5px 10px;border:1px solid var(--border-input);border-radius:5px;background:var(--bg-input);color:var(--text-primary);font-family:inherit;font-size:12px">'+userOpts+'</select>'    +'<select onchange="_kpiMonth=this.value;renderKPIPanel()" style="padding:5px 10px;border:1px solid var(--border-input);border-radius:6px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)">'+monthOpts+'</select>'    +'<div style="margin-right:auto;display:flex;gap:8px">'    +'<button style="background:#f0fdf4;color:#15803d;border:1px solid #86efac;border-radius:5px;font-size:11px;padding:5px 12px;cursor:pointer;font-weight:600" onclick="openTeamKPITargets()">🎯 تنظیم اهداف تیم</button>'    +(_isManager()?'<button style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:5px;font-size:11px;padding:5px 12px;cursor:pointer;font-weight:600;margin-right:6px" onclick="openProvTargetsModal()">🗺 اهداف استانی</button>':'')    +'<button class="btn-primary" onclick="openKPILog(_kpiUser)" style="font-size:11px;padding:5px 12px">📝 ثبت فعالیت</button>'    +'<button style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:5px;font-size:11px;padding:5px 12px;cursor:pointer;font-weight:600" onclick="exportKPIReport()">📥 دانلود گزارش</button>'    +'</div></div>';
@@ -205,6 +254,42 @@ function renderKPIPanel(){
     +'</div>'
     // forecast row
     +(data.dayElapsed>0&&_kpiMonth===currentJMonth()?'<div style="width:100%;margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.15);font-size:11px;color:rgba(255,255,255,.7);display:flex;gap:16px;flex-wrap:wrap">'      +'<span>📈 پیش‌بینی پایان ماه: <strong style="color:#fbbf24">'+Math.round(data.forecast.overall||0)+'</strong> / 100</span>'      +'<span>⏱ '+data.dayElapsed+' روز کاری گذشته از '+data.dayTotal+'</span>'      +'</div>':'')    +'</div>';
+
+  // ── قیف فروش در KPI
+  (function(){
+    var FSTAGES=['لید','سرنخ','فرصت','مشتری'];
+    var FCOLORS={'لید':'#f59e0b','سرنخ':'#0ea5e9','فرصت':'#8b5cf6','مشتری':'#22c55e'};
+    var fCnts={};FSTAGES.forEach(function(s){fCnts[s]=0;});
+    _buildPCCache();
+    getAllProvinces().forEach(function(p){
+      var rt=getProvType(p.id);
+      getProvCenters(p.id).forEach(function(c){
+        var e=getE(rt,c.id);
+        if((e.owner||c.owner||'')!==_kpiUser)return;
+        var lead=e.lead||c.lead||'سرنخ';
+        if(fCnts[lead]!==undefined)fCnts[lead]++;
+      });
+    });
+    var fTotal=Object.values(fCnts).reduce(function(a,b){return a+b;},0)||1;
+    html+='<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">';
+    // Funnel
+    html+='<div style="flex:1;min-width:200px;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:10px 14px">';
+    html+='<div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:7px">📊 قیف فروش</div>';
+    html+='<div style="display:flex;gap:2px;align-items:stretch">';
+    FSTAGES.forEach(function(s,idx){
+      var cnt=fCnts[s]||0;var pct=Math.round(cnt/fTotal*100);var clr=FCOLORS[s];
+      html+='<div style="flex:1;text-align:center;padding:6px 3px;border:1px solid '+clr+'33;border-radius:5px;background:'+clr+'0d">';
+      html+='<div style="font-size:16px;font-weight:700;color:'+clr+'">'+cnt+'</div>';
+      html+='<div style="font-size:10px;font-weight:600;color:'+clr+'">'+esc(s)+'</div>';
+      html+='<div style="font-size:10px;color:var(--text-muted)">'+pct+'٪</div>';
+      html+='</div>';
+      if(idx<FSTAGES.length-1)html+='<div style="display:flex;align-items:center;color:var(--text-muted);font-size:13px;padding:0 1px">›</div>';
+    });
+    html+='</div></div>';
+    // Lead timing
+    html+=renderLeadTimingHtml(_kpiUser);
+    html+='</div>';
+  })();
 
   // ── KPI Cards
   // find best and worst KPI indices

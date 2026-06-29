@@ -1,3 +1,4 @@
+/* ═══ public/js/center-modal.js ═══ */
 // ════════════════════════ JDP ══════════════════════════
 var _jdpOutsideHandler=null;
 function openJDP(inp,cb){

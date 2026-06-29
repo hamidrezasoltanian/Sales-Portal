@@ -1,8 +1,10 @@
+/* ═══ public/js/tasks.js ═══ */
 // ════════════════════════ TASK MANAGEMENT ════════════════════════
 // ════════════════════════ TASK MANAGEMENT (Monday-style) ════════════════════════
 var _taskFilter='all'; // all | mine | overdue
 var _taskView='kanban'; // kanban | list
 var _taskSearch=''; // keyword filter
+var _taskTeamMode=false; // toggle: false=personal, true=department team
 var _TK_STATUSES=[
   {id:'todo',label:'انجام نشده',color:'#64748b'},
   {id:'doing',label:'در حال انجام',color:'#6366f1'},
@@ -112,6 +114,12 @@ function _tkFindSub(subs,sid){
 function _tkFilteredTasks(){
   _ensureTasks();
   var today=todayStr();
+  // Team mode: show all tasks in same department
+  if(_taskTeamMode&&window._myDepartment){
+    var deptTasks=DB.tasks.filter(function(t){return(t.department||'')===(window._myDepartment||'');});
+    if(_taskSearch&&_taskSearch.trim()){var _q2=fNorm(_taskSearch.trim());deptTasks=deptTasks.filter(function(t){return fNorm(t.title||'').indexOf(_q2)>=0||fNorm(t.note||'').indexOf(_q2)>=0;});}
+    return deptTasks;
+  }
   var tasks=DB.tasks.filter(function(t){
     if(_taskFilter==='mine')return t.owner===currentUser;
     if(_taskFilter==='overdue')return t.status!=='done'&&t.dueDate&&t.dueDate<today;
@@ -143,6 +151,10 @@ function renderTasksPanel(){
     +[['all','همه'],['mine','وظایف من'],['overdue','سررسید گذشته']].map(function(f){
       return'<button class="task-filter-btn'+(_taskFilter===f[0]?' active':'')+'" onclick="_taskFilter=\''+f[0]+'\';renderTasksPanel()">'+f[1]+'</button>';
     }).join('')
+    +(window._myDepartment?'<span style="display:inline-flex;gap:2px;background:var(--bg-raised);border-radius:8px;padding:3px;border:1px solid var(--border)">'
+    +'<button onclick="_taskTeamMode=false;renderTasksPanel()" style="font-size:11px;border:none;border-radius:6px;padding:4px 12px;cursor:pointer;font-family:inherit;background:'+(!_taskTeamMode?'#6366f1':'transparent')+';color:'+(!_taskTeamMode?'#fff':'var(--text-secondary)')+'" title="وظایف شخصی">👤 من</button>'
+    +'<button onclick="_taskTeamMode=true;renderTasksPanel()" style="font-size:11px;border:none;border-radius:6px;padding:4px 12px;cursor:pointer;font-family:inherit;background:'+(_taskTeamMode?'#6366f1':'transparent')+';color:'+(_taskTeamMode?'#fff':'var(--text-secondary)')+'" title="وظایف تیم دپارتمان">👥 تیم</button>'
+    +'</span>':'')
     +'<button class="btn-primary" style="margin-right:auto;font-size:12px;padding:6px 16px" onclick="openTaskModal()">+ وظیفه جدید</button>'
     +'<button onclick="openTkColumnsModal()" style="font-size:11px;padding:5px 12px;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-family:inherit;color:var(--text-secondary)">⚙️ ستون‌ها</button>'
     +'</div>';
@@ -239,6 +251,8 @@ function tkDrop(ev,statusId){
   t.done=(statusId==='done');
   t.doneAt=t.done?todayStr():'';
   saveDB();
+  fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({status:t.status,done:t.done,doneAt:t.doneAt})}).catch(function(){});
   renderTasksPanel();
 }
 
@@ -281,6 +295,8 @@ function tkQuickToggle(tid){
     t.activity.push({type:'status',text:'«'+prevLabel+'» → انجام شد ✓',by:currentUser,at:new Date().toISOString()});
   }
   saveDB();
+  fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({status:t.status,done:t.done,doneAt:t.doneAt||null,activity:t.activity})}).catch(function(){});
   renderTasksPanel();
 }
 
@@ -405,6 +421,7 @@ function tkSaveTask(tid){
   t.note=(document.getElementById('tkd_note')||{}).value||'';
   t.recurring=(document.getElementById('tkd_recurring')||{}).value||'none';
   if(!tid) t.centerKey=(document.getElementById('tkd_centerKey')||{}).value||'';
+  if(!tid) t.department=window._myDepartment||'';
   if(!t.activity)t.activity=[];
   if(tid&&_prevStatus!==status){
     var _statuses=_getTkStatuses();
@@ -416,10 +433,26 @@ function tkSaveTask(tid){
   }
   // notify new owner
   if(t.owner&&t.owner!==currentUser&&typeof sendNotif==='function'&&t._notifiedOwner!==t.owner){
-    sendNotif(t.owner,'وظیفه «'+t.title+'» به شما واگذار شد',t.centerKey||'');
+    sendNotif(t.owner,'وظیفه «'+t.title+'» به شما واگذار شد',t.centerKey||'',[],'task',{taskId:t.id,taskTitle:t.title});
     t._notifiedOwner=t.owner;
   }
   saveDB();
+  // SQL dual-write (fire-and-forget)
+  (function(task,isNew){
+    fetch('/api/tasks'+(isNew?'':'/'+encodeURIComponent(String(task.id))),{
+      method:isNew?'POST':'PUT',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        id:task.id,title:task.title,owner:task.owner||null,
+        dueDate:task.dueDate||null,priority:task.priority||2,
+        status:task.status||'todo',centerKey:task.centerKey||null,
+        note:task.note||'',subtasks:task.subtasks||[],
+        done:!!task.done,recurring:task.recurring||'none',
+        activity:task.activity||[],createdBy:task.createdBy||currentUser,
+        department:task.department||''
+      })
+    }).catch(function(){});
+  })(t,!tid);
   closeModal('taskDetail');
   showToast(tid?'💾 ذخیره شد':'✅ وظیفه ایجاد شد');
   renderTasksPanel();
@@ -429,6 +462,7 @@ function tkDeleteTask(tid){
   _ensureTasks();
   DB.tasks=DB.tasks.filter(function(x){return String(x.id)!==String(tid);});
   saveDB();
+  fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'DELETE'}).catch(function(){});
   closeModal('taskDetail');
   showToast('🗑 وظیفه حذف شد');
   renderTasksPanel();
@@ -443,6 +477,10 @@ function tkAddComment(tid){
   t.activity.push({type:'comment',text:text,by:currentUser,at:new Date().toISOString()});
   inp.value='';
   saveDB();
+  fetch('/api/tasks/'+encodeURIComponent(String(tid))+'/comment',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({text:text})
+  }).catch(function(){});
   // re-render activity log in place
   var log=document.getElementById('tkActivityLog');
   if(log){
@@ -511,6 +549,8 @@ function tkToggleSub(tid,sid){
   var s=_tkFindSub(t.subtasks,sid);if(!s)return;
   s.done=!s.done;
   saveDB();
+  fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({subtasks:t.subtasks})}).catch(function(){});
   var tree=document.getElementById('tkSubTree');
   if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
 }
@@ -526,6 +566,8 @@ function tkEditSubTitle(tid,sid){
     if(nv===null)return;
     s.title=nv.trim()||s.title;
     saveDB();
+    fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({subtasks:t.subtasks})}).catch(function(){});
     var tree=document.getElementById('tkSubTree');if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
     return;
   }
@@ -536,6 +578,8 @@ function tkEditSubTitle(tid,sid){
   var save=function(){
     if(saved)return;saved=true;
     s.title=inp.value.trim()||s.title;saveDB();
+    fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({subtasks:t.subtasks})}).catch(function(){});
     var tree=document.getElementById('tkSubTree');if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
   };
   inp.addEventListener('blur',save);
@@ -559,6 +603,8 @@ function tkDelSub(tid,sid){
   var t=_tkFindTask(tid);if(!t)return;
   _tkDelSubFrom(t.subtasks,sid);
   saveDB();
+  fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({subtasks:t.subtasks})}).catch(function(){});
   var tree=document.getElementById('tkSubTree');
   if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
 }
@@ -570,7 +616,10 @@ function _toggleTask(tid){
   t.status=(t.status==='done')?'todo':'done';
   t.done=(t.status==='done');
   t.doneAt=t.done?todayStr():'';
-  saveDB();renderTasksPanel();
+  saveDB();
+  fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({status:t.status,done:t.done,doneAt:t.doneAt||null})}).catch(function(){});
+  renderTasksPanel();
 }
 function _deleteTask(tid){tkDeleteTask(tid);}
 
@@ -685,7 +734,7 @@ function _runMorningBriefing(today){
       + items.slice(0,5).join('\n• ')
       + (items.length>5?'\nو '+(items.length-5)+' مورد دیگر':'')
       + '\nروز خوبی داشته باشید! 💪';
-    sendNotif(exp, msg, '');
+    if(!_hasRecentNotif(exp,'morning_brief')){sendNotif(exp, msg, '', [], 'morning_brief', null);}
   });
   if(cnt>0) showToast('🌅 بریفینگ صبحگاهی برای '+cnt+' کارشناس ارسال شد', 3000);
 }
@@ -711,7 +760,7 @@ function _runTodayReminders(today){
       + items.slice(0,5).map(function(x){return x.name;}).join('\n• ')
       + (items.length>5?'\nو '+(items.length-5)+' مورد دیگر':'')
       + '\nوارد برنامه هفته شوید.';
-    sendNotif(exp, msg, items[0].key, items.map(function(x){return x.key;}));
+    if(!_hasRecentNotif(exp,'followup')){sendNotif(exp, msg, items[0].key, items.map(function(x){return x.key;}), 'followup', null);}
   });
   if(cnt>0) showToast('🔔 یادآوری ساعت ۱۵ برای '+cnt+' کارشناس ارسال شد', 3000);
 }
@@ -746,7 +795,7 @@ function _runOverdueAndUndatedReminders(today){
         + d.overdue.slice(0,5).map(function(x){return x.name+' (تاریخ: '+x.date+')';}).join('\n• ')
         + (d.overdue.length>5?'\nو '+(d.overdue.length-5)+' مورد دیگر':'')
         + '\nلطفاً گزارش ثبت کنید.';
-      sendNotif(exp, msg, d.overdue[0].key, d.overdue.map(function(x){return x.key;}));
+      if(!_hasRecentNotif(exp,'followup')){sendNotif(exp, msg, d.overdue[0].key, d.overdue.map(function(x){return x.key;}), 'followup', null);}
       cnt++;
     }
     if(d.noDate.length){
@@ -754,7 +803,7 @@ function _runOverdueAndUndatedReminders(today){
         + d.noDate.slice(0,5).map(function(x){return x.name;}).join('\n• ')
         + (d.noDate.length>5?'\nو '+(d.noDate.length-5)+' مورد دیگر':'')
         + '\nبرای هر مرکز تاریخ تنظیم کنید.';
-      sendNotif(exp, msg2, d.noDate[0].key, d.noDate.map(function(x){return x.key;}));
+      if(!_hasRecentNotif(exp,'followup')){sendNotif(exp, msg2, d.noDate[0].key, d.noDate.map(function(x){return x.key;}), 'followup', null);}
       if(!d.overdue.length) cnt++;
     }
   });
