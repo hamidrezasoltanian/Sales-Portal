@@ -31,7 +31,7 @@ function switchTab(tab){
   currentTab=tab;
   try{localStorage.setItem('_st',tab);}catch(e){}
   _navPush(tab, null);
-  ['home','provinces','weekplan','calendar','checklist','activity','changelog','tasks','manager','kpi','mtr','pricing','proforma','reports','hcp'].forEach(function(t){
+  ['home','provinces','weekplan','calendar','checklist','activity','changelog','tasks','manager','kpi','mtr','pricing','proforma','reports','hcp','letters'].forEach(function(t){
     var b=document.getElementById('tab_'+t);if(b)b.classList.toggle('active',t===tab);
   });
   document.getElementById('dash').style.display=(tab==='provinces')?'':'none';
@@ -69,6 +69,8 @@ function switchTab(tab){
   if(tab==='week-planner'&&typeof renderWeekPlannerPanel==='function')renderWeekPlannerPanel();
   var _fmp=document.getElementById('faradisMatchPanel');if(_fmp)_fmp.style.display=(tab==='faradis-match')?'':'none';
   if(tab==='faradis-match'&&typeof renderFaradisMatchPanel==='function')renderFaradisMatchPanel();
+  var lettersP=document.getElementById('lettersPanel');if(lettersP)lettersP.style.display=(tab==='letters')?'':'none';
+  if(tab==='letters'&&typeof window._lettersVueLoad==='function')window._lettersVueLoad();
   // update mobile nav
   (function(){document.querySelectorAll('.mob-tab').forEach(function(btn){var fn=btn.getAttribute('onclick')||'';var m=fn.match(/switchTab\('([^']+)'\)/);if(m)btn.classList.toggle('active',m[1]===tab);});})();
   function _safeRender(fn, tabName) {

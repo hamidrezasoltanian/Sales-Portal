@@ -2,6 +2,7 @@ import { createApp } from 'vue';
 import ProformaPanel from './components/ProformaPanel.vue';
 import NotificationsPanel from './components/NotificationsPanel.vue';
 import TasksPanel from './components/TasksPanel.vue';
+import LettersPanel from './components/LettersPanel.vue';
 
 fetch('/api/auth/me')
   .then(r => r.ok ? r.json() : null)
@@ -56,6 +57,14 @@ fetch('/api/auth/me')
       const ti = createApp(TasksPanel, { username, isManager });
       const tm = ti.mount(tasksEl);
       (window as any)._tasksVueLoad = () => (tm as any).load?.();
+    }
+
+    // LettersPanel — دبیرخانه دیجیتال
+    const lettersEl = document.getElementById('vue-letters');
+    if (lettersEl) {
+      const li = createApp(LettersPanel, { username, userRole, isManager });
+      const lm = li.mount(lettersEl);
+      (window as any)._lettersVueLoad = () => (lm as any).load?.();
     }
   })
   .catch(() => {});

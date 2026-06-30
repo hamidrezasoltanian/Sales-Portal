@@ -84,6 +84,7 @@ const faradisMatch = require('./routes/faradis-match');
 app.use('/api/faradis-match', faradisMatch);
 const faradisData = require('./routes/faradis-data');
 app.use('/api/faradis-data', faradisData);
+app.use('/api/letters', require('./routes/letters'));
 
 // Health check — بدون auth، قابل دسترس از هر جا
 app.get('/api/health', async function (req, res) {

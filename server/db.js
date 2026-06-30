@@ -46,9 +46,11 @@ async function initSchema() {
       phone VARCHAR(20) DEFAULT '',
       active BOOLEAN DEFAULT true,
       password_hash VARCHAR(200),
+      signature_pin VARCHAR(100),
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS signature_pin VARCHAR(100)`);
 
   await query(`
     CREATE TABLE IF NOT EXISTS app_data (
@@ -648,6 +650,192 @@ async function initSchema() {
   await query(`CREATE INDEX IF NOT EXISTS idx_changelog_rkey ON change_log(rkey)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_changelog_at ON change_log(at DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_changelog_by ON change_log(by)`);
+
+  // ════════════════════════════════════════
+  // LETTERS & SECRETARIAT TABLES
+  // ════════════════════════════════════════
+  await query(`
+    CREATE TABLE IF NOT EXISTS letters (
+      id SERIAL PRIMARY KEY,
+      indicator_number CHARACTER VARYING(100) UNIQUE,
+      subject CHARACTER VARYING(300) NOT NULL,
+      body TEXT DEFAULT '',
+      type CHARACTER VARYING(20) NOT NULL,
+      status CHARACTER VARYING(20) DEFAULT 'registered',
+      sender_external CHARACTER VARYING(250) DEFAULT '',
+      receiver_external CHARACTER VARYING(250) DEFAULT '',
+      created_by CHARACTER VARYING(100) REFERENCES app_users(username) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      priority CHARACTER VARYING(20) DEFAULT 'normal',
+      classification CHARACTER VARYING(20) DEFAULT 'normal',
+      department_prefix CHARACTER VARYING(50) DEFAULT 'الف',
+      is_archived BOOLEAN DEFAULT FALSE,
+      is_deleted BOOLEAN DEFAULT FALSE,
+      registered_at TIMESTAMPTZ,
+      use_letterhead BOOLEAN DEFAULT FALSE,
+      signature_status CHARACTER VARYING(50) DEFAULT 'none'
+    )
+  `);
+  // Alter existing letters table to add new columns if they don't exist
+  await query(`ALTER TABLE letters ADD COLUMN IF NOT EXISTS priority CHARACTER VARYING(20) DEFAULT 'normal'`);
+  await query(`ALTER TABLE letters ADD COLUMN IF NOT EXISTS classification CHARACTER VARYING(20) DEFAULT 'normal'`);
+  await query(`ALTER TABLE letters ADD COLUMN IF NOT EXISTS department_prefix CHARACTER VARYING(50) DEFAULT 'الف'`);
+  await query(`ALTER TABLE letters ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT FALSE`);
+  await query(`ALTER TABLE letters ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE`);
+  await query(`ALTER TABLE letters ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ`);
+  await query(`ALTER TABLE letters ADD COLUMN IF NOT EXISTS use_letterhead BOOLEAN DEFAULT FALSE`);
+  await query(`ALTER TABLE letters ADD COLUMN IF NOT EXISTS signature_status CHARACTER VARYING(50) DEFAULT 'none'`);
+  // Drop constraint check if exists to allow new statuses
+  await query(`ALTER TABLE letters DROP CONSTRAINT IF EXISTS letters_status_check`);
+  await query(`ALTER TABLE letters DROP CONSTRAINT IF EXISTS letters_type_check`);
+
+  // Indexes on letters
+  await query(`CREATE INDEX IF NOT EXISTS idx_letters_created_at ON letters(created_at DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_letters_created_by ON letters(created_by)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_letters_indicator ON letters(indicator_number)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_letters_type ON letters(type)`);
+
+  // letter_referrals
+  await query(`
+    CREATE TABLE IF NOT EXISTS letter_referrals (
+      id SERIAL PRIMARY KEY,
+      letter_id INTEGER REFERENCES letters(id) ON DELETE CASCADE,
+      sender_id CHARACTER VARYING(100) REFERENCES app_users(username) ON DELETE SET NULL,
+      receiver_id CHARACTER VARYING(100) REFERENCES app_users(username) ON DELETE SET NULL,
+      note TEXT DEFAULT '',
+      is_read BOOLEAN DEFAULT FALSE,
+      referred_at TIMESTAMPTZ DEFAULT NOW(),
+      action_type CHARACTER VARYING(50) DEFAULT 'for_action',
+      is_completed BOOLEAN DEFAULT FALSE,
+      completed_at TIMESTAMPTZ,
+      completion_note TEXT DEFAULT '',
+      private_note TEXT DEFAULT ''
+    )
+  `);
+  await query(`ALTER TABLE letter_referrals ADD COLUMN IF NOT EXISTS action_type CHARACTER VARYING(50) DEFAULT 'for_action'`);
+  await query(`ALTER TABLE letter_referrals ADD COLUMN IF NOT EXISTS is_completed BOOLEAN DEFAULT FALSE`);
+  await query(`ALTER TABLE letter_referrals ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ`);
+  await query(`ALTER TABLE letter_referrals ADD COLUMN IF NOT EXISTS completion_note TEXT DEFAULT ''`);
+  await query(`ALTER TABLE letter_referrals ADD COLUMN IF NOT EXISTS private_note TEXT DEFAULT ''`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_letter_referrals_letter ON letter_referrals(letter_id)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_letter_referrals_receiver ON letter_referrals(receiver_id)`);
+
+  // letter_files
+  await query(`
+    CREATE TABLE IF NOT EXISTS letter_files (
+      id SERIAL PRIMARY KEY,
+      letter_id INTEGER REFERENCES letters(id) ON DELETE CASCADE,
+      filename TEXT NOT NULL,
+      mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+      file_size INTEGER DEFAULT 0,
+      data BYTEA NOT NULL,
+      uploaded_by CHARACTER VARYING(100) REFERENCES app_users(username) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_letter_files_letter ON letter_files(letter_id)`);
+
+  // letter_receivers
+  await query(`
+    CREATE TABLE IF NOT EXISTS letter_receivers (
+      id SERIAL PRIMARY KEY,
+      letter_id INTEGER REFERENCES letters(id) ON DELETE CASCADE,
+      receiver_type CHARACTER VARYING(50) DEFAULT 'user',
+      receiver_id CHARACTER VARYING(100) NOT NULL
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_letter_receivers_letter ON letter_receivers(letter_id)`);
+
+  // letter_signers
+  await query(`
+    CREATE TABLE IF NOT EXISTS letter_signers (
+      id SERIAL PRIMARY KEY,
+      letter_id INTEGER REFERENCES letters(id) ON DELETE CASCADE,
+      user_id CHARACTER VARYING(100) REFERENCES app_users(username) ON DELETE SET NULL,
+      status CHARACTER VARYING(50) DEFAULT 'pending',
+      signed_at TIMESTAMPTZ,
+      sign_type CHARACTER VARYING(50)
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_letter_signers_letter ON letter_signers(letter_id)`);
+
+  // letter_indicators
+  await query(`
+    CREATE TABLE IF NOT EXISTS letter_indicators (
+      id SERIAL PRIMARY KEY,
+      fiscal_year_id INTEGER DEFAULT 1,
+      department_prefix CHARACTER VARYING(50) DEFAULT 'الف',
+      letter_type CHARACTER VARYING(20) DEFAULT 'internal',
+      last_sequence INTEGER DEFAULT 0
+    )
+  `);
+
+  // letter_templates
+  await query(`
+    CREATE TABLE IF NOT EXISTS letter_templates (
+      id SERIAL PRIMARY KEY,
+      title VARCHAR(200) NOT NULL,
+      content TEXT NOT NULL,
+      created_by VARCHAR(100) REFERENCES app_users(username) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  // ════════════════════════════════════════
+  // SYNCED FACTORS & FACTOR ROWS (FARADIS)
+  // ════════════════════════════════════════
+  await query(`
+    CREATE TABLE IF NOT EXISTS sync_factors (
+      factor_num VARCHAR(200) PRIMARY KEY,
+      parent_factor_num VARCHAR(200),
+      factor_code VARCHAR(200),
+      factor_name VARCHAR(500),
+      factor_date TIMESTAMPTZ,
+      is_confirm BOOLEAN,
+      status_num INTEGER,
+      cancel_num INTEGER,
+      description TEXT,
+      company_num INTEGER,
+      factor_type INTEGER,
+      price BIGINT,
+      is_delete BOOLEAN,
+      save_date TIMESTAMPTZ,
+      edit_date TIMESTAMPTZ,
+      expire_date TIMESTAMPTZ,
+      delivery_date TIMESTAMPTZ,
+      delivery_address TEXT,
+      delivery_phone VARCHAR(200),
+      delivery_postal_code VARCHAR(200),
+      sum_paid BIGINT,
+      sum_paid_without_cheque BIGINT,
+      marketer_num VARCHAR(200),
+      visitor_num VARCHAR(200)
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_sync_factors_company ON sync_factors(company_num)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_sync_factors_date ON sync_factors(factor_date DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_sync_factors_type ON sync_factors(factor_type)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_sync_factors_is_delete ON sync_factors(is_delete)`);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS sync_factor_rows (
+      factor_row_num VARCHAR(200) PRIMARY KEY,
+      factor_num VARCHAR(200),
+      store_stuff_num INTEGER,
+      stuff_num INTEGER,
+      price BIGINT,
+      count1 NUMERIC(18,4),
+      count2 NUMERIC(18,4),
+      description TEXT,
+      total_price BIGINT,
+      is_delete BOOLEAN,
+      save_date TIMESTAMPTZ,
+      edit_date TIMESTAMPTZ
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_sync_factor_rows_factor ON sync_factor_rows(factor_num)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_sync_factor_rows_stuff ON sync_factor_rows(stuff_num)`);
+
 
   // Seed products and initial price list if products table is empty
   const prodCount = await query('SELECT COUNT(*) FROM products');
