@@ -4,6 +4,7 @@ const express = require('express');
 const router  = express.Router();
 const { query } = require('../db');
 
+const { requirePermission } = require('../permissions');
 const { requireAuth } = require('../auth');
 
 function isManagerRole(role) {

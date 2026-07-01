@@ -205,18 +205,32 @@ function _isSuperAdmin(){
 }
 function _isExpert(){return !_isManager();}
 
-// ── Permission engine (additive — empty permissions = full access) ──────────
+// ── Permission engine ─────────────────────────────────────────────────────
+// دسترسی‌های پیش‌فرض بر اساس نقش — همگام با server/permissions.js
+var _DEFAULT_ROLE_PERMISSIONS={
+  'IT':           {settings:'edit',changelog:'edit',activities:'view'},
+  'بازرگانی':    {wms:'edit',proforma:'edit',letters:'edit',support:'edit',contacts:'edit',provinces:'view',weekplan:'view',calendar:'view'},
+  'مالی':        {receivables:'edit',pricing:'edit',proforma:'edit',letters:'edit',provinces:'view',weekplan:'view',wms:'view'},
+  'کارشناس فروش':{weekplan:'edit',calendar:'edit',checklist:'edit',tasks:'edit',support:'edit',contacts:'edit',provinces:'view',activities:'view'},
+  'مهمان':       {home:'view',provinces:'view',calendar:'view'}
+};
+function _roleDefault(module){
+  var members=(DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS||[];
+  var me=members.find(function(m){return m.id===currentUser;});
+  var map=me&&_DEFAULT_ROLE_PERMISSIONS[me.role];
+  return map?map[module]:undefined;
+}
 function _hasAccess(module){
   if(_isManager())return true;
   var perms=window._myPermissions||{};
-  if(!perms.modules)return true; // empty = full access (backward-compatible)
+  if(!perms.modules){var d=_roleDefault(module);return d==='edit'||d==='view';}
   var level=perms.modules[module];
   return level==='edit'||level==='view';
 }
 function _canEdit(module){
   if(_isManager())return true;
   var perms=window._myPermissions||{};
-  if(!perms.modules)return true;
+  if(!perms.modules){return _roleDefault(module)==='edit';}
   return perms.modules[module]==='edit';
 }
 function _getAllowedProvinces(allProvs){

@@ -1,5 +1,9 @@
 'use strict';
 
+// ── TEMPORARILY DISABLED ─────────────────────────────────────────────────────
+const NOTIF_ENABLED = false;
+// ─────────────────────────────────────────────────────────────────────────────
+
 const express = require('express');
 const { query, pool } = require('../db');
 const { requireAuth } = require('../auth');
@@ -68,6 +72,7 @@ router.get('/', requireAuth, async function (req, res) {
 
 // ── POST /api/notifications ────────────────────────────────────────────────
 router.post('/', requireAuth, async function (req, res) {
+  if (!NOTIF_ENABLED) return res.status(201).json({ ok: true, disabled: true });
   try {
     const { id, to, msg, centerKey, centerKeys, at, type, meta, autoSend } = req.body;
     if (!id || !to || !msg) {
@@ -220,6 +225,25 @@ router.delete('/:id', requireAuth, async function (req, res) {
   } catch (e) {
     console.error('[notifications DELETE /:id]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
+
+
+// ── POST /api/notifications/telegram-push ─────────────────────────────────
+// Called by the browser (sendNotif in app.js) to push a Telegram message
+// to the target user without storing a DB notification record.
+router.post('/telegram-push', requireAuth, async function (req, res) {
+  try {
+    const { to, msg } = req.body;
+    if (!to || !msg) return res.status(400).json({ error: 'to and msg required' });
+    const tgNotify = getTgNotify();
+    if (tgNotify) {
+      tgNotify(to, '🔔 ' + msg).catch(function(){});
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[notifications POST /telegram-push]', e.message);
+    res.status(500).json({ error: 'internal error' });
   }
 });
 

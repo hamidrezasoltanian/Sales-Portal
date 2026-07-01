@@ -3,3 +3,5 @@ node_modules/
 .env
 *.log
 scripts/__pycache__/
+*.bak
+mizito.txt

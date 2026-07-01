@@ -208,22 +208,6 @@ function openSettings(){
     });
     body+='</div></div>';
   }
-  // ── Onboarding tutorial section
-  var _obIsDisabled = DB.settings&&DB.settings.onboardingDisabled&&DB.settings.onboardingDisabled[currentUser];
-  body += '<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px">'
-    +'<div>'
-    +'<div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:3px">🎓 آموزش راهنما</div>'
-    +'<div style="font-size:11px;color:var(--text-muted)">نمایش راهنمای ۷ روزه برای کاربران تازه</div>'
-    +'</div>'
-    +'<div style="display:flex;gap:8px;align-items:center">'
-    +(_obIsDisabled
-      ? '<span style="font-size:11px;color:var(--text-muted);background:var(--bg-raised);border-radius:4px;padding:3px 8px">غیرفعال</span>'
-        +'<button onclick="_reEnableOnboarding();closeModal(\'settingsModal\')" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:11px;font-family:inherit">فعال‌سازی مجدد</button>'
-      : '<span style="font-size:11px;color:#16a34a;background:#dcfce7;border-radius:4px;padding:3px 8px">فعال</span>'
-        +'<button onclick="_dismissOnboarding(true);closeModal(\'settingsModal\')" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:11px;font-family:inherit">غیرفعال‌کردن</button>')
-    +'</div>'
-    +'</div></div>';
   openModal('settingsModal','⚙ تنظیمات نرم‌افزار',body,foot,{lg:true});
 }
 

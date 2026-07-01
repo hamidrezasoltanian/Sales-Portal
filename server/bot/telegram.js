@@ -195,7 +195,39 @@ const MENU_KB_MANAGER = {
   resize_keyboard: true,
 };
 
-function menuFor(sess) { return isManagerRole(sess.role) ? MENU_KB_MANAGER : MENU_KB; }
+function _hasModuleAccess(sess, module) {
+  if (isManagerRole(sess.role)) return true;
+  const perms = sess.permissions || {};
+  if (!perms.modules) {
+    const defaults = {
+      'IT': {settings:1,changelog:1,activities:1},
+      'بازرگانی': {wms:1,proforma:1,letters:1,support:1,contacts:1,provinces:1,weekplan:1,calendar:1},
+      'مالی': {receivables:1,pricing:1,proforma:1,letters:1,provinces:1,weekplan:1,wms:1},
+      'کارشناس فروش': {weekplan:1,calendar:1,checklist:1,tasks:1,support:1,contacts:1,provinces:1,activities:1},
+      'مهمان': {home:1,provinces:1,calendar:1},
+    };
+    return !!(defaults[sess.role] && defaults[sess.role][module]);
+  }
+  return !!(perms.modules && perms.modules[module]);
+}
+
+function menuFor(sess) {
+  if (isManagerRole(sess.role)) return MENU_KB_MANAGER;
+  // Build dynamic keyboard based on permissions
+  const rows = [];
+  rows.push([{ text: '☀️ برنامه امروز' }, { text: '📅 برنامه هفته' }]);
+  rows.push([{ text: '🏥 مراکز من' }, { text: '🎯 پیشنهادی' }]);
+  rows.push([{ text: '📋 وظایف من' }, { text: '🔍 جستجوی مرکز' }]);
+  rows.push([{ text: '➕ ثبت در برنامه' }, { text: '📝 یادداشت مرکز' }]);
+  rows.push([{ text: '➕ وظیفه جدید' }, { text: '📅 تغییر فالوآپ' }]);
+  rows.push([{ text: '📊 آمار من' }, { text: '🔍 اسکن QR' }]);
+  const extraRow = [];
+  if (_hasModuleAccess(sess, 'wms')) extraRow.push({ text: '📦 موجودی انبار' });
+  if (_hasModuleAccess(sess, 'proforma')) extraRow.push({ text: '📄 پیشفاکتورها' });
+  if (extraRow.length) rows.push(extraRow);
+  rows.push([{ text: '❓ راهنما' }]);
+  return { keyboard: rows, resize_keyboard: true };
+}
 
 // ── Update handler ────────────────────────────────────────────────────────
 async function handleUpdate(upd) {
@@ -280,6 +312,11 @@ async function handleUpdate(upd) {
       }
       Object.assign(sess, { username: user.username, name: user.display_name, role: user.role, state: ST.IDLE });
       delete sess.pendingUser;
+      // Load permissions for this user
+      try {
+        const permR = await query('SELECT permissions FROM app_users WHERE username=$1', [user.username]);
+        sess.permissions = (permR.rows[0] && permR.rows[0].permissions) || {};
+      } catch(_) { sess.permissions = {}; }
       await persistSession(chatId);
       await sendMsg(chatId,
         '✅ <b>خوش آمدید، ' + user.display_name + '!</b>\n' +
@@ -649,7 +686,14 @@ async function doCompleteEntry(chatId, sess, key, outcome, note, nextDate, cente
     if (note) reply += '\n📝 ' + note;
     if (outcome === 'followup' && nextDate) reply += '\n📅 پیگیری بعدی: <b>' + nextDate + '</b>';
     reply += '\n\n📈 KPI: یک ' + (actType === 'visit' ? 'مراجعه' : 'تماس') + ' ثبت شد.';
-    await sendMsg(chatId, reply, { reply_markup: menuFor(sess) });
+    // Offer status change
+    const statusChangeBtns = { inline_keyboard: [[
+      { text: '🟢 فعال', callback_data: 'sc:' + rkey + ':فعال' },
+      { text: '🟡 معلق', callback_data: 'sc:' + rkey + ':معلق' },
+      { text: '🔴 غیرفعال', callback_data: 'sc:' + rkey + ':غیرفعال' },
+      { text: '⏭ رد کردن', callback_data: 'sc:' + rkey + ':skip' },
+    ]] };
+    await sendMsg(chatId, reply + '\n\n<i>آیا وضعیت این مرکز رو هم می‌خوای عوض کنی؟</i>', { reply_markup: statusChangeBtns });
   } catch(e) {
     try { await client.query('ROLLBACK'); } catch(_) {}
     await sendMsg(chatId, '❌ خطا در ثبت: ' + e.message, { reply_markup: menuFor(sess) });
@@ -1426,6 +1470,23 @@ async function handleCallback(cb) {
         return [{ text: label, callback_data: 'plan_date:' + i }];
       });
       await sendMsg(chatId, '📅 <b>' + center.name + '</b>\n\nتاریخ را انتخاب کنید:', { reply_markup: { inline_keyboard: dateRows } });
+    }
+    return;
+  }
+
+  // ── Status change after marking done ─────────────────────────────────────
+  if (data.startsWith('sc:')) {
+    await answerCallback(cb.id, '');
+    const scParts = data.split(':');
+    // format: sc:rtype_rid:status  (rtype_rid may contain underscores)
+    // last part is status, everything between 'sc:' and last ':' is rkey
+    const lastColon = data.lastIndexOf(':');
+    const scRkey = data.slice(3, lastColon);
+    const scStatus = data.slice(lastColon + 1);
+    if (scStatus === 'skip') {
+      await sendMsg(chatId, '⏭ وضعیت تغییر نکرد.', { reply_markup: menuFor(sess) });
+    } else {
+      await doSetStatus(chatId, sess, scRkey, scStatus);
     }
     return;
   }
@@ -3215,6 +3276,32 @@ async function sendWeeklyDigest() {
     }
 
     await notifyManagers(text);
+
+    // Send personal weekly KPI to each expert
+    try {
+      const stored = await loadBotSessions();
+      for (const [chatIdStr, s] of Object.entries(stored)) {
+        if (!s.username || isManagerRole(s.role) || s.state !== ST.IDLE) continue;
+        try {
+          const uStats = perExpert[s.username] || { calls: 0, visits: 0, overdue: 0 };
+          const uDone  = doneCounts[s.username] || 0;
+          const uSales = (stats && stats[s.username] && stats[s.username].sales) || 0;
+          let expertKpi =
+            '\ud83d\udcca <b>خلاصه هفته شما — ' + (s.name || s.username) + '</b>\n' +
+            '\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n' +
+            '\ud83d\udcde \u062a\u0645\u0627\u0633\u200c\u0647\u0627: ' + uStats.calls + '\n' +
+            '\ud83e\udd1d \u0645\u0631\u0627\u062c\u0639\u0647\u200c\u0647\u0627: ' + uStats.visits + '\n';
+          if (uDone)  expertKpi += '\u2705 \u0627\u0646\u062c\u0627\u0645 \u0634\u062f\u0647: ' + uDone + '\n';
+          if (uSales) expertKpi += '\ud83d\udcb0 \u0641\u0631\u0648\u0634: ' + uSales + '\n';
+          if (uStats.overdue) expertKpi += '\u26a0\ufe0f \u0645\u0639\u0648\u0642: ' + uStats.overdue + ' \u0645\u0631\u06a9\u0632\n';
+          expertKpi +=
+            '\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n' +
+            '\ud83d\udcaa \u0647\u0641\u062a\u0647 \u062e\u0648\u0628\u06cc \u062f\u0627\u0634\u062a\u0647 \u0628\u0627\u0634\u06cc\u062f!';
+          await sendMsg(parseInt(chatIdStr), expertKpi).catch(function(){});
+        } catch(e2) {}
+      }
+    } catch(e) {}
+
     console.log('[bot] Weekly digest sent for ' + todayStr);
   } catch(e) {
     console.error('[bot] weekly digest error:', e.message);
@@ -3238,6 +3325,11 @@ function startDailyScheduler() {
           _lastWeeklyDate = dateKey;
           await sendWeeklyDigest();
         }
+      }
+      // Expert morning reminder at 08:30
+      if (h === 8 && m === 30 && dateKey !== _lastReminderDate) {
+        _lastReminderDate = dateKey;
+        await sendExpertReminders();
       }
     } catch(e) {}
   }, 60000);

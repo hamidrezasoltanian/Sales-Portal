@@ -3,6 +3,7 @@
 const express = require('express');
 const multer  = require('multer');
 const { query } = require('../db');
+const { requirePermission } = require('../permissions');
 const { requireAuth } = require('../auth');
 
 const router = express.Router();

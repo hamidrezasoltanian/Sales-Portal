@@ -1,9 +1,11 @@
 'use strict';
 const express = require('express');
 const { query } = require('../db');
+const { requirePermission } = require('../permissions');
 const { requireAuth, requireManager } = require('../auth');
 const router = express.Router();
 router.use(requireAuth);
+router.use(requirePermission('pricing', 'view'));
 
 const BUYER_TYPES = ['hospital', 'colleague', 'doctor', 'patient'];
 const PAY_TYPES   = ['d30', 'd60', 'cash'];

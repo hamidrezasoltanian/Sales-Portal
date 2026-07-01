@@ -5996,9 +5996,7 @@ function _initNotif(){if(!DB.notifications)DB.notifications=[];}
 // ── Browser Push Notifications ──────────────────────────────────────────────
 var _pushGranted = false;
 
-function _initBrowserNotif(){
-  if(!('Notification' in window))return;
-  if(Notification.permission==='granted'){_pushGranted=true;return;}
+function _initBrowserNotif(){ /* notifications disabled */ }
   if(Notification.permission==='denied')return;
   // Ask on first meaningful interaction (call from init after small delay)
   setTimeout(function(){
@@ -6046,20 +6044,17 @@ document.addEventListener('visibilitychange',function(){
 });
 
 function sendNotif(toUser,message,centerKey,centerKeys){
-  _initNotif();
-  var n={id:Date.now()+'_'+Math.random().toString(36).slice(2),to:toUser,from:currentUser,at:new Date().toISOString(),message:message,centerKey:centerKey||'',centerKeys:centerKeys||null,read:false};
-  DB.notifications.push(n);
-  if(DB.notifications.length>300)DB.notifications=DB.notifications.slice(-300);
-  saveDB();
-  updateNotifBadge();
-  showToast('\u{1F4E9} اعلان برای '+(USERS[toUser]||toUser)+' ارسال شد',2000);
+  // Send via Telegram instead of in-app storage
+  fetch('/api/notifications/telegram-push',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({to:toUser,msg:message})
+  }).catch(function(){});
 }
 
 function updateNotifBadge(){
-  _initNotif();
-  var unread=DB.notifications.filter(function(n){return n.to===currentUser&&!n.read;}).length;
-  var badge=document.getElementById('notifBadge');
-  if(badge){badge.textContent=unread;badge.style.display=unread>0?'flex':'none';}
+  var badge=document.getElementById(\'notifBadge\');if(badge)badge.style.display=\'none\';
+  var bell=document.getElementById(\'notifBell\');if(bell)bell.style.display=\'none\';
 }
 
 var _notifPanelOpen=false;
@@ -8843,22 +8838,6 @@ function openSettings(){
     +'<button onclick="if(confirm(\'پاکسازی همه داده‌ها؟\'))clearAllData()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 8px;border:1px solid #fca5a5;border-radius:8px;background:#fee2e220;cursor:pointer;font-size:11px;font-family:inherit;color:#dc2626"><span style=\"font-size:18px\">🗑</span><span style=\"font-weight:600\">پاکسازی داده‌ها</span><span style=\"font-size:10px\">حذف کامل اطلاعات</span></button>'
     +(_isManager()?'<button onclick="closeModal(\'settingsModal\');openDistributionWizard()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 8px;border:1px solid #c4b5fd;border-radius:8px;background:#f5f3ff;cursor:pointer;font-size:11px;font-family:inherit;color:#5b21b6"><span style=\"font-size:18px\">🔀</span><span style=\"font-weight:600\">تقسیم مراکز</span><span style=\"color:var(--text-muted);font-size:10px\">توزیع بین کارشناسان</span></button>':'')
     +'</div></div>';
-  // ── Onboarding tutorial section
-  var _obIsDisabled = DB.settings&&DB.settings.onboardingDisabled&&DB.settings.onboardingDisabled[currentUser];
-  body += '<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px">'
-    +'<div>'
-    +'<div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:3px">🎓 آموزش راهنما</div>'
-    +'<div style="font-size:11px;color:var(--text-muted)">نمایش راهنمای ۷ روزه برای کاربران تازه</div>'
-    +'</div>'
-    +'<div style="display:flex;gap:8px;align-items:center">'
-    +(_obIsDisabled
-      ? '<span style="font-size:11px;color:var(--text-muted);background:var(--bg-raised);border-radius:4px;padding:3px 8px">غیرفعال</span>'
-        +'<button onclick="_reEnableOnboarding();closeModal(\'settingsModal\')" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:11px;font-family:inherit">فعال‌سازی مجدد</button>'
-      : '<span style="font-size:11px;color:#16a34a;background:#dcfce7;border-radius:4px;padding:3px 8px">فعال</span>'
-        +'<button onclick="_dismissOnboarding(true);closeModal(\'settingsModal\')" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:11px;font-family:inherit">غیرفعال‌کردن</button>')
-    +'</div>'
-    +'</div></div>';
   openModal('settingsModal','⚙ تنظیمات نرم‌افزار',body,foot,{lg:true});
 }
 
@@ -10094,222 +10073,6 @@ async function init(){
 }
 
 // ════════════════════════ ONBOARDING TUTORIAL ════════════════════════
-var _OB_STEPS = [
-  {
-    day: 1,
-    title: 'خوش آمدید به آتنا CRM!',
-    tips: [
-      'از منوی بالا تب <b>استان‌ها</b> را انتخاب کنید تا لیست استان‌ها را ببینید.',
-      'روی یک استان کلیک کنید تا مراکز آن استان نمایش داده شود.',
-      'می‌توانید مراکز را به صورت لیست، کانبان یا کارت مشاهده کنید.',
-      'با کلیک روی هر مرکز، جزئیات و گزینه‌های ویرایش را باز کنید.'
-    ]
-  },
-  {
-    day: 2,
-    title: 'پیگیری و برنامه هفته',
-    tips: [
-      'در صفحه مرکز، تاریخ پیگیری بعدی را تنظیم کنید.',
-      'تب <b>برنامه هفته</b> نقشه بازدیدهای هفتگی شما را نشان می‌دهد.',
-      'مراکزی که پیگیری سررسیده دارند با رنگ هشدار نمایش داده می‌شوند.',
-      'مراکز را به روزهای مختلف هفته اضافه یا جابجا کنید.'
-    ]
-  },
-  {
-    day: 3,
-    title: 'ثبت فعالیت',
-    tips: [
-      'در صفحه هر مرکز می‌توانید تماس، بازدید یا فروش ثبت کنید.',
-      'بعد از بازدید، وضعیت مرکز را به‌روز کنید.',
-      'تب <b>فعالیت‌ها</b> کل لاگ تماس‌ها و بازدیدها را نشان می‌دهد.',
-      'می‌توانید هر فعالیت را به یک مرکز خاص مرتبط کنید.'
-    ]
-  },
-  {
-    day: 4,
-    title: 'برچسب، وضعیت و سرنخ',
-    tips: [
-      'هر مرکز می‌تواند یک یا چند <b>برچسب</b> داشته باشد.',
-      'وضعیت (مثلاً: در حال مذاکره، فروخته شده) را برای هر مرکز تنظیم کنید.',
-      'سرنخ‌ها (Lead) نشان می‌دهند مرکز در چه مرحله‌ای از فرآیند فروش است.',
-      'از فیلتر بالای لیست مراکز برای جستجو بر اساس وضعیت یا برچسب استفاده کنید.'
-    ]
-  },
-  {
-    day: 5,
-    title: 'اعلان‌ها و یادآوری‌ها',
-    tips: [
-      'زنگ اعلان در بالای صفحه مراکز با پیگیری سررسیده را هشدار می‌دهد.',
-      'می‌توانید یادآورهای دستی برای هر مرکز تنظیم کنید.',
-      'تب <b>تقویم</b> رویدادها و سررسیدها را به صورت ماهانه نشان می‌دهد.',
-      'اعلان‌های دیده‌شده را می‌توانید از پنل اعلان‌ها حذف کنید.'
-    ]
-  },
-  {
-    day: 6,
-    title: 'وظایف و تایم‌لاین مرکز',
-    tips: [
-      'تب <b>چک‌لیست روزانه</b> وظایف روزانه شما را نشان می‌دهد.',
-      'در صفحه هر مرکز، تایم‌لاین تمام تعاملات قابل مشاهده است.',
-      'می‌توانید یادداشت‌های خصوصی برای هر مرکز ثبت کنید.',
-      'وظایف انجام‌شده را تیک بزنید تا امتیاز روزانه شما محاسبه شود.'
-    ]
-  },
-  {
-    day: 7,
-    title: 'گزارش و KPI',
-    tips: [
-      'تب <b>KPI</b> (فقط مدیر) اهداف و عملکرد تیم را نمایش می‌دهد.',
-      'کارشناسان می‌توانند آمار شخصی خود را در تب فعالیت‌ها ببینند.',
-      'از بخش تنظیمات می‌توانید داده‌ها را به اکسل خروجی بگیرید.',
-      'آموزش راهنما را هر زمان از تنظیمات می‌توانید دوباره فعال کنید.'
-    ]
-  }
-];
-
-var _obCurrentStep = 0;
-
-function _onboardingDay(){
-  try{
-    var fu = DB.settings && DB.settings.firstUse && DB.settings.firstUse[currentUser];
-    if(!fu) return 1;
-    var parts = fu.split('/');
-    var fuMs = jMs(parseInt(parts[0]), parseInt(parts[1]), parseInt(parts[2]));
-    var todayParts = todayStr().split('/');
-    var todayMs = jMs(parseInt(todayParts[0]), parseInt(todayParts[1]), parseInt(todayParts[2]));
-    var diff = Math.floor((todayMs - fuMs) / 86400000);
-    return Math.max(1, Math.min(7, diff + 1));
-  }catch(e){ return 1; }
-}
-
-function _shouldShowOnboarding(){
-  try{
-    if(!currentUser) return false;
-    if(DB.settings && DB.settings.onboardingDisabled && DB.settings.onboardingDisabled[currentUser]) return false;
-    var fu = DB.settings && DB.settings.firstUse && DB.settings.firstUse[currentUser];
-    if(!fu) return true; // firstUse not set yet — will be set in _initOnboarding
-    var parts = fu.split('/');
-    var fuMs = jMs(parseInt(parts[0]), parseInt(parts[1]), parseInt(parts[2]));
-    var todayParts = todayStr().split('/');
-    var todayMs = jMs(parseInt(todayParts[0]), parseInt(todayParts[1]), parseInt(todayParts[2]));
-    var diff = Math.floor((todayMs - fuMs) / 86400000);
-    return diff < 7;
-  }catch(e){ return false; }
-}
-
-function _initOnboarding(){
-  try{
-    if(!currentUser) return;
-    if(!DB.settings) DB.settings = {};
-    if(!DB.settings.firstUse) DB.settings.firstUse = {};
-    if(!DB.settings.onboardingDisabled) DB.settings.onboardingDisabled = {};
-    if(!DB.settings.firstUse[currentUser]){
-      DB.settings.firstUse[currentUser] = todayStr();
-      saveDB();
-    }
-    if(_shouldShowOnboarding()){
-      setTimeout(_showOnboardingWidget, 800);
-    }
-  }catch(e){ console.warn('[onboarding] init error', e); }
-}
-
-function _showOnboardingWidget(){
-  if(document.getElementById('onboardingWidget')) return;
-  _obCurrentStep = 0;
-  _obRenderWidget();
-}
-
-function _obRenderWidget(){
-  var existing = document.getElementById('onboardingWidget');
-  var wasMinimized = existing && existing.classList.contains('ob-minimized');
-  if(existing) existing.remove();
-
-  var step = _OB_STEPS[_obCurrentStep] || _OB_STEPS[0];
-  var day = _obCurrentStep + 1;
-
-  var dots = _OB_STEPS.map(function(s, i){
-    return '<span class="ob-step-dot'+(i===_obCurrentStep?' active':'')+'" onclick="_obGoStep('+i+')" title="روز '+(i+1)+'" style="cursor:pointer"></span>';
-  }).join('');
-
-  var tips = step.tips.map(function(t){ return '<li>'+t+'</li>'; }).join('');
-
-  var prevDisabled = _obCurrentStep === 0 ? 'disabled style="opacity:.4;cursor:default"' : '';
-  var nextDisabled = _obCurrentStep === 6 ? 'disabled style="opacity:.4;cursor:default"' : '';
-
-  var html = '<div id="onboardingWidget"'+(wasMinimized?' class="ob-minimized"':'')+'>'
-    +'<div class="ob-header" onclick="_obToggleMinimize(event)">'
-    +'<div class="ob-header-title"><span>🎓</span><span>راهنمای آموزشی — '+(7-_onboardingDay()+1)+'/۷ روز باقی‌مانده</span></div>'
-    +'<div class="ob-header-btns" onclick="event.stopPropagation()">'
-    +'<button class="ob-mini-btn" onclick="_obToggleMinimize(event)" title="کوچک/بزرگ">⊟</button>'
-    +'</div>'
-    +'</div>'
-    +'<div id="onboardingBody">'
-    +'<div class="ob-step-indicator">'+dots+'<span class="ob-step-label">روز '+day+' از ۷</span></div>'
-    +'<div class="ob-body"><div class="ob-day-title">'+step.title+'</div><ul>'+tips+'</ul></div>'
-    +'<div class="ob-footer" id="onboardingFooter">'
-    +'<button class="ob-btn-dismiss" onclick="_dismissOnboarding(true)">بستن و غیرفعال‌کردن</button>'
-    +'<div class="ob-nav-btns">'
-    +'<button class="ob-btn-nav" '+prevDisabled+' onclick="_obGoStep('+(_obCurrentStep-1)+')">→ قبلی</button>'
-    +'<button class="ob-btn-nav" '+nextDisabled+' onclick="_obGoStep('+(_obCurrentStep+1)+')">بعدی ←</button>'
-    +'</div>'
-    +'</div>'
-    +'</div>'
-    +'</div>';
-
-  document.body.insertAdjacentHTML('beforeend', html);
-
-  // click outside to minimize
-  setTimeout(function(){
-    document.addEventListener('click', _obOutsideClick, {capture: false, once: false, passive: true});
-  }, 200);
-}
-
-var _obOutsideClickBound = false;
-function _obOutsideClick(e){
-  var w = document.getElementById('onboardingWidget');
-  if(!w) { document.removeEventListener('click', _obOutsideClick); return; }
-  if(!w.contains(e.target)){
-    if(!w.classList.contains('ob-minimized')) w.classList.add('ob-minimized');
-  }
-}
-
-function _obToggleMinimize(e){
-  if(e) e.stopPropagation();
-  var w = document.getElementById('onboardingWidget');
-  if(w) w.classList.toggle('ob-minimized');
-}
-
-function _obGoStep(idx){
-  if(idx < 0 || idx > 6) return;
-  _obCurrentStep = idx;
-  _obRenderWidget();
-}
-
-function _dismissOnboarding(disable){
-  document.removeEventListener('click', _obOutsideClick);
-  var w = document.getElementById('onboardingWidget');
-  if(w) w.remove();
-  if(disable && currentUser){
-    if(!DB.settings) DB.settings = {};
-    if(!DB.settings.onboardingDisabled) DB.settings.onboardingDisabled = {};
-    DB.settings.onboardingDisabled[currentUser] = true;
-    saveDB();
-    showToast('آموزش راهنما غیرفعال شد. از تنظیمات می‌توانید دوباره فعال کنید.', 4000);
-  }
-}
-function _reEnableOnboarding(){
-  if(!currentUser) return;
-  if(!DB.settings) DB.settings = {};
-  if(!DB.settings.onboardingDisabled) DB.settings.onboardingDisabled = {};
-  if(!DB.settings.firstUse) DB.settings.firstUse = {};
-  delete DB.settings.onboardingDisabled[currentUser];
-  // Reset firstUse to today so the 7-day window restarts
-  DB.settings.firstUse[currentUser] = todayStr();
-  saveDB();
-  showToast('آموزش راهنما فعال شد!', 3000);
-  setTimeout(_showOnboardingWidget, 500);
-}
-// ════════════════════════ END ONBOARDING ═════════════════════════════
 
 var _sse = null;
 var _sseReconnectTimer = null;
