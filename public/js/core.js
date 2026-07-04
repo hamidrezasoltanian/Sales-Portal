@@ -481,7 +481,29 @@ function mergeDatabaseDiff(local, server, lastSynced) {
   }
 
   // 4. checklist
-  merged.checklist = Object.assign({}, server.checklist || {}, local.checklist || {});
+  merged.checklist = copy(server.checklist || {});
+  var localChecklist = local.checklist || {};
+  var baseChecklist = lastSynced.checklist || {};
+  var checklistKeys = {};
+  Object.keys(merged.checklist).forEach(function(k) { checklistKeys[k] = true; });
+  Object.keys(localChecklist).forEach(function(k) { checklistKeys[k] = true; });
+  Object.keys(baseChecklist).forEach(function(k) { checklistKeys[k] = true; });
+  Object.keys(checklistKeys).forEach(function(k) {
+    var inServer = merged.checklist[k] !== undefined;
+    var inLocal = localChecklist[k] !== undefined;
+    var inBase = baseChecklist[k] !== undefined;
+    if (inLocal && inServer) {
+      merged.checklist[k] = localChecklist[k];
+    } else if (inLocal && !inServer) {
+      if (!inBase) {
+        merged.checklist[k] = localChecklist[k];
+      }
+    } else if (!inLocal && inServer) {
+      if (inBase) {
+        delete merged.checklist[k];
+      }
+    }
+  });
 
   // 5. settings
   merged.settings = Object.assign({}, server.settings || {}, local.settings || {});
@@ -497,16 +519,36 @@ function mergeDatabaseDiff(local, server, lastSynced) {
   listKeys.forEach(function(lk) {
     var sList = server[lk] || [];
     var lList = local[lk] || [];
-    var map = {};
-    sList.forEach(function(item) {
-      var id = item.id || item.key || JSON.stringify(item);
-      map[id] = item;
+    var baseList = lastSynced[lk] || [];
+
+    var sMap = {}; sList.forEach(function(x) { var id = x.id || x.key || JSON.stringify(x); sMap[id] = x; });
+    var lMap = {}; lList.forEach(function(x) { var id = x.id || x.key || JSON.stringify(x); lMap[id] = x; });
+    var bMap = {}; baseList.forEach(function(x) { var id = x.id || x.key || JSON.stringify(x); bMap[id] = x; });
+
+    var unionIds = {};
+    Object.keys(sMap).forEach(function(id) { unionIds[id] = true; });
+    Object.keys(lMap).forEach(function(id) { unionIds[id] = true; });
+    Object.keys(bMap).forEach(function(id) { unionIds[id] = true; });
+
+    var finalItems = [];
+    Object.keys(unionIds).forEach(function(id) {
+      var inServer = !!sMap[id];
+      var inLocal = !!lMap[id];
+      var inBase = !!bMap[id];
+
+      if (inLocal && inServer) {
+        finalItems.push(lMap[id]);
+      } else if (inLocal && !inServer) {
+        if (!inBase) {
+          finalItems.push(lMap[id]);
+        }
+      } else if (!inLocal && inServer) {
+        if (!inBase) {
+          finalItems.push(sMap[id]);
+        }
+      }
     });
-    lList.forEach(function(item) {
-      var id = item.id || item.key || JSON.stringify(item);
-      map[id] = item;
-    });
-    merged[lk] = Object.values(map);
+    merged[lk] = finalItems;
   });
 
   return merged;
