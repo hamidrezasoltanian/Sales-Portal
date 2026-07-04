@@ -281,6 +281,14 @@ async function pfOpenEdit(id) {
 function _pfShowModal(pf) {
   var readOnly = pf && pf.status !== 'draft';
   var modal = document.getElementById('pfModal');
+  if (!modal) {
+    var div = document.createElement('div');
+    div.innerHTML = _pfModalHTML() + _pfPrintZone();
+    while (div.firstChild) {
+      document.body.appendChild(div.firstChild);
+    }
+    modal = document.getElementById('pfModal');
+  }
   if (!modal) return;
 
   var itemRows = _pfItems.map(function(item, i) {
