@@ -847,6 +847,9 @@ function setE(type,id,field,val){var k=recK(type,id);if(!DB.edits[k])DB.edits[k]
         if(foundWeek)break;
       }
       if(foundWeek){
+        if(typeof wpRemoveFromOtherWeeks==='function'){
+          wpRemoveFromOtherWeeks(type+'_'+id, foundWeek.id);
+        }
         var newKey=wpEntryKey(foundWeek.id,type,id);
         if(!DB.weekEntries[newKey]){
           var cname=_getCenterName(type,id)||(type+'_'+id);
