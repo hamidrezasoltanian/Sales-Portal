@@ -7,6 +7,11 @@ const { requirePermission } = require('../permissions');
 const { requireAuth } = require('../auth');
 
 const router = express.Router();
+router.use(requireAuth);
+router.use((req, res, next) => {
+  const level = req.method === 'GET' ? 'view' : 'edit';
+  requirePermission('proforma', level)(req, res, next);
+});
 
 // ── Zod schemas ────────────────────────────────────────────────────────────
 const ItemSchema = z.object({

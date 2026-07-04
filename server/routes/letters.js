@@ -7,6 +7,11 @@ const { requirePermission } = require('../permissions');
 const { requireAuth } = require('../auth');
 
 const router = express.Router();
+router.use(requireAuth);
+router.use((req, res, next) => {
+  const level = req.method === 'GET' ? 'view' : 'edit';
+  requirePermission('letters', level)(req, res, next);
+});
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024 }, // سقف ۱۵ مگابایت برای ضمایم

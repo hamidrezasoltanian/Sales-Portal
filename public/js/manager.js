@@ -2122,7 +2122,7 @@ async function init(){
   })();
   // Apply granular permission hiding (additive — only hides, never shows what role already hides)
   (function(){
-    var _allMods=['provinces','weekplan','calendar','checklist','activity','tasks','mtr','pricing','proforma','support','hr','trade-kpi','kpi','manager','changelog'];
+    var _allMods=['provinces','weekplan','calendar','checklist','activity','tasks','mtr','pricing','proforma','support','hr','trade-kpi','kpi','manager','changelog','wms','letters'];
     _allMods.forEach(function(mod){
       if(!_hasAccess(mod)){
         var btnId='tab_'+mod.replace('-','_');

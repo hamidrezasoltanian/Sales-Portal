@@ -1,11 +1,16 @@
 'use strict';
 
 const express = require('express');
-const router  = express.Router();
 const { query } = require('../db');
-
 const { requirePermission } = require('../permissions');
 const { requireAuth } = require('../auth');
+
+const router  = express.Router();
+router.use(requireAuth);
+router.use((req, res, next) => {
+  const level = req.method === 'GET' ? 'view' : 'edit';
+  requirePermission('hr', level)(req, res, next);
+});
 
 function isManagerRole(role) {
   return ['مدیر', 'سوپر ادمین'].includes(role);

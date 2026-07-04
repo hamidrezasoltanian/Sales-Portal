@@ -6,6 +6,11 @@ const { requirePermission } = require('../permissions');
 const { requireAuth } = require('../auth');
 
 const router = express.Router();
+router.use(requireAuth);
+router.use((req, res, next) => {
+  const level = req.method === 'GET' ? 'view' : 'edit';
+  requirePermission('wms', level)(req, res, next);
+});
 
 // ── Row mappers (SQL → JS camelCase) ─────────────────────────────────────────
 function rowToProduct(r) {

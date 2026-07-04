@@ -1,9 +1,15 @@
 'use strict';
 const express = require('express');
-const router = express.Router();
 const { query } = require('../db');
 const { requirePermission } = require('../permissions');
 const { requireAuth } = require('../auth');
+
+const router = express.Router();
+router.use(requireAuth);
+router.use((req, res, next) => {
+  const level = req.method === 'GET' ? 'view' : 'edit';
+  requirePermission('trade-kpi', level)(req, res, next);
+});
 
 function isManager(role) { return ['مدیر', 'سوپر ادمین'].includes(role); }
 function isSuperAdmin(role) { return role === 'سوپر ادمین' || role === 'مدیر'; }
