@@ -574,10 +574,15 @@
             '<div style="font-size:.65rem;color:#9ca3af">مرکز</div></div>';
         }).join('') +
       '</div>' +
-      '<button onclick="window._wpSubmit()" style="padding:10px 28px;background:#10b981;color:white;border:none;border-radius:8px;font-family:inherit;font-size:.95rem;cursor:pointer;font-weight:700">' +
-        '✅ افزودن '+selectedCount+' مرکز به برنامه' +
-      '</button>' +
-      '<span style="font-size:.8rem;color:#6b7280;margin-right:12px">برای '+esc(expertName)+' — '+range.start+'</span>';
+      '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">' +
+        '<button onclick="window._wpSubmit()" style="padding:10px 28px;background:#10b981;color:white;border:none;border-radius:8px;font-family:inherit;font-size:.95rem;cursor:pointer;font-weight:700">' +
+          '✅ افزودن '+selectedCount+' مرکز به برنامه' +
+        '</button>' +
+        '<button onclick="window.wpOpenPlannerBulkMove()" style="padding:10px 24px;background:#8b5cf6;color:white;border:none;border-radius:8px;font-family:inherit;font-size:.95rem;cursor:pointer;font-weight:700">' +
+          '🔄 انتقال به هفته دیگر (بدون روز)' +
+        '</button>' +
+        '<span style="font-size:.8rem;color:#6b7280;margin-right:12px">برای '+esc(expertName)+' — '+range.start+'</span>' +
+      '</div>';
   }
 
   window._wpShowMore = function() {

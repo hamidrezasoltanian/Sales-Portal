@@ -553,7 +553,7 @@ function _doAddCenter(){
     var lead=(document.getElementById('ac_lead')||{}).value||'سرنخ';
     var owner=(document.getElementById('ac_owner')||{}).value||currentUser;
     var rtype=getProvType(_currentProvId);
-    var maxRow=centers.length>0?Math.max.apply(null,centers.map(function(c){return c.row||0;})):0;
+    var maxRow=allCents.length>0?Math.max.apply(null,allCents.map(function(c){return c.row||0;})):0;
     var id=rtype+'_new_'+Date.now();
 
     if(!DB.extra)DB.extra=[];
