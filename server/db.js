@@ -612,11 +612,11 @@ async function initSchema() {
     CREATE OR REPLACE FUNCTION sync_week_entries_columns()
     RETURNS TRIGGER AS $$
     BEGIN
-      NEW.id             := NEW.value->>'id';
-      NEW.week_id        := NEW.value->>'weekId';
-      NEW.rec_key        := NEW.value->>'recKey';
-      NEW.rtype          := NEW.value->>'rtype';
-      NEW.rid            := NEW.value->>'rid';
+      NEW.id             := COALESCE(NEW.value->>'id', NEW.key);
+      NEW.week_id        := COALESCE(NEW.value->>'weekId', split_part(NEW.key, ':::', 1));
+      NEW.rec_key        := COALESCE(NEW.value->>'recKey', NEW.value->>'rec_key', split_part(NEW.key, ':::', 2) || '_' || split_part(NEW.key, ':::', 3));
+      NEW.rtype          := COALESCE(NEW.value->>'rtype', split_part(NEW.key, ':::', 2));
+      NEW.rid            := COALESCE(NEW.value->>'rid', split_part(NEW.key, ':::', 3));
       NEW.scheduled_date := NEW.value->>'scheduledDate';
       NEW.action_type    := NEW.value->>'actionType';
       NEW.added_by       := NEW.value->>'addedBy';
@@ -640,9 +640,7 @@ async function initSchema() {
   // Data recovery: Restore missing columnar values for existing entries using a dummy self-update
   await query(`
     UPDATE week_entries
-    SET value = value
-    WHERE (scheduled_date IS NULL AND value->>'scheduledDate' IS NOT NULL)
-       OR (week_id IS NULL AND value->>'weekId' IS NOT NULL)
+    SET value = value;
   `).catch(e => console.error('[DB] Existing entries data recovery update failed:', e.message));
 
 
