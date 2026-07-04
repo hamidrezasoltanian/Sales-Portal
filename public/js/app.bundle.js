@@ -486,6 +486,7 @@ function _umUsers(){
       +'<td style="padding:9px 6px;white-space:nowrap">'
         +'<button onclick="umSaveUser(\''+m.id+'\')" title="ذخیره تغییرات" style="background:var(--brand-bg);color:var(--brand);border:1px solid var(--brand);border-radius:5px;padding:4px 10px;cursor:pointer;font-size:11px;font-family:inherit">💾 ذخیره</button> '
         +'<button onclick="umResetPassword(\''+m.id+'\')" title="تغییر رمز" style="background:var(--bg-raised);color:var(--text-secondary);border:1px solid var(--border);border-radius:5px;padding:4px 8px;cursor:pointer;font-size:11px">🔑</button>'
+        +' <button onclick="umOpenPermissionsModal(\''+m.id+'\')" title="ویرایش دسترسی‌ها" style="background:#f5f3ff;color:#6d28d9;border:1px solid #c4b5fd;border-radius:5px;padding:4px 8px;cursor:pointer;font-size:11px">🛡 دسترسی‌ها</button>'
         +(centers>0?' <button onclick="umReassignAll(\''+m.id+'\')" title="جابجایی مراکز" style="background:#fef9c3;color:#854d0e;border:1px solid #fcd34d;border-radius:5px;padding:4px 8px;cursor:pointer;font-size:11px">🔀</button>':'')
       +'</td>'
     +'</tr>';
@@ -616,6 +617,113 @@ function umSaveUser(userId){
         saveDB();
       }
       showToast('✅ «'+newName+'» ذخیره شد');buildUSERS();setTimeout(function(){umTab('users');},300);
+    })
+    .catch(function(e){showToast('❌ خطا: '+e.message);});
+}
+
+
+// ── Permission Editor Modal ────────────────────────────────────────────────
+var _UM_MODULES=[
+  {key:'weekplan',   label:'برنامه هفته'},
+  {key:'calendar',   label:'تقویم'},
+  {key:'provinces',  label:'استان‌ها'},
+  {key:'contacts',   label:'مخاطبین'},
+  {key:'support',    label:'پشتیبانی'},
+  {key:'checklist',  label:'چک‌لیست'},
+  {key:'tasks',      label:'وظایف'},
+  {key:'activities', label:'فعالیت‌ها'},
+  {key:'wms',        label:'انبار (WMS)'},
+  {key:'pricing',    label:'قیمت‌گذاری'},
+  {key:'proforma',   label:'پیش‌فاکتور'},
+  {key:'letters',    label:'دبیرخانه'},
+  {key:'receivables',label:'مطالبات'},
+  {key:'hr',         label:'منابع انسانی'},
+  {key:'kpi',        label:'KPI / گزارش مدیر'},
+  {key:'settings',   label:'تنظیمات'},
+  {key:'changelog',  label:'لاگ تغییرات'},
+];
+function umOpenPermissionsModal(userId){
+  var members=umGetMembers();
+  var m=members.find(function(x){return x.id===userId;});
+  if(!m){showToast('کاربر یافت نشد');return;}
+  var perms=(m.permissions&&m.permissions.modules)||{};
+  var existingProvs=(m.permissions&&m.permissions.provinces)||[];
+
+  var rows=_UM_MODULES.map(function(mod){
+    var cur=perms[mod.key]||'none';
+    var opts=['none','view','edit'];
+    var labels=['بدون دسترسی','فقط مشاهده','ویرایش'];
+    var radios=opts.map(function(v,i){
+      return '<label style="display:inline-flex;align-items:center;gap:3px;margin-left:10px;cursor:pointer;font-size:11.5px">'
+        +'<input type="radio" name="perm_'+mod.key+'" value="'+v+'"'+(cur===v?' checked':'')+' style="cursor:pointer"> '+labels[i]
+        +'</label>';
+    }).join('');
+    return '<tr style="border-bottom:1px solid var(--border)">'
+      +'<td style="padding:7px 8px;font-size:12px;font-weight:500;color:var(--text-primary)">'+mod.label+'</td>'
+      +'<td style="padding:7px 8px">'+radios+'</td>'
+      +'</tr>';
+  }).join('');
+
+  var allProvs=typeof getAllProvinces==='function'?getAllProvinces():[];
+  var provHtml='';
+  if(allProvs.length){
+    var noneChecked=!existingProvs.length;
+    provHtml='<div style="margin-top:16px;border:1px solid var(--border);border-radius:8px;padding:12px">'
+      +'<div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:8px">محدودیت استان (خالی = همه استان‌ها)</div>'
+      +'<div style="display:flex;flex-wrap:wrap;gap:6px">'
+      +allProvs.map(function(p){
+        var chk=existingProvs.indexOf(p.id)>=0?' checked':'';
+        return '<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;cursor:pointer">'
+          +'<input type="checkbox" class="perm-prov" value="'+p.id+'"'+chk+' style="cursor:pointer"> '+esc(p.name||p.id)
+          +'</label>';
+      }).join('')
+      +'</div></div>';
+  }
+
+  var html='<div style="padding:4px 0">'
+    +'<div style="font-size:12.5px;color:var(--text-secondary);margin-bottom:12px">'
+    +'کاربر: <strong>'+esc(m.name)+'</strong> — نقش: <strong>'+esc(m.role||'')+'</strong>'
+    +'<br><span style="font-size:11px;color:var(--text-muted)">خالی گذاشتن همه گزینه‌ها → دسترسی پیش‌فرض بر اساس نقش اعمال می‌شود.</span></div>'
+    +'<div style="overflow-x:auto;max-height:340px;overflow-y:auto">'
+    +'<table style="width:100%;border-collapse:collapse"><tbody>'+rows+'</tbody></table></div>'
+    +provHtml
+    +'<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">'
+    +'<button onclick="umSavePermissions(\''+userId+'\')" style="background:var(--brand-bg);color:var(--brand);border:1px solid var(--brand);border-radius:6px;padding:7px 18px;cursor:pointer;font-size:12px;font-family:inherit;font-weight:600">💾 ذخیره دسترسی‌ها</button>'
+    +'<button onclick="umClearPermissions(\''+userId+'\')" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5;border-radius:6px;padding:7px 14px;cursor:pointer;font-size:12px;font-family:inherit" title="حذف دسترسی‌های سفارشی و بازگشت به پیش‌فرض نقش">🗑 بازنشانی</button>'
+    +'</div></div>';
+
+  var _permFoot='<button class="btn-secondary" onclick="closeModal(\'permModal\')">بستن</button>';
+  openModal('permModal','🛡 ویرایش دسترسی‌ها — '+esc(m.name),html,_permFoot,{lg:true});
+}
+function umSavePermissions(userId){
+  var modules={};
+  _UM_MODULES.forEach(function(mod){
+    var el=document.querySelector('input[name="perm_'+mod.key+'"]:checked');
+    if(el&&el.value!=='none')modules[mod.key]=el.value;
+  });
+  var provEls=document.querySelectorAll('.perm-prov:checked');
+  var provinces=Array.from(provEls).map(function(e){return e.value;});
+  var perms=Object.keys(modules).length?{modules:modules}:{};
+  if(provinces.length)perms.provinces=provinces;
+  fetch('/api/users/'+encodeURIComponent(userId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({permissions:perms})})
+    .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||r.status);return d;}); })
+    .then(function(){
+      // به‌روزرسانی محلی
+      var m=umGetMembers().find(function(x){return x.id===userId;});
+      if(m)m.permissions=perms;
+      closeModal('permModal');
+      showToast('✅ دسترسی‌های «'+userId+'» ذخیره شد');
+    })
+    .catch(function(e){showToast('❌ خطا: '+e.message);});
+}
+function umClearPermissions(userId){
+  fetch('/api/users/'+encodeURIComponent(userId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({permissions:{}})})
+    .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||r.status);return d;}); })
+    .then(function(){
+      var m=umGetMembers().find(function(x){return x.id===userId;});
+      if(m)m.permissions={};
+      closeModal('permModal');
+      showToast('✅ دسترسی‌ها بازنشانی شد — پیش‌فرض نقش اعمال می‌شود');
     })
     .catch(function(e){showToast('❌ خطا: '+e.message);});
 }
@@ -9092,8 +9200,9 @@ function _setupAutoReminder(){
     var now = new Date();
     if(now.getHours() < 9) return;
     var today = todayStr();
-    if((DB._lastMorningReminder||'') === today) return;
-    DB._lastMorningReminder = today;
+    if(!DB.settings) DB.settings = {};
+    if((DB.settings.lastMorningReminder||'') === today) return;
+    DB.settings.lastMorningReminder = today;
     saveDB();
     _runMorningBriefing(today);
   }, 60000);
@@ -9104,8 +9213,9 @@ function _setupAutoReminder(){
     var now = new Date();
     if(now.getHours() < 15) return;
     var today = todayStr();
-    if((DB._lastAfternoonReminder||'') === today) return;
-    DB._lastAfternoonReminder = today;
+    if(!DB.settings) DB.settings = {};
+    if((DB.settings.lastAfternoonReminder||'') === today) return;
+    DB.settings.lastAfternoonReminder = today;
     saveDB();
     _runTodayReminders(today);
   }, 60000);
@@ -9114,8 +9224,9 @@ function _setupAutoReminder(){
   setTimeout(function(){
     if(!_isManager()) return;
     var today = todayStr();
-    if((DB._lastStartupReminder||'') === today) return;
-    DB._lastStartupReminder = today;
+    if(!DB.settings) DB.settings = {};
+    if((DB.settings.lastStartupReminder||'') === today) return;
+    DB.settings.lastStartupReminder = today;
     saveDB();
     _runOverdueAndUndatedReminders(today);
   }, 8000);
@@ -10934,22 +11045,6 @@ function openSettings(){
     });
     body+='</div></div>';
   }
-  // ── Onboarding tutorial section
-  var _obIsDisabled = DB.settings&&DB.settings.onboardingDisabled&&DB.settings.onboardingDisabled[currentUser];
-  body += '<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px">'
-    +'<div>'
-    +'<div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:3px">🎓 آموزش راهنما</div>'
-    +'<div style="font-size:11px;color:var(--text-muted)">نمایش راهنمای ۷ روزه برای کاربران تازه</div>'
-    +'</div>'
-    +'<div style="display:flex;gap:8px;align-items:center">'
-    +(_obIsDisabled
-      ? '<span style="font-size:11px;color:var(--text-muted);background:var(--bg-raised);border-radius:4px;padding:3px 8px">غیرفعال</span>'
-        +'<button onclick="_reEnableOnboarding();closeModal(\'settingsModal\')" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:11px;font-family:inherit">فعال‌سازی مجدد</button>'
-      : '<span style="font-size:11px;color:#16a34a;background:#dcfce7;border-radius:4px;padding:3px 8px">فعال</span>'
-        +'<button onclick="_dismissOnboarding(true);closeModal(\'settingsModal\')" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:11px;font-family:inherit">غیرفعال‌کردن</button>')
-    +'</div>'
-    +'</div></div>';
   openModal('settingsModal','⚙ تنظیمات نرم‌افزار',body,foot,{lg:true});
 }
 

@@ -686,8 +686,9 @@ function _setupAutoReminder(){
     var now = new Date();
     if(now.getHours() < 9) return;
     var today = todayStr();
-    if((DB._lastMorningReminder||'') === today) return;
-    DB._lastMorningReminder = today;
+    if(!DB.settings) DB.settings = {};
+    if((DB.settings.lastMorningReminder||'') === today) return;
+    DB.settings.lastMorningReminder = today;
     saveDB();
     _runMorningBriefing(today);
   }, 60000);
@@ -698,8 +699,9 @@ function _setupAutoReminder(){
     var now = new Date();
     if(now.getHours() < 15) return;
     var today = todayStr();
-    if((DB._lastAfternoonReminder||'') === today) return;
-    DB._lastAfternoonReminder = today;
+    if(!DB.settings) DB.settings = {};
+    if((DB.settings.lastAfternoonReminder||'') === today) return;
+    DB.settings.lastAfternoonReminder = today;
     saveDB();
     _runTodayReminders(today);
   }, 60000);
@@ -708,8 +710,9 @@ function _setupAutoReminder(){
   setTimeout(function(){
     if(!_isManager()) return;
     var today = todayStr();
-    if((DB._lastStartupReminder||'') === today) return;
-    DB._lastStartupReminder = today;
+    if(!DB.settings) DB.settings = {};
+    if((DB.settings.lastStartupReminder||'') === today) return;
+    DB.settings.lastStartupReminder = today;
     saveDB();
     _runOverdueAndUndatedReminders(today);
   }, 8000);
