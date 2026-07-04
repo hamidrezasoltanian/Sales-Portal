@@ -261,8 +261,20 @@
         return '<option value="'+esc(u.id)+'"'+((_wpState.expertId===u.id)?' selected':'')+'>'+esc(u.name)+'</option>';
       }).join('');
 
-    var weekOpts = weeks.filter(function(w){ return !w.isPast; }).map(function(w) {
-      return '<option value="'+w.wsStr+'|'+w.weStr+'"'+((_wpState.weekId===w.wsStr)?' selected':'')+'>'+esc(w.label)+(w.isCurrent?' ← این هفته':'')+' </option>';
+    var activeWeeksMap = {};
+    Object.keys(DB.weekEntries || {}).forEach(function(k) {
+      var we = DB.weekEntries[k];
+      if (we && !we.done) {
+        activeWeeksMap[k.split(':::')[0]] = true;
+      }
+    });
+
+    var weekOpts = weeks.map(function(w) {
+      var suffix = '';
+      if (w.isCurrent) suffix = ' ◀ این هفته';
+      else if (activeWeeksMap[w.id]) suffix = ' 🔴 (کار مانده)';
+      else if (w.isPast) suffix = ' ✓';
+      return '<option value="'+w.wsStr+'|'+w.weStr+'"'+((_wpState.weekId===w.wsStr)?' selected':'')+'>'+esc(w.label)+suffix+' </option>';
     }).join('');
 
     var inp = function(style, extra) {
