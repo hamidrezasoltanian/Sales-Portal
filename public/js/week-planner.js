@@ -478,10 +478,15 @@
             '</div>';
           }).join('') +
         '</div>' +
-        '<button onclick="window._wpSubmit()" style="padding:10px 28px;background:#10b981;color:white;border:none;border-radius:8px;font-family:inherit;font-size:.95rem;cursor:pointer;font-weight:700">' +
-          '✅ افزودن '+selectedCount+' مرکز به برنامه' +
-        '</button>' +
-        '<span style="font-size:.8rem;color:#6b7280;margin-right:12px">برای '+esc(expertName)+' — '+range.start+'</span>';
+        '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">' +
+          '<button onclick="window._wpSubmit()" style="padding:10px 28px;background:#10b981;color:white;border:none;border-radius:8px;font-family:inherit;font-size:.95rem;cursor:pointer;font-weight:700">' +
+            '✅ افزودن '+selectedCount+' مرکز به برنامه' +
+          '</button>' +
+          '<button onclick="window.wpOpenPlannerBulkMove()" style="padding:10px 24px;background:#8b5cf6;color:white;border:none;border-radius:8px;font-family:inherit;font-size:.95rem;cursor:pointer;font-weight:700">' +
+            '🔄 انتقال به هفته دیگر (بدون روز)' +
+          '</button>' +
+          '<span style="font-size:.8rem;color:#6b7280;margin-right:12px">برای '+esc(expertName)+' — '+range.start+'</span>' +
+        '</div>';
     }
 
     el.innerHTML =
@@ -693,6 +698,92 @@
       if (i >= entries.length) {
         if (typeof showToast==='function') showToast('✅ '+done+' مرکز به برنامه اضافه شد'+(errors>0?' ('+errors+' خطا)':''));
         _wpState.selected = {};
+        if (typeof loadDB==='function') loadDB().then(function(){ window._wpLoadCenters(); });
+        else window._wpLoadCenters();
+        return;
+      }
+      fetch('/api/week-entries', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(entries[i])
+      }).then(function(r){ if(r.ok) done++; else errors++; postNext(i+1); })
+        .catch(function(){ errors++; postNext(i+1); });
+    }
+    postNext(0);
+  };
+
+  window.wpOpenPlannerBulkMove = function() {
+    var selectedKeys = Object.keys(_wpState.selected);
+    if (!selectedKeys.length) {
+      if(typeof showToast==='function') showToast('مرکزی انتخاب نشده');
+      return;
+    }
+    
+    var wks = typeof wpGetWeeks === 'function' ? wpGetWeeks() : [];
+    
+    var activeWeeksMap = {};
+    Object.keys(DB.weekEntries || {}).forEach(function(k) {
+      var we = DB.weekEntries[k];
+      if (we && !we.done) {
+        activeWeeksMap[k.split(':::')[0]] = true;
+      }
+    });
+
+    var shown = []; var seen = {};
+    var pastWks = wks.filter(function(w){return w.isPast;});
+    var recentPastWks = pastWks.slice(-3);
+    wks.filter(function(w){return w.isCurrent||!w.isPast;}).slice(0,8)
+      .concat(pastWks.filter(function(w){return activeWeeksMap[w.id] || recentPastWks.some(function(r){return r.id===w.id;});}))
+      .forEach(function(w){if(!seen[w.id]){seen[w.id]=true;shown.push(w);}});
+    shown.sort(function(a,b){return a.num-b.num;});
+
+    var body = '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">انتقال گروهی ' + selectedKeys.length + ' مرکز انتخابی به کدام هفته انجام شود؟ (بدون تعیین روز)</div>'
+      + '<div style="display:flex;flex-direction:column;gap:5px;max-height:55vh;overflow-y:auto">'
+      + shown.map(function(wt){
+        return '<button class="btn-primary" style="display:flex;justify-content:space-between;align-items:center;width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text-primary);cursor:pointer;font-family:inherit" onclick="window.wpDoPlannerBulkMove(\'' + wt.id + '\')">'
+          + '<span style="font-weight:600">' + esc(wt.label) + '</span>'
+          + '<span style="font-size:11px;background:#8b5cf620;color:#8b5cf6;border:1px solid #8b5cf644;padding:2px 8px;border-radius:10px">انتقال ↪</span>'
+          + '</button>';
+      }).join('') + '</div>';
+
+    if (typeof openModal === 'function') {
+      openModal('wpPlannerBulkMoveModal', '🔄 انتقال گروهی به هفته دیگر', body, '<button class="btn-secondary" onclick="closeModal(\'wpPlannerBulkMoveModal\')">انصراف</button>');
+    }
+  };
+
+  window.wpDoPlannerBulkMove = function(targetWeekId) {
+    var selectedKeys = Object.keys(_wpState.selected);
+    if (!selectedKeys.length) return;
+    
+    var actionType = _wpState.actionType || 'call';
+    var expertId = _wpState.expertId;
+
+    var entries = [];
+    selectedKeys.forEach(function(rkey) {
+      var c = _wpState.centers.find(function(x){ return x.rkey === rkey; });
+      if (!c) return;
+      
+      if (typeof wpRemoveFromOtherWeeks === 'function') {
+        wpRemoveFromOtherWeeks(c.rtype + '_' + c.id, targetWeekId);
+      }
+      
+      entries.push({
+        id: 'we_'+Date.now()+'_'+Math.random().toString(36).slice(2,5)+'_'+c.id.slice(-4),
+        weekId: targetWeekId, recKey: c.rtype+'_'+c.id,
+        rtype: c.rtype, rid: c.id,
+        scheduledDate: null, actionType: actionType,
+        addedBy: expertId, centerName: c.name,
+      });
+    });
+
+    if (typeof closeModal === 'function') {
+      closeModal('wpPlannerBulkMoveModal');
+    }
+
+    var done = 0, errors = 0;
+    function postNext(i) {
+      if (i >= entries.length) {
+        if (typeof showToast==='function') showToast('✅ '+done+' مرکز به هفته جدید منتقل شد');
+        _wpState.selected = {};
+        if (typeof saveDB==='function') saveDB();
         if (typeof loadDB==='function') loadDB().then(function(){ window._wpLoadCenters(); });
         else window._wpLoadCenters();
         return;
