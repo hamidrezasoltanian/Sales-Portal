@@ -612,6 +612,30 @@ async function initSchema() {
     CREATE OR REPLACE FUNCTION sync_week_entries_columns()
     RETURNS TRIGGER AS $$
     BEGIN
+      -- 1. If columns were updated, sync them to the JSONB value
+      IF TG_OP = 'UPDATE' THEN
+        IF NEW.scheduled_date IS DISTINCT FROM OLD.scheduled_date OR (NEW.scheduled_date IS NULL AND NEW.value->>'scheduledDate' IS NOT NULL) THEN
+          NEW.value := jsonb_set(NEW.value, '{scheduledDate}', COALESCE(to_jsonb(NEW.scheduled_date), 'null'::jsonb));
+        END IF;
+        IF NEW.week_id IS DISTINCT FROM OLD.week_id OR (NEW.week_id IS NULL AND NEW.value->>'weekId' IS NOT NULL) THEN
+          NEW.value := jsonb_set(NEW.value, '{weekId}', COALESCE(to_jsonb(NEW.week_id), 'null'::jsonb));
+        END IF;
+        IF NEW.action_type IS DISTINCT FROM OLD.action_type THEN
+          NEW.value := jsonb_set(NEW.value, '{actionType}', COALESCE(to_jsonb(NEW.action_type), 'null'::jsonb));
+        END IF;
+        IF NEW.done IS DISTINCT FROM OLD.done THEN
+          NEW.value := jsonb_set(NEW.value, '{done}', to_jsonb(NEW.done));
+        END IF;
+        IF NEW.done_date IS DISTINCT FROM OLD.done_date THEN
+          NEW.value := jsonb_set(NEW.value, '{doneDate}', COALESCE(to_jsonb(NEW.done_date), 'null'::jsonb));
+        END IF;
+        -- Update primary key if week_id changed
+        IF NEW.week_id IS DISTINCT FROM OLD.week_id THEN
+          NEW.key := NEW.week_id || ':::' || COALESCE(NEW.value->>'recKey', split_part(NEW.key, ':::', 2) || '_' || split_part(NEW.key, ':::', 3));
+        END IF;
+      END IF;
+
+      -- 2. Ensure all columns are synced from the JSONB value (or fallback)
       NEW.id             := COALESCE(NEW.value->>'id', NEW.key);
       NEW.week_id        := COALESCE(NEW.value->>'weekId', split_part(NEW.key, ':::', 1));
       NEW.rec_key        := COALESCE(NEW.value->>'recKey', NEW.value->>'rec_key', split_part(NEW.key, ':::', 2) || '_' || split_part(NEW.key, ':::', 3));

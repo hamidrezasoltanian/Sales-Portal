@@ -129,12 +129,12 @@ router.put('/:id', requireAuth, async function (req, res) {
     };
     const result = await query(
       `UPDATE week_entries
-       SET scheduled_date = COALESCE($1, scheduled_date),
-           done           = COALESCE($2, done),
-           done_date      = COALESCE($3, done_date),
-           action_type    = COALESCE($4, action_type),
-           week_tag_id    = COALESCE($5, week_tag_id),
-           center_name    = COALESCE($6, center_name),
+       SET scheduled_date = CASE WHEN $9::boolean THEN $1 ELSE scheduled_date END,
+           done           = CASE WHEN $10::boolean THEN $2 ELSE done END,
+           done_date      = CASE WHEN $11::boolean THEN $3 ELSE done_date END,
+           action_type    = CASE WHEN $12::boolean THEN $4 ELSE action_type END,
+           week_tag_id    = CASE WHEN $13::boolean THEN $5 ELSE week_tag_id END,
+           center_name    = CASE WHEN $14::boolean THEN $6 ELSE center_name END,
            value          = $7,
            updated_at     = NOW()
        WHERE id = $8
@@ -148,6 +148,12 @@ router.put('/:id', requireAuth, async function (req, res) {
         centerName !== undefined ? centerName : null,
         JSON.stringify(updatedVal),
         req.params.id,
+        scheduledDate !== undefined,
+        done !== undefined,
+        doneDate !== undefined,
+        actionType !== undefined,
+        weekTagId !== undefined,
+        centerName !== undefined,
       ]
     );
     res.json(rowToObj(result.rows[0]));
@@ -198,15 +204,16 @@ router.post('/bulk-move', requireAuth, async function (req, res) {
     if (!Array.isArray(ids) || !ids.length || !weekId) {
       return res.status(400).json({ error: 'آرایه شناسه‌ها و weekId الزامی است' });
     }
-    const placeholders = ids.map(function (_, i) { return '$' + (i + 3); }).join(',');
+    const hasScheduledDate = scheduledDate !== undefined;
+    const placeholders = ids.map(function (_, i) { return '$' + (i + 4); }).join(',');
     const result = await query(
       `UPDATE week_entries
        SET week_id        = $1,
-           scheduled_date = COALESCE($2, scheduled_date),
+           scheduled_date = CASE WHEN $2::boolean THEN $3 ELSE scheduled_date END,
            updated_at     = NOW()
        WHERE id IN (${placeholders})
        RETURNING *`,
-      [weekId, scheduledDate || null, ...ids]
+      [weekId, hasScheduledDate, scheduledDate !== undefined ? scheduledDate : null, ...ids]
     );
     res.json(result.rows.map(rowToObj));
   } catch (e) {
