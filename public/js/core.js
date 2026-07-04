@@ -267,6 +267,32 @@ async function loadDB(){
     var r=await fetch('/api/data/db');
     if(r.status===401){if(_spinner)_spinner.style.display='none';showLoginOverlay();return;}
     var d=await r.json();
+
+    // Check if there is an unsynced local backup in localStorage
+    var isSynced = localStorage.getItem('atena_db_synced');
+    var backupStr = localStorage.getItem('atena_db_backup');
+    if (isSynced === 'false' && backupStr) {
+      try {
+        var backup = JSON.parse(backupStr);
+        var lastSyncedStr = localStorage.getItem('atena_db_last_synced');
+        var lastSynced = lastSyncedStr ? JSON.parse(lastSyncedStr) : null;
+        
+        console.warn('[AtenaSync] Unsynced local changes found in localStorage. Merging with server database...');
+        
+        // Merge backup changes on top of server database d
+        var merged = mergeDatabaseDiff(backup, d, lastSynced || d);
+        d = merged; // replace d with merged state
+        
+        // Trigger a save to sync these merged changes back to the server
+        setTimeout(function() {
+          saveDB();
+          showToast('🔄 تغییرات ذخیره نشده محلی بازیابی و همگام‌سازی شدند', 4000);
+        }, 1000);
+      } catch(err) {
+        console.error('[AtenaSync] Error merging local backup:', err.message);
+      }
+    }
+
     if(d&&typeof d==='object'){
       _dbServerTs=d._serverTs||null;
       Object.keys(DB).forEach(function(k){if(k!=='_serverTs'&&d[k]!==undefined)DB[k]=d[k];});
@@ -284,6 +310,10 @@ async function loadDB(){
     if(_migrated){saveDB();console.log('[migration] legacy contacts migrated');}
     _serverSynced=true;_invalidateEditsCache();
     _lastSyncedDB = JSON.parse(JSON.stringify(DB));
+
+    if (isSynced !== 'false') {
+      _clearLocalBackup();
+    }
   }catch(e){
     console.warn('Server fetch failed, using empty DB:',e.message);
   }finally{
@@ -334,6 +364,7 @@ function _saveDBNow(){
                     DB._weDeletedKeys=[];
                     _lastSyncedDB = JSON.parse(JSON.stringify(DB));
                     console.info('%c[AtenaCRM] تداخل با موفقیت حل شد و داده‌ها در تلاش مجدد ذخیره شدند.', 'color: #10b981; font-weight: bold;');
+                    _clearLocalBackup();
                   }
                 });
               })
@@ -346,16 +377,140 @@ function _saveDBNow(){
         if(seq===_saveSeq) {
           DB._weDeletedKeys=[];
           _lastSyncedDB = JSON.parse(JSON.stringify(DB));
+          _clearLocalBackup();
         }
       });
     })
     .catch(function(e){console.warn('saveDB sync failed:',e.message);});
 }
+function _backupLocalDB() {
+  try {
+    localStorage.setItem('atena_db_backup', JSON.stringify(DB));
+    if (_lastSyncedDB) {
+      localStorage.setItem('atena_db_last_synced', JSON.stringify(_lastSyncedDB));
+    }
+    localStorage.setItem('atena_db_synced', 'false');
+  } catch(e) {
+    console.warn('[AtenaBackup] LocalStorage backup failed:', e.message);
+  }
+}
+function _clearLocalBackup() {
+  try {
+    localStorage.setItem('atena_db_synced', 'true');
+    localStorage.removeItem('atena_db_backup');
+    localStorage.removeItem('atena_db_last_synced');
+  } catch(e) {}
+}
 function saveDB(){
+  _backupLocalDB();
   clearTimeout(_saveDebounceTimer);
   _saveDebounceTimer=setTimeout(function(){_saveDBNow();},600);
 }
-function saveDBSync(){clearTimeout(_saveDebounceTimer);return _saveDBNow();}
+function saveDBSync(){
+  _backupLocalDB();
+  clearTimeout(_saveDebounceTimer);
+  return _saveDBNow();
+}
+
+function mergeDatabaseDiff(local, server, lastSynced) {
+  var merged = Object.assign({}, server);
+  lastSynced = lastSynced || {};
+
+  var copy = function(obj) {
+    return obj ? JSON.parse(JSON.stringify(obj)) : obj;
+  };
+
+  // 1. edits
+  merged.edits = copy(server.edits || {});
+  var localEdits = local.edits || {};
+  var lastEdits = lastSynced.edits || {};
+  Object.keys(localEdits).forEach(function(k) {
+    var le = localEdits[k];
+    var se = merged.edits[k];
+    var lse = lastEdits[k];
+    if (!se) {
+      if (JSON.stringify(le) !== JSON.stringify(lse)) {
+        merged.edits[k] = le;
+      }
+    } else {
+      var mergedCenter = Object.assign({}, se, le);
+      if ((le._ts || 0) < (se._ts || 0)) {
+        Object.keys(le).forEach(function(field) {
+          if (lse && JSON.stringify(le[field]) !== JSON.stringify(lse[field])) {
+            mergedCenter[field] = le[field];
+          }
+        });
+      }
+      merged.edits[k] = mergedCenter;
+    }
+  });
+
+  // 2. notes
+  merged.notes = copy(server.notes || {});
+  var localNotes = local.notes || {};
+  Object.keys(localNotes).forEach(function(k) {
+    var ln = localNotes[k] || [];
+    var sn = merged.notes[k] || [];
+    var map = {};
+    sn.forEach(function(n) { map[n.text + ':::' + (n.by || n.user)] = n; });
+    ln.forEach(function(n) { map[n.text + ':::' + (n.by || n.user)] = n; });
+    merged.notes[k] = Object.values(map);
+  });
+
+  // 3. weekEntries
+  merged.weekEntries = copy(server.weekEntries || {});
+  var localWE = local.weekEntries || {};
+  var lastWE = lastSynced.weekEntries || {};
+  Object.keys(localWE).forEach(function(k) {
+    var le = localWE[k];
+    var se = merged.weekEntries[k];
+    var lse = lastWE[k];
+    if (!se) {
+      if (!lse) {
+        merged.weekEntries[k] = le;
+      }
+    } else {
+      var mergedWE = Object.assign({}, se, le);
+      merged.weekEntries[k] = mergedWE;
+    }
+  });
+  if (local._weDeletedKeys && local._weDeletedKeys.length > 0) {
+    local._weDeletedKeys.forEach(function(dk) {
+      delete merged.weekEntries[dk];
+    });
+  }
+
+  // 4. checklist
+  merged.checklist = Object.assign({}, server.checklist || {}, local.checklist || {});
+
+  // 5. settings
+  merged.settings = Object.assign({}, server.settings || {}, local.settings || {});
+
+  // 6. events
+  var evMap = {};
+  (server.events || []).forEach(function(ev) { if(ev.id) evMap[ev.id] = ev; });
+  (local.events || []).forEach(function(ev) { if(ev.id) evMap[ev.id] = ev; });
+  merged.events = Object.values(evMap);
+
+  // 7. Lists/Logs
+  var listKeys = ['salesLog', 'callLog', 'visitLog', 'missionLog', 'extra', 'provHistory', 'changeLog', 'tasks', 'kpiHistory'];
+  listKeys.forEach(function(lk) {
+    var sList = server[lk] || [];
+    var lList = local[lk] || [];
+    var map = {};
+    sList.forEach(function(item) {
+      var id = item.id || item.key || JSON.stringify(item);
+      map[id] = item;
+    });
+    lList.forEach(function(item) {
+      var id = item.id || item.key || JSON.stringify(item);
+      map[id] = item;
+    });
+    merged[lk] = Object.values(map);
+  });
+
+  return merged;
+}
 
 function exportDBJson(){
   var data=JSON.stringify({version:2,exportedAt:new Date().toISOString(),db:DB},null,2);
