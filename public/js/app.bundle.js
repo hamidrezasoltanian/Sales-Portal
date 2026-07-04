@@ -304,6 +304,7 @@ function _saveDBNow(){
     .then(function(r){
       if(r.status===409){
         // 409 means another user saved since our last known timestamp — merge and retry
+        console.warn('[AtenaCRM] تداخل داده شناسایی شد. در حال ادغام خودکار تغییرات...');
         return r.json().catch(function(){return {};}).then(function(errData){
           var conflictBy = errData && errData.by ? (USERS && USERS[errData.by] ? USERS[errData.by] : errData.by) : null;
           return fetch('/api/data/db').then(function(r2){return r2.ok?r2.json():null;}).then(function(d){
@@ -333,6 +334,7 @@ function _saveDBNow(){
                   if(seq===_saveSeq) {
                     DB._weDeletedKeys=[];
                     _lastSyncedDB = JSON.parse(JSON.stringify(DB));
+                    console.info('%c[AtenaCRM] تداخل با موفقیت حل شد و داده‌ها در تلاش مجدد ذخیره شدند.', 'color: #10b981; font-weight: bold;');
                   }
                 });
               })
