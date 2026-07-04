@@ -1392,9 +1392,18 @@ function saveScheduleFromModal(eKey) {
 }
 function openAssignWeekForCenter(rtype,id,name){
   var wks=wpGetWeeks();
+  var activeWeeksMap = {};
+  Object.keys(DB.weekEntries || {}).forEach(function(k) {
+    var we = DB.weekEntries[k];
+    if (we && !we.done) {
+      activeWeeksMap[k.split(':::')[0]] = true;
+    }
+  });
   var shown=[];var seen={};
+  var pastWks = wks.filter(function(w){return w.isPast;});
+  var recentPastWks = pastWks.slice(-3);
   wks.filter(function(w){return w.isCurrent||!w.isPast;}).slice(0,8)
-    .concat(wks.filter(function(w){return w.isPast;}).slice(-3))
+    .concat(pastWks.filter(function(w){return activeWeeksMap[w.id] || recentPastWks.some(function(r){return r.id===w.id;});}))
     .forEach(function(w){if(!seen[w.id]){seen[w.id]=true;shown.push(w);}});
   shown.sort(function(a,b){return a.num-b.num;});
 
@@ -1564,9 +1573,18 @@ function wpOpenAssignBulkMove() {
     return;
   }
   var wks = wpGetWeeks();
+  var activeWeeksMap = {};
+  Object.keys(DB.weekEntries || {}).forEach(function(k) {
+    var we = DB.weekEntries[k];
+    if (we && !we.done) {
+      activeWeeksMap[k.split(':::')[0]] = true;
+    }
+  });
   var shown = []; var seen = {};
+  var pastWks = wks.filter(function(w){return w.isPast;});
+  var recentPastWks = pastWks.slice(-3);
   wks.filter(function(w){return w.isCurrent||!w.isPast;}).slice(0,8)
-    .concat(wks.filter(function(w){return w.isPast;}).slice(-3))
+    .concat(pastWks.filter(function(w){return activeWeeksMap[w.id] || recentPastWks.some(function(r){return r.id===w.id;});}))
     .forEach(function(w){if(!seen[w.id]){seen[w.id]=true;shown.push(w);}});
   shown.sort(function(a,b){return a.num-b.num;});
 
