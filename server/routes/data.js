@@ -165,11 +165,11 @@ router.put('/db', async (req, res) => {
     const metaRow = await client.query(
       "SELECT updated_at, updated_by FROM app_data WHERE key = '_db_meta' FOR UPDATE"
     );
-    if (_clientTs && metaRow.rows.length && metaRow.rows[0].updated_at) {
+    if (metaRow.rows.length && metaRow.rows[0].updated_at) {
       const serverTs = metaRow.rows[0].updated_at.toISOString();
       const lastSaveBy = metaRow.rows[0].updated_by || null;
-      // Only 409 if: timestamp mismatch AND the last save was by a DIFFERENT user
-      if (serverTs !== _clientTs && lastSaveBy && lastSaveBy !== user) {
+      console.log('[DEBUG CONFLICT]', { _clientTs, serverTs, lastSaveBy, user, match: serverTs === _clientTs, diffUser: lastSaveBy !== user });
+      if (_clientTs && serverTs !== _clientTs && lastSaveBy && lastSaveBy !== user) {
         await client.query('ROLLBACK');
         return res.status(409).json({ error: 'تغییرات توسط کاربر دیگری ذخیره شده', by: lastSaveBy });
       }
