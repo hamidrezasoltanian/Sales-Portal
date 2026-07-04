@@ -4854,7 +4854,7 @@ function openCenterAudit(centerKey, centerName) {
     var g=dp?j2g(dp[0],dp[1],dp[2]):[2000,1,1];
     var ts=dp?new Date(g[0],g[1]-1,g[2]).getTime():0;
     events.push({ts:ts,type:'note',icon:'📝',color:'#0ea5e9',
-      title:'یادداشت',detail:String(n.text||'').substring(0,60),by:n.by||n.user,at:null,dateStr:n.date||(n.at?fmtDate(n.at):'')||''});
+      title:'یادداشت',detail:String(n.text||'').substring(0,60),by:n.by||n.user,at:null,dateStr:n.date||(n.at?msToJ(n.at):'')||''});
   });
   // weekEntries done
   Object.values(DB.weekEntries||{}).filter(function(we){return we.recKey===centerKey&&we.done;}).forEach(function(we){
@@ -5530,7 +5530,7 @@ function _renderNotesList(notes){
       +'<div style="font-size:12px;line-height:1.6;color:var(--text-primary)">'+lines+'</div>'
       +tagBadges
       +'<div class="note-meta" style="margin-top:3px"><span style="font-weight:600">'+esc(n.by||n.user||'')+'</span>'
-      +'<span style="margin-right:6px">'+esc(n.date||(n.at?fmtDate(n.at):'')||'')+'</span></div></div>';
+      +'<span style="margin-right:6px">'+esc(n.date||(n.at?msToJ(n.at):'')||'')+'</span></div></div>';
   }).join('');
 }
 
@@ -5703,7 +5703,7 @@ function renderNotesList(type,id){
   return notes.slice().reverse().map(function(n,i){
     var realIdx=notes.length-1-i;
     return'<div class="note-item">'+esc(n.text)
-      +'<div class="note-meta"><span>'+esc(n.by||n.user||'')+'</span><span>'+(n.date||fmtDate(n.at)||'')+'</span>'
+      +'<div class="note-meta"><span>'+esc(n.by||n.user||'')+'</span><span>'+(n.date||msToJ(n.at)||'')+'</span>'
       +'<button class="note-del" onclick="delNoteAndRefresh(\''+type+'\',\''+id+'\','+realIdx+')">🗑</button>'
       +'</div></div>';
   }).join('');
