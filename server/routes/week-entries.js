@@ -65,11 +65,28 @@ router.post('/', requireAuth, async function (req, res) {
     if (!id || !weekId || !recKey || !rtype || !rid) {
       return res.status(400).json({ error: 'فیلدهای id، weekId، recKey، rtype و rid الزامی هستند' });
     }
+    const dbKey = `${weekId}:::${recKey}`;
+    const dbValue = {
+      id,
+      weekId,
+      recKey,
+      rtype,
+      rid,
+      scheduledDate: scheduledDate || null,
+      actionType: actionType || 'call',
+      addedBy: addedBy || req.user.username,
+      centerName: centerName || null,
+      weekTagId: weekTagId || null,
+      done: false,
+      doneDate: null
+    };
     const result = await query(
-      `INSERT INTO week_entries (id, week_id, rec_key, rtype, rid, scheduled_date, action_type, added_by, center_name, week_tag_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO week_entries (key, value, id, week_id, rec_key, rtype, rid, scheduled_date, action_type, added_by, center_name, week_tag_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
       [
+        dbKey,
+        JSON.stringify(dbValue),
         id,
         weekId,
         recKey,
@@ -96,6 +113,20 @@ router.post('/', requireAuth, async function (req, res) {
 router.put('/:id', requireAuth, async function (req, res) {
   try {
     const { scheduledDate, done, doneDate, actionType, weekTagId, centerName } = req.body;
+    const rowRes = await query('SELECT key, value FROM week_entries WHERE id = $1', [req.params.id]);
+    if (!rowRes.rows.length) {
+      return res.status(404).json({ error: 'ورودی برنامه هفته یافت نشد' });
+    }
+    const currentVal = rowRes.rows[0].value || {};
+    const updatedVal = {
+      ...currentVal,
+      ...(scheduledDate !== undefined ? { scheduledDate } : {}),
+      ...(done !== undefined ? { done } : {}),
+      ...(doneDate !== undefined ? { doneDate } : {}),
+      ...(actionType !== undefined ? { actionType } : {}),
+      ...(weekTagId !== undefined ? { weekTagId } : {}),
+      ...(centerName !== undefined ? { centerName } : {}),
+    };
     const result = await query(
       `UPDATE week_entries
        SET scheduled_date = COALESCE($1, scheduled_date),
@@ -104,8 +135,9 @@ router.put('/:id', requireAuth, async function (req, res) {
            action_type    = COALESCE($4, action_type),
            week_tag_id    = COALESCE($5, week_tag_id),
            center_name    = COALESCE($6, center_name),
+           value          = $7,
            updated_at     = NOW()
-       WHERE id = $7
+       WHERE id = $8
        RETURNING *`,
       [
         scheduledDate !== undefined ? scheduledDate : null,
@@ -114,12 +146,10 @@ router.put('/:id', requireAuth, async function (req, res) {
         actionType || null,
         weekTagId !== undefined ? weekTagId : null,
         centerName !== undefined ? centerName : null,
+        JSON.stringify(updatedVal),
         req.params.id,
       ]
     );
-    if (!result.rows.length) {
-      return res.status(404).json({ error: 'ورودی برنامه هفته یافت نشد' });
-    }
     res.json(rowToObj(result.rows[0]));
   } catch (e) {
     console.error('[week-entries PUT /:id]', e.message);
