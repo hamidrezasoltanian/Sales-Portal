@@ -539,8 +539,7 @@ function _doAddCenter(){
     if(dup){
       var dpId = dup.province_id || (dup.id && dup.id.indexOf('||') >= 0 ? dup.id.split('||')[0] : 'tehran');
       var pName = getProvNameFromId(dpId);
-      showToast('⚠ مرکز «'+dup.name+'» قبلاً در استان «'+(pName||dpId)+'» ثبت شده است',4000);
-      return;
+      if(!confirm('⚠ مرکز «'+dup.name+'» قبلاً در استان «'+(pName||dpId)+'» ثبت شده است.\nآیا مطمئن هستید که می‌خواهید یک مرکز جدید با این نام اضافه کنید؟')) return;
     }
     if(similar){
       var dpId = similar.province_id || (similar.id && similar.id.indexOf('||') >= 0 ? similar.id.split('||')[0] : 'tehran');
