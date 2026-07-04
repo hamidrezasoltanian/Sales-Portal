@@ -252,6 +252,7 @@ var _serverSynced=false;
 var _saveDebounceTimer=null;
 var _dbServerTs=null; // tracks server updated_at for conflict detection
 var _saveSeq=0; // sequence counter to ignore out-of-order fetch responses
+var _lastSyncedDB=null;
 var _editsKeysCache=null; // invalidated by setE/loadDB for memoized Object.keys(DB.edits)
 function _getEditsKeys(){if(!_editsKeysCache)_editsKeysCache=Object.keys(DB.edits||{});return _editsKeysCache;}
 function _invalidateEditsCache(){_editsKeysCache=null;}
@@ -282,6 +283,7 @@ async function loadDB(){
     });
     if(_migrated){saveDB();console.log('[migration] legacy contacts migrated');}
     _serverSynced=true;_invalidateEditsCache();
+    _lastSyncedDB = JSON.parse(JSON.stringify(DB));
   }catch(e){
     console.warn('Server fetch failed, using empty DB:',e.message);
   }finally{
@@ -306,45 +308,43 @@ function _saveDBNow(){
           return fetch('/api/data/db').then(function(r2){return r2.ok?r2.json():null;}).then(function(d){
             if(!d||typeof d!=='object'){showToast('⚠ خطای همگام‌سازی — لطفاً صفحه را رفرش کنید',5000);return;}
             if(d._serverTs)_dbServerTs=d._serverTs;
-            // Merge: local edits + weekEntries win over server (preserve unsaved work)
-            var merged=Object.assign({},DB,d);
-            merged.weekEntries=Object.assign({},d.weekEntries||{},DB.weekEntries||{});
-            // Don't let server revive locally-deleted entries
-            (DB._weDeletedKeys||[]).forEach(function(dk){delete merged.weekEntries[dk];});
-            // Smart edits merge using timestamps
-            var mEd=Object.assign({},d.edits||{});
-            var lEd=DB.edits||{};
-            Object.keys(lEd).forEach(function(k){
-              var le=lEd[k]||{};var se=mEd[k]||{};
-              if((le._ts||0)>=(se._ts||0))mEd[k]=le;
-              else mEd[k]=Object.assign({},le,se);
-            });
-            merged.edits=mEd;
-            // Preserve local new centers (DB.extra)
-            var _extMap={};
-            (d.extra||[]).forEach(function(x){_extMap[x.id]=x;});
-            (DB.extra||[]).forEach(function(x){_extMap[x.id]=x;});
-            merged.extra=Object.keys(_extMap).map(function(k){return _extMap[k];});
-            // Preserve local read=true for notifications on 409 retry
-            if(DB.notifications&&d.notifications){
+            
+            // Perform the diff-based merge so local changes are preserved
+            var merged = mergeDatabaseDiff(DB, d, _lastSyncedDB);
+            
+            if (d.notifications && DB.notifications && DB.notifications.length) {
               var _lr409={};DB.notifications.forEach(function(n){if(n.read)_lr409[n.id]=true;});
               merged.notifications=(d.notifications||[]).map(function(n){return _lr409[n.id]?Object.assign({},n,{read:true}):n;});
             }
             delete merged._serverTs;delete merged._clientTs;
             Object.keys(merged).forEach(function(k){DB[k]=merged[k];});
+            _lastSyncedDB = JSON.parse(JSON.stringify(DB));
             if(conflictBy)showToast('🔄 تغییرات '+conflictBy+' ادغام شد',3000);
+            
             // Retry save with updated timestamp
             var p2=JSON.parse(JSON.stringify(DB));
             if(_dbServerTs)p2._clientTs=_dbServerTs;
             return fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json','X-Cid':_sseClientId},body:JSON.stringify(p2)})
-              .then(function(r3){if(!r3.ok)return;return r3.json().then(function(res){if(res&&res._serverTs)_dbServerTs=res._serverTs;if(seq===_saveSeq)DB._weDeletedKeys=[];});})
+              .then(function(r3){
+                if(!r3.ok)return;
+                return r3.json().then(function(res){
+                  if(res&&res._serverTs)_dbServerTs=res._serverTs;
+                  if(seq===_saveSeq) {
+                    DB._weDeletedKeys=[];
+                    _lastSyncedDB = JSON.parse(JSON.stringify(DB));
+                  }
+                });
+              })
               .catch(function(){});
           }).catch(function(){showToast('⚠ خطای شبکه — لطفاً صفحه را رفرش کنید',5000);});
         });
       }
       return r.json().then(function(result){
         if(result&&result._serverTs&&seq===_saveSeq)_dbServerTs=result._serverTs;
-        if(seq===_saveSeq)DB._weDeletedKeys=[];
+        if(seq===_saveSeq) {
+          DB._weDeletedKeys=[];
+          _lastSyncedDB = JSON.parse(JSON.stringify(DB));
+        }
       });
     })
     .catch(function(e){console.warn('saveDB sync failed:',e.message);});

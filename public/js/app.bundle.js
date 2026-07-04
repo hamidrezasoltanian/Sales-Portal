@@ -88,6 +88,135 @@ var _actPage=0;
 var DB={edits:{},notes:{},tags:[],rTags:{},weekTags:[],weekEntries:{},_weDeletedKeys:[],events:[],checklist:{},extra:[],settings:null,kpiTargets:{},callLog:[],visitLog:[],salesLog:[],missionLog:[],provHistory:[],mtrFollower:{},mtrFollowerMap:{},changeLog:[],mtrTrend:[],notifications:[],tasks:[],kpiHistory:[]};
 var _DEFAULT_MEMBERS=[]; // loaded from server via buildUSERS()
 
+// ════════════════════════ SSE (Server-Sent Events) ════════════════════════
+var _sse = null;
+var _sseReconnectTimer = null;
+var _sseReloadTimer = null;
+var _ssePendingBy = null;
+
+function initSSE() {
+  if (_sse) return;
+  _sse = new EventSource('/api/events/stream?cid='+_sseClientId);
+  _sse.onmessage = function(e) {
+    try {
+      var data = JSON.parse(e.data);
+      if (data.type === 'db-updated') {
+        _sseReloadDB(data.by);
+      } else if (data.type === 'notif_new' && data.to === currentUser) {
+        if (typeof _refreshNotifs === 'function') _refreshNotifs();
+        if (data.msg && typeof _firePushNotif === 'function') _firePushNotif('\uD83D\uDD14 اعلان جدید', data.msg, 'notif-' + Date.now());
+      }
+    } catch(err) {}
+  };
+  _sse.onerror = function() {
+    _sse.close(); _sse = null;
+    clearTimeout(_sseReconnectTimer);
+    _sseReconnectTimer = setTimeout(initSSE, 8000);
+  };
+}
+window.initSSE = initSSE;
+
+function _sseReloadDB(byUser) {
+  if (!byUser) return;
+  var _isTgBot = byUser && byUser.indexOf(':bot') !== -1;
+  if (!_isTgBot && byUser === currentUser) return;
+  _ssePendingBy = _isTgBot ? byUser.replace(':bot','') : byUser;
+  clearTimeout(_sseReloadTimer);
+  _sseReloadTimer = setTimeout(function() {
+    var triggeredBy = _ssePendingBy;
+    _ssePendingBy = null;
+    fetch('/api/data/db').then(function(r){ return r.ok ? r.json() : null; }).then(function(d) {
+      if (!d || typeof d !== 'object') return;
+      if (d._serverTs) _dbServerTs = d._serverTs;
+      var merged = Object.assign({}, DB, d);
+      merged.weekEntries = Object.assign({}, DB.weekEntries, d.weekEntries || {});
+      var mergedEdits4 = Object.assign({}, d.edits || {});
+      var localEdits4 = DB.edits || {};
+      Object.keys(localEdits4).forEach(function(k) {
+        var le = localEdits4[k] || {}; var se = mergedEdits4[k] || {};
+        if ((le._ts || 0) >= (se._ts || 0)) mergedEdits4[k] = le;
+        else mergedEdits4[k] = Object.assign({}, le, se);
+      });
+      merged.edits = mergedEdits4;
+      if (d.notifications && DB.notifications && DB.notifications.length) {
+        var _localRead={};
+        DB.notifications.forEach(function(n){if(n.read)_localRead[n.id]=true;});
+        merged.notifications=(d.notifications||[]).map(function(n){
+          return _localRead[n.id]?Object.assign({},n,{read:true}):n;
+        });
+      }
+      delete merged._serverTs; delete merged._clientTs;
+      Object.keys(merged).forEach(function(k) { DB[k] = merged[k]; });
+      if (!_saveDebounceTimer) {
+        if (currentTab === 'weekplan' && typeof renderWeekPlan === 'function') renderWeekPlan();
+        else if (currentTab === 'provinces' && typeof renderDashboard === 'function') { renderDashboard(); if(typeof renderTable==='function')renderTable(); }
+        else if (currentTab === 'activity' && typeof renderActivity === 'function') renderActivity();
+        else if (currentTab === 'kpi' && typeof renderKPIPanel === 'function') renderKPIPanel();
+        else if (currentTab === 'manager' && typeof renderManagerPanel === 'function') renderManagerPanel();
+      }
+      var _tgSuffix = triggeredBy && triggeredBy.endsWith(':bot') ? ' (تلگرام)' : '';
+      var _tgBy = triggeredBy ? triggeredBy.replace(':bot','') : null;
+      var name = _tgBy ? (USERS[_tgBy] || _tgBy) : 'کاربر دیگری';
+      if (typeof showToast === 'function') showToast('\uD83D\uDD04 ' + name + _tgSuffix + ' تغییراتی اعمال کرد', 2500);
+    }).catch(function() {});
+  }, 1500);
+}
+
+// نمایش راهنما اگر دیتابیس خالی است
+function checkEmptyDB(){
+  try{
+    var totalCenters=CENTERS.length+Object.values(PC_RAW).reduce(function(s,a){return s+a.length;},0)+(DB.extra||[]).length;
+    var msg=document.getElementById('emptyDBMsg');
+    if(!msg)return;
+    var tw=document.querySelector('.table-wrap');
+    var pg=document.getElementById('provGrid');
+    if(totalCenters===0){
+      msg.style.display='block';
+      if(pg)pg.style.display='none';
+      if(tw)tw.style.display='none';
+    }else{
+      msg.style.display='none';
+      if(tw)tw.style.display='';
+    }
+  }catch(e){}
+}
+window.checkEmptyDB = checkEmptyDB;
+
+// ── پاک‌سازی ورودی‌های منسوخ (orphaned) ─────────────────────────────
+function _getAllValidRecKeys(){
+  var valid=new Set();
+  CENTERS.forEach(function(c){valid.add('center_'+c.id);});
+  if(typeof _buildPCCache==='function')_buildPCCache();
+  if(_PC_CACHE)Object.keys(_PC_CACHE).forEach(function(provId){
+    (_PC_CACHE[provId]||[]).forEach(function(c){valid.add('pc_'+c.id);});
+  });
+  (DB.extra||[]).forEach(function(c){
+    var rtype=c.province_id==='tehran'?'center':'pc';
+    valid.add(rtype+'_'+c.id);
+  });
+  return valid;
+}
+function cleanupOrphanedEntries(showReport){
+  var valid=_getAllValidRecKeys();
+  if(!valid.size)return;
+  var removedWP=0,removedFU=0;
+  Object.keys(DB.weekEntries||{}).forEach(function(k){
+    var we=DB.weekEntries[k];
+    var rk=we.recKey||(we.rtype?we.rtype+'_'+we.rid:'');
+    if(rk&&!valid.has(rk)){_weRemove(k);removedWP++;}
+  });
+  Object.keys(DB.edits||{}).forEach(function(k){
+    if(!valid.has(k)&&DB.edits[k].followupDate){delete DB.edits[k].followupDate;removedFU++;}
+  });
+  if(removedWP||removedFU){
+    saveDB();
+    if(showReport)showToast('🧹 پاک‌سازی: '+removedWP+' ورودی هفته و '+removedFU+' پیگیری منسوخ حذف شد',4000);
+  }else if(showReport){showToast('✅ هیچ ورودی منسوخی یافت نشد');}
+  return{removedWP:removedWP,removedFU:removedFU};
+}
+window.cleanupOrphanedEntries = cleanupOrphanedEntries;
+// ════════════════════════ END SSE / DB helpers ═══════════════════════
+
 // ── Login/Auth helpers ────────────────────────────────────────
 function showLoginOverlay(){
   var o=document.getElementById('loginOverlay');
@@ -124,6 +253,7 @@ var _serverSynced=false;
 var _saveDebounceTimer=null;
 var _dbServerTs=null; // tracks server updated_at for conflict detection
 var _saveSeq=0; // sequence counter to ignore out-of-order fetch responses
+var _lastSyncedDB=null;
 var _editsKeysCache=null; // invalidated by setE/loadDB for memoized Object.keys(DB.edits)
 function _getEditsKeys(){if(!_editsKeysCache)_editsKeysCache=Object.keys(DB.edits||{});return _editsKeysCache;}
 function _invalidateEditsCache(){_editsKeysCache=null;}
@@ -154,6 +284,7 @@ async function loadDB(){
     });
     if(_migrated){saveDB();console.log('[migration] legacy contacts migrated');}
     _serverSynced=true;_invalidateEditsCache();
+    _lastSyncedDB = JSON.parse(JSON.stringify(DB));
   }catch(e){
     console.warn('Server fetch failed, using empty DB:',e.message);
   }finally{
@@ -178,45 +309,43 @@ function _saveDBNow(){
           return fetch('/api/data/db').then(function(r2){return r2.ok?r2.json():null;}).then(function(d){
             if(!d||typeof d!=='object'){showToast('⚠ خطای همگام‌سازی — لطفاً صفحه را رفرش کنید',5000);return;}
             if(d._serverTs)_dbServerTs=d._serverTs;
-            // Merge: local edits + weekEntries win over server (preserve unsaved work)
-            var merged=Object.assign({},DB,d);
-            merged.weekEntries=Object.assign({},d.weekEntries||{},DB.weekEntries||{});
-            // Don't let server revive locally-deleted entries
-            (DB._weDeletedKeys||[]).forEach(function(dk){delete merged.weekEntries[dk];});
-            // Smart edits merge using timestamps
-            var mEd=Object.assign({},d.edits||{});
-            var lEd=DB.edits||{};
-            Object.keys(lEd).forEach(function(k){
-              var le=lEd[k]||{};var se=mEd[k]||{};
-              if((le._ts||0)>=(se._ts||0))mEd[k]=le;
-              else mEd[k]=Object.assign({},le,se);
-            });
-            merged.edits=mEd;
-            // Preserve local new centers (DB.extra)
-            var _extMap={};
-            (d.extra||[]).forEach(function(x){_extMap[x.id]=x;});
-            (DB.extra||[]).forEach(function(x){_extMap[x.id]=x;});
-            merged.extra=Object.keys(_extMap).map(function(k){return _extMap[k];});
-            // Preserve local read=true for notifications on 409 retry
-            if(DB.notifications&&d.notifications){
+            
+            // Perform the diff-based merge so local changes are preserved
+            var merged = mergeDatabaseDiff(DB, d, _lastSyncedDB);
+            
+            if (d.notifications && DB.notifications && DB.notifications.length) {
               var _lr409={};DB.notifications.forEach(function(n){if(n.read)_lr409[n.id]=true;});
               merged.notifications=(d.notifications||[]).map(function(n){return _lr409[n.id]?Object.assign({},n,{read:true}):n;});
             }
             delete merged._serverTs;delete merged._clientTs;
             Object.keys(merged).forEach(function(k){DB[k]=merged[k];});
+            _lastSyncedDB = JSON.parse(JSON.stringify(DB));
             if(conflictBy)showToast('🔄 تغییرات '+conflictBy+' ادغام شد',3000);
+            
             // Retry save with updated timestamp
             var p2=JSON.parse(JSON.stringify(DB));
             if(_dbServerTs)p2._clientTs=_dbServerTs;
             return fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json','X-Cid':_sseClientId},body:JSON.stringify(p2)})
-              .then(function(r3){if(!r3.ok)return;return r3.json().then(function(res){if(res&&res._serverTs)_dbServerTs=res._serverTs;if(seq===_saveSeq)DB._weDeletedKeys=[];});})
+              .then(function(r3){
+                if(!r3.ok)return;
+                return r3.json().then(function(res){
+                  if(res&&res._serverTs)_dbServerTs=res._serverTs;
+                  if(seq===_saveSeq) {
+                    DB._weDeletedKeys=[];
+                    _lastSyncedDB = JSON.parse(JSON.stringify(DB));
+                  }
+                });
+              })
               .catch(function(){});
           }).catch(function(){showToast('⚠ خطای شبکه — لطفاً صفحه را رفرش کنید',5000);});
         });
       }
       return r.json().then(function(result){
         if(result&&result._serverTs&&seq===_saveSeq)_dbServerTs=result._serverTs;
-        if(seq===_saveSeq)DB._weDeletedKeys=[];
+        if(seq===_saveSeq) {
+          DB._weDeletedKeys=[];
+          _lastSyncedDB = JSON.parse(JSON.stringify(DB));
+        }
       });
     })
     .catch(function(e){console.warn('saveDB sync failed:',e.message);});
@@ -5648,19 +5777,85 @@ function _isSuperAdmin(){
 }
 function _isExpert(){return !_isManager();}
 
-// ── Permission engine (additive — empty permissions = full access) ──────────
-function _hasAccess(module){
-  if(_isManager())return true;
+// ── Permission engine (additive — empty permissions = fallback to role defaults) ──────────
+var _ROLE_DEFAULTS = {
+  'مدیر': {
+    modules: {
+      provinces: 'edit', weekplan: 'edit', calendar: 'edit', checklist: 'edit',
+      activity: 'edit', tasks: 'edit', mtr: 'edit', pricing: 'edit',
+      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'edit',
+      'trade-kpi': 'edit', kpi: 'edit', manager: 'edit', changelog: 'edit', wms: 'edit', letters: 'edit'
+    }
+  },
+  'سوپر ادمین': {
+    modules: {
+      provinces: 'edit', weekplan: 'edit', calendar: 'edit', checklist: 'edit',
+      activity: 'edit', tasks: 'edit', mtr: 'edit', pricing: 'edit',
+      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'edit',
+      'trade-kpi': 'edit', kpi: 'edit', manager: 'edit', changelog: 'edit', wms: 'edit', letters: 'edit'
+    }
+  },
+  'IT': {
+    modules: {
+      provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
+      activity: 'view', tasks: 'view', mtr: 'none', pricing: 'none',
+      proforma: 'none', support: 'view', hcp: 'view', hr: 'none',
+      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'edit', wms: 'none', letters: 'none'
+    }
+  },
+  'بازرگانی': {
+    modules: {
+      provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
+      activity: 'view', tasks: 'view', mtr: 'none', pricing: 'none',
+      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'none',
+      'trade-kpi': 'edit', kpi: 'none', manager: 'none', changelog: 'none', wms: 'edit', letters: 'edit'
+    }
+  },
+  'مالی': {
+    modules: {
+      provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
+      activity: 'view', tasks: 'view', mtr: 'edit', pricing: 'edit',
+      proforma: 'edit', support: 'none', hcp: 'none', hr: 'none',
+      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'view', letters: 'edit'
+    }
+  },
+  'کارشناس فروش': {
+    modules: {
+      provinces: 'view', weekplan: 'edit', calendar: 'edit', checklist: 'edit',
+      activity: 'view', tasks: 'edit', mtr: 'none', pricing: 'none',
+      proforma: 'none', support: 'edit', hcp: 'edit', hr: 'none',
+      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'none', letters: 'none'
+    }
+  },
+  'مهمان': {
+    modules: {
+      provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
+      activity: 'view', tasks: 'view', mtr: 'none', pricing: 'none',
+      proforma: 'none', support: 'none', hcp: 'none', hr: 'none',
+      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'none', letters: 'none'
+    }
+  }
+};
+
+function _getPermLevel(module){
+  if(_isManager())return 'edit';
   var perms=window._myPermissions||{};
-  if(!perms.modules)return true; // empty = full access (backward-compatible)
-  var level=perms.modules[module];
-  return level==='edit'||level==='view';
+  var modules=perms.modules||{};
+  var level=modules[module];
+  if(level===undefined){
+    var r=window._authUserRole||'کارشناس فروش';
+    var def=_ROLE_DEFAULTS[r];
+    if(def)level=def.modules[module];
+  }
+  return level||'none';
+}
+function _hasAccess(module){
+  var lvl=_getPermLevel(module);
+  return lvl==='edit'||lvl==='view';
 }
 function _canEdit(module){
-  if(_isManager())return true;
-  var perms=window._myPermissions||{};
-  if(!perms.modules)return true;
-  return perms.modules[module]==='edit';
+  var lvl=_getPermLevel(module);
+  return lvl==='edit';
 }
 function _getAllowedProvinces(allProvs){
   if(_isManager())return allProvs;
@@ -10530,6 +10725,17 @@ function doCleanAll(){
 
 /* ═══ public/js/manager.js ═══ */
 /* ═══ public/js/manager.js ═══ */
+// ═══ Safety fallbacks: these are defined in core.js / onboarding.js but guard
+//     against any loading-order or cache issue so init() never throws ReferenceError ═══
+if (typeof initSSE === 'undefined') {
+  window.initSSE = function() { console.warn('[CRM] initSSE stub — will retry'); };
+}
+if (typeof checkEmptyDB === 'undefined') {
+  window.checkEmptyDB = function() {};
+}
+if (typeof cleanupOrphanedEntries === 'undefined') {
+  window.cleanupOrphanedEntries = function() { return {removedWP:0,removedFU:0}; };
+}
 // ════════════════════════ INIT ════════════════════════
 var _typeFilterBuilt=false;
 function buildTypeFilter(){
@@ -12859,41 +13065,7 @@ function _obIncrTabCount(tab){
   }catch(e){}
 }
 function _showTabTutorial(tab){
-  var tut=_TAB_TUTORIALS[tab];
-  if(!tut)return;
-  if(_obGetTabCount(tab)>=3)return;
-  var ex=document.getElementById('_tabTutPanel');if(ex)ex.remove();
-  var remaining=3-_obGetTabCount(tab);
-  var cards=tut.steps.map(function(s){
-    return '<div style="background:rgba(255,255,255,.9);border-radius:8px;padding:9px 11px;flex:1;min-width:130px;max-width:210px;border:1px solid #c7d2fe">'
-      +'<div style="font-size:15px;margin-bottom:2px">'+s.icon+'</div>'
-      +'<div style="font-size:11px;font-weight:700;color:#1e1b4b;margin-bottom:2px">'+s.title+'</div>'
-      +'<div style="font-size:10px;color:#4b5563;line-height:1.5">'+s.text+'</div>'
-      +'</div>';
-  }).join('');
-  var html='<div id="_tabTutPanel" style="position:relative;z-index:10;background:linear-gradient(135deg,#eef2ff,#e0e7ff);border:1.5px solid #a5b4fc;border-radius:10px;padding:10px 14px;margin:8px 16px 4px">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px">'
-    +'<span style="font-size:12px;font-weight:700;color:#4338ca;white-space:nowrap">🎓 راهنمای '+tut.title+'</span>'
-    +'<span style="font-size:10px;color:#818cf8;flex:1">'+remaining+' بار دیگه نشون داده می‌شه</span>'
-    +'<button onclick="_dismissTabTutorial(\''+tab+'\')" style="font-size:11px;padding:4px 14px;background:#6366f1;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;white-space:nowrap;flex-shrink:0">✓ متوجه شدم</button>'
-    +'</div>'
-    +'<div style="display:flex;gap:7px;flex-wrap:wrap">'+cards+'</div>'
-    +'</div>';
-  // For provinces, inject before the provGrid/mainTable area
-  var panelMap={
-    home:'homePanel',weekplan:'wpPanel',tasks:'tasksPanel',calendar:'calPanel',
-    checklist:'ckPanel',activity:'actPanel',kpi:'kpiPanel',manager:'managerPanel',
-    changelog:'changelogPanel',mtr:'mtrPanel',pricing:'pricingPanel',proforma:'proformaPanel'
-  };
-  if(tab==='provinces'){
-    var fb=document.getElementById('filtersBar');
-    if(fb&&fb.parentNode){fb.parentNode.insertBefore(Object.assign(document.createElement('div'),{innerHTML:html}).firstChild,fb);}
-    return;
-  }
-  var panelId=panelMap[tab];
-  var panel=panelId?document.getElementById(panelId):null;
-  if(panel){panel.insertAdjacentHTML('afterbegin',html);}
-  else{document.body.insertAdjacentHTML('afterbegin',html);}
+  return;
 }
 function _dismissTabTutorial(tab){
   _obIncrTabCount(tab);
@@ -12906,151 +13078,9 @@ function _initOnboarding(){
 function _shouldShowOnboarding(){return false;}
 // ════════════════════════ END ONBOARDING ═════════════════════════════
 
-var _sse = null;
-var _sseReconnectTimer = null;
-var _sseReloadTimer = null;
-var _ssePendingBy = null;
+// initSSE moved to core.js
 
-function initSSE() {
-  if (_sse) return;
-  _sse = new EventSource('/api/events/stream?cid='+_sseClientId);
-  _sse.onmessage = function(e) {
-    try {
-      var data = JSON.parse(e.data);
-      if (data.type === 'db-updated') {
-        _sseReloadDB(data.by);
-      } else if (data.type === 'notif_new' && data.to === currentUser) {
-        _refreshNotifs();
-        if (data.msg) _firePushNotif('🔔 اعلان جدید', data.msg, 'notif-' + Date.now());
-      }
-    } catch(err) {}
-  };
-  _sse.onerror = function() {
-    _sse.close(); _sse = null;
-    clearTimeout(_sseReconnectTimer);
-    _sseReconnectTimer = setTimeout(initSSE, 8000);
-  };
-}
-
-function _sseReloadDB(byUser) {
-  if (!byUser) return;
-  // Skip own saves from THIS browser tab (not from Telegram)
-  var _isTgBot = byUser && byUser.indexOf(':bot') !== -1;
-  if (!_isTgBot && byUser === currentUser) return;
-  // Update who triggered the last sync (for toast message)
-  _ssePendingBy = _isTgBot ? byUser.replace(':bot','') : byUser;
-  // Debounce: coalesce multiple rapid events into one fetch+render
-  clearTimeout(_sseReloadTimer);
-  _sseReloadTimer = setTimeout(function() {
-    var triggeredBy = _ssePendingBy;
-    _ssePendingBy = null;
-    fetch('/api/data/db').then(function(r){ return r.ok ? r.json() : null; }).then(function(d) {
-      if (!d || typeof d !== 'object') return;
-      if (d._serverTs) _dbServerTs = d._serverTs;
-      var merged = Object.assign({}, DB, d);
-      merged.weekEntries = Object.assign({}, DB.weekEntries, d.weekEntries || {});
-      // Smart merge: local edits with newer _ts take priority over server version
-      var mergedEdits4 = Object.assign({}, d.edits || {});
-      var localEdits4 = DB.edits || {};
-      Object.keys(localEdits4).forEach(function(k) {
-        var le = localEdits4[k] || {}; var se = mergedEdits4[k] || {};
-        if ((le._ts || 0) >= (se._ts || 0)) mergedEdits4[k] = le;
-        else mergedEdits4[k] = Object.assign({}, le, se);
-      });
-      merged.edits = mergedEdits4;
-      // Preserve local read=true — SSE must not un-read notifications the user already opened
-      if (d.notifications && DB.notifications && DB.notifications.length) {
-        var _localRead={};
-        DB.notifications.forEach(function(n){if(n.read)_localRead[n.id]=true;});
-        merged.notifications=(d.notifications||[]).map(function(n){
-          return _localRead[n.id]?Object.assign({},n,{read:true}):n;
-        });
-      }
-      delete merged._serverTs; delete merged._clientTs;
-      Object.keys(merged).forEach(function(k) { DB[k] = merged[k]; });
-      // Only re-render if no pending user save (avoids clobbering active edits)
-      if (!_saveDebounceTimer) {
-        if (currentTab === 'weekplan') renderWeekPlan();
-        else if (currentTab === 'provinces') { renderDashboard(); renderTable(); }
-        else if (currentTab === 'activity') renderActivity();
-        else if (currentTab === 'kpi') renderKPIPanel();
-        else if (currentTab === 'manager') renderManagerPanel();
-      }
-      var _tgSuffix = triggeredBy && triggeredBy.endsWith(':bot') ? ' (تلگرام)' : '';
-      var _tgBy = triggeredBy ? triggeredBy.replace(':bot','') : null;
-      var name = _tgBy ? (USERS[_tgBy] || _tgBy) : 'کاربر دیگری';
-      showToast('🔄 ' + name + _tgSuffix + ' تغییراتی اعمال کرد', 2500);
-    }).catch(function() {});
-  }, 1500);
-}
-
-
-// ── پاک‌سازی ورودی‌های منسوخ (orphaned) ─────────────────────────
-function _getAllValidRecKeys(){
-  var valid=new Set();
-  // تهران
-  CENTERS.forEach(function(c){valid.add('center_'+c.id);});
-  // استانی
-  _buildPCCache();
-  Object.keys(_PC_CACHE).forEach(function(provId){
-    (_PC_CACHE[provId]||[]).forEach(function(c){valid.add('pc_'+c.id);});
-  });
-  // دستی
-  (DB.extra||[]).forEach(function(c){
-    var rtype=c.province_id==='tehran'?'center':'pc';
-    valid.add(rtype+'_'+c.id);
-  });
-  return valid;
-}
-
-function cleanupOrphanedEntries(showReport){
-  var valid=_getAllValidRecKeys();
-  if(!valid.size)return; // دیتابیس خالی، چیزی پاک نکن
-
-  var removedWP=0,removedFU=0;
-
-  // weekEntries پاک‌سازی
-  Object.keys(DB.weekEntries||{}).forEach(function(k){
-    var we=DB.weekEntries[k];
-    var rk=we.recKey||(we.rtype?we.rtype+'_'+we.rid:'');
-    if(rk&&!valid.has(rk)){
-      _weRemove(k);removedWP++;
-    }
-  });
-
-  // followupDate پاک‌سازی از edits مراکز حذف‌شده
-  Object.keys(DB.edits||{}).forEach(function(k){
-    if(!valid.has(k)&&DB.edits[k].followupDate){
-      delete DB.edits[k].followupDate;removedFU++;
-    }
-  });
-
-  if(removedWP||removedFU){
-    saveDB();
-    if(showReport)
-      showToast('🧹 پاک‌سازی: '+removedWP+' ورودی هفته و '+removedFU+' پیگیری منسوخ حذف شد',4000);
-  }else if(showReport){
-    showToast('✅ هیچ ورودی منسوخی یافت نشد');
-  }
-  return{removedWP:removedWP,removedFU:removedFU};
-}
-
-// نمایش راهنما اگر دیتابیس خالی است
-function checkEmptyDB(){
-  var totalCenters=CENTERS.length+Object.values(PC_RAW).reduce(function(s,a){return s+a.length;},0)+(DB.extra||[]).length;
-  var msg=document.getElementById('emptyDBMsg');
-  if(!msg)return;
-  var tw=document.querySelector('.table-wrap');
-  var pg=document.getElementById('provGrid');
-  if(totalCenters===0){
-    msg.style.display='block';
-    if(pg)pg.style.display='none';
-    if(tw)tw.style.display='none';
-  }else{
-    msg.style.display='none';
-    if(tw)tw.style.display='';
-  }
-}
+// _sseReloadDB moved to core.js
 
 // ═══════════════════════════════════════════════════════════════════
 

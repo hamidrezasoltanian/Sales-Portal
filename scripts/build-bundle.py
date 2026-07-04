@@ -43,11 +43,11 @@ with open(OUT, 'w', encoding='utf-8') as f:
     f.write(result)
 
 size = os.path.getsize(OUT)
-print(f'✅ {OUT} — {size:,} bytes ({len(FILES)} files)')
+print(f'OK {OUT} — {size:,} bytes ({len(FILES)} files)')
 
 # Syntax check
 r = subprocess.run(['node', '--check', OUT], capture_output=True, text=True)
 if r.returncode != 0:
     print('❌ Syntax error:', r.stderr)
     sys.exit(1)
-print('✅ Syntax OK')
+print('OK Syntax OK')
