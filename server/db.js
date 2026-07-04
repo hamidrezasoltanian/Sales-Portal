@@ -607,6 +607,45 @@ async function initSchema() {
   await query(`CREATE INDEX IF NOT EXISTS idx_we_week_id ON week_entries(week_id)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_we_added_by ON week_entries(added_by)`).catch(()=>{});
 
+  // Idempotent trigger to keep table columns synchronized with the JSONB value blob
+  await query(`
+    CREATE OR REPLACE FUNCTION sync_week_entries_columns()
+    RETURNS TRIGGER AS $$
+    BEGIN
+      NEW.id             := NEW.value->>'id';
+      NEW.week_id        := NEW.value->>'weekId';
+      NEW.rec_key        := NEW.value->>'recKey';
+      NEW.rtype          := NEW.value->>'rtype';
+      NEW.rid            := NEW.value->>'rid';
+      NEW.scheduled_date := NEW.value->>'scheduledDate';
+      NEW.action_type    := NEW.value->>'actionType';
+      NEW.added_by       := NEW.value->>'addedBy';
+      NEW.center_name    := NEW.value->>'centerName';
+      NEW.week_tag_id    := NEW.value->>'weekTagId';
+      NEW.done           := COALESCE((NEW.value->>'done')::boolean, false);
+      NEW.done_date      := NEW.value->>'doneDate';
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+  `).catch(e => console.error('[DB] create sync_week_entries_columns function failed:', e.message));
+
+  await query(`DROP TRIGGER IF EXISTS trg_sync_week_entries_columns ON week_entries`).catch(()=>{});
+  await query(`
+    CREATE TRIGGER trg_sync_week_entries_columns
+    BEFORE INSERT OR UPDATE ON week_entries
+    FOR EACH ROW
+    EXECUTE FUNCTION sync_week_entries_columns();
+  `).catch(e => console.error('[DB] create trigger failed:', e.message));
+
+  // Data recovery: Restore missing columnar values for existing entries using a dummy self-update
+  await query(`
+    UPDATE week_entries
+    SET value = value
+    WHERE (scheduled_date IS NULL AND value->>'scheduledDate' IS NOT NULL)
+       OR (week_id IS NULL AND value->>'weekId' IS NOT NULL)
+  `).catch(e => console.error('[DB] Existing entries data recovery update failed:', e.message));
+
+
   // ════════════════════════════════════════
   // NOTIFICATIONS — extracted from DB.notifications blob
   // ════════════════════════════════════════
