@@ -223,7 +223,7 @@ function renderProvList(){
 
   pg.innerHTML='';
   rows.forEach(function(d){pg.appendChild(d);});
-  var _rc=document.getElementById('rowCount');if(_rc)_rc.textContent=filtProvs.length+' استان'+(filtProvs.length<getAllowedProvinces(getAllProvinces()).length?' (فیلتر شده)':'')+(
+  var _rc=document.getElementById('rowCount');if(_rc)_rc.textContent=filtProvs.length+' استان'+(filtProvs.length<_getAllowedProvinces(getAllProvinces()).length?' (فیلتر شده)':'')+(
     _globalOwnerFilter?' (فیلتر: '+esc(USERS[_globalOwnerFilter]||_globalOwnerFilter)+')':'');
 }
 

@@ -1609,6 +1609,7 @@ function fmtExpiry(d){
 // daysLeft stays the same (calculation independent of calendar)
 
 async function loadS(){
+  S = seedState();
   try{
     const [prRes,whRes,cpRes,lotRes,txnRes,poRes,stRes]=await Promise.all([
       fetch('/api/wms/products'),
