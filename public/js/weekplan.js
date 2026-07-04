@@ -205,19 +205,85 @@ function _isSuperAdmin(){
 }
 function _isExpert(){return !_isManager();}
 
-// ── Permission engine (additive — empty permissions = full access) ──────────
-function _hasAccess(module){
-  if(_isManager())return true;
+// ── Permission engine (additive — empty permissions = fallback to role defaults) ──────────
+var _ROLE_DEFAULTS = {
+  'مدیر': {
+    modules: {
+      provinces: 'edit', weekplan: 'edit', calendar: 'edit', checklist: 'edit',
+      activity: 'edit', tasks: 'edit', mtr: 'edit', pricing: 'edit',
+      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'edit',
+      'trade-kpi': 'edit', kpi: 'edit', manager: 'edit', changelog: 'edit', wms: 'edit', letters: 'edit'
+    }
+  },
+  'سوپر ادمین': {
+    modules: {
+      provinces: 'edit', weekplan: 'edit', calendar: 'edit', checklist: 'edit',
+      activity: 'edit', tasks: 'edit', mtr: 'edit', pricing: 'edit',
+      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'edit',
+      'trade-kpi': 'edit', kpi: 'edit', manager: 'edit', changelog: 'edit', wms: 'edit', letters: 'edit'
+    }
+  },
+  'IT': {
+    modules: {
+      provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
+      activity: 'view', tasks: 'view', mtr: 'none', pricing: 'none',
+      proforma: 'none', support: 'view', hcp: 'view', hr: 'none',
+      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'edit', wms: 'none', letters: 'none'
+    }
+  },
+  'بازرگانی': {
+    modules: {
+      provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
+      activity: 'view', tasks: 'view', mtr: 'none', pricing: 'none',
+      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'none',
+      'trade-kpi': 'edit', kpi: 'none', manager: 'none', changelog: 'none', wms: 'edit', letters: 'edit'
+    }
+  },
+  'مالی': {
+    modules: {
+      provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
+      activity: 'view', tasks: 'view', mtr: 'edit', pricing: 'edit',
+      proforma: 'edit', support: 'none', hcp: 'none', hr: 'none',
+      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'view', letters: 'edit'
+    }
+  },
+  'کارشناس فروش': {
+    modules: {
+      provinces: 'view', weekplan: 'edit', calendar: 'edit', checklist: 'edit',
+      activity: 'view', tasks: 'edit', mtr: 'none', pricing: 'none',
+      proforma: 'none', support: 'edit', hcp: 'edit', hr: 'none',
+      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'none', letters: 'none'
+    }
+  },
+  'مهمان': {
+    modules: {
+      provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
+      activity: 'view', tasks: 'view', mtr: 'none', pricing: 'none',
+      proforma: 'none', support: 'none', hcp: 'none', hr: 'none',
+      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'none', letters: 'none'
+    }
+  }
+};
+
+function _getPermLevel(module){
+  if(_isManager())return 'edit';
   var perms=window._myPermissions||{};
-  if(!perms.modules)return true; // empty = full access (backward-compatible)
-  var level=perms.modules[module];
-  return level==='edit'||level==='view';
+  var modules=perms.modules||{};
+  var level=modules[module];
+  if(level===undefined){
+    var r=window._authUserRole||'کارشناس فروش';
+    var def=_ROLE_DEFAULTS[r];
+    if(def)level=def.modules[module];
+  }
+  return level||'none';
+}
+function _hasAccess(module){
+  var lvl=_getPermLevel(module);
+  return lvl==='edit'||lvl==='view';
 }
 function _canEdit(module){
-  if(_isManager())return true;
-  var perms=window._myPermissions||{};
-  if(!perms.modules)return true;
-  return perms.modules[module]==='edit';
+  var lvl=_getPermLevel(module);
+  return lvl==='edit';
 }
 function _getAllowedProvinces(allProvs){
   if(_isManager())return allProvs;
