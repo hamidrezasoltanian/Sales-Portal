@@ -445,24 +445,45 @@ function pfSearchCenter(q) {
   var qn = fNorm(q);
   var results = [];
 
-  // Tehran centers
-  if (typeof CENTERS !== 'undefined') {
-    CENTERS.forEach(function(c) {
-      if (results.length < 6 && fNorm(c.name).includes(qn)) {
-        results.push({ key: 'center_' + c.id, name: c.name });
+  function addResult(key, name) {
+    if (results.some(function(item) { return item.key === key; })) return;
+    results.push({ key: key, name: name });
+  }
+
+  // Extra centers (manually added)
+  if (typeof DB !== 'undefined' && DB.extra) {
+    DB.extra.forEach(function(c) {
+      var rtype = (c.province_id === 'tehran') ? 'center' : 'pc';
+      var name = _getCenterName(rtype, c.id) || c.name;
+      if (fNorm(name).indexOf(qn) !== -1) {
+        addResult(rtype + '_' + c.id, name);
       }
     });
   }
+
+  // Tehran centers
+  if (typeof CENTERS !== 'undefined') {
+    CENTERS.forEach(function(c) {
+      var name = _getCenterName('center', c.id) || c.name;
+      if (fNorm(name).indexOf(qn) !== -1) {
+        addResult('center_' + c.id, name);
+      }
+    });
+  }
+
   // Province centers
   if (typeof _PC_CACHE !== 'undefined') {
     Object.keys(_PC_CACHE).forEach(function(provId) {
       (_PC_CACHE[provId] || []).forEach(function(c) {
-        if (results.length < 10 && fNorm(c.name).includes(qn)) {
-          results.push({ key: 'pc_' + c.id, name: c.name });
+        var name = _getCenterName('pc', c.id) || c.name;
+        if (fNorm(name).indexOf(qn) !== -1) {
+          addResult('pc_' + c.id, name);
         }
       });
     });
   }
+
+  results = results.slice(0, 15);
 
   if (!results.length) { drop.style.display = 'none'; return; }
   drop.innerHTML = results.map(function(r) {

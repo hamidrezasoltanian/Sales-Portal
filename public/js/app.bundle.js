@@ -3299,7 +3299,7 @@ function getFiltered(){
   var rows=getProvCenters(provId);
   return rows.filter(function(r){
     var e=getE(rtype,r.id);
-    if(q&&!fMatch(q,r.name))return false;
+    if(q&&!fMatch(q,_getCenterName(rtype,r.id)))return false;
     if(fp&&String(e.potential||r.potential)!==fp)return false;
     var st=e.status||'بدون تماس';if(fs&&st!==fs)return false;
     var lead=(e.lead||r.lead||'').replace(/[ي]/g,'ی').replace(/[ك]/g,'ک').trim();if(fl&&lead!==fl)return false;
@@ -10224,7 +10224,7 @@ function gSearchQuery(q){
     _buildPCCache();
     (CENTERS||[]).forEach(function(c){
       if(res.length>=12)return;
-      var name=c.name||'';
+      var name=_getCenterName('center', c.id) || c.name || '';
       if(fNorm(name).indexOf(qn)!==-1){
         var e=getE('center',c.id)||{};
         var cid=c.id;
@@ -10234,7 +10234,7 @@ function gSearchQuery(q){
     var _gsAllowedProvs=(window._myPermissions&&window._myPermissions.provinces&&window._myPermissions.provinces.length)?window._myPermissions.provinces:null;
     Object.keys(_PC_CACHE||{}).forEach(function(pv){if(pv==='tehran')return;if(res.length>=12)return;if(_gsAllowedProvs&&_gsAllowedProvs.indexOf(pv)<0)return;(_PC_CACHE[pv]||[]).forEach(function(c){
       if(res.length>=12)return;
-      var name=c.name||c.center_name||'';
+      var name=_getCenterName('pc', c.id) || c.name || c.center_name || '';
       if(fNorm(name).indexOf(qn)!==-1){
         var e=getE('pc',c.id)||{};var cid=c.id;
         res.push({icon:'🏢',title:esc(name),sub:esc(e.status||c.province_name||''),action:function(){closeGSearch();openCenterModal('pc',cid);}});
@@ -10246,7 +10246,7 @@ function gSearchQuery(q){
       if(res.length>=12)return;
       var ertype=c.province_id==='tehran'?'center':'pc';
       if(ertype==='center'&&_mainCIds.has(String(c.id)))return;
-      var name=c.name||c.center_name||'';
+      var name=_getCenterName(ertype, c.id) || c.name || c.center_name || '';
       if(fNorm(name).indexOf(qn)!==-1){
         var e=getE(ertype,c.id)||{};var cid=c.id;var crt=ertype;
         res.push({icon:'➕',title:esc(name),sub:esc(e.status||c.province_name||'مرکز اضافه‌شده'),action:function(){closeGSearch();openCenterModal(crt,cid);}});

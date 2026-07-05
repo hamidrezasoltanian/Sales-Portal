@@ -14,7 +14,7 @@ function getFiltered(){
   var rows=getProvCenters(provId);
   return rows.filter(function(r){
     var e=getE(rtype,r.id);
-    if(q&&!fMatch(q,r.name))return false;
+    if(q&&!fMatch(q,_getCenterName(rtype,r.id)))return false;
     if(fp&&String(e.potential||r.potential)!==fp)return false;
     var st=e.status||'بدون تماس';if(fs&&st!==fs)return false;
     var lead=(e.lead||r.lead||'').replace(/[ي]/g,'ی').replace(/[ك]/g,'ک').trim();if(fl&&lead!==fl)return false;
