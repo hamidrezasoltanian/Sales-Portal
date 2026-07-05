@@ -1166,6 +1166,10 @@ router.post('/centers/merge', requirePermission('provinces', 'edit'), async (req
   try {
     await client.query('BEGIN');
 
+    // Build edit keys
+    const srcKey = sourceType === 'center' ? `center_${sourceId}` : `pc_${sourceId}`;
+    const tgtKey = targetType === 'center' ? `center_${targetId}` : `pc_${targetId}`;
+
     // Load CENTERS and PC_RAW
     const cmRes = await client.query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS','PC_RAW')");
     const cmData = {};
@@ -1188,10 +1192,6 @@ router.post('/centers/merge', requirePermission('provinces', 'edit'), async (req
     editsRes.rows.forEach(r  => { edits[r.center_key]   = r.data;  });
     tagsRes.rows.forEach(r   => { rTags[r.center_key]   = r.tags;  });
     notesRes.rows.forEach(r  => { noteMap[r.center_key] = r.notes; });
-
-    // Build edit keys
-    const srcKey = sourceType === 'center' ? `center_${sourceId}` : `pc_${sourceId}`;
-    const tgtKey = targetType === 'center' ? `center_${targetId}` : `pc_${targetId}`;
 
     // Merge edit data
     function mergeEditData(target, source) {
