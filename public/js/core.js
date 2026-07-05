@@ -101,6 +101,9 @@ function initSSE() {
       var data = JSON.parse(e.data);
       if (data.type === 'db-updated') {
         _sseReloadDB(data.by);
+      } else if (data.type === 'app-reload') {
+        if (typeof showToast === 'function') showToast('🔄 نسخه جدید بارگذاری شد. بازنشانی صفحه...', 3500);
+        setTimeout(function(){ location.reload(); }, 2500);
       } else if (data.type === 'notif_new' && data.to === currentUser) {
         if (typeof _refreshNotifs === 'function') _refreshNotifs();
         if (data.msg && typeof _firePushNotif === 'function') _firePushNotif('\uD83D\uDD14 اعلان جدید', data.msg, 'notif-' + Date.now());
@@ -127,27 +130,7 @@ function _sseReloadDB(byUser) {
     fetch('/api/data/db').then(function(r){ return r.ok ? r.json() : null; }).then(function(d) {
       if (!d || typeof d !== 'object') return;
       if (d._serverTs) _dbServerTs = d._serverTs;
-      var merged = Object.assign({}, DB, d);
-      merged.weekEntries = Object.assign({}, DB.weekEntries, d.weekEntries || {});
-      var mergedEdits4 = Object.assign({}, d.edits || {});
-      var localEdits4 = DB.edits || {};
-      var lastEdits4 = _lastSyncedDB.edits || {};
-      Object.keys(localEdits4).forEach(function(k) {
-        var le = localEdits4[k] || {}; var se = mergedEdits4[k] || {};
-        var lse = lastEdits4[k] || {};
-        if ((le._ts || 0) >= (se._ts || 0)) {
-          mergedEdits4[k] = le;
-        } else {
-          var mergedCenter = Object.assign({}, le, se);
-          Object.keys(le).forEach(function(field) {
-            if (lse && JSON.stringify(le[field]) !== JSON.stringify(lse[field])) {
-              mergedCenter[field] = le[field];
-            }
-          });
-          mergedEdits4[k] = mergedCenter;
-        }
-      });
-      merged.edits = mergedEdits4;
+      var merged = mergeDatabaseDiff(DB, d, _lastSyncedDB);
       if (d.notifications && DB.notifications && DB.notifications.length) {
         var _localRead={};
         DB.notifications.forEach(function(n){if(n.read)_localRead[n.id]=true;});
@@ -157,6 +140,7 @@ function _sseReloadDB(byUser) {
       }
       delete merged._serverTs; delete merged._clientTs;
       Object.keys(merged).forEach(function(k) { DB[k] = merged[k]; });
+      _lastSyncedDB = JSON.parse(JSON.stringify(DB));
       if (!_saveDebounceTimer) {
         if (currentTab === 'weekplan' && typeof renderWeekPlan === 'function') renderWeekPlan();
         else if (currentTab === 'provinces' && typeof renderDashboard === 'function') { renderDashboard(); if(typeof renderTable==='function')renderTable(); }

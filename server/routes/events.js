@@ -1,6 +1,6 @@
 'use strict';
 const express = require('express');
-const { requireAuth } = require('../auth');
+const { requireAuth, requireManager } = require('../auth');
 const router = express.Router();
 
 const _clients = new Set();
@@ -29,5 +29,10 @@ function broadcast(type, data, excludeCid) {
     try { c.res.write(msg); } catch(e) { _clients.delete(c); }
   });
 }
+
+router.post('/reload', requireAuth, requireManager, (req, res) => {
+  broadcast('app-reload', { at: Date.now() });
+  return res.json({ ok: true });
+});
 
 module.exports = { router, broadcast };
