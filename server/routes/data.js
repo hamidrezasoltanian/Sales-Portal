@@ -3,6 +3,7 @@
 const express = require('express');
 const { query, pool } = require('../db');
 const { requireAuth, requireManager } = require('../auth');
+const { requirePermission } = require('../permissions');
 let _broadcast = null;
 try { _broadcast = require('./events').broadcast; } catch(e) {}
 
@@ -782,7 +783,7 @@ router.get('/centers/master', async (req, res) => {
 });
 
 // PUT /api/data/centers/master
-router.put('/centers/master', requireManager, async (req, res) => {
+router.put('/centers/master', requirePermission('provinces', 'edit'), async (req, res) => {
   const { CENTERS, PC_RAW } = req.body || {};
   if (!CENTERS || !PC_RAW) {
     return res.status(400).json({ error: 'CENTERS و PC_RAW الزامی است' });
@@ -1156,7 +1157,7 @@ router.put('/kv/:key', async (req, res) => {
 });
 
 // POST /api/centers/merge  — merge source center into target
-router.post('/centers/merge', requireManager, async (req, res) => {
+router.post('/centers/merge', requirePermission('provinces', 'edit'), async (req, res) => {
   const { sourceType, sourceId, targetType, targetId } = req.body || {};
   if (!sourceId || !targetId) return res.status(400).json({ error: 'sourceId و targetId الزامی است' });
   if (sourceId === targetId) return res.status(400).json({ error: 'منبع و هدف یکی است' });
