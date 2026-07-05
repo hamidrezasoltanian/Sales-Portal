@@ -782,13 +782,13 @@ function recK(type,id){return type+'_'+id;}
 function getE(type,id){return DB.edits[recK(type,id)]||{};}
 function _getCenterName(type,id){
   var _over=(DB.edits[recK(type,id)]||{}).nameOverride;if(_over)return _over;
-  if(type==='center'){var c=CENTERS.find(function(x){return x.id===id;});if(c)return c.name;}
+  if(type==='center'){var c=CENTERS.find(function(x){return String(x.id)===String(id);});if(c)return c.name;}
   _buildPCCache();
-  var provId=id.split('||')[0];
+  var provId=(id+'').split('||')[0];
   var arr=_PC_CACHE[provId]||[];
-  var c2=arr.find(function(x){return x.id===id;});
+  var c2=arr.find(function(x){return String(x.id)===String(id);});
   if(c2)return c2.name;
-  var ex=(DB.extra||[]).find(function(x){return x.id===id;});
+  var ex=(DB.extra||[]).find(function(x){return String(x.id)===String(id);});
   return ex?ex.name:id;
 }
 function getCenterById(rtype,id){

@@ -286,7 +286,7 @@ function renderProvTable(){
     return arr.slice().sort(function(a,b){
       var ea=getE(rtype,a.id),eb=getE(rtype,b.id);
       var va,vb;
-      if(_sortField==='name'){va=a.name;vb=b.name;}
+      if(_sortField==='name'){va=_getCenterName(rtype,a.id);vb=_getCenterName(rtype,b.id);}
       else if(_sortField==='potential'){va=parseInt(ea.potential||a.potential||9);vb=parseInt(eb.potential||b.potential||9);}
       else if(_sortField==='status'){va=STATUS_LIST.indexOf(ea.status||'بدون تماس');vb=STATUS_LIST.indexOf(eb.status||'بدون تماس');}
       else if(_sortField==='followupDate'){va=ea.followupDate||'9999';vb=eb.followupDate||'9999';}
@@ -325,6 +325,7 @@ function renderProvTable(){
   })();
   body.innerHTML=data.length?data.map(function(r){
     var e=getE(rtype,r.id);
+    var displayName=_getCenterName(rtype,r.id);
     var st=e.status||'بدون تماس';var sc=stCls(st);
     var lead=e.lead||r.lead||'سرنخ';var lc=lCls(lead);
     var pot=e.potential!==undefined?e.potential:r.potential;
@@ -380,8 +381,8 @@ function renderProvTable(){
         +(e.biopsyScore?'<span class="biopsy-badge" title="پتانسیل بیوپسی (امتیاز ۶-۱۰+) — '+(e.biopsyReasons||[]).join(' • ')+'">🔬 '+e.biopsyScore+'</span>':'')
         +(e.competitor?'<span title="رقیب: '+esc(e.competitor)+'" style="display:inline-block;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:9px;padding:1px 7px;font-size:10px;font-weight:700;cursor:help;margin-right:3px">🤖 '+esc(e.competitor)+'</span>':'')
         +(function(){var _mi=typeof MTR_BY_CENTER!=='undefined'?MTR_BY_CENTER[r.id]:null;if(!_mi||!_mi.length)return '';var _ov=_mi.filter(function(x){return x.od>45;});var _warn=_mi.filter(function(x){return x.od>20&&x.od<=45;});var _col=_ov.length?'#dc2626':_warn.length?'#d97706':'#0ea5e9';return '<span title="مطالبات باز" style="background:'+_col+';color:var(--text-primary);border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:5px;cursor:default">💰 '+_mi.length+'</span>';})()
-        +'<button class="ctr-link" onclick="openCenterModal(\''+rtype+'\',\''+r.id+'\')">'+esc(r.name)+'</button>'
-        +'<button onclick="event.stopPropagation();openCallFocus(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')" title="پانل تماس سریع" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:.55;vertical-align:middle" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.55">📞</button>'
+        +'<button class="ctr-link" onclick="openCenterModal(\''+rtype+'\',\''+r.id+'\')">'+esc(displayName)+'</button>'
+        +'<button onclick="event.stopPropagation();openCallFocus(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')" title="پانل تماس سریع" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:.55;vertical-align:middle" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.55">📞</button>'
         +'<button onclick="event.stopPropagation();openPreCallBrief(\''+rtype+'\',\''+r.id+'\')" title="خلاصه قبل تماس" style="background:none;border:none;cursor:pointer;font-size:10px;padding:0 2px;opacity:.6">🎯</button>'
         +phoneHtml
         +(e.phones&&e.phones.length||e.address||e.contactName||(e.contacts&&e.contacts.length)?'<button onclick="event.stopPropagation();showContactPopup(event,\''+rtype+'\',\''+r.id+'\')" title="اطلاعات تماس" style="background:none;border:none;cursor:pointer;font-size:10px;padding:0 2px;color:#0369a1;vertical-align:middle">📋</button>':'')
@@ -400,11 +401,11 @@ function renderProvTable(){
         +STATUS_LIST.map(function(s,i){return'<option class="'+STATUS_CLS[i]+'"'+(s===st?' selected':'')+'>'+s+'</option>';}).join('')+'</select>'
         +'<span class="st-print">'+st+'</span></td>'
       +'<td style="white-space:nowrap">'+(_activeNoDate?'<span title="بدون تاریخ پیگیری" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f97316;margin-left:3px;vertical-align:middle"></span>':'')+'<input type="text" class="'+fdCls+'" value="'+fd+'" readonly onclick="openJDP(this,function(v){setE(\''+rtype+'\',\''+r.id+'\',\'followupDate\',v);this.value=v;renderBanner();renderProvTable();}.bind(this))" style="cursor:pointer;max-width:82px">'+'<button class="qfd-btn" onclick="event.stopPropagation();quickSetFd(\''+rtype+'\',\''+r.id+'\',1)" title="فردا">+۱</button>'+'<button class="qfd-btn" onclick="event.stopPropagation();quickSetFd(\''+rtype+'\',\''+r.id+'\',3)" title="۳ روز">+۳</button>'+'<button class="qfd-btn" onclick="event.stopPropagation();quickSetFd(\''+rtype+'\',\''+r.id+'\',7)" title="هفته">+۷</button></td>'
-      +'<td><button class="note-btn'+(notes.length?' has':'')+'" onclick="openNotes(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')">📝'+(notes.length?' '+notes.length:'')+'</button>'
+      +'<td><button class="note-btn'+(notes.length?' has':'')+'" onclick="openNotes(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">📝'+(notes.length?' '+notes.length:'')+'</button>'
         +'<input style="margin-right:4px;width:100px;border:1px solid var(--border-input);border-radius:4px;padding:2px 5px;font-size:10px;direction:rtl" placeholder="یادداشت سریع" onkeydown="if(event.key===\'Enter\'&&this.value.trim()){addNote(\''+rtype+'\',\''+r.id+'\',this.value,this);}">'
         +notePreview+'</td>'
-      +(function(){var _rk2=rtype+'_'+r.id;var _inWk=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk2;});return '<td><button class="btn-assignweek" style="'+(_inWk?'background:#7c3aed':'')+'" onclick="openAssignWeekForCenter(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')">'+(_inWk?'↪ در هفته':'📋 هفته')+'</button></td>';})()
-      +(function(){var _rk3=rtype+'_'+r.id;var _td=todayStr();var _inToday=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk3&&we.scheduledDate===_td;});return _inToday?'':'<button onclick="event.stopPropagation();quickAddToToday(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')" title="اضافه به برنامه امروز" style="font-size:10px;padding:1px 6px;border:1px solid #7c3aed;border-radius:4px;background:#f5f3ff;color:#7c3aed;cursor:pointer;margin-right:3px;font-family:inherit">+امروز</button>';})()
+      +(function(){var _rk2=rtype+'_'+r.id;var _inWk=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk2;});return '<td><button class="btn-assignweek" style="'+(_inWk?'background:#7c3aed':'')+'" onclick="openAssignWeekForCenter(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">'+(_inWk?'↪ در هفته':'📋 هفته')+'</button></td>';})()
+      +(function(){var _rk3=rtype+'_'+r.id;var _td=todayStr();var _inToday=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk3&&we.scheduledDate===_td;});return _inToday?'':'<button onclick="event.stopPropagation();quickAddToToday(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')" title="اضافه به برنامه امروز" style="font-size:10px;padding:1px 6px;border:1px solid #7c3aed;border-radius:4px;background:#f5f3ff;color:#7c3aed;cursor:pointer;margin-right:3px;font-family:inherit">+امروز</button>';})()
       +'<td>'+lastContactHtml+'</td>'
       +'</tr>';
   }).join(''):'<tr><td colspan="12" style="text-align:center;padding:40px;color:#94a3b8">نتیجه‌ای یافت نشد</td></tr>';
@@ -617,8 +618,9 @@ function renderKanban(){
       +'<div class="kanban-col-head '+H_CLS[idx]+'">'+st+' <span class="kanban-cnt">'+rows.length+'</span></div>'
       +'<div class="kanban-col-body">'+rows.map(function(r){
         var e=getE(rtype,r.id);var fd=e.followupDate||'';
+        var displayName=_getCenterName(rtype,r.id);
         return'<div class="kanban-card" draggable="true" ondragstart="event.dataTransfer.setData(\'id\',\''+r.id+'\')" onclick="openCenterModal(\''+rtype+'\',\''+r.id+'\')">'
-          +'<div class="kanban-card-name">'+esc(r.name)+'</div>'
+          +'<div class="kanban-card-name">'+esc(displayName)+'</div>'
           +'<div class="kanban-card-meta">'
           +'<span class="pot-badge pot-'+(e.potential||r.potential)+'">'+(e.potential||r.potential)+'</span>'
           +(e.biopsyScore?'<span class="biopsy-badge" title="پتانسیل بیوپسی (امتیاز: اینترونشنال=۱۰، رادیولوژی=۷، اورولوژی=۶) — '+(e.biopsyReasons||[]).join(' • ')+'">🔬 '+e.biopsyScore+'</span>':'')
@@ -646,7 +648,7 @@ function renderCards(){
   var data=getFiltered();
   if(_sortField){var _rtype2=rtype;data=data.slice().sort(function(a,b){
     var ea=getE(_rtype2,a.id),eb=getE(_rtype2,b.id);var va,vb;
-    if(_sortField==='name'){va=a.name;vb=b.name;}
+    if(_sortField==='name'){va=_getCenterName(_rtype2,a.id);vb=_getCenterName(_rtype2,b.id);}
     else if(_sortField==='potential'){va=parseInt(ea.potential||a.potential||9);vb=parseInt(eb.potential||b.potential||9);}
     else if(_sortField==='status'){va=STATUS_LIST.indexOf(ea.status||'بدون تماس');vb=STATUS_LIST.indexOf(eb.status||'بدون تماس');}
     else if(_sortField==='type'){va=ea.type||a.type||'ω';vb=eb.type||b.type||'ω';}
@@ -662,8 +664,9 @@ function renderCards(){
     var fd=e.followupDate||'';var lead=e.lead||r.lead||'';
     var notes=DB.notes[recK(rtype,r.id)]||[];
     var stall=isStalled(rtype,r.id);var ov=isOverdue(rtype,r.id);
+    var displayName=_getCenterName(rtype,r.id);
     return'<div class="data-card'+(stall?' danger':ov?' warn':'')+'" onclick="openCenterModal(\''+rtype+'\',\''+r.id+'\')">'
-      +'<div class="card-head"><span class="card-title">'+esc(r.name)+'</span>'
+      +'<div class="card-head"><span class="card-title">'+esc(displayName)+'</span>'
       +'<span class="pot-badge pot-'+(e.potential||r.potential)+'">'+(e.potential||r.potential)+'</span>'
       +(e.biopsyScore?'<span class="biopsy-badge" title="'+(e.biopsyReasons||[]).join(' • ')+ '">🔬 '+e.biopsyScore+'</span>':'')
       +'</div>'
@@ -713,8 +716,9 @@ function renderPipeline() {
         +'<div class="pipeline-col-body">'
         +items.slice(0,50).map(function(item){
           var owner=USERS[item.e.owner||item.r.owner||'']||'';
+          var displayName=_getCenterName(rtype,item.r.id);
           return'<div class="pipeline-card" style="border-right-color:'+ST_COLORS[idx]+'" onclick="openCenterModal(\''+rtype+'\',\''+item.r.id+'\')">'
-            +'<div class="pc-name">'+esc(item.r.name)+'</div>'
+            +'<div class="pc-name">'+esc(displayName)+'</div>'
             +'<div class="pc-meta">'+(owner?'👤 '+esc(owner):'')+(item.e.followupDate?' 📅 '+item.e.followupDate:'')+'</div>'
             +'</div>';
         }).join('')
@@ -833,9 +837,10 @@ function renderMobileList(data,rtype,today){
     var lastCls=daysSince===null?'color:var(--text-muted)':daysSince===0?'color:#16a34a;font-weight:600':daysSince<=7?'color:#0ea5e9':daysSince<=30?'color:#f59e0b':'color:#dc2626;font-weight:600';
     var lastLbl=daysSince===null?'—':daysSince===0?'امروز':daysSince+' روز پیش';
     var firstPhone=e.phones&&e.phones.length?e.phones[0]:'';
-    return'<div class="'+rowCls+'" data-rowid="'+r.id+'">'
+    var displayName=_getCenterName(rtype,r.id);
+    return'<div class="'+rowCls+'" data-rowid="' + r.id + '">'
       +'<div class="mob-ctr-r1">'
-        +'<button class="mob-ctr-name" onclick="openCenterModal(\''+rtype+'\',\''+r.id+'\')" title="باز کردن مرکز">'+esc(r.name)+'</button>'
+        +'<button class="mob-ctr-name" onclick="openCenterModal(\''+rtype+'\',\''+r.id+'\')" title="باز کردن مرکز">'+esc(displayName)+'</button>'
         +(e.competitor?'<span title="رقیب: '+esc(e.competitor)+'" style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:9px;padding:1px 6px;font-size:10px;font-weight:700;margin-right:4px">🤖</span>':'')
         +(isOverdue(rtype,r.id)?'<span title="پیگیری معوق" style="font-size:11px">🟠</span>':'')
         +(isStalled(rtype,r.id)&&st!=='قرارداد بسته شد'?'<span title="۳۰+ روز بدون فعالیت" style="font-size:11px">🔴</span>':'')
@@ -851,9 +856,9 @@ function renderMobileList(data,rtype,today){
         +'<input type="text" class="'+fdCls+'" value="'+fd+'" readonly placeholder="تاریخ پیگیری" onclick="openJDP(this,function(v){setE(\''+rtype+'\',\''+r.id+'\',\'followupDate\',v);this.value=v;renderBanner();renderMobileList(getFiltered(),\''+rtype+'\',todayStr());}.bind(this))" style="cursor:pointer">'
         +(firstPhone?'<a href="'+_phoneHref(firstPhone)+'" title="'+_phoneTitle()+'" onclick="event.stopPropagation()" class="mob-act-btn" style="text-decoration:none">📞</a>':'')
         +'<button class="mob-act-btn" onclick="openPreCallBrief(\''+rtype+'\',\''+r.id+'\')" title="خلاصه قبل تماس">🎯</button>'
-        +'<button class="mob-act-btn'+(notes.length?' primary':'')+'" onclick="openNotes(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')" title="یادداشت‌ها">📝'+(notes.length?' '+notes.length:'')+'</button>'
-        +'<button class="mob-act-btn" onclick="quickCallLog(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')" title="ثبت سریع تماس">📋</button>'
-        +(function(){var _rk2=rtype+'_'+r.id;var _inWk=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk2;});return '<button class="mob-act-btn'+(_inWk?' primary':'')+'" onclick="openAssignWeekForCenter(\''+rtype+'\',\''+r.id+'\',\''+esc(r.name)+'\')" title="افزودن به برنامه هفته">'+(_inWk?'↪':'📅')+'</button>';}())
+        +'<button class="mob-act-btn'+(notes.length?' primary':'')+'" onclick="openNotes(\''+rtype+'\',\''+esc(displayName)+'\')" title="یادداشت‌ها">📝'+(notes.length?' '+notes.length:'')+'</button>'
+        +'<button class="mob-act-btn" onclick="quickCallLog(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')" title="ثبت سریع تماس">📋</button>'
+        +(function(){var _rk2=rtype+'_'+r.id;var _inWk=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk2;});return '<button class="mob-act-btn'+(_inWk?' primary':'')+'" onclick="openAssignWeekForCenter(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')" title="افزودن به برنامه هفته">'+(_inWk?'↪':'📅')+'</button>';}())
         +'<span style="font-size:10px;'+lastCls+';margin-right:auto;padding-right:4px">'+lastLbl+'</span>'
       +'</div>'
     +'</div>';

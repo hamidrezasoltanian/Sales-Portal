@@ -1347,7 +1347,8 @@ html:not([data-theme="dark"]) body{
   align-items:center;gap:8px;flex-wrap:wrap;
   font-size:12px;font-weight:600;
   box-shadow:0 4px 20px rgba(99,102,241,.4);
-  position:relative;overflow:hidden
+  position:sticky;top:45px;z-index:90;
+  overflow:hidden
 }
 .bulk-toolbar::before{
   content:'';position:absolute;inset:0;

@@ -2222,44 +2222,53 @@ function _doBulkDelete(){
   var keys=Array.from(_selectedCenters);
   closeModal('bulkDelModal');
   var deleted=0;
+  var masterDeleted=0;
   keys.forEach(function(key){
     var parts=key.split('_');var rtype=parts[0];var id=parts.slice(1).join('_');
     var isExtra=(id.indexOf('_new_')>=0);
     _cleanCenterData(rtype,id);
     if(isExtra){
       DB.extra=(DB.extra||[]).filter(function(c){return c.id!==id;});
-    }else if(rtype==='center'){
-      for(var _ci=CENTERS.length-1;_ci>=0;_ci--){
-        var _cc=CENTERS[_ci];var _cid='c_'+(_cc.row||_cc.id||'');
-        if(_cid===id||String(_cc.id)===String(id)){CENTERS.splice(_ci,1);break;}
-      }
     }else{
-      var _provId=id.split('||')[0];var _row=Number(id.split('||')[1]);
-      PROVINCES.forEach(function(p){
-        if(p.id===_provId){
-          var _pname=p.name.replace(/[ي]/g,'ی').replace(/[ك]/g,'ک');
-          if(PC_RAW[_pname]){PC_RAW[_pname]=PC_RAW[_pname].filter(function(r){return(Array.isArray(r)?r[0]:r.row)!==_row;});}
-          if(PC_RAW[p.id]){PC_RAW[p.id]=PC_RAW[p.id].filter(function(r){return(Array.isArray(r)?r[0]:r.row)!==_row;});}
+      masterDeleted++;
+      if(rtype==='center'){
+        for(var _ci=CENTERS.length-1;_ci>=0;_ci--){
+          var _cc=CENTERS[_ci];var _cid='c_'+(_cc.row||_cc.id||'');
+          if(_cid===id||String(_cc.id)===String(id)){CENTERS.splice(_ci,1);break;}
         }
-      });
+      }else{
+        var _provId=id.split('||')[0];var _row=Number(id.split('||')[1]);
+        PROVINCES.forEach(function(p){
+          if(p.id===_provId){
+            var _pname=p.name.replace(/[ي]/g,'ی').replace(/[ك]/g,'ک');
+            if(PC_RAW[_pname]){PC_RAW[_pname]=PC_RAW[_pname].filter(function(r){return(Array.isArray(r)?r[0]:r.row)!==_row;});}
+            if(PC_RAW[p.id]){PC_RAW[p.id]=PC_RAW[p.id].filter(function(r){return(Array.isArray(r)?r[0]:r.row)!==_row;});}
+          }
+        });
+      }
     }
     deleted++;
   });
   saveDB();
   clearPCCache();_ALL_PROVS=null;_typeFilterBuilt=false;
-  var _newCENTERS=CENTERS.slice();
-  var _newPC_RAW={};Object.keys(PC_RAW).forEach(function(k){_newPC_RAW[k]=PC_RAW[k];});
-  fetch('/api/data/centers/master',{method:'PUT',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({CENTERS:_newCENTERS,PC_RAW:_newPC_RAW})
-  }).then(function(r){
-    if(!r.ok)console.error('[bulk delete] server save failed:',r.status);
+  if(masterDeleted>0){
+    var _newCENTERS=CENTERS.slice();
+    var _newPC_RAW={};Object.keys(PC_RAW).forEach(function(k){_newPC_RAW[k]=PC_RAW[k];});
+    fetch('/api/data/centers/master',{method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({CENTERS:_newCENTERS,PC_RAW:_newPC_RAW})
+    }).then(function(r){
+      if(!r.ok)console.error('[bulk delete] server save failed:',r.status);
+      clearCenterSelection();rebuildFilters();renderTable();
+      showToast('✅ '+deleted+' مرکز حذف شد');
+    }).catch(function(e){
+      console.error('[bulk delete]',e.message);
+      clearCenterSelection();rebuildFilters();renderTable();
+      showToast('✅ '+deleted+' مرکز حذف شد');
+    });
+  }else{
     clearCenterSelection();rebuildFilters();renderTable();
     showToast('✅ '+deleted+' مرکز حذف شد');
-  }).catch(function(e){
-    console.error('[bulk delete]',e.message);
-    clearCenterSelection();rebuildFilters();renderTable();
-    showToast('✅ '+deleted+' مرکز حذف شد');
-  });
+  }
 }
 
 
