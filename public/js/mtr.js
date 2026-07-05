@@ -2072,6 +2072,20 @@ function _updateCenterBulkBar(){
   if(_selectedCenters.size>0){
     bar.classList.add('active');
     if(cnt)cnt.textContent=_selectedCenters.size+' مرکز انتخاب شده';
+    var delBtn=document.getElementById('bulkDeleteBtn');
+    if(delBtn){
+      var hasMaster=Array.from(_selectedCenters).some(function(key){
+        var parts=key.split('_');
+        var id=parts.slice(1).join('_');
+        return id.indexOf('_new_')<0;
+      });
+      var canDeleteMaster=(typeof _canEdit==='function')&&_canEdit('provinces');
+      if(hasMaster && !canDeleteMaster){
+        delBtn.style.display='none';
+      }else{
+        delBtn.style.display='inline-block';
+      }
+    }
   }else{
     bar.classList.remove('active');
     var allCb=document.getElementById('selectAllCb');
