@@ -132,10 +132,21 @@ function _sseReloadDB(byUser) {
       merged.weekEntries = Object.assign({}, DB.weekEntries, d.weekEntries || {});
       var mergedEdits4 = Object.assign({}, d.edits || {});
       var localEdits4 = DB.edits || {};
+      var lastEdits4 = _lastSyncedDB.edits || {};
       Object.keys(localEdits4).forEach(function(k) {
         var le = localEdits4[k] || {}; var se = mergedEdits4[k] || {};
-        if ((le._ts || 0) >= (se._ts || 0)) mergedEdits4[k] = le;
-        else mergedEdits4[k] = Object.assign({}, le, se);
+        var lse = lastEdits4[k] || {};
+        if ((le._ts || 0) >= (se._ts || 0)) {
+          mergedEdits4[k] = le;
+        } else {
+          var mergedCenter = Object.assign({}, le, se);
+          Object.keys(le).forEach(function(field) {
+            if (lse && JSON.stringify(le[field]) !== JSON.stringify(lse[field])) {
+              mergedCenter[field] = le[field];
+            }
+          });
+          mergedEdits4[k] = mergedCenter;
+        }
       });
       merged.edits = mergedEdits4;
       if (d.notifications && DB.notifications && DB.notifications.length) {
@@ -434,8 +445,13 @@ function mergeDatabaseDiff(local, server, lastSynced) {
         merged.edits[k] = le;
       }
     } else {
-      var mergedCenter = Object.assign({}, se, le);
-      if ((le._ts || 0) < (se._ts || 0)) {
+      var leTs = le._ts || 0;
+      var seTs = se._ts || 0;
+      var mergedCenter;
+      if (leTs >= seTs) {
+        mergedCenter = Object.assign({}, se, le);
+      } else {
+        mergedCenter = Object.assign({}, le, se);
         Object.keys(le).forEach(function(field) {
           if (lse && JSON.stringify(le[field]) !== JSON.stringify(lse[field])) {
             mergedCenter[field] = le[field];
