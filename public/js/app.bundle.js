@@ -1765,6 +1765,10 @@ function onUserChange(u){
 
 // ════════════════════════ TAB SWITCH ══════════════════
 function switchTab(tab){
+  if(tab==='provinces' && currentTab==='provinces' && _currentProvId){
+    backToProvinces();
+    return;
+  }
   if(tab!=='provinces')_currentProvId=null;
   currentTab=tab;
   try{localStorage.setItem('_st',tab);}catch(e){}
@@ -1934,7 +1938,9 @@ function _navPush(tab, provId) {
 
 // دکمه بازگشت برنامه — اگر تاریخچه مرورگر وجود دارد از آن استفاده می‌کند
 function appBack() {
-  if (_navReady && window.history.length > 1) {
+  if (_currentProvId) {
+    backToProvinces();
+  } else if (_navReady && window.history.length > 1) {
     history.back();
   } else {
     backToProvinces();
@@ -4273,6 +4279,9 @@ function closeModal(id){
   if(m)m.remove();
   // also close JDP if open
   closeJDP();
+  if(id && id.indexOf('cm_')===0){
+    if(typeof renderTable==='function')renderTable();
+  }
 }
 function closeAllModals(){
   document.querySelectorAll('.m-overlay').forEach(function(m){m.remove();});
@@ -5288,7 +5297,7 @@ function openCenterModal(rtype,id){
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
     +'<div><label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">نام مرکز</label>'
     +'<input type="text" value="'+esc(displayName)+'" style="'+inpStyle+'" '
-    +'onchange="setE(\''+rtype+'\',\''+r.id+'\',\'nameOverride\',this.value.trim());var _m=document.getElementById(\'mo_cm_'+id+'\');var _th=_m?_m.querySelector(\'.m-head span\'):null;if(_th)_th.textContent=\'🏥 \'+(this.value.trim()||\''+esc(displayName)+'\')" placeholder="نام مرکز..."></div>'
+    +'onchange="setE(\''+rtype+'\',\''+r.id+'\',\'nameOverride\',this.value.trim());var _m=document.getElementById(\'mo_cm_'+id+'\');var _th=_m?_m.querySelector(\'.m-head span\'):null;if(_th)_th.textContent=\'🏥 \'+(this.value.trim()||\''+esc(displayName)+'\');if(typeof renderTable===\'function\')renderTable();" placeholder="نام مرکز..."></div>'
     +(isExtra
       ?'<div><label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">استان</label>'
         +'<select style="'+inpStyle+'" onchange="_updateExtraCenterProv(\''+r.id+'\',this.value)">'

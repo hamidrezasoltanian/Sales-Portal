@@ -27,6 +27,10 @@ function onUserChange(u){
 
 // ════════════════════════ TAB SWITCH ══════════════════
 function switchTab(tab){
+  if(tab==='provinces' && currentTab==='provinces' && _currentProvId){
+    backToProvinces();
+    return;
+  }
   if(tab!=='provinces')_currentProvId=null;
   currentTab=tab;
   try{localStorage.setItem('_st',tab);}catch(e){}
@@ -196,7 +200,9 @@ function _navPush(tab, provId) {
 
 // دکمه بازگشت برنامه — اگر تاریخچه مرورگر وجود دارد از آن استفاده می‌کند
 function appBack() {
-  if (_navReady && window.history.length > 1) {
+  if (_currentProvId) {
+    backToProvinces();
+  } else if (_navReady && window.history.length > 1) {
     history.back();
   } else {
     backToProvinces();

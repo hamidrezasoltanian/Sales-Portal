@@ -971,7 +971,7 @@ function openCenterModal(rtype,id){
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
     +'<div><label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">نام مرکز</label>'
     +'<input type="text" value="'+esc(displayName)+'" style="'+inpStyle+'" '
-    +'onchange="setE(\''+rtype+'\',\''+r.id+'\',\'nameOverride\',this.value.trim());var _m=document.getElementById(\'mo_cm_'+id+'\');var _th=_m?_m.querySelector(\'.m-head span\'):null;if(_th)_th.textContent=\'🏥 \'+(this.value.trim()||\''+esc(displayName)+'\')" placeholder="نام مرکز..."></div>'
+    +'onchange="setE(\''+rtype+'\',\''+r.id+'\',\'nameOverride\',this.value.trim());var _m=document.getElementById(\'mo_cm_'+id+'\');var _th=_m?_m.querySelector(\'.m-head span\'):null;if(_th)_th.textContent=\'🏥 \'+(this.value.trim()||\''+esc(displayName)+'\');if(typeof renderTable===\'function\')renderTable();" placeholder="نام مرکز..."></div>'
     +(isExtra
       ?'<div><label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">استان</label>'
         +'<select style="'+inpStyle+'" onchange="_updateExtraCenterProv(\''+r.id+'\',this.value)">'

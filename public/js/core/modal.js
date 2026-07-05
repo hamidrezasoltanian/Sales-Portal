@@ -26,6 +26,9 @@ function closeModal(id){
   if(m)m.remove();
   // also close JDP if open
   closeJDP();
+  if(id && id.indexOf('cm_')===0){
+    if(typeof renderTable==='function')renderTable();
+  }
 }
 function closeAllModals(){
   document.querySelectorAll('.m-overlay').forEach(function(m){m.remove();});
