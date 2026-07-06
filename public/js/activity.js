@@ -50,20 +50,19 @@ function filterDailyMonitor(){
 
   // 2. Collect centers where followupDate === today (not already seen)
   getAllProvinces().forEach(function(p) {
-    var rt = getProvType(p.id);
     getProvCenters(p.id).forEach(function(c) {
-      var e = getE(rt,c.id);
+      var e = getE(c.rtype,c.id);
       var owner = e.owner||c.owner||'';
       if(!owner) return;
       if(e.followupDate===today) {
-        var key = rt+'_'+c.id;
+        var key = c.rtype+'_'+c.id;
         if(!seenKeys.has(key)) {
           seenKeys.add(key);
-          var acts = _getTodayActivities(rt,c.id,today);
+          var acts = _getTodayActivities(c.rtype,c.id,today);
           var isDone = acts.length>0||(e.status==='قرارداد بسته شد'||e.status==='غیرفعال');
           todayEntries.push({
             key: 'followup_'+key,
-            rtype: rt,
+            rtype: c.rtype,
             rid: c.id,
             name: e.nameOverride||c.name||'?',
             owner: owner,

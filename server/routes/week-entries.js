@@ -65,11 +65,12 @@ router.post('/', requireAuth, async function (req, res) {
     if (!id || !weekId || !recKey || !rtype || !rid) {
       return res.status(400).json({ error: 'فیلدهای id، weekId، recKey، rtype و rid الزامی هستند' });
     }
-    const dbKey = `${weekId}:::${recKey}`;
+    const cleanRecKey = (recKey && recKey !== rtype && recKey.includes('_')) ? recKey : `${rtype}_${rid}`;
+    const dbKey = `${weekId}:::${rtype}:::${rid}`;
     const dbValue = {
       id,
       weekId,
-      recKey,
+      recKey: cleanRecKey,
       rtype,
       rid,
       scheduledDate: scheduledDate || null,
@@ -89,7 +90,7 @@ router.post('/', requireAuth, async function (req, res) {
         JSON.stringify(dbValue),
         id,
         weekId,
-        recKey,
+        cleanRecKey,
         rtype,
         rid,
         scheduledDate || null,
@@ -112,7 +113,7 @@ router.post('/', requireAuth, async function (req, res) {
 // ── PUT /api/week-entries/:id ──────────────────────────────────────────────
 router.put('/:id', requireAuth, async function (req, res) {
   try {
-    const { scheduledDate, done, doneDate, actionType, weekTagId, centerName } = req.body;
+    const { weekId, scheduledDate, done, doneDate, actionType, weekTagId, centerName } = req.body;
     const rowRes = await query('SELECT key, value FROM week_entries WHERE id = $1', [req.params.id]);
     if (!rowRes.rows.length) {
       return res.status(404).json({ error: 'ورودی برنامه هفته یافت نشد' });
@@ -120,6 +121,7 @@ router.put('/:id', requireAuth, async function (req, res) {
     const currentVal = rowRes.rows[0].value || {};
     const updatedVal = {
       ...currentVal,
+      ...(weekId !== undefined ? { weekId } : {}),
       ...(scheduledDate !== undefined ? { scheduledDate } : {}),
       ...(done !== undefined ? { done } : {}),
       ...(doneDate !== undefined ? { doneDate } : {}),
@@ -129,17 +131,19 @@ router.put('/:id', requireAuth, async function (req, res) {
     };
     const result = await query(
       `UPDATE week_entries
-       SET scheduled_date = CASE WHEN $9::boolean THEN $1 ELSE scheduled_date END,
-           done           = CASE WHEN $10::boolean THEN $2 ELSE done END,
-           done_date      = CASE WHEN $11::boolean THEN $3 ELSE done_date END,
-           action_type    = CASE WHEN $12::boolean THEN $4 ELSE action_type END,
-           week_tag_id    = CASE WHEN $13::boolean THEN $5 ELSE week_tag_id END,
-           center_name    = CASE WHEN $14::boolean THEN $6 ELSE center_name END,
-           value          = $7,
+       SET week_id        = CASE WHEN $15::boolean THEN $1 ELSE week_id END,
+           scheduled_date = CASE WHEN $9::boolean THEN $2 ELSE scheduled_date END,
+           done           = CASE WHEN $10::boolean THEN $3 ELSE done END,
+           done_date      = CASE WHEN $11::boolean THEN $4 ELSE done_date END,
+           action_type    = CASE WHEN $12::boolean THEN $5 ELSE action_type END,
+           week_tag_id    = CASE WHEN $13::boolean THEN $6 ELSE week_tag_id END,
+           center_name    = CASE WHEN $14::boolean THEN $7 ELSE center_name END,
+           value          = $8,
            updated_at     = NOW()
-       WHERE id = $8
+       WHERE id = $16
        RETURNING *`,
       [
+        weekId !== undefined ? weekId : null,
         scheduledDate !== undefined ? scheduledDate : null,
         done !== undefined ? done : null,
         doneDate !== undefined ? doneDate : null,
@@ -147,13 +151,14 @@ router.put('/:id', requireAuth, async function (req, res) {
         weekTagId !== undefined ? weekTagId : null,
         centerName !== undefined ? centerName : null,
         JSON.stringify(updatedVal),
-        req.params.id,
         scheduledDate !== undefined,
         done !== undefined,
         doneDate !== undefined,
         actionType !== undefined,
         weekTagId !== undefined,
         centerName !== undefined,
+        weekId !== undefined,
+        req.params.id,
       ]
     );
     res.json(rowToObj(result.rows[0]));

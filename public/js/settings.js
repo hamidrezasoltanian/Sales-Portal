@@ -817,80 +817,9 @@ function setE(type,id,field,val){var k=recK(type,id);if(!DB.edits[k])DB.edits[k]
   if(field==='status'&&val==='غیرفعال'&&!_undoSuppressed)setTimeout(function(){_promptLostReason(type,id);},400);
   if(field==='status'||field==='lead'||field==='potential')DB.edits[k]._lastActivity=nowTs();
   if(field==='status')DB.edits[k]._statusChangedTs=nowTs();
-  if(field==='followupDate'&&val){
-    (function(){
-      var _p=(val+'').split('/').map(Number);
-      if(_p.length!==3||isNaN(_p[0]))return;
-      var _ndMs=jMs(_p[0],_p[1],_p[2]);
-      Object.keys(DB.weekEntries||{}).forEach(function(_wk){
-        var _we=DB.weekEntries[_wk];
-        if(_we.rtype!==type||_we.rid!==id||_we.done)return;
-        var _wId=_wk.split(':::')[0];
-        var _mWk=(wpGetWeeks()||[]).find(function(w){return w.id===_wId;});
-        if(!_mWk)return;
-        var _wsMs=jMs(_mWk.wsArr[0],_mWk.wsArr[1],_mWk.wsArr[2]);
-        var _weMs=jMs(_mWk.weArr[0],_mWk.weArr[1],_mWk.weArr[2]);
-        if(_ndMs>=_wsMs&&_ndMs<=_weMs)_we.scheduledDate=val;
-      });
-      // Automatically schedule a week entry for this future week if it doesn't exist
-      var foundWeek=null;
-      var yrs=[_p[0]-1,_p[0],_p[0]+1];
-      for(var i=0;i<yrs.length;i++){
-        var yr=yrs[i];
-        var wks=typeof getYearWeeks==='function'?getYearWeeks(yr):[];
-        for(var j=0;j<wks.length;j++){
-          var wk=wks[j];
-          var wsMs=jMs(wk.wsArr[0],wk.wsArr[1],wk.wsArr[2]);
-          var weMs=jMs(wk.weArr[0],wk.weArr[1],wk.weArr[2]);
-          if(_ndMs>=wsMs&&_ndMs<=weMs){foundWeek=wk;break;}
-        }
-        if(foundWeek)break;
-      }
-      if(foundWeek){
-        if(typeof wpRemoveFromOtherWeeks==='function'){
-          wpRemoveFromOtherWeeks(type+'_'+id, foundWeek.id);
-        }
-        var newKey=wpEntryKey(foundWeek.id,type,id);
-        if(!DB.weekEntries[newKey]){
-          var cname=_getCenterName(type,id)||(type+'_'+id);
-          DB.weekEntries[newKey]={
-            scheduledDate:val,
-            done:false,
-            doneDate:null,
-            rtype:type,
-            rid:id,
-            recKey:type+'_'+id,
-            centerName:cname,
-            actionType:'call',
-            addedBy:currentUser
-          };
-          (function(_k,_we){
-            var _pts=_k.split(':::');
-            fetch('/api/week-entries',{
-              method:'POST',
-              headers:{'Content-Type':'application/json'},
-              body:JSON.stringify({
-                id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),
-                weekId:_pts[0],
-                recKey:_pts[1],
-                rtype:_we.rtype,
-                rid:_we.rid,
-                scheduledDate:_we.scheduledDate||null,
-                actionType:_we.actionType||'call',
-                done:false,
-                doneDate:null,
-                addedBy:_we.addedBy||currentUser,
-                centerName:_we.centerName||''
-              })
-            }).then(function(r){return r.ok?r.json():null;}).then(function(d){
-              if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;
-            }).catch(function(){});
-          })(newKey,DB.weekEntries[newKey]);
-        } else {
-          DB.weekEntries[newKey].scheduledDate=val;
-        }
-      }
-    })();
+
+  if(typeof wpReconcileFollowupDates==='function'){
+    wpReconcileFollowupDates();
   }
   saveDB();
   flashRow(id);

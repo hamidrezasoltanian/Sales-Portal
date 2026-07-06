@@ -57,24 +57,31 @@ function _buildPCCache(){
     var rt=(provId==='tehran'?'center':'pc')+'_'+c.id;
     return !overrides[rt]||overrides[rt]===provId;
   }):[];
+  var defaultType = provId === 'tehran' ? 'center' : 'pc';
+  base = base.map(function(c){return Object.assign({}, c, {rtype: defaultType});});
+
   var extras=(DB.extra||[]).filter(function(c){
     if(hasOverrides){var ek='extra_'+c.id;if(overrides[ek]&&overrides[ek]!==provId)return false;if(overrides[ek]===provId)return true;}
     return c.province_id===provId;
   });
+  extras = extras.map(function(c){return Object.assign({}, c, {rtype: defaultType});});
+
   // Centers from other provinces moved here via override
   var movedIn=[];
   if(hasOverrides){
+    var destProv=getAllProvinces().find(function(p){return p.id===provId;});
+    var destOwner=destProv?destProv.owner:null;
     Object.keys(overrides).forEach(function(rk){
       if(overrides[rk]!==provId)return;
       var parts=rk.split('_');var rt=parts[0];var cid=parts.slice(1).join('_');
       if(rt==='center'){
         var found=(window.CENTERS||[]).find(function(x){return String(x.id)===cid;});
-        if(found&&provId!=='tehran')movedIn.push(Object.assign({},found,{province_id:provId,rtype:'center'}));
+        if(found&&provId!=='tehran')movedIn.push(Object.assign({},found,{province_id:provId,rtype:'center',owner:destOwner}));
       } else if(rt==='pc'){
         Object.keys(_PC_CACHE).forEach(function(pid){
           if(pid===provId)return;
           var fc=(_PC_CACHE[pid]||[]).find(function(x){return x.id===cid;});
-          if(fc)movedIn.push(Object.assign({},fc,{province_id:provId}));
+          if(fc)movedIn.push(Object.assign({},fc,{province_id:provId,rtype:'pc',owner:destOwner}));
         });
       }
     });

@@ -32,7 +32,7 @@ async function loadDBFromSQL(client) {
     c.query('SELECT id, username as "userId", month, done, note FROM mission_log'),
     c.query('SELECT province_id as "provId", province_name as "provName", from_owner as "from", from_name as "fromName", to_owner as "to", to_name as "toName", action_date as "at", action_ts as "ts" FROM province_history ORDER BY id'),
     c.query('SELECT username as "userId", month, data FROM kpi_history'),
-    c.query('SELECT key, value FROM week_entries').catch(() => ({ rows: [] })),
+    c.query('SELECT id, key, value FROM week_entries').catch(() => ({ rows: [] })),
     c.query("SELECT updated_at FROM app_data WHERE key = '_db_meta'"),
     c.query('SELECT at, "by", rkey, field, val FROM change_log ORDER BY at DESC LIMIT 500').catch(() => ({ rows: [] })),
     c.query('SELECT a.center_key, h.name, h.specialty, a.role as title, h.phones FROM hcp_affiliations a JOIN healthcare_professionals h ON a.hcp_id = h.id').catch(() => ({ rows: [] }))
@@ -93,7 +93,12 @@ async function loadDBFromSQL(client) {
   });
 
   const weekEntries = {};
-  weR.rows.forEach(function(r) { weekEntries[r.key] = r.value; });
+  weR.rows.forEach(function(r) {
+    if (r.value) {
+      r.value.sqlId = r.id;
+    }
+    weekEntries[r.key] = r.value;
+  });
 
   const _serverTs = metaR.rows.length && metaR.rows[0].updated_at
     ? metaR.rows[0].updated_at.toISOString() : null;
@@ -160,19 +165,23 @@ router.put('/db', async (req, res) => {
 
     const _clientTs = body._clientTs || null;
     const user = req.user.username;
+    const _cid = req.headers['x-cid'] || '';
 
-    // Conflict detection: only block if a DIFFERENT user made changes since client's last known timestamp
-    // Same-user rapid sequential saves (dedup, auto-reminders, etc.) should never 409-loop
+    // Conflict detection: only block if a DIFFERENT user OR a DIFFERENT tab/client ID made changes since client's last known timestamp
     const metaRow = await client.query(
-      "SELECT updated_at, updated_by FROM app_data WHERE key = '_db_meta' FOR UPDATE"
+      "SELECT value, updated_at, updated_by FROM app_data WHERE key = '_db_meta' FOR UPDATE"
     );
     if (metaRow.rows.length && metaRow.rows[0].updated_at) {
       const serverTs = metaRow.rows[0].updated_at.toISOString();
       const lastSaveBy = metaRow.rows[0].updated_by || null;
-      console.log('[DEBUG CONFLICT]', { _clientTs, serverTs, lastSaveBy, user, match: serverTs === _clientTs, diffUser: lastSaveBy !== user });
-      if (_clientTs && serverTs !== _clientTs && lastSaveBy && lastSaveBy !== user) {
+      const lastVal = metaRow.rows[0].value || {};
+      const lastCid = lastVal.cid || null;
+
+      const isDifferentTab = (lastSaveBy !== user) || (lastCid && lastCid !== _cid);
+      console.log('[DEBUG CONFLICT]', { _clientTs, serverTs, lastSaveBy, lastCid, user, _cid, match: serverTs === _clientTs, isDifferentTab });
+      if (_clientTs && serverTs !== _clientTs && isDifferentTab) {
         await client.query('ROLLBACK');
-        return res.status(409).json({ error: 'تغییرات توسط کاربر دیگری ذخیره شده', by: lastSaveBy });
+        return res.status(409).json({ error: 'تغییرات توسط کاربر دیگری یا در تب دیگری ذخیره شده', by: lastSaveBy });
       }
     }
 
@@ -421,10 +430,10 @@ router.put('/db', async (req, res) => {
     // ── update _db_meta timestamp (used for conflict detection) ───────────────
     const upserted = await client.query(
       `INSERT INTO app_data (key, value, updated_at, updated_by)
-       VALUES ('_db_meta', '{}', NOW(), $1)
-       ON CONFLICT (key) DO UPDATE SET value = '{}', updated_at = NOW(), updated_by = $1
+       VALUES ('_db_meta', $1, NOW(), $2)
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2
        RETURNING updated_at`,
-      [user]
+      [JSON.stringify({ cid: _cid }), user]
     );
 
     // Save current version to history (keeps 30 days)
@@ -452,7 +461,6 @@ router.put('/db', async (req, res) => {
     await client.query('COMMIT');
 
     const _serverTs = upserted.rows[0].updated_at.toISOString();
-    const _cid = req.headers['x-cid'] || '';
     try { if (_broadcast) _broadcast('db-updated', { by: user, at: Date.now() }, _cid); } catch(e) {}
     return res.json({ ok: true, _serverTs });
   } catch (e) {
@@ -772,8 +780,17 @@ router.get('/centers/master', async (req, res) => {
     const result = await query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS', 'PC_RAW')");
     const out = { CENTERS: [], PC_RAW: {} };
     result.rows.forEach(function (row) {
-      if (row.key === 'CENTERS') out.CENTERS = row.data;
-      else if (row.key === 'PC_RAW') out.PC_RAW = row.data;
+      if (row.key === 'CENTERS') {
+        out.CENTERS = row.data;
+      } else if (row.key === 'PC_RAW') {
+        const raw = row.data || {};
+        const normalized = {};
+        for (const [k, v] of Object.entries(raw)) {
+          const normKey = k.replace(/[ي]/g, 'ی').replace(/[ك]/g, 'ک');
+          normalized[normKey] = v;
+        }
+        out.PC_RAW = normalized;
+      }
     });
     return res.json(out);
   } catch (e) {
@@ -1195,18 +1212,24 @@ router.post('/centers/merge', requirePermission('provinces', 'edit'), async (req
 
     // Merge edit data
     function mergeEditData(target, source) {
-      if (!source || !Object.keys(source).length) return target || {};
-      if (!target || !Object.keys(target).length) return { ...source };
-      const tc = target.contacts || [];
-      const seenNames = new Set(tc.map(c => c.name || ''));
-      for (const ct of (source.contacts || [])) {
-        if (!seenNames.has(ct.name || '')) {
-          tc.push(ct); seenNames.add(ct.name || '');
+      if (!source || typeof source !== 'object') return target || {};
+      if (!target || typeof target !== 'object') return { ...source };
+      
+      const tc = Array.isArray(target.contacts) ? target.contacts : [];
+      const seenNames = new Set(tc.map(c => (c && c.name) || ''));
+      
+      const srcContacts = Array.isArray(source.contacts) ? source.contacts : [];
+      for (const ct of srcContacts) {
+        if (!ct) continue;
+        const cName = ct.name || '';
+        if (!seenNames.has(cName)) {
+          tc.push(ct); seenNames.add(cName);
         } else {
-          const exc = tc.find(x => (x.name || '') === (ct.name || ''));
+          const exc = tc.find(x => x && (x.name || '') === cName);
           if (exc) {
             const ep = new Set(exc.phones || []);
-            for (const ph of (ct.phones || [])) {
+            const srcPhones = Array.isArray(ct.phones) ? ct.phones : [];
+            for (const ph of srcPhones) {
               if (ph && !ep.has(ph)) { (exc.phones = exc.phones || []).push(ph); ep.add(ph); }
             }
           }
@@ -1270,7 +1293,8 @@ router.post('/centers/merge', requirePermission('provinces', 'edit'), async (req
       const arr    = pname ? (PC_RAW[pname] || []) : [];
       if (arr.length) {
         const newArr = arr.filter((r, i) => {
-          const rrow = typeof r === 'object' ? (r.row ?? r.n ?? i) : r[0];
+          if (!r) return false;
+          const rrow = (typeof r === 'object' && !Array.isArray(r)) ? (r.row ?? r.n ?? i) : (Array.isArray(r) ? r[0] : r);
           return rrow !== rowNum;
         });
         if (newArr.length < arr.length) {

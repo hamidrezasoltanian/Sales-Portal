@@ -61,12 +61,12 @@ function j2g(jy,jm,jd){var jy2=jy+1595;var days=-355668+(365*jy2)+(Math.floor(jy
 function todayJ(){var d=new Date();return g2j(d.getFullYear(),d.getMonth()+1,d.getDate());}
 function todayStr(){var t=todayJ();return t[0]+'/'+p2(t[1])+'/'+p2(t[2]);}
 function jDays(jy,jm){if(jm<=6)return 31;if(jm<=11)return 30;return(((((jy-474)%2820)+474+38)*682)%2816<682)?30:29;}
-function jDow(jy,jm,jd){var g=j2g(jy,jm,jd);return(new Date(g[0],g[1]-1,g[2]).getDay()+1)%7;}
+function jDow(jy,jm,jd){var g=j2g(jy,jm,jd);return(new Date(g[0],g[1]-1,g[2],12).getDay()+1)%7;}
 function p2(n){return n<10?'0'+n:String(n);}
-function jMs(jy,jm,jd){var g=j2g(jy,jm,jd);return new Date(g[0],g[1]-1,g[2]).getTime();}
+function jMs(jy,jm,jd){var g=j2g(jy,jm,jd);return new Date(g[0],g[1]-1,g[2],12).getTime();}
 function msToJ(ms){if(!ms)return'';var d=new Date(ms);var j=g2j(d.getFullYear(),d.getMonth()+1,d.getDate());return j[0]+'/'+p2(j[1])+'/'+p2(j[2]);}
-function jAdd(jy,jm,jd,n){var g=j2g(jy,jm,jd);var d=new Date(g[0],g[1]-1,g[2]+n);return g2j(d.getFullYear(),d.getMonth()+1,d.getDate());}
-function wkStart(jy,jm,jd){var dow=jDow(jy,jm,jd);var g=j2g(jy,jm,jd);var d=new Date(g[0],g[1]-1,g[2]-dow);return g2j(d.getFullYear(),d.getMonth()+1,d.getDate());}
+function jAdd(jy,jm,jd,n){var g=j2g(jy,jm,jd);var d=new Date(g[0],g[1]-1,g[2]+n,12);return g2j(d.getFullYear(),d.getMonth()+1,d.getDate());}
+function wkStart(jy,jm,jd){var dow=jDow(jy,jm,jd);var g=j2g(jy,jm,jd);var d=new Date(g[0],g[1]-1,g[2]-dow,12);return g2j(d.getFullYear(),d.getMonth()+1,d.getDate());}
 
 // ════════════════════════ HELPERS ══════════════════════
 function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -631,4 +631,193 @@ function getWeekLabelForDate(dateStr){
   }
   return '';
 }
+
+// تولید همه هفته‌های یک سال شمسی
+function getYearWeeks(jYear){
+  var weeks=[];var today=todayJ();
+  var todayMs=jMs(today[0],today[1],today[2]);
+  // شروع از اولین شنبه قبل یا مساوی ۱ فروردین
+  var d1=[jYear,1,1];var dow=jDow(d1[0],d1[1],d1[2]);
+  var cur=jAdd(d1[0],d1[1],d1[2],-dow);
+  for(var wn=1;wn<=56;wn++){
+    var end=jAdd(cur[0],cur[1],cur[2],6);
+    if(cur[0]>jYear)break;
+    if(end[0]<jYear){cur=jAdd(cur[0],cur[1],cur[2],7);continue;}
+    var wsStr=cur[0]+'/'+p2(cur[1])+'/'+p2(cur[2]);
+    var weStr=end[0]+'/'+p2(end[1])+'/'+p2(end[2]);
+    var wsMs=jMs(cur[0],cur[1],cur[2]);var weMs=jMs(end[0],end[1],end[2]);
+    var isCurrent=wsMs<=todayMs&&weMs>=todayMs;var isPast=weMs<todayMs;
+    // label: هفته N — شهریور ۱ تا ۷
+    var mStart=J_MONTHS[cur[1]-1];var mEnd=J_MONTHS[end[1]-1];
+    var label='هفته '+wn+' — '+(cur[1]!==end[1]?mStart+' '+cur[2]+' تا '+mEnd+' '+end[2]:mStart+' '+cur[2]+' تا '+end[2]);
+    weeks.push({id:wsStr,num:wn,wsStr:wsStr,weStr:weStr,wsArr:cur.slice(),weArr:end.slice(),label:label,isCurrent:isCurrent,isPast:isPast,jYear:jYear});
+    cur=jAdd(cur[0],cur[1],cur[2],7);
+  }
+  return weeks;
+}
+
+// ساخت کلید weekEntries
+function wpEntryKey(weekId,rtype,rid){return weekId+':::'+rtype+':::'+rid;}
+function wpGetWeeks(){return getYearWeeks(typeof _wpYear !== 'undefined' && _wpYear ? _wpYear : todayJ()[0]);}
+
+// تطبیق خودکار تاریخ‌های پیگیری و ساخت ورودی‌های هفته گم‌شده
+function wpReconcileFollowupDates(){
+  if(!DB.edits)return 0;
+  var added=0, updated=0, moved=0;
+  Object.keys(DB.edits).forEach(function(k){
+    var e=DB.edits[k];
+    if(!e||!e.followupDate)return;
+    var pts=k.split('_');
+    if(pts.length<2)return;
+    var rtype=pts[0];
+    var rid=pts.slice(1).join('_');
+    
+    var val=e.followupDate;
+    var _p=val.split('/').map(Number);
+    if(_p.length!==3||isNaN(_p[0]))return;
+    var _ndMs=jMs(_p[0],_p[1],_p[2]);
+    
+    // پیدا کردن هفته مناسب برای این تاریخ پیگیری
+    var foundWeek=null;
+    var yrs=[_p[0]-1,_p[0],_p[0]+1];
+    for(var i=0;i<yrs.length;i++){
+      var yr=yrs[i];
+      var wks=getYearWeeks(yr);
+      for(var j=0;j<wks.length;j++){
+        var wk=wks[j];
+        var wsMs=jMs(wk.wsArr[0],wk.wsArr[1],wk.wsArr[2]);
+        var weMs=jMs(wk.weArr[0],wk.weArr[1],wk.weArr[2]);
+        if(_ndMs>=wsMs&&_ndMs<=weMs){foundWeek=wk;break;}
+      }
+      if(foundWeek)break;
+    }
+    if(!foundWeek)return;
+    
+    var correctKey=wpEntryKey(foundWeek.id,rtype,rid);
+    
+    // پیدا کردن ورودی‌های فعال (انجام‌نشده) موجود برای این مرکز
+    var activeKeys=[];
+    Object.keys(DB.weekEntries||{}).forEach(function(wkKey){
+      var we=DB.weekEntries[wkKey];
+      if(!we||we.done)return;
+      var weRk=we.recKey||(we.rtype+'_'+we.rid);
+      if(weRk===k) activeKeys.push(wkKey);
+    });
+    
+    if(activeKeys.length===0){
+      // سناریو ۱: هیچ ورودی فعالی در برنامه هفته وجود ندارد. یکی می‌سازیم!
+      if(!DB.weekEntries[correctKey]){
+        var cname=(typeof _getCenterName==='function'?_getCenterName(rtype,rid):'')||(rtype+'_'+rid);
+        DB.weekEntries[correctKey]={
+          scheduledDate:val,
+          done:false,
+          doneDate:null,
+          rtype:rtype,
+          rid:rid,
+          recKey:k,
+          centerName:cname,
+          actionType:'call',
+          addedBy:typeof currentUser!=='undefined'?currentUser:'system'
+        };
+        added++;
+        (function(_k,_we){
+          var _pts=_k.split(':::');
+          fetch('/api/week-entries',{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+              id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),
+              weekId:_pts[0],
+              recKey:_we.recKey || (_we.rtype+'_'+_we.rid),
+              rtype:_we.rtype,
+              rid:_we.rid,
+              scheduledDate:_we.scheduledDate||null,
+              actionType:_we.actionType||'call',
+              done:false,
+              doneDate:null,
+              addedBy:_we.addedBy||'system',
+              centerName:_we.centerName||''
+            })
+          }).then(function(r){return r.ok?r.json():null;}).then(function(d){
+            if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;
+          }).catch(function(){});
+        })(correctKey,DB.weekEntries[correctKey]);
+      }
+    } else {
+      // سناریو ۲: ورودی‌های فعالی وجود دارند. صحت هفته و تاریخ را بررسی می‌کنیم.
+      var hasCorrectEntry=false;
+      activeKeys.forEach(function(wkKey){
+        if(wkKey===correctKey){
+          hasCorrectEntry=true;
+          var we=DB.weekEntries[wkKey];
+          if(we.scheduledDate!==val){
+            // اصلاح روز قرارگیری در صورتی که تاریخ فیلد با تاریخ ورودی مغایرت دارد
+            we.scheduledDate=val;
+            updated++;
+            (function(_we, _wk){
+              var idOrKey = _we.sqlId || _we.id || _wk;
+              fetch('/api/week-entries/'+encodeURIComponent(idOrKey),{
+                method:'PUT',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({scheduledDate:val})
+              }).catch(function(){});
+            })(we, wkKey);
+          }
+        } else {
+          // در هفته اشتباه است! حذفش می‌کنیم.
+          var we=DB.weekEntries[wkKey];
+          (function(oldK, _we){
+            var idOrKey = _we.sqlId || _we.id || oldK;
+            fetch('/api/week-entries/'+encodeURIComponent(idOrKey),{method:'DELETE'}).catch(function(){});
+            delete DB.weekEntries[oldK];
+            if(!DB._weDeletedKeys)DB._weDeletedKeys=[];
+            if(DB._weDeletedKeys.indexOf(oldK)<0)DB._weDeletedKeys.push(oldK);
+          })(wkKey, we);
+          moved++;
+        }
+      });
+      
+      // اگر ورودی هفته اشتباه حذف شد و ورودی صحیح در هفته درست هنوز وجود ندارد، یکی ایجاد می‌کنیم
+      if(!hasCorrectEntry && !DB.weekEntries[correctKey]){
+        var cname=(typeof _getCenterName==='function'?_getCenterName(rtype,rid):'')||(rtype+'_'+rid);
+        DB.weekEntries[correctKey]={
+          scheduledDate:val,
+          done:false,
+          doneDate:null,
+          rtype:rtype,
+          rid:rid,
+          recKey:k,
+          centerName:cname,
+          actionType:'call',
+          addedBy:typeof currentUser!=='undefined'?currentUser:'system'
+        };
+        added++;
+        (function(_k,_we){
+          var _pts=_k.split(':::');
+          fetch('/api/week-entries',{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+              id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),
+              weekId:_pts[0],
+              recKey:_we.recKey || (_we.rtype+'_'+_we.rid),
+              rtype:_we.rtype,
+              rid:_we.rid,
+              scheduledDate:_we.scheduledDate||null,
+              actionType:_we.actionType||'call',
+              done:false,
+              doneDate:null,
+              addedBy:_we.addedBy||'system',
+              centerName:_we.centerName||''
+            })
+          }).then(function(r){return r.ok?r.json():null;}).then(function(d){
+            if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;
+          }).catch(function(){});
+        })(correctKey,DB.weekEntries[correctKey]);
+      }
+    }
+  });
+  return added + updated + moved;
+}
+
 

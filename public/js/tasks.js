@@ -72,7 +72,7 @@ function _ensureTasks(){
     var dp=(t.dueDate||_today).split('/').map(Number);
     var g=j2g(dp[0],dp[1],dp[2]);
     var days=t.recurring==='weekly'?7:30;
-    var nd=new Date(g[0],g[1]-1,g[2]+days);
+    var nd=new Date(g[0],g[1]-1,g[2]+days,12);
     var nj=g2j(nd.getFullYear(),nd.getMonth()+1,nd.getDate());
     var newDate=nj[0]+'/'+p2(nj[1])+'/'+p2(nj[2]);
     if(newDate<=_today)return;

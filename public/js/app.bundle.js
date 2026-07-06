@@ -62,12 +62,12 @@ function j2g(jy,jm,jd){var jy2=jy+1595;var days=-355668+(365*jy2)+(Math.floor(jy
 function todayJ(){var d=new Date();return g2j(d.getFullYear(),d.getMonth()+1,d.getDate());}
 function todayStr(){var t=todayJ();return t[0]+'/'+p2(t[1])+'/'+p2(t[2]);}
 function jDays(jy,jm){if(jm<=6)return 31;if(jm<=11)return 30;return(((((jy-474)%2820)+474+38)*682)%2816<682)?30:29;}
-function jDow(jy,jm,jd){var g=j2g(jy,jm,jd);return(new Date(g[0],g[1]-1,g[2]).getDay()+1)%7;}
+function jDow(jy,jm,jd){var g=j2g(jy,jm,jd);return(new Date(g[0],g[1]-1,g[2],12).getDay()+1)%7;}
 function p2(n){return n<10?'0'+n:String(n);}
-function jMs(jy,jm,jd){var g=j2g(jy,jm,jd);return new Date(g[0],g[1]-1,g[2]).getTime();}
+function jMs(jy,jm,jd){var g=j2g(jy,jm,jd);return new Date(g[0],g[1]-1,g[2],12).getTime();}
 function msToJ(ms){if(!ms)return'';var d=new Date(ms);var j=g2j(d.getFullYear(),d.getMonth()+1,d.getDate());return j[0]+'/'+p2(j[1])+'/'+p2(j[2]);}
-function jAdd(jy,jm,jd,n){var g=j2g(jy,jm,jd);var d=new Date(g[0],g[1]-1,g[2]+n);return g2j(d.getFullYear(),d.getMonth()+1,d.getDate());}
-function wkStart(jy,jm,jd){var dow=jDow(jy,jm,jd);var g=j2g(jy,jm,jd);var d=new Date(g[0],g[1]-1,g[2]-dow);return g2j(d.getFullYear(),d.getMonth()+1,d.getDate());}
+function jAdd(jy,jm,jd,n){var g=j2g(jy,jm,jd);var d=new Date(g[0],g[1]-1,g[2]+n,12);return g2j(d.getFullYear(),d.getMonth()+1,d.getDate());}
+function wkStart(jy,jm,jd){var dow=jDow(jy,jm,jd);var g=j2g(jy,jm,jd);var d=new Date(g[0],g[1]-1,g[2]-dow,12);return g2j(d.getFullYear(),d.getMonth()+1,d.getDate());}
 
 // ════════════════════════ HELPERS ══════════════════════
 function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -632,6 +632,195 @@ function getWeekLabelForDate(dateStr){
   }
   return '';
 }
+
+// تولید همه هفته‌های یک سال شمسی
+function getYearWeeks(jYear){
+  var weeks=[];var today=todayJ();
+  var todayMs=jMs(today[0],today[1],today[2]);
+  // شروع از اولین شنبه قبل یا مساوی ۱ فروردین
+  var d1=[jYear,1,1];var dow=jDow(d1[0],d1[1],d1[2]);
+  var cur=jAdd(d1[0],d1[1],d1[2],-dow);
+  for(var wn=1;wn<=56;wn++){
+    var end=jAdd(cur[0],cur[1],cur[2],6);
+    if(cur[0]>jYear)break;
+    if(end[0]<jYear){cur=jAdd(cur[0],cur[1],cur[2],7);continue;}
+    var wsStr=cur[0]+'/'+p2(cur[1])+'/'+p2(cur[2]);
+    var weStr=end[0]+'/'+p2(end[1])+'/'+p2(end[2]);
+    var wsMs=jMs(cur[0],cur[1],cur[2]);var weMs=jMs(end[0],end[1],end[2]);
+    var isCurrent=wsMs<=todayMs&&weMs>=todayMs;var isPast=weMs<todayMs;
+    // label: هفته N — شهریور ۱ تا ۷
+    var mStart=J_MONTHS[cur[1]-1];var mEnd=J_MONTHS[end[1]-1];
+    var label='هفته '+wn+' — '+(cur[1]!==end[1]?mStart+' '+cur[2]+' تا '+mEnd+' '+end[2]:mStart+' '+cur[2]+' تا '+end[2]);
+    weeks.push({id:wsStr,num:wn,wsStr:wsStr,weStr:weStr,wsArr:cur.slice(),weArr:end.slice(),label:label,isCurrent:isCurrent,isPast:isPast,jYear:jYear});
+    cur=jAdd(cur[0],cur[1],cur[2],7);
+  }
+  return weeks;
+}
+
+// ساخت کلید weekEntries
+function wpEntryKey(weekId,rtype,rid){return weekId+':::'+rtype+':::'+rid;}
+function wpGetWeeks(){return getYearWeeks(typeof _wpYear !== 'undefined' && _wpYear ? _wpYear : todayJ()[0]);}
+
+// تطبیق خودکار تاریخ‌های پیگیری و ساخت ورودی‌های هفته گم‌شده
+function wpReconcileFollowupDates(){
+  if(!DB.edits)return 0;
+  var added=0, updated=0, moved=0;
+  Object.keys(DB.edits).forEach(function(k){
+    var e=DB.edits[k];
+    if(!e||!e.followupDate)return;
+    var pts=k.split('_');
+    if(pts.length<2)return;
+    var rtype=pts[0];
+    var rid=pts.slice(1).join('_');
+    
+    var val=e.followupDate;
+    var _p=val.split('/').map(Number);
+    if(_p.length!==3||isNaN(_p[0]))return;
+    var _ndMs=jMs(_p[0],_p[1],_p[2]);
+    
+    // پیدا کردن هفته مناسب برای این تاریخ پیگیری
+    var foundWeek=null;
+    var yrs=[_p[0]-1,_p[0],_p[0]+1];
+    for(var i=0;i<yrs.length;i++){
+      var yr=yrs[i];
+      var wks=getYearWeeks(yr);
+      for(var j=0;j<wks.length;j++){
+        var wk=wks[j];
+        var wsMs=jMs(wk.wsArr[0],wk.wsArr[1],wk.wsArr[2]);
+        var weMs=jMs(wk.weArr[0],wk.weArr[1],wk.weArr[2]);
+        if(_ndMs>=wsMs&&_ndMs<=weMs){foundWeek=wk;break;}
+      }
+      if(foundWeek)break;
+    }
+    if(!foundWeek)return;
+    
+    var correctKey=wpEntryKey(foundWeek.id,rtype,rid);
+    
+    // پیدا کردن ورودی‌های فعال (انجام‌نشده) موجود برای این مرکز
+    var activeKeys=[];
+    Object.keys(DB.weekEntries||{}).forEach(function(wkKey){
+      var we=DB.weekEntries[wkKey];
+      if(!we||we.done)return;
+      var weRk=we.recKey||(we.rtype+'_'+we.rid);
+      if(weRk===k) activeKeys.push(wkKey);
+    });
+    
+    if(activeKeys.length===0){
+      // سناریو ۱: هیچ ورودی فعالی در برنامه هفته وجود ندارد. یکی می‌سازیم!
+      if(!DB.weekEntries[correctKey]){
+        var cname=(typeof _getCenterName==='function'?_getCenterName(rtype,rid):'')||(rtype+'_'+rid);
+        DB.weekEntries[correctKey]={
+          scheduledDate:val,
+          done:false,
+          doneDate:null,
+          rtype:rtype,
+          rid:rid,
+          recKey:k,
+          centerName:cname,
+          actionType:'call',
+          addedBy:typeof currentUser!=='undefined'?currentUser:'system'
+        };
+        added++;
+        (function(_k,_we){
+          var _pts=_k.split(':::');
+          fetch('/api/week-entries',{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+              id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),
+              weekId:_pts[0],
+              recKey:_we.recKey || (_we.rtype+'_'+_we.rid),
+              rtype:_we.rtype,
+              rid:_we.rid,
+              scheduledDate:_we.scheduledDate||null,
+              actionType:_we.actionType||'call',
+              done:false,
+              doneDate:null,
+              addedBy:_we.addedBy||'system',
+              centerName:_we.centerName||''
+            })
+          }).then(function(r){return r.ok?r.json():null;}).then(function(d){
+            if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;
+          }).catch(function(){});
+        })(correctKey,DB.weekEntries[correctKey]);
+      }
+    } else {
+      // سناریو ۲: ورودی‌های فعالی وجود دارند. صحت هفته و تاریخ را بررسی می‌کنیم.
+      var hasCorrectEntry=false;
+      activeKeys.forEach(function(wkKey){
+        if(wkKey===correctKey){
+          hasCorrectEntry=true;
+          var we=DB.weekEntries[wkKey];
+          if(we.scheduledDate!==val){
+            // اصلاح روز قرارگیری در صورتی که تاریخ فیلد با تاریخ ورودی مغایرت دارد
+            we.scheduledDate=val;
+            updated++;
+            (function(_we, _wk){
+              var idOrKey = _we.sqlId || _we.id || _wk;
+              fetch('/api/week-entries/'+encodeURIComponent(idOrKey),{
+                method:'PUT',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({scheduledDate:val})
+              }).catch(function(){});
+            })(we, wkKey);
+          }
+        } else {
+          // در هفته اشتباه است! حذفش می‌کنیم.
+          var we=DB.weekEntries[wkKey];
+          (function(oldK, _we){
+            var idOrKey = _we.sqlId || _we.id || oldK;
+            fetch('/api/week-entries/'+encodeURIComponent(idOrKey),{method:'DELETE'}).catch(function(){});
+            delete DB.weekEntries[oldK];
+            if(!DB._weDeletedKeys)DB._weDeletedKeys=[];
+            if(DB._weDeletedKeys.indexOf(oldK)<0)DB._weDeletedKeys.push(oldK);
+          })(wkKey, we);
+          moved++;
+        }
+      });
+      
+      // اگر ورودی هفته اشتباه حذف شد و ورودی صحیح در هفته درست هنوز وجود ندارد، یکی ایجاد می‌کنیم
+      if(!hasCorrectEntry && !DB.weekEntries[correctKey]){
+        var cname=(typeof _getCenterName==='function'?_getCenterName(rtype,rid):'')||(rtype+'_'+rid);
+        DB.weekEntries[correctKey]={
+          scheduledDate:val,
+          done:false,
+          doneDate:null,
+          rtype:rtype,
+          rid:rid,
+          recKey:k,
+          centerName:cname,
+          actionType:'call',
+          addedBy:typeof currentUser!=='undefined'?currentUser:'system'
+        };
+        added++;
+        (function(_k,_we){
+          var _pts=_k.split(':::');
+          fetch('/api/week-entries',{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+              id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),
+              weekId:_pts[0],
+              recKey:_we.recKey || (_we.rtype+'_'+_we.rid),
+              rtype:_we.rtype,
+              rid:_we.rid,
+              scheduledDate:_we.scheduledDate||null,
+              actionType:_we.actionType||'call',
+              done:false,
+              doneDate:null,
+              addedBy:_we.addedBy||'system',
+              centerName:_we.centerName||''
+            })
+          }).then(function(r){return r.ok?r.json():null;}).then(function(d){
+            if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;
+          }).catch(function(){});
+        })(correctKey,DB.weekEntries[correctKey]);
+      }
+    }
+  });
+  return added + updated + moved;
+}
+
 
 
 /* ═══ public/js/settings.js ═══ */
@@ -1454,80 +1643,9 @@ function setE(type,id,field,val){var k=recK(type,id);if(!DB.edits[k])DB.edits[k]
   if(field==='status'&&val==='غیرفعال'&&!_undoSuppressed)setTimeout(function(){_promptLostReason(type,id);},400);
   if(field==='status'||field==='lead'||field==='potential')DB.edits[k]._lastActivity=nowTs();
   if(field==='status')DB.edits[k]._statusChangedTs=nowTs();
-  if(field==='followupDate'&&val){
-    (function(){
-      var _p=(val+'').split('/').map(Number);
-      if(_p.length!==3||isNaN(_p[0]))return;
-      var _ndMs=jMs(_p[0],_p[1],_p[2]);
-      Object.keys(DB.weekEntries||{}).forEach(function(_wk){
-        var _we=DB.weekEntries[_wk];
-        if(_we.rtype!==type||_we.rid!==id||_we.done)return;
-        var _wId=_wk.split(':::')[0];
-        var _mWk=(wpGetWeeks()||[]).find(function(w){return w.id===_wId;});
-        if(!_mWk)return;
-        var _wsMs=jMs(_mWk.wsArr[0],_mWk.wsArr[1],_mWk.wsArr[2]);
-        var _weMs=jMs(_mWk.weArr[0],_mWk.weArr[1],_mWk.weArr[2]);
-        if(_ndMs>=_wsMs&&_ndMs<=_weMs)_we.scheduledDate=val;
-      });
-      // Automatically schedule a week entry for this future week if it doesn't exist
-      var foundWeek=null;
-      var yrs=[_p[0]-1,_p[0],_p[0]+1];
-      for(var i=0;i<yrs.length;i++){
-        var yr=yrs[i];
-        var wks=typeof getYearWeeks==='function'?getYearWeeks(yr):[];
-        for(var j=0;j<wks.length;j++){
-          var wk=wks[j];
-          var wsMs=jMs(wk.wsArr[0],wk.wsArr[1],wk.wsArr[2]);
-          var weMs=jMs(wk.weArr[0],wk.weArr[1],wk.weArr[2]);
-          if(_ndMs>=wsMs&&_ndMs<=weMs){foundWeek=wk;break;}
-        }
-        if(foundWeek)break;
-      }
-      if(foundWeek){
-        if(typeof wpRemoveFromOtherWeeks==='function'){
-          wpRemoveFromOtherWeeks(type+'_'+id, foundWeek.id);
-        }
-        var newKey=wpEntryKey(foundWeek.id,type,id);
-        if(!DB.weekEntries[newKey]){
-          var cname=_getCenterName(type,id)||(type+'_'+id);
-          DB.weekEntries[newKey]={
-            scheduledDate:val,
-            done:false,
-            doneDate:null,
-            rtype:type,
-            rid:id,
-            recKey:type+'_'+id,
-            centerName:cname,
-            actionType:'call',
-            addedBy:currentUser
-          };
-          (function(_k,_we){
-            var _pts=_k.split(':::');
-            fetch('/api/week-entries',{
-              method:'POST',
-              headers:{'Content-Type':'application/json'},
-              body:JSON.stringify({
-                id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),
-                weekId:_pts[0],
-                recKey:_pts[1],
-                rtype:_we.rtype,
-                rid:_we.rid,
-                scheduledDate:_we.scheduledDate||null,
-                actionType:_we.actionType||'call',
-                done:false,
-                doneDate:null,
-                addedBy:_we.addedBy||currentUser,
-                centerName:_we.centerName||''
-              })
-            }).then(function(r){return r.ok?r.json():null;}).then(function(d){
-              if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;
-            }).catch(function(){});
-          })(newKey,DB.weekEntries[newKey]);
-        } else {
-          DB.weekEntries[newKey].scheduledDate=val;
-        }
-      }
-    })();
+
+  if(typeof wpReconcileFollowupDates==='function'){
+    wpReconcileFollowupDates();
   }
   saveDB();
   flashRow(id);
@@ -1693,24 +1811,31 @@ function _buildPCCache(){
     var rt=(provId==='tehran'?'center':'pc')+'_'+c.id;
     return !overrides[rt]||overrides[rt]===provId;
   }):[];
+  var defaultType = provId === 'tehran' ? 'center' : 'pc';
+  base = base.map(function(c){return Object.assign({}, c, {rtype: defaultType});});
+
   var extras=(DB.extra||[]).filter(function(c){
     if(hasOverrides){var ek='extra_'+c.id;if(overrides[ek]&&overrides[ek]!==provId)return false;if(overrides[ek]===provId)return true;}
     return c.province_id===provId;
   });
+  extras = extras.map(function(c){return Object.assign({}, c, {rtype: defaultType});});
+
   // Centers from other provinces moved here via override
   var movedIn=[];
   if(hasOverrides){
+    var destProv=getAllProvinces().find(function(p){return p.id===provId;});
+    var destOwner=destProv?destProv.owner:null;
     Object.keys(overrides).forEach(function(rk){
       if(overrides[rk]!==provId)return;
       var parts=rk.split('_');var rt=parts[0];var cid=parts.slice(1).join('_');
       if(rt==='center'){
         var found=(window.CENTERS||[]).find(function(x){return String(x.id)===cid;});
-        if(found&&provId!=='tehran')movedIn.push(Object.assign({},found,{province_id:provId,rtype:'center'}));
+        if(found&&provId!=='tehran')movedIn.push(Object.assign({},found,{province_id:provId,rtype:'center',owner:destOwner}));
       } else if(rt==='pc'){
         Object.keys(_PC_CACHE).forEach(function(pid){
           if(pid===provId)return;
           var fc=(_PC_CACHE[pid]||[]).find(function(x){return x.id===cid;});
-          if(fc)movedIn.push(Object.assign({},fc,{province_id:provId}));
+          if(fc)movedIn.push(Object.assign({},fc,{province_id:provId,rtype:'pc',owner:destOwner}));
         });
       }
     });
@@ -3298,25 +3423,26 @@ function getFiltered(){
   var rtype=getProvType(provId);
   var rows=getProvCenters(provId);
   return rows.filter(function(r){
-    var e=getE(rtype,r.id);
-    if(q&&!fMatch(q,_getCenterName(rtype,r.id)))return false;
+    var crtype=r.rtype||rtype;
+    var e=getE(crtype,r.id);
+    if(q&&!fMatch(q,_getCenterName(crtype,r.id)))return false;
     if(fp&&String(e.potential||r.potential)!==fp)return false;
     var st=e.status||'بدون تماس';if(fs&&st!==fs)return false;
     var lead=(e.lead||r.lead||'').replace(/[ي]/g,'ی').replace(/[ك]/g,'ک').trim();if(fl&&lead!==fl)return false;
     var owner=e.owner||r.owner||'';if(effectiveOwner&&owner!==effectiveOwner)return false;
     if(ftp){var ctype=e.type||r.type||'';if(ctype.indexOf(ftp)<0)return false;}
-    if(ft){var tgs=rTags(rtype,r.id);if(tgs.indexOf(ft)===-1)return false;}
+    if(ft){var tgs=rTags(crtype,r.id);if(tgs.indexOf(ft)===-1)return false;}
     // Quick filter
-    if(_quickFilter==='overdue')return isOverdue(rtype,r.id);
+    if(_quickFilter==='overdue')return isOverdue(crtype,r.id);
     if(_quickFilter==='nofollowup'){return !e.followupDate;}
     if(_quickFilter==='noowner'){return !(e.owner||r.owner);}
-    if(_quickFilter==='stalled')return isStalled(rtype,r.id);
+    if(_quickFilter==='stalled')return isStalled(crtype,r.id);
     if(_quickFilter==='pot1'){return (e.potential||r.potential)==1;}
     if(_quickFilter==='inweek'){
-      var _rk=rtype+'_'+r.id;
+      var _rk=crtype+'_'+r.id;
       return Object.keys(DB.weekEntries||{}).some(function(k){
         var we=DB.weekEntries[k];
-        return (we.rtype===rtype&&we.rid===String(r.id))||(we.recKey&&(we.recKey===_rk||we.recKey.indexOf(':::'+rtype+':::'+r.id)>=0));
+        return (we.rtype===crtype&&we.rid===String(r.id))||(we.recKey&&(we.recKey===_rk||we.recKey.indexOf(':::'+crtype+':::'+r.id)>=0));
       });
     }
     return true;
@@ -3408,9 +3534,9 @@ function renderProvList(){
       
       html += '<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));gap:8px">';
       centers.forEach(function(c){
-        var e = getE(getProvType(p.id), c.id);
+        var e = getE(c.rtype, c.id);
         var st = e.status||'بدون تماس';
-        html += '<div onclick="openCenterModal(\''+getProvType(p.id)+'\',\''+c.id+'\')" style="padding:8px 10px;background:var(--bg-raised);border:1px solid var(--border-input);border-radius:8px;cursor:pointer;font-size:11px">';
+        html += '<div onclick="openCenterModal(\''+c.rtype+'\',\''+c.id+'\')" style="padding:8px 10px;background:var(--bg-raised);border:1px solid var(--border-input);border-radius:8px;cursor:pointer;font-size:11px">';
         html += '<div style="font-weight:600;margin-bottom:4px">🏥 '+esc(c.name)+'</div>';
         html += '<div style="color:var(--text-secondary)">'+esc(st)+'</div>';
         html += '</div>';
@@ -3486,7 +3612,7 @@ function renderProvList(){
     +(p.id==='tehran'?(function(){
       var tCs=getProvCenters('tehran');
       var potG={1:0,2:0,3:0,4:0};
-      tCs.forEach(function(cc){var ee=getE('center',cc.id);var lvl=ee.potential!==undefined?ee.potential:cc.potential||1;potG[lvl]=(potG[lvl]||0)+1;});
+      tCs.forEach(function(cc){var ee=getE(cc.rtype,cc.id);var lvl=ee.potential!==undefined?ee.potential:cc.potential||1;potG[lvl]=(potG[lvl]||0)+1;});
       var tot=tCs.length||1;
       var pClrs=['','#16a34a','#0ea5e9','#f59e0b','#dc2626'];
       var bars=[1,2,3,4].map(function(lvl){
@@ -3564,14 +3690,15 @@ function renderProvTable(){
   (function(){var wrap=tbl?tbl.parentElement:null;if(wrap)_renderRecentCenters(wrap);})();
   // Pin sort: pinned at top, then apply _sortField within each group
   var pinnedKeys=new Set((DB.settings&&DB.settings.pinnedCenters)||[]);
-  var pinnedData=data.filter(function(r){return pinnedKeys.has(recK(rtype,r.id));});
-  var unpinnedData=data.filter(function(r){return !pinnedKeys.has(recK(rtype,r.id));});
+  var pinnedData=data.filter(function(r){return pinnedKeys.has(recK(r.rtype||rtype,r.id));});
+  var unpinnedData=data.filter(function(r){return !pinnedKeys.has(recK(r.rtype||rtype,r.id));});
   function sortGroup(arr){
     if(!_sortField)return arr;
     return arr.slice().sort(function(a,b){
-      var ea=getE(rtype,a.id),eb=getE(rtype,b.id);
+      var art=a.rtype||rtype, brt=b.rtype||rtype;
+      var ea=getE(art,a.id),eb=getE(brt,b.id);
       var va,vb;
-      if(_sortField==='name'){va=_getCenterName(rtype,a.id);vb=_getCenterName(rtype,b.id);}
+      if(_sortField==='name'){va=_getCenterName(art,a.id);vb=_getCenterName(brt,b.id);}
       else if(_sortField==='potential'){va=parseInt(ea.potential||a.potential||9);vb=parseInt(eb.potential||b.potential||9);}
       else if(_sortField==='status'){va=STATUS_LIST.indexOf(ea.status||'بدون تماس');vb=STATUS_LIST.indexOf(eb.status||'بدون تماس');}
       else if(_sortField==='followupDate'){va=ea.followupDate||'9999';vb=eb.followupDate||'9999';}
@@ -3609,27 +3736,28 @@ function renderProvTable(){
     if(tbl){if(_compactTable)tbl.classList.add('compact-mode');else tbl.classList.remove('compact-mode');}
   })();
   body.innerHTML=data.length?data.map(function(r){
-    var e=getE(rtype,r.id);
-    var displayName=_getCenterName(rtype,r.id);
+    var crtype=r.rtype||rtype;
+    var e=getE(crtype,r.id);
+    var displayName=_getCenterName(crtype,r.id);
     var st=e.status||'بدون تماس';var sc=stCls(st);
     var lead=e.lead||r.lead||'سرنخ';var lc=lCls(lead);
     var pot=e.potential!==undefined?e.potential:r.potential;
     var fd=e.followupDate||'';
     var fdCls='fd-inp'+(fd&&fd<today?' ov':fd&&fd===today?' today':'');
     var _activeNoDate=!fd&&st!=='غیرفعال'&&st!=='قرارداد بسته شد';
-    var notes=DB.notes[recK(rtype,r.id)]||[];
+    var notes=DB.notes[recK(crtype,r.id)]||[];
     var lastNote=notes.length?notes[notes.length-1]:null;
     var notePreview=lastNote?'<div style="font-size:9px;color:var(--text-muted);max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px" title="'+esc(lastNote.text||'')+'">'+esc((lastNote.text||'').substring(0,40))+'</div>':'';
     // Row color class (Improvement 2)
     var rowCls='';
     if(st==='قرارداد بسته شد')rowCls='row-contracted';
-    else if(isOverdue(rtype,r.id))rowCls='row-overdue';
+    else if(isOverdue(crtype,r.id))rowCls='row-overdue';
     else if(fd&&fd<=addDaysToJalali(today,3))rowCls='row-upcoming';
-    else if(isStalled(rtype,r.id))rowCls='row-stalled';
+    else if(isStalled(crtype,r.id))rowCls='row-stalled';
     else if(!fd&&!rowCls)rowCls='row-no-followup';
     // Pin
-    var pinned=isPinned(rtype,r.id);
-    var pinBtn='<button onclick="event.stopPropagation();togglePin(\''+rtype+'\',\''+r.id+'\')" title="'+(pinned?'رفع پین':'پین')+'" style="background:none;border:none;cursor:pointer;font-size:12px;padding:0 2px;opacity:'+(pinned?'1':'.3')+'" class="pin-btn">⭐</button>';
+    var pinned=isPinned(crtype,r.id);
+    var pinBtn='<button onclick="event.stopPropagation();togglePin(\''+crtype+'\',\''+r.id+'\')" title="'+(pinned?'رفع پین':'پین')+'" style="background:none;border:none;cursor:pointer;font-size:12px;padding:0 2px;opacity:'+(pinned?'1':'.3')+'" class="pin-btn">⭐</button>';
     // Phone
     var firstPhone=e.phones&&e.phones.length?e.phones[0]:'';
     var phoneHtml=firstPhone?'<a href="'+_phoneHref(firstPhone)+'" title="'+_phoneTitle()+'" style="display:block;font-size:9px;color:#0369a1;direction:ltr;text-decoration:none;margin-top:1px" onclick="event.stopPropagation()">📞 '+esc(firstPhone)+'</a>':'';
@@ -3637,7 +3765,7 @@ function renderProvTable(){
     var lastTs=e._lastActivity||e._ts||0;
     var daysSince=lastTs?Math.floor((nowTs()-lastTs)/86400000):null;
     // Contact touchpoint counter from done weekEntries
-    var _recK2=rtype+'_'+r.id;
+    var _recK2=crtype+'_'+r.id;
     var _tpCalls=0,_tpVisits=0;
     Object.values(DB.weekEntries||{}).forEach(function(we){
       if(!we.done)return;
@@ -3658,39 +3786,39 @@ function renderProvTable(){
       :'<span style="color:#dc2626;font-size:10px;font-weight:600">'+daysSince+' روز 🔴</span>';
     lastContactHtml+=_tpHtml;
     return'<tr data-rowid="'+r.id+'" class="'+rowCls+'">'
-      +'<td><input type="checkbox" class="row-cb" data-rid="'+r.id+'" data-rtype="'+rtype+'" onclick="toggleCenterSelect(this,\''+r.id+'\')" style="width:14px;height:14px;cursor:pointer;accent-color:#2563eb"></td>'
+      +'<td><input type="checkbox" class="row-cb" data-rid="'+r.id+'" data-rtype="'+crtype+'" onclick="toggleCenterSelect(this,\''+r.id+'\')" style="width:14px;height:14px;cursor:pointer;accent-color:#2563eb"></td>'
       +'<td>'
         +pinBtn
-        +(isStalled(rtype,r.id)&&rowCls!=='row-contracted'?'<span class="risk-badge" title="۳۰+ روز بدون فعالیت">🔴</span>':'')
-        +(isOverdue(rtype,r.id)&&rowCls!=='row-stalled'?'<span class="risk-badge" title="پیگیری معوق">🟠</span>':'')
+        +(isStalled(crtype,r.id)&&rowCls!=='row-contracted'?'<span class="risk-badge" title="۳۰+ روز بدون فعالیت">🔴</span>':'')
+        +(isOverdue(crtype,r.id)&&rowCls!=='row-stalled'?'<span class="risk-badge" title="پیگیری معوق">🟠</span>':'')
         +(e.biopsyScore?'<span class="biopsy-badge" title="پتانسیل بیوپسی (امتیاز ۶-۱۰+) — '+(e.biopsyReasons||[]).join(' • ')+'">🔬 '+e.biopsyScore+'</span>':'')
         +(e.competitor?'<span title="رقیب: '+esc(e.competitor)+'" style="display:inline-block;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:9px;padding:1px 7px;font-size:10px;font-weight:700;cursor:help;margin-right:3px">🤖 '+esc(e.competitor)+'</span>':'')
         +(function(){var _mi=typeof MTR_BY_CENTER!=='undefined'?MTR_BY_CENTER[r.id]:null;if(!_mi||!_mi.length)return '';var _ov=_mi.filter(function(x){return x.od>45;});var _warn=_mi.filter(function(x){return x.od>20&&x.od<=45;});var _col=_ov.length?'#dc2626':_warn.length?'#d97706':'#0ea5e9';return '<span title="مطالبات باز" style="background:'+_col+';color:var(--text-primary);border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:5px;cursor:default">💰 '+_mi.length+'</span>';})()
-        +'<button class="ctr-link" onclick="openCenterModal(\''+rtype+'\',\''+r.id+'\')">'+esc(displayName)+'</button>'
-        +'<button onclick="event.stopPropagation();openCallFocus(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')" title="پانل تماس سریع" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:.55;vertical-align:middle" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.55">📞</button>'
-        +'<button onclick="event.stopPropagation();openPreCallBrief(\''+rtype+'\',\''+r.id+'\')" title="خلاصه قبل تماس" style="background:none;border:none;cursor:pointer;font-size:10px;padding:0 2px;opacity:.6">🎯</button>'
+        +'<button class="ctr-link" onclick="openCenterModal(\''+crtype+'\',\''+r.id+'\')">'+esc(displayName)+'</button>'
+        +'<button onclick="event.stopPropagation();openCallFocus(\''+crtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')" title="پانل تماس سریع" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:.55;vertical-align:middle" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.55">📞</button>'
+        +'<button onclick="event.stopPropagation();openPreCallBrief(\''+crtype+'\',\''+r.id+'\')" title="خلاصه قبل تماس" style="background:none;border:none;cursor:pointer;font-size:10px;padding:0 2px;opacity:.6">🎯</button>'
         +phoneHtml
-        +(e.phones&&e.phones.length||e.address||e.contactName||(e.contacts&&e.contacts.length)?'<button onclick="event.stopPropagation();showContactPopup(event,\''+rtype+'\',\''+r.id+'\')" title="اطلاعات تماس" style="background:none;border:none;cursor:pointer;font-size:10px;padding:0 2px;color:#0369a1;vertical-align:middle">📋</button>':'')
-        +renderTagCell(rtype,r.id)+'</td>'
-      +'<td><select class="pot-btn pot-'+pot+'" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'potential\',parseInt(this.value));this.className=\'pot-btn pot-\'+this.value">'
+        +(e.phones&&e.phones.length||e.address||e.contactName||(e.contacts&&e.contacts.length)?'<button onclick="event.stopPropagation();showContactPopup(event,\''+crtype+'\',\''+r.id+'\')" title="اطلاعات تماس" style="background:none;border:none;cursor:pointer;font-size:10px;padding:0 2px;color:#0369a1;vertical-align:middle">📋</button>':'')
+        +renderTagCell(crtype,r.id)+'</td>'
+      +'<td><select class="pot-btn pot-'+pot+'" onchange="setE(\''+crtype+'\',\''+r.id+'\',\'potential\',parseInt(this.value));this.className=\'pot-btn pot-\'+this.value">'
         +[1,2,3,4].map(function(v){return'<option value="'+v+'"'+(pot==v?' selected':'')+'>'+v+'</option>';}).join('')+'</select></td>'
-      +(function(){var typeOpts=[''].concat(TYPE_LIST);var curType=e.type||r.type||'';return'<td><select class="ed-inp" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'type\',this.value)" style="width:90px">'+typeOpts.map(function(t){return'<option value="'+t+'"'+(curType===t?' selected':'')+'>'+(t||'-- نوع --')+'</option>';}).join('')+'</select></td>';})()
+      +(function(){var typeOpts=[''].concat(TYPE_LIST);var curType=e.type||r.type||'';return'<td><select class="ed-inp" onchange="setE(\''+crtype+'\',\''+r.id+'\',\'type\',this.value)" style="width:90px">'+typeOpts.map(function(t){return'<option value="'+t+'"'+(curType===t?' selected':'')+'>'+(t||'-- نوع --')+'</option>';}).join('')+'</select></td>';})()
 
-      +'<td><select class="ed-sel '+lc+'" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'lead\',this.value);this.className=\'ed-sel \'+(window.LEAD_CLS[this.value]||\'lead-none\')">'
+      +'<td><select class="ed-sel '+lc+'" onchange="setE(\''+crtype+'\',\''+r.id+'\',\'lead\',this.value);this.className=\'ed-sel \'+(window.LEAD_CLS[this.value]||\'lead-none\')">'
         +LEAD_LIST.map(function(l){return'<option'+(l===lead?' selected':'')+'>'+l+'</option>';}).join('')+'</select>'+(e.oppGrade?'<span style="font-size:9px;font-weight:700;padding:1px 4px;border-radius:3px;background:'+(e.oppGrade==='A'?'#fef08a;color:#92400e':e.oppGrade==='B'?'#fed7aa;color:#c2410c':'#e2e8f0;color:#475569')+'">'+e.oppGrade+'</span>':'')+(e.oppValue?'<span style="font-size:9px;color:#7c3aed">'+e.oppValue+'M</span>':'')+(e.customerStatus==='dormant'?'<span title="مشتری خوابیده">😴</span>':'')+'</td>'
       +'<td style="white-space:nowrap"><span class="owner-dot" data-uid="'+encodeURIComponent(e.owner||r.owner||'')+'"></span>'
-      +'<select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'owner\',this.value);var _d=this.previousElementSibling;if(_d)_d.style.background=window.umGetColor?umGetColor(this.value):\'#e2e8f0\'">'
+      +'<select class="ed-sel" onchange="setE(\''+crtype+'\',\''+r.id+'\',\'owner\',this.value);var _d=this.previousElementSibling;if(_d)_d.style.background=window.umGetColor?umGetColor(this.value):\'#e2e8f0\'">'
       +'<option value="">—</option>'
         +(function(){var _act=typeof umGetActive==='function'?umGetActive():[];return _act.map(function(m){return'<option value="'+m.id+'"'+((e.owner||r.owner||'')==m.id?' selected':'')+'>'+m.name+'</option>';}).join('');})()+'</select>'+(function(){var _ow=e.owner||r.owner||'';if(!_ow)return'';var _om=_DEFAULT_MEMBERS&&_DEFAULT_MEMBERS.find(function(mm){return mm.id===_ow;});return(_om&&_om.active===false)?'<span title="مالک غیرفعال" style="font-size:9px;color:#dc2626;background:#fee2e2;border-radius:4px;padding:1px 4px;margin-right:2px">⚠</span>':'';})()+' </td>'
-      +'<td><select class="st-sel '+sc+'" onchange="onStatus(\''+rtype+'\',\''+r.id+'\',this)">'
+      +'<td><select class="st-sel '+sc+'" onchange="onStatus(\''+crtype+'\',\''+r.id+'\',this)">'
         +STATUS_LIST.map(function(s,i){return'<option class="'+STATUS_CLS[i]+'"'+(s===st?' selected':'')+'>'+s+'</option>';}).join('')+'</select>'
         +'<span class="st-print">'+st+'</span></td>'
-      +'<td style="white-space:nowrap">'+(_activeNoDate?'<span title="بدون تاریخ پیگیری" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f97316;margin-left:3px;vertical-align:middle"></span>':'')+'<input type="text" class="'+fdCls+'" value="'+fd+'" readonly onclick="openJDP(this,function(v){setE(\''+rtype+'\',\''+r.id+'\',\'followupDate\',v);this.value=v;renderBanner();renderProvTable();}.bind(this))" style="cursor:pointer;max-width:82px">'+'<button class="qfd-btn" onclick="event.stopPropagation();quickSetFd(\''+rtype+'\',\''+r.id+'\',1)" title="فردا">+۱</button>'+'<button class="qfd-btn" onclick="event.stopPropagation();quickSetFd(\''+rtype+'\',\''+r.id+'\',3)" title="۳ روز">+۳</button>'+'<button class="qfd-btn" onclick="event.stopPropagation();quickSetFd(\''+rtype+'\',\''+r.id+'\',7)" title="هفته">+۷</button></td>'
-      +'<td><button class="note-btn'+(notes.length?' has':'')+'" onclick="openNotes(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">📝'+(notes.length?' '+notes.length:'')+'</button>'
-        +'<input style="margin-right:4px;width:100px;border:1px solid var(--border-input);border-radius:4px;padding:2px 5px;font-size:10px;direction:rtl" placeholder="یادداشت سریع" onkeydown="if(event.key===\'Enter\'&&this.value.trim()){addNote(\''+rtype+'\',\''+r.id+'\',this.value,this);}">'
+      +'<td style="white-space:nowrap">'+(_activeNoDate?'<span title="بدون تاریخ پیگیری" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f97316;margin-left:3px;vertical-align:middle"></span>':'')+'<input type="text" class="'+fdCls+'" value="'+fd+'" readonly onclick="openJDP(this,function(v){setE(\''+crtype+'\',\''+r.id+'\',\'followupDate\',v);this.value=v;renderBanner();renderProvTable();}.bind(this))" style="cursor:pointer;max-width:82px">'+'<button class="qfd-btn" onclick="event.stopPropagation();quickSetFd(\''+crtype+'\',\''+r.id+'\',1)" title="فردا">+۱</button>'+'<button class="qfd-btn" onclick="event.stopPropagation();quickSetFd(\''+crtype+'\',\''+r.id+'\',3)" title="۳ روز">+۳</button>'+'<button class="qfd-btn" onclick="event.stopPropagation();quickSetFd(\''+crtype+'\',\''+r.id+'\',7)" title="هفته">+۷</button></td>'
+      +'<td><button class="note-btn'+(notes.length?' has':'')+'" onclick="openNotes(\''+crtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">📝'+(notes.length?' '+notes.length:'')+'</button>'
+        +'<input style="margin-right:4px;width:100px;border:1px solid var(--border-input);border-radius:4px;padding:2px 5px;font-size:10px;direction:rtl" placeholder="یادداشت سریع" onkeydown="if(event.key===\'Enter\'&&this.value.trim()){addNote(\''+crtype+'\',\''+r.id+'\',this.value,this);}">'
         +notePreview+'</td>'
-      +(function(){var _rk2=rtype+'_'+r.id;var _inWk=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk2;});return '<td><button class="btn-assignweek" style="'+(_inWk?'background:#7c3aed':'')+'" onclick="openAssignWeekForCenter(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">'+(_inWk?'↪ در هفته':'📋 هفته')+'</button></td>';})()
-      +(function(){var _rk3=rtype+'_'+r.id;var _td=todayStr();var _inToday=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk3&&we.scheduledDate===_td;});return _inToday?'':'<button onclick="event.stopPropagation();quickAddToToday(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')" title="اضافه به برنامه امروز" style="font-size:10px;padding:1px 6px;border:1px solid #7c3aed;border-radius:4px;background:#f5f3ff;color:#7c3aed;cursor:pointer;margin-right:3px;font-family:inherit">+امروز</button>';})()
+      +(function(){var _rk2=crtype+'_'+r.id;var _inWk=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk2;});return '<td><button class="btn-assignweek" style="'+(_inWk?'background:#7c3aed':'')+'" onclick="openAssignWeekForCenter(\''+crtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">'+(_inWk?'↪ در هفته':'📋 هفته')+'</button></td>';})()
+      +(function(){var _rk3=crtype+'_'+r.id;var _td=todayStr();var _inToday=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk3&&we.scheduledDate===_td;});return _inToday?'':'<button onclick="event.stopPropagation();quickAddToToday(\''+crtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')" title="اضافه به برنامه امروز" style="font-size:10px;padding:1px 6px;border:1px solid #7c3aed;border-radius:4px;background:#f5f3ff;color:#7c3aed;cursor:pointer;margin-right:3px;font-family:inherit">+امروز</button>';})()
       +'<td>'+lastContactHtml+'</td>'
       +'</tr>';
   }).join(''):'<tr><td colspan="12" style="text-align:center;padding:40px;color:#94a3b8">نتیجه‌ای یافت نشد</td></tr>';
@@ -3885,8 +4013,9 @@ function renderKanban(){
   kb.style.display='';
   var rtype=getProvType(_currentProvId);
   var data=getFiltered();
-  if(_sortField){var _rktype=rtype;data=data.slice().sort(function(a,b){
-    var ea=getE(_rktype,a.id),eb=getE(_rktype,b.id);var va,vb;
+  if(_sortField){data=data.slice().sort(function(a,b){
+    var art=a.rtype||rtype, brt=b.rtype||rtype;
+    var ea=getE(art,a.id),eb=getE(brt,b.id);var va,vb;
     if(_sortField==='name'){va=a.name;vb=b.name;}
     else if(_sortField==='potential'){va=parseInt(ea.potential||a.potential||9);vb=parseInt(eb.potential||b.potential||9);}
     else if(_sortField==='type'){va=ea.type||a.type||'ω';vb=eb.type||b.type||'ω';}
@@ -3896,15 +4025,16 @@ function renderKanban(){
     if(va<vb)return -_sortDir;if(va>vb)return _sortDir;return 0;
   });}
   var groups={};STATUS_LIST.forEach(function(s){groups[s]=[];});
-  data.forEach(function(r){var st=getE(rtype,r.id).status||'بدون تماس';(groups[st]=groups[st]||[]).push(r);});
+  data.forEach(function(r){var crtype=r.rtype||rtype;var st=getE(crtype,r.id).status||'بدون تماس';(groups[st]=groups[st]||[]).push(r);});
   kb.innerHTML='<div class="kanban-board">'+STATUS_LIST.map(function(st,idx){
     var rows=groups[st]||[];
     return'<div class="kanban-col" ondragover="event.preventDefault();this.classList.add(\'kanban-over\')" ondragleave="this.classList.remove(\'kanban-over\')" ondrop="event.preventDefault();this.classList.remove(\'kanban-over\');onKbDrop(event,\''+rtype+'\',\''+st+'\')">'
       +'<div class="kanban-col-head '+H_CLS[idx]+'">'+st+' <span class="kanban-cnt">'+rows.length+'</span></div>'
       +'<div class="kanban-col-body">'+rows.map(function(r){
-        var e=getE(rtype,r.id);var fd=e.followupDate||'';
-        var displayName=_getCenterName(rtype,r.id);
-        return'<div class="kanban-card" draggable="true" ondragstart="event.dataTransfer.setData(\'id\',\''+r.id+'\')" onclick="openCenterModal(\''+rtype+'\',\''+r.id+'\')">'
+        var crtype=r.rtype||rtype;
+        var e=getE(crtype,r.id);var fd=e.followupDate||'';
+        var displayName=_getCenterName(crtype,r.id);
+        return'<div class="kanban-card" draggable="true" ondragstart="event.dataTransfer.setData(\'id\',\''+r.id+'\');event.dataTransfer.setData(\'rtype\',\''+crtype+'\')" onclick="openCenterModal(\''+crtype+'\',\''+r.id+'\')">'
           +'<div class="kanban-card-name">'+esc(displayName)+'</div>'
           +'<div class="kanban-card-meta">'
           +'<span class="pot-badge pot-'+(e.potential||r.potential)+'">'+(e.potential||r.potential)+'</span>'
@@ -3918,8 +4048,9 @@ function renderKanban(){
   var _rc=document.getElementById('rowCount');if(_rc)_rc.textContent='نمایش '+data.length+' (کانبان)';
 }
 
-function onKbDrop(ev,rtype,st){
+function onKbDrop(ev,boardRtype,st){
   var id=ev.dataTransfer.getData('id');if(!id)return;
+  var rtype=ev.dataTransfer.getData('rtype')||boardRtype;
   setE(rtype,id,'status',st);renderTable();
 }
 
@@ -3931,9 +4062,10 @@ function renderCards(){
   cv.style.display='';
   var rtype=getProvType(_currentProvId);
   var data=getFiltered();
-  if(_sortField){var _rtype2=rtype;data=data.slice().sort(function(a,b){
-    var ea=getE(_rtype2,a.id),eb=getE(_rtype2,b.id);var va,vb;
-    if(_sortField==='name'){va=_getCenterName(_rtype2,a.id);vb=_getCenterName(_rtype2,b.id);}
+  if(_sortField){data=data.slice().sort(function(a,b){
+    var art=a.rtype||rtype, brt=b.rtype||rtype;
+    var ea=getE(art,a.id),eb=getE(brt,b.id);var va,vb;
+    if(_sortField==='name'){va=_getCenterName(art,a.id);vb=_getCenterName(brt,b.id);}
     else if(_sortField==='potential'){va=parseInt(ea.potential||a.potential||9);vb=parseInt(eb.potential||b.potential||9);}
     else if(_sortField==='status'){va=STATUS_LIST.indexOf(ea.status||'بدون تماس');vb=STATUS_LIST.indexOf(eb.status||'بدون تماس');}
     else if(_sortField==='type'){va=ea.type||a.type||'ω';vb=eb.type||b.type||'ω';}
@@ -3945,12 +4077,13 @@ function renderCards(){
   });}
   var today=todayStr();
   cv.innerHTML='<div class="card-grid">'+data.map(function(r){
-    var e=getE(rtype,r.id);var st=e.status||'بدون تماس';var sc=stCls(st);
+    var crtype=r.rtype||rtype;
+    var e=getE(crtype,r.id);var st=e.status||'بدون تماس';var sc=stCls(st);
     var fd=e.followupDate||'';var lead=e.lead||r.lead||'';
-    var notes=DB.notes[recK(rtype,r.id)]||[];
-    var stall=isStalled(rtype,r.id);var ov=isOverdue(rtype,r.id);
-    var displayName=_getCenterName(rtype,r.id);
-    return'<div class="data-card'+(stall?' danger':ov?' warn':'')+'" onclick="openCenterModal(\''+rtype+'\',\''+r.id+'\')">'
+    var notes=DB.notes[recK(crtype,r.id)]||[];
+    var stall=isStalled(crtype,r.id);var ov=isOverdue(crtype,r.id);
+    var displayName=_getCenterName(crtype,r.id);
+    return'<div class="data-card'+(stall?' danger':ov?' warn':'')+'" onclick="openCenterModal(\''+crtype+'\',\''+r.id+'\')">'
       +'<div class="card-head"><span class="card-title">'+esc(displayName)+'</span>'
       +'<span class="pot-badge pot-'+(e.potential||r.potential)+'">'+(e.potential||r.potential)+'</span>'
       +(e.biopsyScore?'<span class="biopsy-badge" title="'+(e.biopsyReasons||[]).join(' • ')+ '">🔬 '+e.biopsyScore+'</span>':'')
@@ -3981,9 +4114,10 @@ function renderPipeline() {
   var groups={};
   STATUS_LIST.forEach(function(s){groups[s]=[];});
   data.forEach(function(r){
-    var e=getE(rtype,r.id);var st=e.status||'بدون تماس';
+    var crtype=r.rtype||rtype;
+    var e=getE(crtype,r.id);var st=e.status||'بدون تماس';
     if(!groups[st])groups[st]=[];
-    groups[st].push({r:r,e:e});
+    groups[st].push({r:r,e:e,crtype:crtype});
   });
   var ST_COLORS=['#94a3b8','#3b82f6','#8b5cf6','#f59e0b','#22c55e','#ef4444'];
   var ST_ICONS=['⬜','📞','🤝','📋','✅','🚫'];
@@ -4001,8 +4135,8 @@ function renderPipeline() {
         +'<div class="pipeline-col-body">'
         +items.slice(0,50).map(function(item){
           var owner=USERS[item.e.owner||item.r.owner||'']||'';
-          var displayName=_getCenterName(rtype,item.r.id);
-          return'<div class="pipeline-card" style="border-right-color:'+ST_COLORS[idx]+'" onclick="openCenterModal(\''+rtype+'\',\''+item.r.id+'\')">'
+          var displayName=_getCenterName(item.crtype,item.r.id);
+          return'<div class="pipeline-card" style="border-right-color:'+ST_COLORS[idx]+'" onclick="openCenterModal(\''+item.crtype+'\',\''+item.r.id+'\')">'
             +'<div class="pc-name">'+esc(displayName)+'</div>'
             +'<div class="pc-meta">'+(owner?'👤 '+esc(owner):'')+(item.e.followupDate?' 📅 '+item.e.followupDate:'')+'</div>'
             +'</div>';
@@ -4104,46 +4238,47 @@ function renderMobileList(data,rtype,today){
   if(wrap)_renderRecentCenters(wrap);
   if(!data.length){el.innerHTML='<div style="text-align:center;padding:40px;color:#94a3b8;font-size:14px">نتیجه‌ای یافت نشد</div>';return;}
   el.innerHTML=data.map(function(r){
-    var e=getE(rtype,r.id);
+    var crtype=r.rtype||rtype;
+    var e=getE(crtype,r.id);
     var st=e.status||'بدون تماس';var sc=stCls(st);
     var pot=e.potential!==undefined?e.potential:r.potential;
     var fd=e.followupDate||'';
     var fdCls='mob-fd-inp'+(fd&&fd<today?' ov':fd&&fd===today?' today':'');
     var rowCls='mob-ctr-card';
     if(st==='قرارداد بسته شد')rowCls+=' row-contracted';
-    else if(isOverdue(rtype,r.id))rowCls+=' row-overdue';
+    else if(isOverdue(crtype,r.id))rowCls+=' row-overdue';
     else if(fd&&fd<=addDaysToJalali(today,3))rowCls+=' row-upcoming';
-    else if(isStalled(rtype,r.id))rowCls+=' row-stalled';
+    else if(isStalled(crtype,r.id))rowCls+=' row-stalled';
     var ownerName=USERS[e.owner||r.owner||'']||e.owner||r.owner||'';
     var ownerColor=window.umGetColor?umGetColor(e.owner||r.owner||''):'#e2e8f0';
-    var notes=DB.notes[recK(rtype,r.id)]||[];
+    var notes=DB.notes[recK(crtype,r.id)]||[];
     var lastTs=e._lastActivity||e._ts||0;
     var daysSince=lastTs?Math.floor((nowTs()-lastTs)/86400000):null;
     var lastCls=daysSince===null?'color:var(--text-muted)':daysSince===0?'color:#16a34a;font-weight:600':daysSince<=7?'color:#0ea5e9':daysSince<=30?'color:#f59e0b':'color:#dc2626;font-weight:600';
     var lastLbl=daysSince===null?'—':daysSince===0?'امروز':daysSince+' روز پیش';
     var firstPhone=e.phones&&e.phones.length?e.phones[0]:'';
-    var displayName=_getCenterName(rtype,r.id);
+    var displayName=_getCenterName(crtype,r.id);
     return'<div class="'+rowCls+'" data-rowid="' + r.id + '">'
       +'<div class="mob-ctr-r1">'
-        +'<button class="mob-ctr-name" onclick="openCenterModal(\''+rtype+'\',\''+r.id+'\')" title="باز کردن مرکز">'+esc(displayName)+'</button>'
+        +'<button class="mob-ctr-name" onclick="openCenterModal(\''+crtype+'\',\''+r.id+'\')" title="باز کردن مرکز">'+esc(displayName)+'</button>'
         +(e.competitor?'<span title="رقیب: '+esc(e.competitor)+'" style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:9px;padding:1px 6px;font-size:10px;font-weight:700;margin-right:4px">🤖</span>':'')
-        +(isOverdue(rtype,r.id)?'<span title="پیگیری معوق" style="font-size:11px">🟠</span>':'')
-        +(isStalled(rtype,r.id)&&st!=='قرارداد بسته شد'?'<span title="۳۰+ روز بدون فعالیت" style="font-size:11px">🔴</span>':'')
+        +(isOverdue(crtype,r.id)?'<span title="پیگیری معوق" style="font-size:11px">🟠</span>':'')
+        +(isStalled(crtype,r.id)&&st!=='قرارداد بسته شد'?'<span title="۳۰+ روز بدون فعالیت" style="font-size:11px">🔴</span>':'')
         +(e.biopsyScore?'<span title="امتیاز بیوپسی" style="background:#ecfdf5;color:#065f46;border:1px solid #6ee7b7;border-radius:9px;padding:1px 6px;font-size:10px;font-weight:700">🔬 '+e.biopsyScore+'</span>':'')
         +'<span class="mob-pot pot-'+pot+'">P'+pot+'</span>'
       +'</div>'
       +'<div class="mob-ctr-r2">'
-        +'<select class="mob-st-sel '+sc+'" onchange="onStatus(\''+rtype+'\',\''+r.id+'\',this);this.closest(\'.mob-ctr-card\').className=\'mob-ctr-card\'+(this.value===\'قرارداد بسته شد\'?\' row-contracted\':\'\')">'
+        +'<select class="mob-st-sel '+sc+'" onchange="onStatus(\''+crtype+'\',\''+r.id+'\',this);this.closest(\'.mob-ctr-card\').className=\'mob-ctr-card\'+(this.value===\'قرارداد بسته شد\'?\' row-contracted\':\'\')">'
           +STATUS_LIST.map(function(s,i){return'<option class="'+STATUS_CLS[i]+'"'+(s===st?' selected':'')+'>'+s+'</option>';}).join('')+'</select>'
         +(ownerName?'<span class="mob-owner-pill" style="background:'+ownerColor+'">'+esc(ownerName)+'</span>':'')
       +'</div>'
       +'<div class="mob-ctr-r3">'
-        +'<input type="text" class="'+fdCls+'" value="'+fd+'" readonly placeholder="تاریخ پیگیری" onclick="openJDP(this,function(v){setE(\''+rtype+'\',\''+r.id+'\',\'followupDate\',v);this.value=v;renderBanner();renderMobileList(getFiltered(),\''+rtype+'\',todayStr());}.bind(this))" style="cursor:pointer">'
+        +'<input type="text" class="'+fdCls+'" value="'+fd+'" readonly placeholder="تاریخ پیگیری" onclick="openJDP(this,function(v){setE(\''+crtype+'\',\''+r.id+'\',\'followupDate\',v);this.value=v;renderBanner();renderMobileList(getFiltered(),\''+crtype+'\',todayStr());}.bind(this))" style="cursor:pointer">'
         +(firstPhone?'<a href="'+_phoneHref(firstPhone)+'" title="'+_phoneTitle()+'" onclick="event.stopPropagation()" class="mob-act-btn" style="text-decoration:none">📞</a>':'')
-        +'<button class="mob-act-btn" onclick="openPreCallBrief(\''+rtype+'\',\''+r.id+'\')" title="خلاصه قبل تماس">🎯</button>'
-        +'<button class="mob-act-btn'+(notes.length?' primary':'')+'" onclick="openNotes(\''+rtype+'\',\''+esc(displayName)+'\')" title="یادداشت‌ها">📝'+(notes.length?' '+notes.length:'')+'</button>'
-        +'<button class="mob-act-btn" onclick="quickCallLog(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')" title="ثبت سریع تماس">📋</button>'
-        +(function(){var _rk2=rtype+'_'+r.id;var _inWk=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk2;});return '<button class="mob-act-btn'+(_inWk?' primary':'')+'" onclick="openAssignWeekForCenter(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')" title="افزودن به برنامه هفته">'+(_inWk?'↪':'📅')+'</button>';}())
+        +'<button class="mob-act-btn" onclick="openPreCallBrief(\''+crtype+'\',\''+r.id+'\')" title="خلاصه قبل تماس">🎯</button>'
+        +'<button class="mob-act-btn'+(notes.length?' primary':'')+'" onclick="openNotes(\''+crtype+'\',\''+esc(displayName)+'\')" title="یادداشت‌ها">📝'+(notes.length?' '+notes.length:'')+'</button>'
+        +'<button class="mob-act-btn" onclick="quickCallLog(\''+crtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')" title="ثبت سریع تماس">📋</button>'
+        +(function(){var _rk2=crtype+'_'+r.id;var _inWk=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk2;});return '<button class="mob-act-btn'+(_inWk?' primary':'')+'" onclick="openAssignWeekForCenter(\''+crtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')" title="افزودن به برنامه هفته">'+(_inWk?'↪':'📅')+'</button>';}())
         +'<span style="font-size:10px;'+lastCls+';margin-right:auto;padding-right:4px">'+lastLbl+'</span>'
       +'</div>'
     +'</div>';
@@ -5067,7 +5202,7 @@ function openCenterAudit(centerKey, centerName) {
   (DB.notes[rtype+'_'+rid]||[]).forEach(function(n){
     var dp=n.date?n.date.split('/').map(Number):(n.at?(function(){var _nd=new Date(n.at);return g2j(_nd.getFullYear(),_nd.getMonth()+1,_nd.getDate());}()):null);
     var g=dp?j2g(dp[0],dp[1],dp[2]):[2000,1,1];
-    var ts=dp?new Date(g[0],g[1]-1,g[2]).getTime():0;
+    var ts=dp?new Date(g[0],g[1]-1,g[2],12).getTime():0;
     events.push({ts:ts,type:'note',icon:'📝',color:'#0ea5e9',
       title:'یادداشت',detail:String(n.text||'').substring(0,60),by:n.by||n.user,at:null,dateStr:n.date||(n.at?msToJ(n.at):'')||''});
   });
@@ -5544,10 +5679,8 @@ function openMergeCenterModal(rtype,id,name){
   var provs=typeof getAllProvinces==='function'?getAllProvinces():[];
   provs.forEach(function(p){
     var arr=typeof getProvCenters==='function'?getProvCenters(p.id):[];
-    arr.forEach(function(c,i){
-      var row=c.row!=null?c.row:(c.n!=null?c.n:i);
-      var cid=p.id+'||'+row;
-      if(cid!==id)allCenters.push({rtype:'pc',id:cid,name:c.name||cid});
+    arr.forEach(function(c){
+      if(c.id!==id)allCenters.push({rtype:c.rtype,id:c.id,name:c.name||c.id});
     });
   });
   window._mrgAll=allCenters;
@@ -6397,13 +6530,13 @@ function renderWpFullCenterList() {
   _getAllowedProvinces(getAllProvinces()).forEach(function(p){
     var tp = getProvType(p.id);
     getProvCenters(p.id).forEach(function(c){
-      var rk = tp+'_'+c.id;
+      var rk = c.rtype+'_'+c.id;
       if (inWeekMap[rk]) return;
-      var e = getE(tp, c.id);
+      var e = getE(c.rtype, c.id);
       var owner = e.owner||c.owner||'';
       if(!_isManager()&&owner&&owner!==currentUser)return;
       allCenters.push({
-        id:c.id, rtype:tp, recKey:rk,
+        id:c.id, rtype:c.rtype, recKey:rk,
         name:c.name||'',
         provId:p.id, provName:p.name||'',
         owner:owner, ownerName:owner?(USERS[owner]||owner):'—',
@@ -6580,11 +6713,11 @@ function wpPickForDay(weekId, dayStr) {
   _getAllowedProvinces(getAllProvinces()).forEach(function(p){
     var tp = getProvType(p.id);
     getProvCenters(p.id).forEach(function(c){
-      var rk = tp+'_'+c.id;
+      var rk = c.rtype+'_'+c.id;
       if(inWeekMap[rk]) return;
-      var e = getE(tp,c.id); var owner = e.owner||c.owner||'';
+      var e = getE(c.rtype,c.id); var owner = e.owner||c.owner||'';
       if(!_isManager() && owner && owner!==currentUser) return;
-      centers.push({id:c.id,rtype:tp,name:c.name||'',provName:p.name||'',owner:owner,ownerName:owner?(USERS[owner]||owner):'—'});
+      centers.push({id:c.id,rtype:c.rtype,name:c.name||'',provName:p.name||'',owner:owner,ownerName:owner?(USERS[owner]||owner):'—'});
     });
   });
   var _centers = centers;
@@ -6680,7 +6813,7 @@ function wpPickSelect(row){
     centerName:c.name||getRecLabel(c.rtype+'_'+c.id),
     actionType:'call', addedBy:currentUser
   };
-  (function(_k,_we){var _pts=_k.split(':::');fetch('/api/week-entries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),weekId:_pts[0],recKey:_pts[1],rtype:_we.rtype,rid:_we.rid,scheduledDate:_we.scheduledDate||null,actionType:_we.actionType||'call',done:false,doneDate:null,addedBy:_we.addedBy||currentUser,centerName:_we.centerName||''})}).then(function(r){return r.ok?r.json():null;}).then(function(d){if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;}).catch(function(){});})(eKey,DB.weekEntries[eKey]);
+  (function(_k,_we){var _pts=_k.split(':::');fetch('/api/week-entries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),weekId:_pts[0],recKey:_we.recKey || (_we.rtype+'_'+_we.rid),rtype:_we.rtype,rid:_we.rid,scheduledDate:_we.scheduledDate||null,actionType:_we.actionType||'call',done:false,doneDate:null,addedBy:_we.addedBy||currentUser,centerName:_we.centerName||''})}).then(function(r){return r.ok?r.json():null;}).then(function(d){if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;}).catch(function(){});})(eKey,DB.weekEntries[eKey]);
   saveDB();
   closeModal('wpPickModal');
   renderWeekPlan();
@@ -6739,7 +6872,7 @@ function wpFclAddToWeek(weekId, rtype, rid) {
     centerName: getRecLabel(rtype + '_' + rid),
     actionType: 'call', addedBy: currentUser
   };
-  (function(_k,_we){var _pts=_k.split(':::');fetch('/api/week-entries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),weekId:_pts[0],recKey:_pts[1],rtype:_we.rtype,rid:_we.rid,scheduledDate:_we.scheduledDate||null,actionType:_we.actionType||'call',done:false,doneDate:null,addedBy:_we.addedBy||currentUser,centerName:_we.centerName||''})}).then(function(r){return r.ok?r.json():null;}).then(function(d){if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;}).catch(function(){});})(eKey,DB.weekEntries[eKey]);
+  (function(_k,_we){var _pts=_k.split(':::');fetch('/api/week-entries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),weekId:_pts[0],recKey:_we.recKey || (_we.rtype+'_'+_we.rid),rtype:_we.rtype,rid:_we.rid,scheduledDate:_we.scheduledDate||null,actionType:_we.actionType||'call',done:false,doneDate:null,addedBy:_we.addedBy||currentUser,centerName:_we.centerName||''})}).then(function(r){return r.ok?r.json():null;}).then(function(d){if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;}).catch(function(){});})(eKey,DB.weekEntries[eKey]);
   saveDB();
   renderWeekPlan();
   showToast(_wasInOther ? 'مرکز از هفته قبلی منتقل شد 🔄' : 'مرکز به هفته اضافه شد ✅', 2000);
@@ -6981,7 +7114,7 @@ function _mdkCheckSubmit(){
   btn.style.cursor=ok?'pointer':'not-allowed';
 }
 function jAddDays(jy,jm,jd,days){
-  var g=j2g(jy,jm,jd);var ts=new Date(g[0],g[1]-1,g[2]);
+  var g=j2g(jy,jm,jd);var ts=new Date(g[0],g[1]-1,g[2],12);
   ts.setDate(ts.getDate()+days);
   return g2j(ts.getFullYear(),ts.getMonth()+1,ts.getDate());
 }
@@ -7126,6 +7259,10 @@ function wpDrop(event, targetDate) {
   if (!eKey || !DB.weekEntries[eKey]) return;
   if (DB.weekEntries[eKey].scheduledDate === targetDate) return;
   DB.weekEntries[eKey].scheduledDate = targetDate;
+  var _we = DB.weekEntries[eKey];
+  if (_we.rtype && _we.rid) {
+    setE(_we.rtype, _we.rid, 'followupDate', targetDate);
+  }
   saveDB();
   (function(){var _we=DB.weekEntries[eKey];if(_we&&_we.sqlId){fetch('/api/week-entries/'+encodeURIComponent(_we.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledDate:targetDate})}).catch(function(){});}})();
   renderWeekPlan();
@@ -7266,7 +7403,7 @@ function saveScheduleFromModal(eKey) {
         var _sel2=document.getElementById('wpSel');
         if(_sel2){wpBuildSelect();_sel2.value=destWeek.id;}
       }
-      (function(){var _wen=DB.weekEntries[newKey2]||DB.weekEntries[eKey];if(_wen&&_wen.sqlId){fetch('/api/week-entries/'+encodeURIComponent(_wen.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledDate:dateVal,actionType:actVal})}).catch(function(){});}})();
+      (function(){var _wen=DB.weekEntries[newKey2]||DB.weekEntries[eKey];if(_wen&&_wen.sqlId){fetch('/api/week-entries/'+encodeURIComponent(_wen.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({weekId:destWeek.id,scheduledDate:dateVal,actionType:actVal})}).catch(function(){});}})();
       saveDB();closeModal('schModal');_debouncedRenderWeekPlan();
       showToast('↪ انتقال به '+(destWeek?destWeek.label:dateVal), 2500);
       return;
@@ -7357,7 +7494,7 @@ function addToWeekAuto(weekId,rtype,id,name,actionType){
   var eKey=wpEntryKey(weekId,rtype,id);
   var _rk=rtype+'_'+id;
   wpRemoveFromOtherWeeks(_rk, weekId);
-  if(!DB.weekEntries[eKey]||DB.weekEntries[eKey].done){DB.weekEntries[eKey]={scheduledDate:null,done:false,doneDate:null,rtype:rtype,rid:id,recKey:rtype+'_'+id,centerName:getRecLabel(rtype+'_'+id),actionType:actionType||'call',addedBy:currentUser};(function(_k,_we){var _pts=_k.split(':::');fetch('/api/week-entries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),weekId:_pts[0],recKey:_pts[1],rtype:_we.rtype,rid:_we.rid,scheduledDate:_we.scheduledDate||null,actionType:_we.actionType||'call',done:false,doneDate:null,addedBy:_we.addedBy||currentUser,centerName:_we.centerName||''})}).then(function(r){return r.ok?r.json():null;}).then(function(d){if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;}).catch(function(){});})(eKey,DB.weekEntries[eKey]);}
+  if(!DB.weekEntries[eKey]||DB.weekEntries[eKey].done){DB.weekEntries[eKey]={scheduledDate:null,done:false,doneDate:null,rtype:rtype,rid:id,recKey:rtype+'_'+id,centerName:getRecLabel(rtype+'_'+id),actionType:actionType||'call',addedBy:currentUser};(function(_k,_we){var _pts=_k.split(':::');fetch('/api/week-entries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),weekId:_pts[0],recKey:_we.recKey || (_we.rtype+'_'+_we.rid),rtype:_we.rtype,rid:_we.rid,scheduledDate:_we.scheduledDate||null,actionType:_we.actionType||'call',done:false,doneDate:null,addedBy:_we.addedBy||currentUser,centerName:_we.centerName||''})}).then(function(r){return r.ok?r.json():null;}).then(function(d){if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;}).catch(function(){});})(eKey,DB.weekEntries[eKey]);}
   saveDB();
   var sel=document.getElementById('wpSel');
   if(sel){
@@ -7528,7 +7665,7 @@ function bulkMoveSelectedToWeek(targetWeekId) {
         actionType:actType,
         addedBy:currentUser
       };
-      (function(_k,_we){var _pts=_k.split(':::');fetch('/api/week-entries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),weekId:_pts[0],recKey:_pts[1],rtype:_we.rtype,rid:_we.rid,scheduledDate:_we.scheduledDate||null,actionType:_we.actionType||'call',done:false,doneDate:null,addedBy:_we.addedBy||currentUser,centerName:_we.centerName||''})}).then(function(r){return r.ok?r.json():null;}).then(function(d){if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;}).catch(function(){});})(eKey,DB.weekEntries[eKey]);
+      (function(_k,_we){var _pts=_k.split(':::');fetch('/api/week-entries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),weekId:_pts[0],recKey:_we.recKey || (_we.rtype+'_'+_we.rid),rtype:_we.rtype,rid:_we.rid,scheduledDate:_we.scheduledDate||null,actionType:_we.actionType||'call',done:false,doneDate:null,addedBy:_we.addedBy||currentUser,centerName:_we.centerName||''})}).then(function(r){return r.ok?r.json():null;}).then(function(d){if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;}).catch(function(){});})(eKey,DB.weekEntries[eKey]);
     }
   });
   
@@ -7562,7 +7699,7 @@ function saveWpAssign(weekId){
     var _rk=rtype+'_'+rid;
     wpRemoveFromOtherWeeks(_rk, weekId);
     if(!DB.weekEntries[eKey] || !DB.weekEntries[eKey].done){
-      DB.weekEntries[eKey]={scheduledDate:null,done:false,doneDate:null,rtype:rtype,rid:rid,recKey:rtype+'_'+rid,centerName:getRecLabel(rtype+'_'+rid),actionType:actType,addedBy:currentUser};(function(_k,_we){var _pts=_k.split(':::');fetch('/api/week-entries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),weekId:_pts[0],recKey:_pts[1],rtype:_we.rtype,rid:_we.rid,scheduledDate:_we.scheduledDate||null,actionType:_we.actionType||'call',done:false,doneDate:null,addedBy:_we.addedBy||currentUser,centerName:_we.centerName||''})}).then(function(r){return r.ok?r.json():null;}).then(function(d){if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;}).catch(function(){});})(eKey,DB.weekEntries[eKey]);
+      DB.weekEntries[eKey]={scheduledDate:null,done:false,doneDate:null,rtype:rtype,rid:rid,recKey:rtype+'_'+rid,centerName:getRecLabel(rtype+'_'+rid),actionType:actType,addedBy:currentUser};(function(_k,_we){var _pts=_k.split(':::');fetch('/api/week-entries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),weekId:_pts[0],recKey:_we.recKey || (_we.rtype+'_'+_we.rid),rtype:_we.rtype,rid:_we.rid,scheduledDate:_we.scheduledDate||null,actionType:_we.actionType||'call',done:false,doneDate:null,addedBy:_we.addedBy||currentUser,centerName:_we.centerName||''})}).then(function(r){return r.ok?r.json():null;}).then(function(d){if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;}).catch(function(){});})(eKey,DB.weekEntries[eKey]);
     }
   });
   saveDB();
@@ -8511,20 +8648,19 @@ function filterDailyMonitor(){
 
   // 2. Collect centers where followupDate === today (not already seen)
   getAllProvinces().forEach(function(p) {
-    var rt = getProvType(p.id);
     getProvCenters(p.id).forEach(function(c) {
-      var e = getE(rt,c.id);
+      var e = getE(c.rtype,c.id);
       var owner = e.owner||c.owner||'';
       if(!owner) return;
       if(e.followupDate===today) {
-        var key = rt+'_'+c.id;
+        var key = c.rtype+'_'+c.id;
         if(!seenKeys.has(key)) {
           seenKeys.add(key);
-          var acts = _getTodayActivities(rt,c.id,today);
+          var acts = _getTodayActivities(c.rtype,c.id,today);
           var isDone = acts.length>0||(e.status==='قرارداد بسته شد'||e.status==='غیرفعال');
           todayEntries.push({
             key: 'followup_'+key,
-            rtype: rt,
+            rtype: c.rtype,
             rid: c.id,
             name: e.nameOverride||c.name||'?',
             owner: owner,
@@ -8957,7 +9093,7 @@ function _ensureTasks(){
     var dp=(t.dueDate||_today).split('/').map(Number);
     var g=j2g(dp[0],dp[1],dp[2]);
     var days=t.recurring==='weekly'?7:30;
-    var nd=new Date(g[0],g[1]-1,g[2]+days);
+    var nd=new Date(g[0],g[1]-1,g[2]+days,12);
     var nj=g2j(nd.getFullYear(),nd.getMonth()+1,nd.getDate());
     var newDate=nj[0]+'/'+p2(nj[1])+'/'+p2(nj[2]);
     if(newDate<=_today)return;
@@ -13343,6 +13479,7 @@ async function init(){
     _typeFilterBuilt=false;
     cleanupOrphanedEntries(false);
     var _dedup=wpDeduplicateEntries();if(_dedup>0){saveDBSync();console.info('[wp] dedup removed',_dedup,'duplicate week entries');}
+    var _reconciled=wpReconcileFollowupDates();if(_reconciled>0){saveDBSync();console.info('[wp] reconciled',_reconciled,'missing week entries');}
     rebuildFilters();buildTypeFilter();
     switchTab(currentTab);
     _initOnboarding();

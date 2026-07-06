@@ -872,7 +872,7 @@ function wpMarkDoneKey(eKey){
   openModal('wpDoneModal','✅ انجام شد',body,footer);
 }
 function jAddDays(jy,jm,jd,days){
-  var g=j2g(jy,jm,jd);var ts=new Date(g[0],g[1]-1,g[2]);
+  var g=j2g(jy,jm,jd);var ts=new Date(g[0],g[1]-1,g[2],12);
   ts.setDate(ts.getDate()+days);
   return g2j(ts.getFullYear(),ts.getMonth()+1,ts.getDate());
 }
@@ -961,6 +961,10 @@ function wpDrop(event, targetDate) {
   if (!eKey || !DB.weekEntries[eKey]) return;
   if (DB.weekEntries[eKey].scheduledDate === targetDate) return;
   DB.weekEntries[eKey].scheduledDate = targetDate;
+  var _we = DB.weekEntries[eKey];
+  if (_we.rtype && _we.rid) {
+    setE(_we.rtype, _we.rid, 'followupDate', targetDate);
+  }
   saveDB();
   renderWeekPlan();
   showToast('📅 تاریخ به ' + targetDate + ' تغییر کرد', 2000);

@@ -741,7 +741,7 @@ function openCenterAudit(centerKey, centerName) {
   (DB.notes[rtype+'_'+rid]||[]).forEach(function(n){
     var dp=n.date?n.date.split('/').map(Number):(n.at?(function(){var _nd=new Date(n.at);return g2j(_nd.getFullYear(),_nd.getMonth()+1,_nd.getDate());}()):null);
     var g=dp?j2g(dp[0],dp[1],dp[2]):[2000,1,1];
-    var ts=dp?new Date(g[0],g[1]-1,g[2]).getTime():0;
+    var ts=dp?new Date(g[0],g[1]-1,g[2],12).getTime():0;
     events.push({ts:ts,type:'note',icon:'📝',color:'#0ea5e9',
       title:'یادداشت',detail:String(n.text||'').substring(0,60),by:n.by||n.user,at:null,dateStr:n.date||(n.at?msToJ(n.at):'')||''});
   });
@@ -1218,10 +1218,8 @@ function openMergeCenterModal(rtype,id,name){
   var provs=typeof getAllProvinces==='function'?getAllProvinces():[];
   provs.forEach(function(p){
     var arr=typeof getProvCenters==='function'?getProvCenters(p.id):[];
-    arr.forEach(function(c,i){
-      var row=c.row!=null?c.row:(c.n!=null?c.n:i);
-      var cid=p.id+'||'+row;
-      if(cid!==id)allCenters.push({rtype:'pc',id:cid,name:c.name||cid});
+    arr.forEach(function(c){
+      if(c.id!==id)allCenters.push({rtype:c.rtype,id:c.id,name:c.name||c.id});
     });
   });
   window._mrgAll=allCenters;

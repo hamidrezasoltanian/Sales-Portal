@@ -614,10 +614,10 @@ async function initSchema() {
     BEGIN
       -- 1. If columns were updated, sync them to the JSONB value
       IF TG_OP = 'UPDATE' THEN
-        IF NEW.scheduled_date IS DISTINCT FROM OLD.scheduled_date OR (NEW.scheduled_date IS NULL AND NEW.value->>'scheduledDate' IS NOT NULL) THEN
+        IF NEW.scheduled_date IS DISTINCT FROM OLD.scheduled_date THEN
           NEW.value := jsonb_set(NEW.value, '{scheduledDate}', COALESCE(to_jsonb(NEW.scheduled_date), 'null'::jsonb));
         END IF;
-        IF NEW.week_id IS DISTINCT FROM OLD.week_id OR (NEW.week_id IS NULL AND NEW.value->>'weekId' IS NOT NULL) THEN
+        IF NEW.week_id IS DISTINCT FROM OLD.week_id THEN
           NEW.value := jsonb_set(NEW.value, '{weekId}', COALESCE(to_jsonb(NEW.week_id), 'null'::jsonb));
         END IF;
         IF NEW.action_type IS DISTINCT FROM OLD.action_type THEN

@@ -2135,6 +2135,7 @@ async function init(){
     _typeFilterBuilt=false;
     cleanupOrphanedEntries(false);
     var _dedup=wpDeduplicateEntries();if(_dedup>0){saveDBSync();console.info('[wp] dedup removed',_dedup,'duplicate week entries');}
+    var _reconciled=wpReconcileFollowupDates();if(_reconciled>0){saveDBSync();console.info('[wp] reconciled',_reconciled,'missing week entries');}
     rebuildFilters();buildTypeFilter();
     switchTab(currentTab);
     _initOnboarding();
