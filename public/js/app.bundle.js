@@ -85,7 +85,7 @@ var _redoStack=[];
 var MAX_UNDO=50;
 var _undoSuppressed=false;
 var _actPage=0;
-var DB={edits:{},notes:{},tags:[],rTags:{},weekTags:[],weekEntries:{},_weDeletedKeys:[],events:[],checklist:{},extra:[],settings:null,kpiTargets:{},callLog:[],visitLog:[],salesLog:[],missionLog:[],provHistory:[],mtrFollower:{},mtrFollowerMap:{},changeLog:[],mtrTrend:[],notifications:[],tasks:[],kpiHistory:[]};
+var DB={edits:{},notes:{},tags:[],rTags:{},weekTags:[],weekEntries:{},_weDeletedKeys:[],events:[],checklist:{},extra:[],settings:null,provOverrides:{},kpiTargets:{},callLog:[],visitLog:[],salesLog:[],missionLog:[],provHistory:[],mtrFollower:{},mtrFollowerMap:{},changeLog:[],mtrTrend:[],notifications:[],tasks:[],kpiHistory:[]};
 var _DEFAULT_MEMBERS=[]; // loaded from server via buildUSERS()
 
 // ════════════════════════ SSE (Server-Sent Events) ════════════════════════
@@ -508,6 +508,9 @@ function mergeDatabaseDiff(local, server, lastSynced) {
 
   // 5. settings
   merged.settings = Object.assign({}, server.settings || {}, local.settings || {});
+
+  // provOverrides
+  merged.provOverrides = Object.assign({}, server.provOverrides || {}, local.provOverrides || {});
 
   // 6. events
   var evMap = {};
@@ -1815,7 +1818,14 @@ function _buildPCCache(){
   base = base.map(function(c){return Object.assign({}, c, {rtype: defaultType});});
 
   var extras=(DB.extra||[]).filter(function(c){
-    if(hasOverrides){var ek='extra_'+c.id;if(overrides[ek]&&overrides[ek]!==provId)return false;if(overrides[ek]===provId)return true;}
+    if(hasOverrides){
+      var originalRtype = c.province_id==='tehran'?'center':'pc';
+      var rkey = originalRtype + '_' + c.id;
+      var ek = 'extra_' + c.id;
+      var ov = overrides[rkey] || overrides[ek];
+      if(ov && ov !== provId) return false;
+      if(ov === provId) return true;
+    }
     return c.province_id===provId;
   });
   extras = extras.map(function(c){return Object.assign({}, c, {rtype: defaultType});});
@@ -1828,10 +1838,14 @@ function _buildPCCache(){
     Object.keys(overrides).forEach(function(rk){
       if(overrides[rk]!==provId)return;
       var parts=rk.split('_');var rt=parts[0];var cid=parts.slice(1).join('_');
-      if(rt==='center'){
+      // Search in DB.extra first
+      var extraFound = (DB.extra||[]).find(function(x){return String(x.id)===cid;});
+      if(extraFound){
+        movedIn.push(Object.assign({},extraFound,{province_id:provId,rtype:defaultType,owner:destOwner}));
+      } else if(rt==='center'){
         var found=(window.CENTERS||[]).find(function(x){return String(x.id)===cid;});
         if(found&&provId!=='tehran')movedIn.push(Object.assign({},found,{province_id:provId,rtype:'center',owner:destOwner}));
-      } else if(rt==='pc'){
+      } else if(rt==='pc' || rt==='extra'){
         Object.keys(_PC_CACHE).forEach(function(pid){
           if(pid===provId)return;
           var fc=(_PC_CACHE[pid]||[]).find(function(x){return x.id===cid;});
@@ -5740,6 +5754,7 @@ function _doChangeProvince(rtype,id){
   clearPCCache();
   saveDB();
   closeModal('_cprovModal');
+  closeModal('cm_' + id);
   showToast('\u2705 \u0627\u0633\u062a\u0627\u0646 \u062a\u063a\u06cc\u06cc\u0631 \u06a9\u0631\u062f');
   setTimeout(function(){renderDashboard();if(currentTab==='provinces')renderTable();},300);
 }
@@ -6443,6 +6458,7 @@ function renderWeekPlan(){
       byDay[we.scheduledDate].push(we);
     }
   });
+
 
   var total = allEntries.length; 
   var done = allEntries.filter(function(e){return e.done;}).length;

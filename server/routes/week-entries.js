@@ -84,6 +84,16 @@ router.post('/', requireAuth, async function (req, res) {
     const result = await query(
       `INSERT INTO week_entries (key, value, id, week_id, rec_key, rtype, rid, scheduled_date, action_type, added_by, center_name, week_tag_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       ON CONFLICT (key) DO UPDATE SET
+         value          = week_entries.value || jsonb_build_object(
+                            'scheduledDate', EXCLUDED.scheduled_date,
+                            'actionType',    EXCLUDED.action_type,
+                            'centerName',    COALESCE(EXCLUDED.center_name, week_entries.center_name)
+                          ),
+         scheduled_date = EXCLUDED.scheduled_date,
+         action_type    = EXCLUDED.action_type,
+         center_name    = COALESCE(EXCLUDED.center_name, week_entries.center_name),
+         updated_at     = now()
        RETURNING *`,
       [
         dbKey,
@@ -102,9 +112,6 @@ router.post('/', requireAuth, async function (req, res) {
     );
     res.status(201).json(rowToObj(result.rows[0]));
   } catch (e) {
-    if (e.code === '23505') {
-      return res.status(409).json({ error: 'ورودی برنامه هفته با این شناسه قبلاً ثبت شده' });
-    }
     console.error('[week-entries POST /]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
   }

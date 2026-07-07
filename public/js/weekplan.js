@@ -415,6 +415,7 @@ function renderWeekPlan(){
     }
   });
 
+
   var total = allEntries.length; 
   var done = allEntries.filter(function(e){return e.done;}).length;
 

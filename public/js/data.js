@@ -61,7 +61,14 @@ function _buildPCCache(){
   base = base.map(function(c){return Object.assign({}, c, {rtype: defaultType});});
 
   var extras=(DB.extra||[]).filter(function(c){
-    if(hasOverrides){var ek='extra_'+c.id;if(overrides[ek]&&overrides[ek]!==provId)return false;if(overrides[ek]===provId)return true;}
+    if(hasOverrides){
+      var originalRtype = c.province_id==='tehran'?'center':'pc';
+      var rkey = originalRtype + '_' + c.id;
+      var ek = 'extra_' + c.id;
+      var ov = overrides[rkey] || overrides[ek];
+      if(ov && ov !== provId) return false;
+      if(ov === provId) return true;
+    }
     return c.province_id===provId;
   });
   extras = extras.map(function(c){return Object.assign({}, c, {rtype: defaultType});});
@@ -74,10 +81,14 @@ function _buildPCCache(){
     Object.keys(overrides).forEach(function(rk){
       if(overrides[rk]!==provId)return;
       var parts=rk.split('_');var rt=parts[0];var cid=parts.slice(1).join('_');
-      if(rt==='center'){
+      // Search in DB.extra first
+      var extraFound = (DB.extra||[]).find(function(x){return String(x.id)===cid;});
+      if(extraFound){
+        movedIn.push(Object.assign({},extraFound,{province_id:provId,rtype:defaultType,owner:destOwner}));
+      } else if(rt==='center'){
         var found=(window.CENTERS||[]).find(function(x){return String(x.id)===cid;});
         if(found&&provId!=='tehran')movedIn.push(Object.assign({},found,{province_id:provId,rtype:'center',owner:destOwner}));
-      } else if(rt==='pc'){
+      } else if(rt==='pc' || rt==='extra'){
         Object.keys(_PC_CACHE).forEach(function(pid){
           if(pid===provId)return;
           var fc=(_PC_CACHE[pid]||[]).find(function(x){return x.id===cid;});

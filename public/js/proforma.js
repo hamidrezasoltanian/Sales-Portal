@@ -82,6 +82,7 @@ function _renderPfPanel(el) {
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap">' + filterBtns + '</div>' +
       '<button onclick="pfOpenNew()" style="padding:8px 16px;background:var(--brand);color:white;border:none;border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer;font-weight:600">+ پیشفاکتور جدید</button>' +
+      (isManager ? '<button onclick="pfOpenTemplateEditor()" style="padding:8px 12px;background:#f8fafc;color:#475569;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer;margin-right:8px" title="ویرایش قالب چاپ">🎨 قالب چاپ</button>' : '') +
     '</div>' +
     '<div style="overflow-x:auto;background:white;border:1px solid #e2e8f0;border-radius:10px">' +
       '<table style="width:100%;border-collapse:collapse">' +
@@ -98,9 +99,7 @@ function _renderPfPanel(el) {
         '<tbody>' + rows + '</tbody>' +
       '</table>' +
     '</div>' +
-    (hasMore ? '<div style="text-align:center;margin-top:12px"><button onclick="_pfLoadMore()" style="padding:8px 24px;border:1px solid var(--brand);background:white;color:var(--brand);border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer">⬇ بارگذاری بیشتر (' + (filtered.length - pageItems.length) + ' مورد دیگر)</button></div>' : '') +
-    _pfModalHTML() +
-    _pfPrintZone();
+    (hasMore ? '<div style="text-align:center;margin-top:12px"><button onclick="_pfLoadMore()" style="padding:8px 24px;border:1px solid var(--brand);background:white;color:var(--brand);border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer">⬇ بارگذاری بیشتر (' + (filtered.length - pageItems.length) + ' مورد دیگر)</button></div>' : '');
 }
 
 function _badgeBg(s) {
@@ -235,7 +234,7 @@ function pfReject(id) {
   openModal('pfRejectModal', '❌ رد پیشفاکتور ' + pfNo,
     '<div style="margin-bottom:12px;font-size:13px;color:#475569">دلیل رد را بنویسید (اختیاری):</div>' +
     '<textarea id="pfRejectNote" rows="3" class="form-input" placeholder="توضیحات رد..." style="resize:vertical"></textarea>',
-    '<button onclick="document.getElementById(\'pfRejectModal\').style.display=\'none\'" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">انصراف</button>' +
+    '<button onclick="closeModal(\'pfRejectModal\')" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">انصراف</button>' +
     '<button onclick="_pfDoReject(\'' + id + '\')" style="padding:8px 18px;background:#dc2626;color:white;border:none;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">❌ رد پیشفاکتور</button>'
   );
 }
@@ -243,8 +242,7 @@ function pfReject(id) {
 async function _pfDoReject(id) {
   var noteEl = document.getElementById('pfRejectNote');
   var note   = noteEl ? noteEl.value.trim() : '';
-  var modal  = document.getElementById('pfRejectModal');
-  if (modal) modal.style.display = 'none';
+  closeModal('pfRejectModal');
   await pfAction(id, 'reject', note);
 }
 
@@ -269,21 +267,25 @@ async function pfOpenNew() {
 }
 
 async function pfOpenEdit(id) {
-  var pf = _pfList.find(function(p){ return p.id === id; });
-  if (!pf) return;
-  _pfEditId = id;
-  _pfItems  = (pf.items || []).map(function(i){ return Object.assign({}, i); });
-  if (!_pfItems.length) _pfItems = [{ prodId:'', name:'', unit:'عدد', qty:1, unitPrice:0, lineTotal:0 }];
-  await _pfLoadWmsProds();
-  _pfShowModal(pf);
+  try {
+    var pf = _pfList.find(function(p){ return p.id === id; });
+    if (!pf) return;
+    _pfEditId = id;
+    _pfItems  = (pf.items || []).map(function(i){ return Object.assign({}, i); });
+    if (!_pfItems.length) _pfItems = [{ prodId:'', name:'', unit:'عدد', qty:1, unitPrice:0, lineTotal:0 }];
+    await _pfLoadWmsProds();
+    _pfShowModal(pf);
+  } catch(e) {
+    alert("Error in pfOpenEdit: " + e.message + "\\n" + e.stack);
+  }
 }
 
-function _pfShowModal(pf) {
+function _pfShowModal(pf) { try {
   var readOnly = pf && pf.status !== 'draft';
   var modal = document.getElementById('pfModal');
   if (!modal) {
     var div = document.createElement('div');
-    div.innerHTML = _pfModalHTML() + _pfPrintZone();
+    div.innerHTML = _pfModalHTML();
     while (div.firstChild) {
       document.body.appendChild(div.firstChild);
     }
@@ -342,21 +344,15 @@ function _pfShowModal(pf) {
 
   modal.style.display = 'flex';
   pfRecalc();
-}
+} catch(e) { alert('Error in _pfShowModal: ' + e.message); } }
 
 function _pfItemRow(i, item, readOnly) {
-  var wmsOpts = _pfWmsProds.length
-    ? '<datalist id="pfWmsList_' + i + '">' +
-        _pfWmsProds.map(function(p){ return '<option value="' + esc(p.full_name || p.name) + '" data-unit="' + esc(p.unit||'عدد') + '">'; }).join('') +
-      '</datalist>'
-    : '';
-  var listAttr = _pfWmsProds.length ? ' list="pfWmsList_' + i + '"' : '';
   return '<div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:8px;align-items:center;margin-bottom:8px;padding:8px;background:#f8fafc;border-radius:6px;border:1px solid #e2e8f0" id="pfRow_' + i + '">' +
-    wmsOpts +
     '<div><label style="font-size:10px;color:#64748b;display:block">کالا</label>' +
       (readOnly
         ? '<span style="font-size:13px">' + esc(item.name || '') + '</span>'
-        : '<input class="form-input pf-item-name" data-idx="' + i + '"' + listAttr + ' style="font-size:13px" value="' + esc(item.name||'') + '" placeholder="نام کالا" oninput="_pfRowChange(' + i + ',\'name\',this.value);_pfRowAutofill(' + i + ',this.value)">') +
+        : '<input class="form-input pf-item-name" data-idx="' + i + '" style="font-size:13px" value="' + esc(item.name||'') + '" placeholder="نام کالا" autocomplete="off" oninput="_pfRowChange(' + i + ',\'name\',this.value); pfSearchProduct(' + i + ', this.value)">' +
+          '<div id="pfProdDrop_' + i + '" style="position:absolute;z-index:200;background:white;border:1px solid #e2e8f0;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.1);display:none;max-height:180px;overflow-y:auto"></div>') +
     '</div>' +
     '<div><label style="font-size:10px;color:#64748b;display:block">تعداد</label>' +
       (readOnly
@@ -563,77 +559,168 @@ function pfPrint(id) {
   var pf = _pfList.find(function(p){ return p.id === id; });
   if (!pf) return;
   var zone = document.getElementById('pfPrintZone');
-  if (!zone) return;
+  if (!zone) {
+    zone = document.createElement('div');
+    zone.id = 'pfPrintZone';
+    zone.style.display = 'none';
+    document.body.appendChild(zone);
+  }
   zone.innerHTML = _pfPrintHTML(pf);
   window.print();
 }
+
 
 function _pfPrintHTML(pf) {
   var subtotal = pf.subtotal || 0;
   var discAmt  = pf.discAmt  || 0;
   var taxAmt   = pf.taxAmt   || 0;
   var total    = pf.total    || 0;
+  
+  var template = (typeof DB !== 'undefined' && DB.settings && DB.settings.pfPrintTemplate) 
+                 ? DB.settings.pfPrintTemplate : _pfDefaultTemplate();
+
   var itemRows = (pf.items || []).map(function(item, i) {
     return '<tr>' +
-      '<td style="text-align:center">' + (i+1) + '</td>' +
-      '<td>' + esc(item.name || '') + '</td>' +
-      '<td style="text-align:center">' + esc(item.unit || 'عدد') + '</td>' +
-      '<td style="text-align:center">' + fmtNum(item.qty) + '</td>' +
-      '<td style="text-align:left;font-family:monospace">' + fmtNum(item.unitPrice) + '</td>' +
-      '<td style="text-align:left;font-family:monospace">' + fmtNum(item.lineTotal) + '</td>' +
+      '<td style="border:1px solid #000;text-align:center;padding:5px">' + (i+1) + '</td>' +
+      '<td style="border:1px solid #000;text-align:center;padding:5px">' + esc(item.prodId || '') + '</td>' +
+      '<td style="border:1px solid #000;text-align:right;padding:5px">' + esc(item.name || '') + '</td>' +
+      '<td style="border:1px solid #000;text-align:center;padding:5px">' + fmtNum(item.qty) + '</td>' +
+      '<td style="border:1px solid #000;text-align:center;padding:5px">' + esc(item.unit || 'عدد') + '</td>' +
+      '<td style="border:1px solid #000;text-align:center;font-family:monospace;padding:5px">' + fmtNum(item.unitPrice) + '</td>' +
+      '<td style="border:1px solid #000;text-align:center;font-family:monospace;padding:5px">' + fmtNum(item.lineTotal) + '</td>' +
       '</tr>';
   }).join('');
 
-  return '<div class="pf-print" style="font-family:Vazirmatn,sans-serif;direction:rtl;color:#000;padding:24px;max-width:800px;margin:0 auto">' +
-    '<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0f1f35;padding-bottom:12px;margin-bottom:16px">' +
-      '<div>' +
-        '<div style="font-size:20px;font-weight:800;color:#0f1f35">آتنا زیست درمان</div>' +
-        '<div style="font-size:11px;color:#555;margin-top:3px">توزیع‌کننده تجهیزات پزشکی</div>' +
-      '</div>' +
-      '<div style="border:2px solid #0f1f35;border-radius:6px;padding:10px 16px;text-align:center">' +
-        '<div style="font-size:11px;color:#555">شماره پیشفاکتور</div>' +
-        '<div style="font-size:18px;font-weight:800;font-family:monospace">' + esc(pf.no) + '</div>' +
-        '<div style="font-size:11px;color:#555;margin-top:3px">تاریخ: ' + esc(pf.jalaliDate||'') + '</div>' +
-      '</div>' +
+  var seller = (typeof DB !== 'undefined' && DB.settings && DB.settings.sellerInfo) || {
+    name: 'آتنا زیست درمان', natId: '۱۰۱۰۴۲۳۴۵۶۷', regId: '۱۲۳۴۵۶', ecoCode: '۴۱۱۱۲۳۴۵۶۷۸۹',
+    address: 'تهران، خیابان ولیعصر، نرسیده به پارک وی، کوچه ...', postal: '۱۹۶۶۶۴۵۳۲۱', phone: '۰۲۱-۸۸۸۸۸۸۸۸'
+  };
+
+  var html = template
+    .replace(/\{\{seller\.name\}\}/g, esc(seller.name))
+    .replace(/\{\{seller\.natId\}\}/g, esc(seller.natId))
+    .replace(/\{\{seller\.regId\}\}/g, esc(seller.regId))
+    .replace(/\{\{seller\.ecoCode\}\}/g, esc(seller.ecoCode))
+    .replace(/\{\{seller\.address\}\}/g, esc(seller.address))
+    .replace(/\{\{seller\.postal\}\}/g, esc(seller.postal))
+    .replace(/\{\{seller\.phone\}\}/g, esc(seller.phone))
+    .replace(/\{\{pf\.no\}\}/g, esc(pf.no))
+    .replace(/\{\{pf\.jalaliDate\}\}/g, esc(pf.jalaliDate||''))
+    .replace(/\{\{pf\.centerName\}\}/g, esc(pf.centerName||'—'))
+    .replace(/\{\{pf\.creatorName\}\}/g, esc(_pfCreatorName(pf.createdBy)))
+    .replace(/\{\{items_html\}\}/g, itemRows)
+    .replace(/\{\{subtotal\}\}/g, fmtNum(subtotal))
+    .replace(/\{\{discAmt\}\}/g, fmtNum(discAmt))
+    .replace(/\{\{taxPct\}\}/g, pf.taxPct||9)
+    .replace(/\{\{taxAmt\}\}/g, fmtNum(taxAmt))
+    .replace(/\{\{total\}\}/g, fmtNum(total))
+    .replace(/\{\{totalWords\}\}/g, _numToWords(total));
+
+  return html;
+}
+
+function _pfDefaultTemplate() {
+  return `<div class="pf-print" style="font-family:Vazirmatn,sans-serif;direction:rtl;color:#000;padding:20px;width:100%;max-width:900px;margin:0 auto">
+  <div style="text-align:center;font-weight:bold;font-size:18px;margin-bottom:15px;border-bottom:2px solid #000;padding-bottom:10px">
+    صورتحساب فروش کالا و خدمات
+  </div>
+  <div style="display:flex;justify-content:space-between;margin-bottom:15px;font-size:13px">
+    <div><strong>شماره:</strong> <span style="font-family:monospace">{{pf.no}}</span></div>
+    <div><strong>تاریخ:</strong> {{pf.jalaliDate}}</div>
+  </div>
+  <div style="border:1px solid #000;border-radius:4px;margin-bottom:15px;font-size:12px">
+    <div style="background:#f0f0f0;padding:5px;border-bottom:1px solid #000;font-weight:bold">مشخصات فروشنده</div>
+    <div style="padding:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <div><strong>فروشنده:</strong> {{seller.name}}</div>
+      <div><strong>شماره اقتصادی:</strong> {{seller.ecoCode}}</div>
+      <div><strong>شناسه ملی:</strong> {{seller.natId}}</div>
+      <div><strong>شماره ثبت:</strong> {{seller.regId}}</div>
+      <div style="grid-column:1/-1"><strong>آدرس:</strong> {{seller.address}} &nbsp;&nbsp; <strong>کد پستی:</strong> {{seller.postal}} &nbsp;&nbsp; <strong>تلفن:</strong> {{seller.phone}}</div>
+    </div>
+  </div>
+  <div style="border:1px solid #000;border-radius:4px;margin-bottom:15px;font-size:12px">
+    <div style="background:#f0f0f0;padding:5px;border-bottom:1px solid #000;font-weight:bold">مشخصات خریدار</div>
+    <div style="padding:10px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><strong>نام شخص حقیقی/حقوقی:</strong> {{pf.centerName}}</div>
+    </div>
+  </div>
+  <table style="width:100%;border-collapse:collapse;margin-bottom:15px;font-size:12px;border:1px solid #000;text-align:center">
+    <thead style="background:#f0f0f0">
+      <tr>
+        <th style="border:1px solid #000;padding:5px">ردیف</th>
+        <th style="border:1px solid #000;padding:5px">کد کالا</th>
+        <th style="border:1px solid #000;padding:5px">شرح کالا / خدمات</th>
+        <th style="border:1px solid #000;padding:5px">تعداد</th>
+        <th style="border:1px solid #000;padding:5px">واحد</th>
+        <th style="border:1px solid #000;padding:5px">مبلغ واحد (ریال)</th>
+        <th style="border:1px solid #000;padding:5px">مبلغ کل (ریال)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{items_html}}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="6" style="text-align:left;padding:5px;border:1px solid #000;font-weight:bold">جمع کل قبل از تخفیف:</td>
+        <td style="border:1px solid #000;padding:5px;font-family:monospace">{{subtotal}}</td>
+      </tr>
+      <tr>
+        <td colspan="6" style="text-align:left;padding:5px;border:1px solid #000;font-weight:bold">تخفیف:</td>
+        <td style="border:1px solid #000;padding:5px;font-family:monospace">{{discAmt}}</td>
+      </tr>
+      <tr>
+        <td colspan="6" style="text-align:left;padding:5px;border:1px solid #000;font-weight:bold">مالیات و عوارض ارزش افزوده ({{taxPct}}٪):</td>
+        <td style="border:1px solid #000;padding:5px;font-family:monospace">{{taxAmt}}</td>
+      </tr>
+      <tr style="background:#f0f0f0">
+        <td colspan="6" style="text-align:left;padding:5px;border:1px solid #000;font-weight:bold">جمع کل فاکتور (ریال):</td>
+        <td style="border:1px solid #000;padding:5px;font-weight:bold;font-family:monospace">{{total}}</td>
+      </tr>
+    </tfoot>
+  </table>
+  <div style="font-size:12px;margin-bottom:20px;border:1px solid #000;padding:10px;border-radius:4px">
+    <strong>مبلغ کل به حروف:</strong> {{totalWords}} ریال
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:40px;font-size:13px;font-weight:bold">
+    <div style="text-align:center">مهر و امضای فروشنده</div>
+    <div style="text-align:center">مهر و امضای خریدار</div>
+  </div>
+</div>`;
+}
+
+function pfOpenTemplateEditor() {
+  if (!_isManager()) { showToast('⚠ دسترسی فقط برای مدیر امکان‌پذیر است'); return; }
+  var tpl = (typeof DB !== 'undefined' && DB.settings && DB.settings.pfPrintTemplate) || _pfDefaultTemplate();
+  var html = '<div style="margin-bottom:12px;font-size:12px;color:#475569">شما می‌توانید کد HTML قالب چاپ را مستقیماً ویرایش کنید. از متغیرهای <code style="direction:ltr;display:inline-block">\{\{...\}\}</code> استفاده کنید.</div>' +
+    '<div style="font-size:11px;color:#0284c7;margin-bottom:8px;background:#f0f9ff;padding:8px;border-radius:6px;border:1px solid #bae6fd">' +
+    '<strong>متغیرهای قابل استفاده:</strong><br>' +
+    '\{\{seller.name\}\}, \{\{seller.ecoCode\}\}, \{\{seller.natId\}\}, \{\{seller.regId\}\}, \{\{seller.address\}\}, \{\{seller.postal\}\}, \{\{seller.phone\}\}<br>' +
+    '\{\{pf.no\}\}, \{\{pf.jalaliDate\}\}, \{\{pf.centerName\}\}, \{\{pf.creatorName\}\}<br>' +
+    '\{\{items_html\}\}, \{\{subtotal\}\}, \{\{discAmt\}\}, \{\{taxPct\}\}, \{\{taxAmt\}\}, \{\{total\}\}, \{\{totalWords\}\}' +
     '</div>' +
-    '<div style="background:#eff6ff;border:2px solid #2563eb;border-radius:6px;padding:10px 16px;text-align:center;margin-bottom:16px">' +
-      '<span style="font-size:17px;font-weight:800;color:#1d4ed8">پیش‌فاکتور فروش</span>' +
-      (pf.validDays ? '<span style="font-size:12px;color:#1d4ed8;margin-right:16px">اعتبار: ' + pf.validDays + ' روز</span>' : '') +
-    '</div>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;padding:12px;background:#f8fafc;border-radius:6px;border:1px solid #e2e8f0;margin-bottom:16px;font-size:12px">' +
-      '<div style="display:flex;gap:6px"><span style="font-weight:700;color:#475569;min-width:80px">مشتری:</span><span>' + esc(pf.centerName||'—') + '</span></div>' +
-      '<div style="display:flex;gap:6px"><span style="font-weight:700;color:#475569;min-width:80px">صادرکننده:</span><span>' + esc(_pfCreatorName(pf.createdBy)) + '</span></div>' +
-    '</div>' +
-    '<table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-size:12px">' +
-      '<thead><tr style="background:#1a2744;color:#fff">' +
-        '<th style="padding:8px;border:1px solid #1a2744;text-align:center;width:40px">ردیف</th>' +
-        '<th style="padding:8px;border:1px solid #1a2744;text-align:right">شرح کالا</th>' +
-        '<th style="padding:8px;border:1px solid #1a2744;text-align:center;width:60px">واحد</th>' +
-        '<th style="padding:8px;border:1px solid #1a2744;text-align:center;width:60px">تعداد</th>' +
-        '<th style="padding:8px;border:1px solid #1a2744;text-align:center;width:120px">قیمت واحد (ریال)</th>' +
-        '<th style="padding:8px;border:1px solid #1a2744;text-align:center;width:120px">مبلغ کل (ریال)</th>' +
-      '</tr></thead>' +
-      '<tbody>' + itemRows + '</tbody>' +
-      '<tfoot>' +
-        (pf.discountPct ? '<tr style="background:#fff7ed"><td colspan="5" style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:700;text-align:right">تخفیف ' + pf.discountPct + '٪</td><td style="padding:6px 8px;border:1px solid #cbd5e1;font-family:monospace;text-align:left">−' + fmtNum(discAmt) + '</td></tr>' : '') +
-        '<tr style="background:#f0f4f8"><td colspan="5" style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:700;text-align:right">مالیات ' + (pf.taxPct||9) + '٪</td><td style="padding:6px 8px;border:1px solid #cbd5e1;font-family:monospace;text-align:left">+' + fmtNum(taxAmt) + '</td></tr>' +
-        '<tr style="background:#f0f4f8"><td colspan="5" style="padding:8px;border:2px solid #1a2744;font-weight:800;text-align:right;font-size:13px">جمع کل (ریال)</td><td style="padding:8px;border:2px solid #1a2744;font-family:monospace;font-weight:800;font-size:13px;text-align:left">' + fmtNum(total) + '</td></tr>' +
-      '</tfoot>' +
-    '</table>' +
-    '<div style="border:1px solid #1a2744;border-radius:6px;padding:10px 14px;margin-bottom:16px;font-size:12px;background:#f0f4ff">' +
-      '<strong>مبلغ به حروف:</strong> ' + _numToWords(total) + ' ریال' +
-    '</div>' +
-    (pf.note ? '<div style="border:1px dashed #cbd5e1;border-radius:6px;padding:10px;margin-bottom:16px;font-size:12px"><strong>توضیحات:</strong> ' + esc(pf.note) + '</div>' : '') +
-    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-top:32px">' +
-      '<div style="text-align:center"><div style="font-size:12px;font-weight:800;margin-bottom:4px">مهر و امضای فروشنده</div><div style="height:50px"></div><div style="border-top:1px solid #000;padding-top:6px;font-size:10px;color:#666">آتنا زیست درمان</div></div>' +
-      '<div style="text-align:center"><div style="font-size:12px;font-weight:800;margin-bottom:4px">مهر و امضای خریدار</div><div style="height:50px"></div><div style="border-top:1px solid #000;padding-top:6px;font-size:10px;color:#666">' + esc(pf.centerName||'') + '</div></div>' +
-      '<div style="text-align:center"><div style="font-size:12px;font-weight:800;margin-bottom:4px">تأیید مدیر فروش</div><div style="height:50px"></div><div style="border-top:1px solid #000;padding-top:6px;font-size:10px;color:#666"></div></div>' +
-    '</div>' +
-    '<div style="margin-top:16px;padding-top:8px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;font-size:10px;color:#94a3b8">' +
-      '<span>این پیشفاکتور توسط سیستم Flow CRM آتنا زیست درمان صادر شده است</span>' +
-      '<span>' + esc(pf.no) + '</span>' +
-    '</div>' +
-  '</div>';
+    '<textarea id="pfTemplateCode" style="width:100%;height:400px;font-family:monospace;font-size:12px;direction:ltr;text-align:left;padding:10px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical">' + esc(tpl) + '</textarea>';
+  
+  openModal('pfTemplateModal', '✏️ ویرایش قالب چاپ پیش‌فاکتور (HTML)', html,
+    '<button onclick="pfResetTemplate()" style="padding:8px 16px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;margin-left:8px">بازگشت به پیش‌فرض</button>' +
+    '<button onclick="document.getElementById(\'pfTemplateModal\').style.display=\'none\'" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;margin-left:8px">انصراف</button>' +
+    '<button onclick="pfSaveTemplate()" style="padding:8px 18px;background:var(--brand);color:white;border:none;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">💾 ذخیره قالب</button>',
+    {lg:true}
+  );
+}
+
+function pfSaveTemplate() {
+  var code = document.getElementById('pfTemplateCode').value;
+  if (!DB.settings) DB.settings = {};
+  DB.settings.pfPrintTemplate = code;
+  saveDB();
+  document.getElementById('pfTemplateModal').style.display = 'none';
+  showToast('✅ قالب چاپ ذخیره شد');
+}
+
+function pfResetTemplate() {
+  if(confirm('آیا مطمئن هستید که می‌خواهید قالب به حالت پیش‌فرض (فاکتور رسمی دارایی) بازگردد؟')) {
+    document.getElementById('pfTemplateCode').value = _pfDefaultTemplate();
+  }
 }
 
 // ── Modal & Print zone HTML ───────────────────────────────────────────────
@@ -710,3 +797,44 @@ window._pfReject  = function(pf)  { pfReject(pf.id); };
     '.form-input:disabled{background:#f8fafc;color:#94a3b8}';
   document.head.appendChild(s);
 }());
+
+
+// ── Product search dropdown ────────────────────────────────────────────────
+function pfSearchProduct(i, q) {
+  var drop = document.getElementById('pfProdDrop_' + i);
+  if (!drop) return;
+  if (!q || q.length < 2) { drop.style.display = 'none'; return; }
+  var qn = fNorm(q);
+  var results = _pfWmsProds.filter(function(p) {
+    return fNorm(p.full_name || p.name).indexOf(qn) !== -1;
+  }).slice(0, 15);
+
+  if (!results.length) { drop.style.display = 'none'; return; }
+  
+  drop.innerHTML = results.map(function(r) {
+    var n = esc(r.full_name || r.name);
+    var u = esc(r.unit || 'عدد');
+    return '<div onclick="pfSelectProduct(' + i + ', \'' + n + '\', \'' + u + '\')" style="padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid #f1f5f9" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'white\'">' + n + ' <span style="color:#94a3b8;font-size:11px">(' + u + ')</span></div>';
+  }).join('');
+  
+  var inp = document.querySelector('.pf-item-name[data-idx="' + i + '"]');
+  if (inp) {
+    var rect = inp.getBoundingClientRect();
+    drop.style.top = (rect.bottom + window.scrollY) + 'px';
+    drop.style.left = rect.left + 'px';
+    drop.style.width = rect.width + 'px';
+    drop.style.position = 'fixed';
+  }
+  drop.style.display = 'block';
+}
+
+function pfSelectProduct(i, name, unit) {
+  var drop = document.getElementById('pfProdDrop_' + i);
+  if (drop) drop.style.display = 'none';
+  var inp = document.querySelector('.pf-item-name[data-idx="' + i + '"]');
+  if (inp) {
+    inp.value = name;
+    _pfRowChange(i, 'name', name);
+    _pfRowAutofill(i, name);
+  }
+}

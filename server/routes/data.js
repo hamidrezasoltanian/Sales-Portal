@@ -62,9 +62,12 @@ async function loadDBFromSQL(client) {
 
   const kpiTargets = {};
   const settings = {};
+  let provOverrides = {};
   settingsR.rows.forEach(function(r) {
     if (r.key === 'kpi_weights') {
       kpiTargets.weights = r.value;
+    } else if (r.key === 'provOverrides') {
+      provOverrides = r.value || {};
     } else {
       settings[r.key] = r.value;
     }
@@ -108,6 +111,7 @@ async function loadDBFromSQL(client) {
     notes,
     rTags,
     settings,
+    provOverrides,
     events: eventsR.rows,
     checklist,
     kpiTargets,
@@ -152,7 +156,7 @@ router.put('/db', async (req, res) => {
   const KNOWN_KEYS = ['edits','notes','tags','rTags','weekEntries','tasks','notifications',
                       'changeLog','settings','events','checklist','kpiTargets','salesLog',
                       'callLog','visitLog','extra','_clientTs','_serverTs','_weDeletedKeys','_mtr',
-                      'missionLog','provHistory','kpiHistory'];
+                      'missionLog','provHistory','kpiHistory', 'provOverrides'];
   const hasKnown = Object.keys(body).some(k => KNOWN_KEYS.includes(k));
   if (!hasKnown && Object.keys(body).length > 0) {
     return res.status(400).json({ error: 'ساختار داده نامعتبر' });
@@ -187,7 +191,7 @@ router.put('/db', async (req, res) => {
 
     const { edits, notes, rTags, tags, settings, events, checklist, kpiTargets,
             extra, salesLog, callLog, visitLog, missionLog, provHistory, kpiHistory,
-            weekEntries, _weDeletedKeys, _mtr } = body;
+            weekEntries, _weDeletedKeys, _mtr, provOverrides } = body;
 
     // ── center_edits ──────────────────────────────────────────────────────────
     if (edits && typeof edits === 'object' && Object.keys(edits).length > 0) {
@@ -234,6 +238,16 @@ router.put('/db', async (req, res) => {
           [key, JSON.stringify(value), user]
         );
       }
+    }
+
+    // ── provOverrides ──────────────────────────────────────────────────────────
+    if (provOverrides !== undefined && typeof provOverrides === 'object') {
+      await client.query(
+        `INSERT INTO app_settings (key, value, updated_at, updated_by)
+         VALUES ('provOverrides', $1, NOW(), $2)
+         ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
+        [JSON.stringify(provOverrides), user]
+      );
     }
 
     // ── structured SQL tables saving ─────────────────────────────────────────
@@ -441,7 +455,7 @@ router.put('/db', async (req, res) => {
     await client.query('SAVEPOINT history_ops');
     try {
       const dbSnap = {
-        edits, notes, rTags, tags, settings, events, checklist, kpiTargets,
+        edits, notes, rTags, tags, settings, provOverrides, events, checklist, kpiTargets,
         extra, salesLog, callLog, visitLog, weekEntries: incomingWE
       };
       await client.query(
@@ -544,6 +558,13 @@ router.post('/history/:id/restore', requireManager, async (req, res) => {
         );
       }
     }
+    const provOverrides = snap.provOverrides || {};
+    await client.query(
+      `INSERT INTO app_settings (key, value, updated_at, updated_by)
+       VALUES ('provOverrides', $1, NOW(), $2)
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
+      [JSON.stringify(provOverrides), user]
+    );
 
     // 5. Structured SQL tables restore from snapshot
     // 1. events

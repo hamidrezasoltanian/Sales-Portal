@@ -84,7 +84,7 @@ var _redoStack=[];
 var MAX_UNDO=50;
 var _undoSuppressed=false;
 var _actPage=0;
-var DB={edits:{},notes:{},tags:[],rTags:{},weekTags:[],weekEntries:{},_weDeletedKeys:[],events:[],checklist:{},extra:[],settings:null,kpiTargets:{},callLog:[],visitLog:[],salesLog:[],missionLog:[],provHistory:[],mtrFollower:{},mtrFollowerMap:{},changeLog:[],mtrTrend:[],notifications:[],tasks:[],kpiHistory:[]};
+var DB={edits:{},notes:{},tags:[],rTags:{},weekTags:[],weekEntries:{},_weDeletedKeys:[],events:[],checklist:{},extra:[],settings:null,provOverrides:{},kpiTargets:{},callLog:[],visitLog:[],salesLog:[],missionLog:[],provHistory:[],mtrFollower:{},mtrFollowerMap:{},changeLog:[],mtrTrend:[],notifications:[],tasks:[],kpiHistory:[]};
 var _DEFAULT_MEMBERS=[]; // loaded from server via buildUSERS()
 
 // ════════════════════════ SSE (Server-Sent Events) ════════════════════════
@@ -507,6 +507,9 @@ function mergeDatabaseDiff(local, server, lastSynced) {
 
   // 5. settings
   merged.settings = Object.assign({}, server.settings || {}, local.settings || {});
+
+  // provOverrides
+  merged.provOverrides = Object.assign({}, server.provOverrides || {}, local.provOverrides || {});
 
   // 6. events
   var evMap = {};
