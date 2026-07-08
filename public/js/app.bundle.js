@@ -5200,7 +5200,7 @@ document.addEventListener('click', function(ev) {
   var popup = document.getElementById('centerContactPopup');
   if (popup && popup.classList.contains('show') && !popup.contains(ev.target)) hideContactPopup();
 });
-async function openCenterAudit(centerKey, centerName) {
+function openCenterAudit(centerKey, centerName) {
   var _ckParts=centerKey.split('_');var rtype=_ckParts[0], rid=_ckParts.slice(1).join('_');
   var events=[];
   // changeLog
@@ -5238,33 +5238,6 @@ async function openCenterAudit(centerKey, centerName) {
       title:(t.done?'وظیفه انجام شد':'وظیفه')+': '+String(t.title||'').substring(0,30),
       detail:t.note||'',by:t.owner||'',at:null,dateStr:t.dueDate||''});
   });
-
-  // proformas — fetch from API and add to timeline
-  try {
-    var _pfResp = await fetch('/api/proforma?center=' + encodeURIComponent(centerKey));
-    if (_pfResp.ok) {
-      var _pfData = await _pfResp.json();
-      (_pfData || []).forEach(function(pf) {
-        var d = new Date(pf.createdAt || pf.updatedAt || Date.now());
-        var statusLabel = {draft:'پیش‌نویس',sent:'ارسال شده',approved:'تأیید شده',rejected:'رد شده',cancelled:'لغو شده'}[pf.status] || pf.status;
-        var total = Number(pf.total || 0).toLocaleString('fa-IR');
-        var itemCount = (pf.items || []).length;
-        var commBadge = pf.hasCommission ? ' | 💸 پورسانت: ' + Number(pf.commissionAmt||0).toLocaleString('fa-IR') + ' ﷼' : '';
-        events.push({
-          ts: d.getTime(),
-          type: 'proforma',
-          icon: '📋',
-          color: '#6366f1',
-          title: 'پیشفاکتور ' + esc(pf.no) + ' — ' + statusLabel,
-          detail: 'مبلغ: ' + total + ' ﷼ | ' + itemCount + ' ردیف' + commBadge,
-          by: pf.createdBy || '',
-          at: d,
-          dateStr: pf.jalaliDate || '',
-          pfId: pf.id,
-        });
-      });
-    }
-  } catch(_pfErr) {}
 
   events.sort(function(a,b){return b.ts-a.ts;});
 
@@ -5660,6 +5633,7 @@ function openCenterModal(rtype,id){
     +'<button style="background:#f0f9ff;color:#0369a1;border:1px solid #7dd3fc;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openCenterAudit(\''+recK(rtype,r.id)+'\',\''+esc(displayName)+'\')">📋 تاریخچه</button>'
     +(_canEdit('provinces') ? '<button style="background:#f0fdf4;color:#15803d;border:1px solid #86efac;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openMergeCenterModal(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">🔀 ادغام</button>' : '')
     +(_isManager()?'<button style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openChangeProvinceModal(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">🗺 تغییر استان</button>':'')
+    +'<button style="background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" id="pfBtn_'+id+'">📄 پیشفاکتورها</button>'
     +'<button class="btn-secondary" onclick="closeModal(\'cm_'+id+'\')">بستن</button>'
     +'<button class="btn-primary" onclick="openAssignWeekForCenter(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">📋 اضافه به هفته</button>';
   // ── مطالبات section ──
@@ -5669,6 +5643,56 @@ function openCenterModal(rtype,id){
     if(mtrHtml) body+=mtrHtml;
   }
   openModal('cm_'+id,'🏥 '+esc(displayName),body,foot,{lg:true});
+  // Wire up proforma button (DOM, no onclick string)
+  (function(_ck4,_mid4,_nm4){
+    setTimeout(function(){
+      var _pfBtn=document.getElementById('pfBtn_'+_mid4);
+      if(_pfBtn){
+        _pfBtn.addEventListener('click',function(){
+          if(typeof pfOpenForCenter==='function')pfOpenForCenter(_ck4,_nm4);
+          if(typeof closeModal==='function')closeModal('cm_'+_mid4);
+        });
+      }
+      // Append mini proforma list section
+      var _modal4=document.getElementById('cm_'+_mid4); if(!_modal4)return;
+      var _bd4=_modal4.querySelector('.modal-body')||_modal4;
+      if(document.getElementById('cmPfSec_'+_mid4))return;
+      var _sec=document.createElement('div');
+      _sec.id='cmPfSec_'+_mid4;
+      _sec.style.cssText='margin-top:14px;padding:12px 14px;background:#f5f3ff;border-radius:10px;border:1px solid #ddd6fe';
+      var _hdr=document.createElement('div');
+      _hdr.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px';
+      var _ttl=document.createElement('span');
+      _ttl.style.cssText='font-weight:700;font-size:12px;color:#6d28d9';
+      _ttl.textContent='📄 پیشفاکتورهای این مرکز';
+      var _lnk=document.createElement('button');
+      _lnk.textContent='مشاهده همه ←';
+      _lnk.style.cssText='font-size:11px;color:#6d28d9;background:none;border:none;cursor:pointer;text-decoration:underline';
+      _lnk.addEventListener('click',function(){
+        if(typeof pfOpenForCenter==='function')pfOpenForCenter(_ck4,_nm4);
+        if(typeof closeModal==='function')closeModal('cm_'+_mid4);
+      });
+      _hdr.appendChild(_ttl); _hdr.appendChild(_lnk);
+      var _body=document.createElement('div');
+      _body.id='cmPfInner_'+_mid4;
+      _body.style.cssText='font-size:12px;color:#94a3b8';
+      _body.textContent='در حال بارگذاری…';
+      _sec.appendChild(_hdr); _sec.appendChild(_body); _bd4.appendChild(_sec);
+      fetch('/api/proforma?center='+encodeURIComponent(_ck4)).then(function(r2){return r2.ok?r2.json():[];}).then(function(lst){
+        var _ei=document.getElementById('cmPfInner_'+_mid4); if(!_ei)return;
+        if(!lst||!lst.length){_ei.innerHTML='<span style="color:#94a3b8">پیشفاکتوری ثبت نشده</span>';return;}
+        var sc={draft:'#6366f1',sent:'#0284c7',approved:'#15803d',rejected:'#dc2626',cancelled:'#9ca3af'};
+        var sl={draft:'پیش‌نویس',sent:'ارسال',approved:'تأیید',rejected:'رد',cancelled:'لغو'};
+        _ei.innerHTML=lst.slice(0,5).map(function(pf){
+          return '<div style="display:flex;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid #ede9fe">'+
+            '<span style="font-family:monospace;font-size:11px;color:#0284c7;flex-shrink:0">'+(pf.no||'')+'</span>'+
+            '<span style="font-size:10px;color:#94a3b8;flex-shrink:0">'+(pf.jalaliDate||'')+'</span>'+
+            '<span style="font-size:10px;color:'+(sc[pf.status]||'#6b7280')+';font-weight:700">'+(sl[pf.status]||pf.status)+'</span>'+
+            '<span style="font-size:11px;font-weight:700;margin-right:auto">'+Number(pf.total||0).toLocaleString('fa-IR')+' ریال</span></div>';
+        }).join('')+(lst.length>5?'<div style="text-align:center;color:#94a3b8;font-size:10px;margin-top:4px">+ '+(lst.length-5)+' مورد دیگر</div>':'');
+      }).catch(function(){});
+    },150);
+  })(recK(rtype,r.id), id, displayName);
   if(typeof _hcpLoadCenterAffiliations==='function'){setTimeout(function(){_hcpLoadCenterAffiliations(rtype,r.id,id);},20);}
   if(window.umGetColor){setTimeout(function(){document.querySelectorAll('.owner-dot[data-uid]').forEach(function(d){var u=decodeURIComponent(d.dataset.uid);if(u)d.style.background=umGetColor(u);});},0);}
   // ── قیمت‌گذاری ──
