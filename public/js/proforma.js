@@ -11,6 +11,7 @@ var _pfPage   = 0;
 var _pfEditId = null;    // currently open modal id (null = new)
 var _pfItems  = [];      // rows in open modal
 var _pfWmsProds = [];    // WMS product list (fetched once per session)
+var _pfWmsProdTs = 0;   // timestamp of last fetch (ms)
 var _pfProdViewMode = 'tree'; // 'tree' | 'list'
 var _pfProdSearch = '';
 var _pfActiveCat = null; // expanded category in tree view
@@ -385,16 +386,33 @@ async function _pfDoReject(id) {
   await pfAction(id, 'reject', note);
 }
 
-// ── Fetch WMS products once (for item autocomplete) ──────────────────────
-async function _pfLoadWmsProds() {
-  if (_pfWmsProds.length) return;
+// ── Fetch WMS products (refresh every 5 min or on-demand) ───────────────────
+async function _pfLoadWmsProds(force) {
+  var now = Date.now();
+  var stale = (now - _pfWmsProdTs) > 5 * 60 * 1000; // 5 minutes
+  if (!force && _pfWmsProds.length && !stale) return;
   try {
-    var r = await fetch('/api/wms/inventory');
+    var r = await fetch('/api/wms/products');
     if (r.ok) {
       var data = await r.json();
       _pfWmsProds = data || [];
+      _pfWmsProdTs = Date.now();
     }
   } catch(e) {}
+}
+
+// Force-refresh products (called after WMS import or from refresh button)
+function pfRefreshProds() {
+  _pfWmsProds = [];
+  _pfWmsProdTs = 0;
+  _pfLoadWmsProds(true).then(function() {
+    var modal = document.getElementById('pfProdModal');
+    if (modal && modal.style.display !== 'none') {
+      var body = document.getElementById('pfProdModalBody');
+      if (body) body.innerHTML = _pfBuildProductListHtml();
+    }
+    if (typeof showToast === 'function') showToast('✅ لیست کالاها به‌روزشد');
+  });
 }
 
 // ── Open new proforma modal ───────────────────────────────────────────────

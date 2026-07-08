@@ -8,6 +8,14 @@ const { requireAuth } = require('../auth');
 const router = express.Router();
 router.use(requireAuth);
 router.use((req, res, next) => {
+  // /products and /inventory GET are needed by proforma for all users - skip WMS permission
+  const isPublicReadPath = req.method === 'GET' && (
+    req.path === '/products' ||
+    req.path.startsWith('/products?') ||
+    req.path === '/inventory' ||
+    req.path.startsWith('/inventory?')
+  );
+  if (isPublicReadPath) return next();
   const level = req.method === 'GET' ? 'view' : 'edit';
   requirePermission('wms', level)(req, res, next);
 });
