@@ -132,14 +132,24 @@ router.post('/', requireAuth, async (req, res) => {
     const d = validate(CreateSchema, req.body, res);
     if (!d) return;
 
-    // Auto-number PF-1404-0001
+    // Auto-number PF-1404-0001 (use MAX to avoid duplicate key on delete)
     const year = (d.jalaliDate || '').split('/')[0] || String(new Date().getFullYear());
-    const countRes = await query(
-      `SELECT COUNT(*) FROM proformas WHERE no LIKE $1`,
+    const maxRes = await query(
+      `SELECT MAX(CAST(SUBSTRING(no FROM '\\d+$') AS INTEGER)) as max_seq 
+       FROM proformas 
+       WHERE no LIKE $1`,
       [`PF-${year}-%`]
     );
-    const seq = String(parseInt(countRes.rows[0].count) + 1).padStart(4, '0');
-    const no  = `PF-${year}-${seq}`;
+
+    let nextSeq = 1;
+    if (maxRes.rows.length > 0 && maxRes.rows[0].max_seq !== null) {
+      nextSeq = parseInt(maxRes.rows[0].max_seq) + 1;
+    }
+
+    const seq = String(nextSeq).padStart(4, '0');
+    const no = `PF-${year}-${seq}`;
+    
+    console.log('[proforma POST] Generated proforma number:', no, 'nextSeq:', nextSeq);
 
     // Item-level discount calculation
     const itemsFull = d.items.map(function(i) {
@@ -157,13 +167,19 @@ router.post('/', requireAuth, async (req, res) => {
 
     const r = await query(
       `INSERT INTO proformas
-         (id,no,jalali_date,valid_days,center_key,center_name,items,
-          subtotal,discount_pct,disc_amt,tax_pct,tax_amt,total,
-          note,manager_note,buyer_nat_id,buyer_eco_code,buyer_reg_id,
-          buyer_address,buyer_phone,buyer_postal,
-          has_commission,commission_amt,commission_note,
-          status,created_by,created_at,updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,'draft',$25,NOW(),NOW())
+         (id, no, jalali_date, valid_days, center_key, center_name, items,
+          subtotal, discount_pct, disc_amt, tax_pct, tax_amt, total,
+          note, manager_note, buyer_nat_id, buyer_eco_code, buyer_reg_id,
+          buyer_address, buyer_phone, buyer_postal,
+          has_commission, commission_amt, commission_note,
+          status, created_by, created_at, updated_at)
+       VALUES 
+         ($1, $2, $3, $4, $5, $6, $7, 
+          $8, $9, $10, $11, $12, $13, 
+          $14, $15, $16, $17, $18, 
+          $19, $20, $21, 
+          $22, $23, $24, 
+          'draft', $25, NOW(), NOW())
        RETURNING *`,
       [id, no, d.jalaliDate||null, d.validDays, d.centerKey, d.centerName,
        JSON.stringify(itemsFull), subtotal, d.discountPct, discAmt,
@@ -203,8 +219,8 @@ router.put('/:id', requireAuth, async (req, res) => {
     const existing = await query('SELECT * FROM proformas WHERE id = $1', [req.params.id]);
     if (!existing.rows.length) return res.status(404).json({ error: 'پیشفاکتور یافت نشد' });
     const isSuperAdmin = req.session?.user?.role === 'سوپر ادمین';
-    if (existing.rows[0].status !== 'draft' && !isSuperAdmin) {
-      return res.status(400).json({ error: 'فقط پیش‌نویس قابل ویرایش است (سوپر ادمین می‌تواند هر وضعیتی را ویرایش کند)' });
+    if (!['draft','approved'].includes(existing.rows[0].status) && !isSuperAdmin) {
+      return res.status(400).json({ error: 'فقط پیش‌نویس یا تایید شده قابل ویرایش است (سوپر ادمین می‌تواند هر وضعیتی را ویرایش کند)' });
     }
 
     const d = validate(CreateSchema.partial(), req.body, res);
@@ -278,7 +294,7 @@ router.put('/:id', requireAuth, async (req, res) => {
 const TRANSITIONS = {
   draft:     ['send','cancel'],
   sent:      ['approve','reject','cancel'],
-  approved:  ['cancel'],
+  approved:  ['cancel','reject'],
   rejected:  ['reopen'],
   cancelled: ['reopen'],
 };
@@ -356,8 +372,11 @@ router.delete('/:id', requireAuth, async (req, res) => {
     const existing = await query('SELECT status FROM proformas WHERE id = $1', [req.params.id]);
     if (!existing.rows.length) return res.status(404).json({ error: 'پیشفاکتور یافت نشد' });
     const isSuperAdmin = req.session?.user?.role === 'سوپر ادمین';
-    if (!isSuperAdmin && !['draft','cancelled'].includes(existing.rows[0].status)) {
-      return res.status(400).json({ error: 'فقط پیش‌نویس یا لغو شده را می‌توان حذف کرد' });
+    const status = existing.rows[0].status;
+    // Allow deletion of draft, cancelled, rejected, or approved statuses
+    // Super admin can delete any status
+    if (!isSuperAdmin && !['draft','cancelled','rejected','approved'].includes(status)) {
+      return res.status(400).json({ error: 'فقط پیش‌نویس، لغو شده، رد شده یا تایید شده را می‌توان حذف کرد' });
     }
     await query('DELETE FROM proformas WHERE id = $1', [req.params.id]);
     res.json({ ok: true });

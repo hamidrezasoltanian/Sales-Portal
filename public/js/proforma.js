@@ -27,6 +27,7 @@ var PF_STATUS = {
   approved:  { label: 'تأیید شده', cls: 'bg'  },
   rejected:  { label: 'رد شده',    cls: 'br'  },
   cancelled: { label: 'لغو شده',   cls: 'by'  },
+  invoiced:  { label: 'فاکتور شده', cls: 'bc'  },
 };
 
 function pfStatusBadge(s) {
@@ -67,11 +68,15 @@ function _pfApplySearch(list) {
   if (!q && !owner) return list;
   var qn = q ? fNorm(q) : '';
   return list.filter(function(pf) {
-    if (owner && pf.createdBy !== owner) return false;
+    // Filter by center owner instead of creator
+    if (owner) {
+      var actualOwner = _pfGetCenterOwnerId(pf.centerKey);
+      if (actualOwner !== owner) return false;
+    }
     if (!qn) return true;
     if (fNorm(pf.centerName || '').indexOf(qn) !== -1) return true;
     if (fNorm(pf.no || '').indexOf(qn) !== -1) return true;
-    if (fNorm(_pfCreatorName(pf.createdBy) || '').indexOf(qn) !== -1) return true;
+    if (fNorm(_pfGetCenterOwner(pf.centerKey) || '').indexOf(qn) !== -1) return true;
     if ((pf.items || []).some(function(it) {
       return fNorm(it.name || '').indexOf(qn) !== -1 ||
              fNorm(it.catalogCode || '').indexOf(qn) !== -1;
@@ -97,8 +102,8 @@ function _renderPfPanel(el) {
   // members for owner dropdown
   var members = (typeof DB !== 'undefined' && DB.settings && DB.settings.members) ? DB.settings.members.filter(function(m){ return m.active !== false; }) : [];
 
-  var filterBtns = ['all','draft','sent','approved','rejected','cancelled'].map(function(s) {
-    var lbl = s === 'all' ? 'همه' : (PF_STATUS[s] || { label: s }).label;
+  var filterBtns = ['all','draft','sent','approved','rejected','cancelled','invoiced'].map(function(s) {
+    var lbl = s === 'all' ? 'همه' : (s === 'invoiced' ? 'فاکتور شده' : (PF_STATUS[s] || { label: s }).label);
     var cnt = s === 'all' ? _pfList.length : _pfList.filter(function(p){ return p.status === s; }).length;
     return '<button onclick="_pfSetFilter(\'' + s + '\')" style="padding:5px 12px;border-radius:20px;border:1px solid ' +
       (_pfFilter === s ? 'var(--brand)' : '#e2e8f0') + ';background:' +
@@ -113,9 +118,9 @@ function _renderPfPanel(el) {
 
   var searchBar =
     '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px">' +
-      '<input id="pfSearchInp" type="text" placeholder="🔍 جستجو: مرکز، کالا، کد کاتالوگ، صادرکننده..." value="' + esc(_pfSearch) + '" ' +
-        'oninput="_pfSearch=this.value;_pfPage=0;var el=document.getElementById(\'proformaPanel\');if(el)_renderPfPanel(el)" ' +
-        'style="flex:1;min-width:200px;padding:7px 12px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:13px;outline:none">' +
+      '<input id="pfSearchInp" type="text" placeholder="🔍 جستجو: مرکز، کالا، کد کاتالوگ، مسئول مرکز..." value="' + esc(_pfSearch) + '" ' +
+        'oninput="if(window._pfSearchTimer)clearTimeout(window._pfSearchTimer);window._pfSearchTimer=setTimeout(function(){_pfSearch=document.getElementById(\'pfSearchInp\').value;_pfPage=0;var el=document.getElementById(\'proformaPanel\');if(el)_renderPfPanel(el);},500)" ' +
+        'style="flex:1;min-width:200px;padding:7px 12px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:13px;outline:none" autocomplete="off">' +
       '<select onchange="_pfOwnerF=this.value;_pfPage=0;var el=document.getElementById(\'proformaPanel\');if(el)_renderPfPanel(el)" ' +
         'style="padding:7px 10px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:12px">' +
         ownerOpts +
@@ -148,7 +153,7 @@ function _renderPfPanel(el) {
       '<td style="padding:10px 12px;font-size:12px;color:#64748b">' + ((pf.items||[]).length) + ' ردیف</td>' +
       '<td style="padding:10px 12px;font-family:monospace;font-size:13px;color:#1e293b;font-weight:600">' + fmtNum(pf.total) + ' ﷼</td>' +
       '<td style="padding:10px 12px"><span class="status-badge" style="background:' + _badgeBg(pf.status) + ';color:' + _badgeFg(pf.status) + ';padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700">' + st.label + '</span></td>' +
-      '<td style="padding:10px 12px;font-size:12px">' + esc(_pfCreatorName(pf.createdBy)) + '</td>' +
+      '<td style="padding:10px 12px;font-size:12px">' + esc(_pfGetCenterOwner(pf.centerKey)) + '</td>' +
       '<td style="padding:10px 12px;white-space:nowrap">' + actions + '</td>' +
       '</tr>';
 
@@ -212,7 +217,7 @@ function _renderPfPanel(el) {
           '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">کالاها</th>' +
           '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">مبلغ کل</th>' +
           '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">وضعیت</th>' +
-          '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">صادرکننده</th>' +
+          '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">مسئول مرکز</th>' +
           '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">عملیات</th>' +
         '</tr></thead>' +
         '<tbody>' + rows + '</tbody>' +
@@ -222,15 +227,65 @@ function _renderPfPanel(el) {
 }
 
 function _badgeBg(s) {
-  return { draft:'#f1f5f9', sent:'#eff6ff', approved:'#dcfce7', rejected:'#fee2e2', cancelled:'#fff7ed' }[s] || '#f1f5f9';
+  return { draft:'#f1f5f9', sent:'#eff6ff', approved:'#dcfce7', rejected:'#fee2e2', cancelled:'#fff7ed', invoiced:'#e0f2fe' }[s] || '#f1f5f9';
 }
 function _badgeFg(s) {
-  return { draft:'#475569', sent:'#1d4ed8', approved:'#15803d', rejected:'#b91c1c', cancelled:'#c2410c' }[s] || '#475569';
+  return { draft:'#475569', sent:'#1d4ed8', approved:'#15803d', rejected:'#b91c1c', cancelled:'#c2410c', invoiced:'#0369a1' }[s] || '#475569';
 }
 function _pfCreatorName(uid) {
   if (!uid) return '';
   var m = (DB.settings && DB.settings.members || []).find(function(x){ return x.id === uid; });
   return m ? m.name : uid;
+}
+
+// ── Helper: get center owner name from frontend cache ───────────────────────
+function _pfGetCenterOwner(centerKey) {
+  if (!centerKey) return '—';
+  var parts = centerKey.split('_');
+  var rtype = parts[0];
+  var rid = parts.slice(1).join('_');
+  var ownerId = null;
+
+  // ۱. بررسی سرنخ‌ها و مراکز فرعی (DB.extra)
+  if (typeof DB !== 'undefined' && DB.extra) {
+    var extra = DB.extra.find(function(c) { return c.id === rid; });
+    if (extra && extra.owner) ownerId = extra.owner;
+  }
+
+  // ۲. بررسی مراکز استانی (PC) برای یافتن مالک کل استان
+  if (!ownerId && rtype === 'pc' && typeof DB !== 'undefined' && DB.settings && DB.settings.provinces) {
+    var provId = rid.split('||')[0];
+    var prov = DB.settings.provinces.find(function(p) { return p.id === provId; });
+    if (prov && prov.owner) ownerId = prov.owner;
+  }
+
+  // در صورت نیاز، منطق مراکز تهران (center) را هم می‌توان اینجا اضافه کرد
+  
+  return ownerId ? _pfCreatorName(ownerId) : 'نامشخص';
+}
+
+// ── Helper: get center owner ID (for filtering) ───────────────────────────
+function _pfGetCenterOwnerId(centerKey) {
+  if (!centerKey) return null;
+  var parts = centerKey.split('_');
+  var rtype = parts[0];
+  var rid = parts.slice(1).join('_');
+  var ownerId = null;
+
+  // ۱. بررسی سرنخ‌ها و مراکز فرعی (DB.extra)
+  if (typeof DB !== 'undefined' && DB.extra) {
+    var extra = DB.extra.find(function(c) { return c.id === rid; });
+    if (extra && extra.owner) ownerId = extra.owner;
+  }
+
+  // ۲. بررسی مراکز استانی (PC) برای یافتن مالک کل استان
+  if (!ownerId && rtype === 'pc' && typeof DB !== 'undefined' && DB.settings && DB.settings.provinces) {
+    var provId = rid.split('||')[0];
+    var prov = DB.settings.provinces.find(function(p) { return p.id === provId; });
+    if (prov && prov.owner) ownerId = prov.owner;
+  }
+
+  return ownerId;
 }
 
 // ── Filter setter ─────────────────────────────────────────────────────────
@@ -599,6 +654,70 @@ function pfAddProductRow(prodId, name, unit, salePrice, catalogCode) {
   showToast('✅ ' + name + ' افزوده شد');
 }
 
+// ── Helper: append quick note from dropdown ───────────────────────────────
+window.pfAppendNote = function(selectEl, targetId, isDynamic) {
+  var val = selectEl.value;
+  if (!val) return;
+  var ta = document.getElementById(targetId);
+  if (!ta) return;
+
+  // محاسبه خودکار متن اعتبار بر اساس روز درج شده در فرم
+  if (isDynamic && val === 'validity') {
+    var days = document.getElementById('pfValid') ? document.getElementById('pfValid').value : 30;
+    val = 'اعتبار این پیش‌فاکتور به مدت ' + days + ' روز کاری می‌باشد.';
+  }
+
+  var current = ta.value.trim();
+  // اگر متنی از قبل بود، متن جدید را در خط بعدی اضافه کن
+  ta.value = current ? current + '\n' + val : val;
+  selectEl.selectedIndex = 0; // برگرداندن کشویی به حالت اول
+};
+
+// ── Note template management functions ─────────────────────────────────────
+function _pfGetNoteTemplates() {
+  if (typeof DB !== 'undefined' && DB.settings && DB.settings.pfNoteTemplates) {
+    return DB.settings.pfNoteTemplates;
+  }
+  return {
+    pmt: ['تسویه نقدی پیش از ارسال بار', '۵۰٪ پیش‌پرداخت، ۵۰٪ زمان تحویل', 'چک صیادی یک ماهه'],
+    acc: ['واریز به حساب بانک ملت شرکت آتنا زیست درمان، شماره شبا: IR0000000000000000000000', 'واریز به حساب بانک تجارت، شماره کارت: 0000-0000-0000-0000'],
+    int: ['نیاز به تایید مدیریت برای درصد تخفیف دارد', 'مشتری بدحساب است، کارکرد فقط به صورت نقدی', 'پیگیری این پیشفاکتور در هفته آینده انجام شود']
+  };
+}
+
+window.pfManageNoteTexts = function() {
+  if (typeof _isManager === 'function' && !_isManager()) { 
+      showToast('⚠️ فقط مدیران امکان ویرایش لیست متون پیش‌فرض را دارند.'); return; 
+  }
+  var tpls = _pfGetNoteTemplates();
+  var html = '<div style="font-size:12px;color:#475569;margin-bottom:12px">هر متن را در یک خط جداگانه بنویسید. برای حذف، خط مربوطه را پاک کنید.</div>' +
+    '<div><label style="font-size:11px;font-weight:700;color:#0284c7;display:block;margin-bottom:4px">📝 لیست شرایط پرداخت</label>' +
+    '<textarea id="mgTplPmt" rows="4" class="form-input" style="resize:vertical;margin-bottom:12px">' + esc(tpls.pmt.join('\n')) + '</textarea></div>' +
+    '<div><label style="font-size:11px;font-weight:700;color:#0284c7;display:block;margin-bottom:4px">💳 لیست معرفی حساب‌ها</label>' +
+    '<textarea id="mgTplAcc" rows="4" class="form-input" style="resize:vertical;margin-bottom:12px">' + esc(tpls.acc.join('\n')) + '</textarea></div>' +
+    '<div><label style="font-size:11px;font-weight:700;color:#0284c7;display:block;margin-bottom:4px">🔒 لیست یادداشت‌های داخلی</label>' +
+    '<textarea id="mgTplInt" rows="4" class="form-input" style="resize:vertical;margin-bottom:12px">' + esc(tpls.int.join('\n')) + '</textarea></div>';
+
+  openModal('pfNoteTplModal', '⚙️ ویرایش متون پیش‌فرض', html,
+    '<button onclick="closeModal(\'pfNoteTplModal\')" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;margin-left:8px">انصراف</button>' +
+    '<button onclick="_pfSaveNoteTexts()" style="padding:8px 18px;background:var(--brand);color:white;border:none;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">💾 ذخیره تغییرات</button>',
+    {lg: false}
+  );
+};
+
+window._pfSaveNoteTexts = function() {
+  if (!DB.settings) DB.settings = {};
+  var pmt = document.getElementById('mgTplPmt').value.split('\n').map(function(s){return s.trim();}).filter(Boolean);
+  var acc = document.getElementById('mgTplAcc').value.split('\n').map(function(s){return s.trim();}).filter(Boolean);
+  var int = document.getElementById('mgTplInt').value.split('\n').map(function(s){return s.trim();}).filter(Boolean);
+
+  DB.settings.pfNoteTemplates = { pmt: pmt, acc: acc, int: int };
+  if (typeof saveDB === 'function') saveDB();
+
+  closeModal('pfNoteTplModal');
+  showToast('✅ لیست متون با موفقیت ذخیره شد (برای دیدن تغییرات در کشویی‌ها، فرم پیش‌فاکتور را ببندید و دوباره باز کنید)');
+};
+
 // ── Show modal ────────────────────────────────────────────────────────────
 function _pfShowModal(pf) { try {
   var readOnly = pf && pf.status !== 'draft';
@@ -634,6 +753,34 @@ function _pfShowModal(pf) { try {
   var buyerPhoneVal   = pf ? (pf.buyerPhone || '') : '';
   var buyerPostalVal  = pf ? (pf.buyerPostal || '') : '';
   var managerNoteVal  = pf ? (pf.managerNote || '') : '';
+
+  // ── Dynamic dropdown lists from DB.settings ──
+  var tpls = _pfGetNoteTemplates();
+
+  function buildOpts(arr, defaultLabel) {
+     return '<option value="">+ ' + defaultLabel + '...</option>' +
+            arr.map(function(txt) { 
+                var shortTxt = txt.length > 35 ? txt.substring(0,35) + '...' : txt;
+                return '<option value="' + esc(txt) + '">' + esc(shortTxt) + '</option>'; 
+            }).join('');
+  }
+
+  var pmtOpts = buildOpts(tpls.pmt, 'شرایط پرداخت');
+  var accOpts = buildOpts(tpls.acc, 'معرفی حساب');
+  var intOpts = buildOpts(tpls.int, 'یادداشت داخلی');
+  var valOpts = '<option value="">+ اعتبار پیش‌فاکتور...</option><option value="validity">درج خودکار اعتبار (بر اساس روز فرم)</option>';
+
+  var pubTools = '<div style="display:flex;gap:6px;margin-bottom:6px">' +
+    '<select onchange="pfAppendNote(this, \'pfNote\')" style="flex:1;font-size:11px;padding:4px;border-radius:4px;border:1px solid #cbd5e1;max-width:30%" '+(readOnly?'disabled':'')+'>' + pmtOpts + '</select>' +
+    '<select onchange="pfAppendNote(this, \'pfNote\')" style="flex:1;font-size:11px;padding:4px;border-radius:4px;border:1px solid #cbd5e1;max-width:30%" '+(readOnly?'disabled':'')+'>' + accOpts + '</select>' +
+    '<select onchange="pfAppendNote(this, \'pfNote\', true)" style="flex:1;font-size:11px;padding:4px;border-radius:4px;border:1px solid #cbd5e1;max-width:30%" '+(readOnly?'disabled':'')+'>' + valOpts + '</select>' +
+    (!readOnly ? '<button onclick="pfManageNoteTexts()" title="مدیریت متون دیفالت" style="padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;background:#f8fafc;cursor:pointer">⚙️</button>' : '') +
+    '</div>';
+
+  var intTools = '<div style="display:flex;gap:6px;margin-bottom:6px">' +
+    '<select onchange="pfAppendNote(this, \'pfManagerNote\')" style="flex:1;font-size:11px;padding:4px;border-radius:4px;border:1px solid #cbd5e1" '+(readOnly?'disabled':'')+'>' + intOpts + '</select>' +
+    (!readOnly ? '<button onclick="pfManageNoteTexts()" title="مدیریت متون دیفالت" style="padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;background:#f8fafc;cursor:pointer">⚙️</button>' : '') +
+    '</div>';
 
   var productPicker = _pfBuildProductPicker(readOnly);
 
@@ -721,11 +868,15 @@ function _pfShowModal(pf) { try {
     '</div>' +
     // ── Two Notes (Tohid & internal)
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
-      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">📝 توضیحات پیش‌فاکتور (در چاپ می‌آید)</label>' +
-        '<textarea id="pfNote" rows="2" class="form-input" ' + (readOnly?'disabled':'') + ' style="resize:vertical">' + esc(noteVal) + '</textarea>' +
+      '<div>' +
+        '<label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">📝 توضیحات پیش‌فاکتور (در چاپ می‌آید)</label>' +
+        pubTools +
+        '<textarea id="pfNote" rows="3" class="form-input" ' + (readOnly?'disabled':'') + ' style="resize:vertical">' + esc(noteVal) + '</textarea>' +
       '</div>' +
-      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">🔒 یادداشت داخلی / مذاکرات مدیریت (عدم چاپ)</label>' +
-        '<textarea id="pfManagerNote" rows="2" class="form-input" ' + (readOnly?'disabled':'') + ' style="resize:vertical">' + esc(managerNoteVal) + '</textarea>' +
+      '<div>' +
+        '<label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">🔒 یادداشت داخلی / مذاکرات مدیریت (عدم چاپ)</label>' +
+        intTools +
+        '<textarea id="pfManagerNote" rows="3" class="form-input" ' + (readOnly?'disabled':'') + ' style="resize:vertical">' + esc(managerNoteVal) + '</textarea>' +
       '</div>' +
     '</div>' +
     // ── Commission section
@@ -976,13 +1127,17 @@ async function pfSave() {
   var valid   = Number(document.getElementById('pfValid') ? document.getElementById('pfValid').value : 3);
 
   // New fields
-  var managerNote  = document.getElementById('pfManagerNote') ? document.getElementById('pfManagerNote').value.trim() : '';
+  var managerNote  = document.getElementById('pfManagerNote') ? (document.getElementById('pfManagerNote').value || '').trim() : '';
   var buyerNatId   = document.getElementById('pfBuyerNatId')   ? document.getElementById('pfBuyerNatId').value.trim()   : '';
   var buyerEcoCode = document.getElementById('pfBuyerEcoCode') ? document.getElementById('pfBuyerEcoCode').value.trim() : '';
   var buyerRegId   = document.getElementById('pfBuyerRegId')   ? document.getElementById('pfBuyerRegId').value.trim()   : '';
   var buyerAddress = document.getElementById('pfBuyerAddress') ? document.getElementById('pfBuyerAddress').value.trim() : '';
   var buyerPhone   = document.getElementById('pfBuyerPhone')   ? document.getElementById('pfBuyerPhone').value.trim()   : '';
   var buyerPostal  = document.getElementById('pfBuyerPostal')  ? document.getElementById('pfBuyerPostal').value.trim()  : '';
+
+  // Ensure empty strings for all fields
+  if (note === null || note === undefined) note = '';
+  if (managerNote === null || managerNote === undefined) managerNote = '';
 
   // Sync any un-fired input values from DOM before saving
   _pfItems.forEach(function(item, i) {
@@ -1014,6 +1169,8 @@ async function pfSave() {
     buyerAddress: buyerAddress, buyerPhone: buyerPhone, buyerPostal: buyerPostal,
     hasCommission: hasCommission, commissionAmt: commissionAmt, commissionNote: commissionNote
   };
+
+  console.log('[Proforma POST] Sending body:', body);
 
   try {
     var url = _pfEditId ? '/api/proforma/' + _pfEditId : '/api/proforma';
