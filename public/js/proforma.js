@@ -1,7 +1,7 @@
-// ════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
 // PROFORMA MODULE — پیشفاکتور
 // Workflow: draft → sent → approved/rejected → (reopen → draft)
-// ════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
 'use strict';
 
 // ── State ─────────────────────────────────────────────────────────────────
@@ -11,6 +11,13 @@ var _pfPage   = 0;
 var _pfEditId = null;    // currently open modal id (null = new)
 var _pfItems  = [];      // rows in open modal
 var _pfWmsProds = [];    // WMS product list (fetched once per session)
+var _pfProdViewMode = 'tree'; // 'tree' | 'list'
+var _pfProdSearch = '';
+var _pfActiveCat = null; // expanded category in tree view
+var _pfSearch    = '';   // live search query
+var _pfOwnerF    = '';   // owner/creator filter
+var _pfExpanded  = {};   // expanded row IDs in list {pfId: true}
+var _pfCenterMap = [];  // center lookup for proforma list clicks
 
 // ── Status labels & colors ───────────────────────────────────────────────
 var PF_STATUS = {
@@ -41,17 +48,53 @@ async function pfLoad() {
 async function renderProformaPanel() {
   var el = document.getElementById('proformaPanel');
   if (!el) return;
-  el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8">در حال بارگذاری…</div>';
-  await pfLoad();
-  _renderPfPanel(el);
+  try {
+    el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8">در حال بارگذاری…</div>';
+    await pfLoad();
+    await _pfLoadWmsProds();
+    _renderPfPanel(el);
+  } catch(e) {
+    el.innerHTML = '<div style="padding:40px;text-align:center;color:#dc2626">خطا: ' + (e && e.message ? e.message : String(e)) + '</div>';
+    console.error('[proforma] renderProformaPanel error:', e);
+  }
+}
+
+
+function _pfApplySearch(list) {
+  var q = (_pfSearch || '').trim();
+  var owner = _pfOwnerF || '';
+  if (!q && !owner) return list;
+  var qn = q ? fNorm(q) : '';
+  return list.filter(function(pf) {
+    if (owner && pf.createdBy !== owner) return false;
+    if (!qn) return true;
+    if (fNorm(pf.centerName || '').indexOf(qn) !== -1) return true;
+    if (fNorm(pf.no || '').indexOf(qn) !== -1) return true;
+    if (fNorm(_pfCreatorName(pf.createdBy) || '').indexOf(qn) !== -1) return true;
+    if ((pf.items || []).some(function(it) {
+      return fNorm(it.name || '').indexOf(qn) !== -1 ||
+             fNorm(it.catalogCode || '').indexOf(qn) !== -1;
+    })) return true;
+    return false;
+  });
+}
+
+function _pfToggleExpand(id) {
+  _pfExpanded[id] = !_pfExpanded[id];
+  var el = document.getElementById('proformaPanel');
+  if (el) _renderPfPanel(el);
 }
 
 function _renderPfPanel(el) {
-  var filtered = _pfFilter === 'all' ? _pfList : _pfList.filter(function(p){ return p.status === _pfFilter; });
+  var byStatus = _pfFilter === 'all' ? _pfList : _pfList.filter(function(p){ return p.status === _pfFilter; });
+  var filtered  = _pfApplySearch(byStatus);
   var isManager = _isManager();
   var PER_PAGE  = 25;
   var pageItems = filtered.slice(0, (_pfPage + 1) * PER_PAGE);
   var hasMore   = filtered.length > pageItems.length;
+
+  // members for owner dropdown
+  var members = (typeof DB !== 'undefined' && DB.settings && DB.settings.members) ? DB.settings.members.filter(function(m){ return m.active !== false; }) : [];
 
   var filterBtns = ['all','draft','sent','approved','rejected','cancelled'].map(function(s) {
     var lbl = s === 'all' ? 'همه' : (PF_STATUS[s] || { label: s }).label;
@@ -60,30 +103,105 @@ function _renderPfPanel(el) {
       (_pfFilter === s ? 'var(--brand)' : '#e2e8f0') + ';background:' +
       (_pfFilter === s ? 'var(--brand)' : 'white') + ';color:' +
       (_pfFilter === s ? 'white' : '#64748b') + ';font-size:12px;font-family:inherit;cursor:pointer">' +
-      lbl + (cnt ? ' (' + cnt + ')' : '') + '</button>';
+      lbl + (cnt ? ' <span style="background:rgba(0,0,0,.12);border-radius:10px;padding:0 6px;font-size:10px">' + cnt + '</span>' : '') + '</button>';
   }).join('');
 
+  // Search + filter bar
+  var ownerOpts = '<option value="">همه کارشناسان</option>' +
+    members.map(function(m){ return '<option value="' + esc(m.id) + '"' + (_pfOwnerF===m.id?' selected':'') + '>' + esc(m.name) + '</option>'; }).join('');
+
+  var searchBar =
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px">' +
+      '<input id="pfSearchInp" type="text" placeholder="🔍 جستجو: مرکز، کالا، کد کاتالوگ، صادرکننده..." value="' + esc(_pfSearch) + '" ' +
+        'oninput="_pfSearch=this.value;_pfPage=0;var el=document.getElementById(\'proformaPanel\');if(el)_renderPfPanel(el)" ' +
+        'style="flex:1;min-width:200px;padding:7px 12px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:13px;outline:none">' +
+      '<select onchange="_pfOwnerF=this.value;_pfPage=0;var el=document.getElementById(\'proformaPanel\');if(el)_renderPfPanel(el)" ' +
+        'style="padding:7px 10px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:12px">' +
+        ownerOpts +
+      '</select>' +
+      (_pfSearch||_pfOwnerF ? '<button onclick="_pfSearch=\'\';_pfOwnerF=\'\';_pfPage=0;var el=document.getElementById(\'proformaPanel\');if(el)_renderPfPanel(el)" style="padding:6px 12px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer">✕ پاک کردن</button>' : '') +
+      '<span style="font-size:12px;color:#94a3b8;white-space:nowrap">' + filtered.length + ' پیشفاکتور</span>' +
+    '</div>';
+
+  _pfCenterMap = [];
   var rows = pageItems.length ? pageItems.map(function(pf) {
     var st = PF_STATUS[pf.status] || { label: pf.status, cls: 'bgr' };
     var actions = _pfActions(pf);
-    return '<tr>' +
-      '<td style="font-family:monospace;font-size:12px;color:#0284c7">' + esc(pf.no) + '</td>' +
-      '<td>' + esc(pf.jalaliDate || '') + '</td>' +
-      '<td>' + esc(pf.centerName || '—') + '</td>' +
-      '<td>' + (pf.items ? pf.items.length : 0) + ' ردیف</td>' +
-      '<td style="font-family:monospace">' + fmtNum(pf.total) + ' ﷼</td>' +
-      '<td><span class="status-badge" style="background:' + _badgeBg(pf.status) + ';color:' + _badgeFg(pf.status) + ';padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600">' + st.label + '</span></td>' +
-      '<td>' + esc(_pfCreatorName(pf.createdBy)) + '</td>' +
-      '<td style="white-space:nowrap">' + actions + '</td>' +
+    var isExpanded = !!_pfExpanded[pf.id];
+    var commBadge = pf.hasCommission ? '<span style="display:inline-block;margin-right:4px;background:#fef3c7;color:#b45309;border:1px solid #fcd34d;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700">💸 پورسانت ' + (pf.commissionAmt ? fmtNum(pf.commissionAmt) + ' ﷼' : '') + '</span>' : '';
+    var verBadge = pf.versions && pf.versions.length ? '<span style="background:#f0f9ff;color:#0284c7;border:1px solid #bae6fd;border-radius:10px;padding:1px 6px;font-size:10px" title="' + pf.versions.length + ' نسخه قبلی">' + pf.versions.length + 'v</span>' : '';
+    var mainRow = '<tr style="border-bottom:' + (isExpanded?'none':'1px solid #f1f5f9') + ';transition:background .15s" ' +
+      'onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'white\'">' +
+      '<td style="padding:10px 12px">' +
+        '<button onclick="_pfToggleExpand(\'' + pf.id + '\')" style="background:none;border:none;cursor:pointer;color:#64748b;font-size:13px;margin-left:4px;padding:0 4px" title="' + (isExpanded?'بستن':'نمایش کالاها') + '">' + (isExpanded?'▼':'▶') + '</button>' +
+        '<span style="font-family:monospace;font-size:12px;color:#0284c7;font-weight:700">' + esc(pf.no) + '</span>' +
+        (verBadge ? ' ' + verBadge : '') +
+      '</td>' +
+      '<td style="padding:10px 12px;font-size:12px;color:#475569">' + esc(pf.jalaliDate || '') + '</td>' +
+      '<td style="padding:10px 12px">' +
+        (pf.centerKey
+          ? '<div onclick="pfCenterClick(' + (_pfCenterMap.push({key:pf.centerKey,name:pf.centerName||''}) - 1) + ')" style="font-weight:600;font-size:13px;color:#0284c7;cursor:pointer;text-decoration:underline;text-underline-offset:2px">' + esc(pf.centerName || '\u2014') + '</div>'
+          : '<div style="font-weight:600;font-size:13px">' + esc(pf.centerName || '\u2014') + '</div>') +
+        commBadge +
+      '</td>' +
+      '<td style="padding:10px 12px;font-size:12px;color:#64748b">' + ((pf.items||[]).length) + ' ردیف</td>' +
+      '<td style="padding:10px 12px;font-family:monospace;font-size:13px;color:#1e293b;font-weight:600">' + fmtNum(pf.total) + ' ﷼</td>' +
+      '<td style="padding:10px 12px"><span class="status-badge" style="background:' + _badgeBg(pf.status) + ';color:' + _badgeFg(pf.status) + ';padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700">' + st.label + '</span></td>' +
+      '<td style="padding:10px 12px;font-size:12px">' + esc(_pfCreatorName(pf.createdBy)) + '</td>' +
+      '<td style="padding:10px 12px;white-space:nowrap">' + actions + '</td>' +
       '</tr>';
-  }).join('') : '<tr><td colspan="8" style="text-align:center;padding:32px;color:#94a3b8">پیشفاکتوری یافت نشد</td></tr>';
+
+    var expandRow = '';
+    if (isExpanded) {
+      var itemsHtml = (pf.items || []).length
+        ? '<table style="width:100%;border-collapse:collapse;font-size:12px">' +
+            '<thead><tr style="background:#f0f9ff">' +
+              '<th style="padding:5px 10px;text-align:right;color:#0369a1;font-weight:600">کد کاتالوگ</th>' +
+              '<th style="padding:5px 10px;text-align:right;color:#0369a1;font-weight:600">نام کالا</th>' +
+              '<th style="padding:5px 10px;text-align:center;color:#0369a1;font-weight:600">تعداد</th>' +
+              '<th style="padding:5px 10px;text-align:center;color:#0369a1;font-weight:600">واحد</th>' +
+              '<th style="padding:5px 10px;text-align:center;color:#0369a1;font-weight:600">قیمت واحد</th>' +
+              '<th style="padding:5px 10px;text-align:center;color:#0369a1;font-weight:600">تخفیف</th>' +
+              '<th style="padding:5px 10px;text-align:center;color:#0369a1;font-weight:600">جمع ردیف</th>' +
+            '</tr></thead>' +
+            '<tbody>' +
+            (pf.items || []).map(function(it, idx) {
+              var disc = it.discPct ? it.discPct + '٪' : '—';
+              return '<tr style="border-top:1px solid #e0f2fe' + (idx%2===1?';background:#f8fbff':'') + '">' +
+                '<td style="padding:5px 10px;font-family:monospace;color:#0284c7">' + esc(it.catalogCode || it.prodId || '—') + '</td>' +
+                '<td style="padding:5px 10px;font-weight:600">' + esc(it.name || '') + '</td>' +
+                '<td style="padding:5px 10px;text-align:center">' + fmtNum(it.qty) + '</td>' +
+                '<td style="padding:5px 10px;text-align:center;color:#64748b">' + esc(it.unit||'عدد') + '</td>' +
+                '<td style="padding:5px 10px;text-align:center;font-family:monospace">' + fmtNum(it.unitPrice) + '</td>' +
+                '<td style="padding:5px 10px;text-align:center;color:#c2410c">' + disc + '</td>' +
+                '<td style="padding:5px 10px;text-align:center;font-family:monospace;font-weight:700;color:#15803d">' + fmtNum(it.lineTotal||it.qty*it.unitPrice) + '</td>' +
+              '</tr>';
+            }).join('') +
+            '</tbody></table>'
+        : '<div style="padding:12px;color:#94a3b8;text-align:center">ردیفی ثبت نشده</div>';
+
+      expandRow = '<tr><td colspan="8" style="padding:0 0 8px 32px;background:#f8fbff;border-bottom:1px solid #e2e8f0">' +
+        '<div style="border:1px solid #bae6fd;border-radius:8px;overflow:hidden;margin:4px 12px 4px 0">' +
+          itemsHtml +
+        '</div>' +
+        (pf.commissionAmt||pf.commissionNote ? '<div style="padding:6px 12px;font-size:11px;color:#92400e;background:#fef3c7;border:1px solid #fde68a;border-radius:6px;margin:4px 12px 0 0">' +
+          '💸 <strong>پورسانت:</strong> ' + (pf.commissionAmt?fmtNum(pf.commissionAmt)+' ﷼ ':'') + esc(pf.commissionNote||'') +
+        '</div>' : '') +
+      '</td></tr>';
+    }
+    return mainRow + expandRow;
+  }).join('') : '<tr><td colspan="8" style="text-align:center;padding:40px;color:#94a3b8">پیشفاکتوری یافت نشد</td></tr>';
 
   el.innerHTML =
-    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap">' + filterBtns + '</div>' +
-      '<button onclick="pfOpenNew()" style="padding:8px 16px;background:var(--brand);color:white;border:none;border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer;font-weight:600">+ پیشفاکتور جدید</button>' +
-      (isManager ? '<button onclick="pfOpenTemplateEditor()" style="padding:8px 12px;background:#f8fafc;color:#475569;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer;margin-right:8px" title="ویرایش قالب چاپ">🎨 قالب چاپ</button>' : '') +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
+        '<button onclick="pfOpenNew()" style="padding:8px 16px;background:var(--brand);color:white;border:none;border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer;font-weight:600">+ پیشفاکتور جدید</button>' +
+        (isManager ? '<button onclick="pfManageTemplates()" style="padding:8px 12px;background:#f8fafc;color:#475569;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer" title="مدیریت قالب‌های چاپ">🎨 قالب‌های چاپ</button>' +
+                     '<button onclick="pfOpenSellerEditor()" style="padding:8px 12px;background:#f8fafc;color:#475569;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer" title="ویرایش مشخصات فروشنده">🏢 فروشنده</button>' : '') +
+      '</div>' +
     '</div>' +
+    searchBar +
     '<div style="overflow-x:auto;background:white;border:1px solid #e2e8f0;border-radius:10px">' +
       '<table style="width:100%;border-collapse:collapse">' +
         '<thead><tr style="background:#f8fafc">' +
@@ -133,11 +251,24 @@ function _pfActions(pf) {
   var btns = [];
   var isManager = _isManager();
 
-  // View / Edit
-  btns.push('<button onclick="pfOpenEdit(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px;background:white;cursor:pointer" title="مشاهده / ویرایش">✏️</button>');
+  // View / Edit — label changes based on status and permission
+  var canEdit = (pf.status === 'draft') && (isManager || pf.createdBy === currentUser);
+  var btnLbl  = canEdit ? '✏️ ویرایش' : '👁️ مشاهده';
+  var btnTitle = canEdit ? 'ویرایش پیش‌فاکتور' : 'مشاهده پیش‌فاکتور';
+  btns.push('<button onclick="pfOpenEdit(\'' + pf.id + '\')" style="padding:4px 10px;font-size:11px;font-weight:600;border:1px solid #cbd5e1;border-radius:6px;background:white;cursor:pointer;font-family:inherit" title="' + btnTitle + '">' + btnLbl + '</button>');
 
   // Print
   btns.push('<button onclick="pfPrint(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px;background:white;cursor:pointer" title="چاپ">🖨️</button>');
+
+  // Version history (if any versions exist)
+  if (pf.versions && pf.versions.length) {
+    btns.push('<button onclick="pfShowVersions(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #bae6fd;border-radius:5px;background:#f0f9ff;color:#0284c7;cursor:pointer" title="' + pf.versions.length + ' نسخه قبلی">🕐</button>');
+  }
+
+  // Follow-up scheduling (if center attached)
+  if (pf.centerKey) {
+    btns.push('<button onclick="pfScheduleFollowup(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #bbf7d0;border-radius:5px;background:#f0fdf4;color:#15803d;cursor:pointer" title="پیگیری در برنامه هفته">📅</button>');
+  }
 
   // Send (expert, draft only)
   if (pf.status === 'draft' && pf.createdBy === currentUser) {
@@ -261,7 +392,10 @@ async function _pfLoadWmsProds() {
 // ── Open new proforma modal ───────────────────────────────────────────────
 async function pfOpenNew() {
   _pfEditId = null;
-  _pfItems = [{ prodId:'', name:'', unit:'عدد', qty:1, unitPrice:0, lineTotal:0 }];
+  _pfItems = [{ prodId:'', name:'', unit:'عدد', qty:1, unitPrice:0, discPct:0, discAmt:0, lineTotal:0 }];
+  _pfProdViewMode = 'tree';
+  _pfProdSearch = '';
+  _pfActiveCat = null;
   await _pfLoadWmsProds();
   _pfShowModal(null);
 }
@@ -271,8 +405,11 @@ async function pfOpenEdit(id) {
     var pf = _pfList.find(function(p){ return p.id === id; });
     if (!pf) return;
     _pfEditId = id;
-    _pfItems  = (pf.items || []).map(function(i){ return Object.assign({}, i); });
-    if (!_pfItems.length) _pfItems = [{ prodId:'', name:'', unit:'عدد', qty:1, unitPrice:0, lineTotal:0 }];
+    _pfItems  = (pf.items || []).map(function(i){ return Object.assign({ discPct:0, discAmt:0 }, i); });
+    if (!_pfItems.length) _pfItems = [{ prodId:'', name:'', unit:'عدد', qty:1, unitPrice:0, discPct:0, discAmt:0, lineTotal:0 }];
+    _pfProdViewMode = 'tree';
+    _pfProdSearch = '';
+    _pfActiveCat = null;
     await _pfLoadWmsProds();
     _pfShowModal(pf);
   } catch(e) {
@@ -280,6 +417,163 @@ async function pfOpenEdit(id) {
   }
 }
 
+// ── Build product picker panel (tree + search) ────────────────────────────
+function _pfBuildProductPicker(readOnly) {
+  if (readOnly) return '';
+
+  var searchHtml =
+    '<div style="display:flex;gap:6px;align-items:center;margin-bottom:10px">' +
+      '<input id="pfProdSearchInp" class="form-input" placeholder="🔍 جستجوی کالا..." value="' + esc(_pfProdSearch) + '" ' +
+        'oninput="_pfProdSearchChange(this.value)" style="flex:1;font-size:13px">' +
+      '<button id="pfProdViewToggleBtn" onclick="_pfToggleProdView()" title="تغییر نمای کالا" ' +
+        'style="padding:6px 10px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;cursor:pointer;font-size:14px;white-space:nowrap">' +
+        (_pfProdViewMode === 'tree' ? '📋 لیست' : '🌳 درختی') +
+      '</button>' +
+    '</div>';
+
+  var prodHtml = '<div id="pfProdListContainer">' + _pfBuildProductListHtml() + '</div>';
+
+  return '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:12px">' +
+    '<div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:8px">📦 انتخاب کالا از انبار</div>' +
+    searchHtml +
+    prodHtml +
+  '</div>';
+}
+
+function _pfBuildProductListHtml() {
+  // Group products by category
+  var categories = {};
+  _pfWmsProds.forEach(function(p) {
+    var cat = p.category || 'سایر';
+    if (!categories[cat]) categories[cat] = [];
+    categories[cat].push(p);
+  });
+  var catList = Object.keys(categories).sort();
+
+  var prodHtml;
+  if (_pfProdSearch.length >= 1) {
+    // Search results
+    var qn = _pfProdSearch.toLowerCase();
+    var results = _pfWmsProds.filter(function(p) {
+      return (p.full_name || p.name || '').toLowerCase().indexOf(qn) !== -1 ||
+             (p.catalog_code || '').toLowerCase().indexOf(qn) !== -1 ||
+             (p.category || '').toLowerCase().indexOf(qn) !== -1;
+    });
+    if (!results.length) {
+      prodHtml = '<div style="padding:16px;text-align:center;color:#94a3b8;font-size:13px">کالایی یافت نشد</div>';
+    } else {
+      prodHtml = '<div style="max-height:220px;overflow-y:auto">' +
+        results.map(function(p) {
+          return _pfProdListItem(p);
+        }).join('') +
+      '</div>';
+    }
+  } else if (_pfProdViewMode === 'list') {
+    // Flat list view
+    prodHtml = '<div style="max-height:220px;overflow-y:auto">' +
+      _pfWmsProds.map(function(p) {
+        return _pfProdListItem(p);
+      }).join('') +
+    '</div>';
+  } else {
+    // Tree view by category
+    prodHtml = '<div style="max-height:220px;overflow-y:auto">' +
+      catList.map(function(cat) {
+        var items = categories[cat];
+        var isOpen = _pfActiveCat === cat;
+        return '<div>' +
+          '<div onclick="_pfToggleCat(\'' + esc(cat) + '\')" style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:#f1f5f9;border-radius:6px;margin-bottom:2px;cursor:pointer;font-weight:600;font-size:12px;color:#374151;user-select:none">' +
+            '<span style="font-size:12px;transition:transform 0.2s;display:inline-block;transform:rotate(' + (isOpen ? '90deg' : '0deg') + ')">' + (isOpen ? '▶' : '▶') + '</span>' +
+            '<span>📁 ' + esc(cat) + '</span>' +
+            '<span style="margin-right:auto;background:#6366f1;color:white;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700">' + items.length + '</span>' +
+          '</div>' +
+          (isOpen ?
+            '<div style="padding-right:16px;margin-bottom:4px">' +
+              items.map(function(p) { return _pfProdListItem(p); }).join('') +
+            '</div>'
+          : '') +
+        '</div>';
+      }).join('') +
+    '</div>';
+  }
+  return prodHtml;
+}
+
+function _pfProdListItem(p) {
+  var name  = esc(p.full_name || p.name);
+  var unit  = esc(p.unit || '\u0639\u062f\u062f');
+  var cat   = esc(p.category || '');
+  var code  = esc(p.catalog_code || '');
+  var price = Number(p.sale_price || 0);
+  var priceHtml = price > 0
+    ? '<span style="color:#15803d;font-size:11px;font-weight:700;white-space:nowrap;background:#f0fdf4;padding:1px 6px;border-radius:8px">' + price.toLocaleString('fa-IR') + ' \u0631\u06cc\u0627\u0644</span>'
+    : '<span style="color:#94a3b8;font-size:10px;white-space:nowrap" title="\u0642\u06cc\u0645\u062a \u0641\u0631\u0648\u0634 \u062f\u0631 \u0627\u0646\u0628\u0627\u0631 \u062a\u0646\u0638\u06cc\u0645 \u0646\u0634\u062f\u0647">&mdash; \u0642\u06cc\u0645\u062a \u0646\u062f\u0627\u0631\u062f</span>';
+  return '<div onclick="pfAddProductRow(\'' + esc(p.id) + '\', \'' + name + '\', \'' + unit + '\', ' + price + ', \'' + code + '\')" ' +
+    'style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border-radius:5px;cursor:pointer;font-size:12px;border-bottom:1px solid #f1f5f9;transition:background 0.15s;gap:8px" ' +
+    'onmouseover="this.style.background=\'#eff6ff\'" onmouseout="this.style.background=\'transparent\'">' +
+    '<div style="flex:1;min-width:0">' +
+      '<div style="font-weight:600;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + name + '</div>' +
+      (code || cat ? '<div style="color:#94a3b8;font-size:10px;margin-top:1px">' + (code ? '<span style="color:#0284c7;font-family:monospace">' + code + '</span>' : '') + (cat && code ? ' &middot; ' : '') + (cat || '') + '</div>' : '') +
+    '</div>' +
+    '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">' +
+      priceHtml +
+      '<span style="color:#6366f1;font-size:10px">(' + unit + ')</span>' +
+    '</div>' +
+  '</div>';
+}
+
+function _pfToggleProdView() {
+  _pfProdViewMode = _pfProdViewMode === 'tree' ? 'list' : 'tree';
+  _pfActiveCat = null;
+  var btn = document.getElementById('pfProdViewToggleBtn');
+  if (btn) {
+    btn.innerHTML = _pfProdViewMode === 'tree' ? '📋 لیست' : '🌳 درختی';
+  }
+  _refreshProductPicker();
+}
+
+function _pfProdSearchChange(q) {
+  _pfProdSearch = q;
+  _refreshProductPicker();
+}
+
+function _pfToggleCat(cat) {
+  _pfActiveCat = _pfActiveCat === cat ? null : cat;
+  _refreshProductPicker();
+}
+
+function _refreshProductPicker() {
+  var container = document.getElementById('pfProdListContainer');
+  if (!container) return;
+  container.innerHTML = _pfBuildProductListHtml();
+}
+
+function pfAddProductRow(prodId, name, unit, salePrice, catalogCode) {
+  // Check if this product already has a row, if so just pick first empty row
+  var emptyIdx = _pfItems.findIndex(function(it) { return !it.name; });
+  var idx;
+  if (emptyIdx !== -1) {
+    idx = emptyIdx;
+    _pfItems[idx].prodId      = prodId;
+    _pfItems[idx].catalogCode = catalogCode || '';
+    _pfItems[idx].name        = name;
+    _pfItems[idx].unit        = unit;
+    _pfItems[idx].unitPrice   = salePrice || 0;
+    _pfItems[idx].lineTotal = (_pfItems[idx].qty || 1) * (salePrice || 0);
+  } else {
+    idx = _pfItems.length;
+    _pfItems.push({ prodId: prodId, name: name, unit: unit, qty: 1, unitPrice: salePrice || 0, discPct: 0, discAmt: 0, lineTotal: salePrice || 0 });
+  }
+  // Re-render items table
+  var wrap = document.getElementById('pfItemsWrap');
+  if (wrap) {
+    wrap.innerHTML = _pfItems.map(function(item, i){ return _pfItemRow(i, item, false); }).join('');
+  }
+  pfRecalc();
+  showToast('✅ ' + name + ' افزوده شد');
+}
+
+// ── Show modal ────────────────────────────────────────────────────────────
 function _pfShowModal(pf) { try {
   var readOnly = pf && pf.status !== 'draft';
   var modal = document.getElementById('pfModal');
@@ -300,106 +594,220 @@ function _pfShowModal(pf) { try {
   var centerVal = pf ? (pf.centerName || '') : '';
   var centerKey = pf ? (pf.centerKey  || '') : '';
   var dateVal   = pf ? (pf.jalaliDate || todayStr()) : todayStr();
-  var taxVal    = pf ? (pf.taxPct !== undefined ? pf.taxPct : 9) : 9;
+  var taxVal    = pf ? (pf.taxPct !== undefined ? pf.taxPct : 0) : 0;
   var discVal   = pf ? (pf.discountPct || 0) : 0;
   var noteVal   = pf ? (pf.note || '') : '';
-  var validVal  = pf ? (pf.validDays || 30) : 30;
+  var validVal  = pf ? (pf.validDays || 3) : 3;
+  var is10      = taxVal === 10;
+
+  // New buyer fields & managerNote
+  var buyerNatIdVal   = pf ? (pf.buyerNatId || '') : '';
+  var buyerEcoCodeVal = pf ? (pf.buyerEcoCode || '') : '';
+  var buyerRegIdVal   = pf ? (pf.buyerRegId || '') : '';
+  var buyerAddressVal = pf ? (pf.buyerAddress || '') : '';
+  var buyerPhoneVal   = pf ? (pf.buyerPhone || '') : '';
+  var buyerPostalVal  = pf ? (pf.buyerPostal || '') : '';
+  var managerNoteVal  = pf ? (pf.managerNote || '') : '';
+
+  var productPicker = _pfBuildProductPicker(readOnly);
 
   document.getElementById('pfModalBody').innerHTML =
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">' +
+    // ── Header row: customer + date + validity
+    '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px;margin-bottom:12px">' +
       '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">مرکز / مشتری</label>' +
         '<input id="pfCenterName" class="form-input" value="' + esc(centerVal) + '" ' + (readOnly?'disabled':'') + ' placeholder="نام مرکز یا مشتری" oninput="pfSearchCenter(this.value)" autocomplete="off">' +
-        '<div id="pfCenterDrop" style="position:absolute;z-index:200;background:white;border:1px solid #e2e8f0;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.1);display:none;max-height:180px;overflow-y:auto;min-width:260px"></div>' +
+        '<div id="pfCenterDrop" style="position:fixed;z-index:9999;background:white;border:1px solid #e2e8f0;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.1);display:none;max-height:180px;overflow-y:auto;min-width:260px"></div>' +
       '</div>' +
       '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">تاریخ صدور (شمسی)</label>' +
         '<input id="pfDate" class="form-input" value="' + esc(dateVal) + '" ' + (readOnly?'disabled':'') + ' placeholder="۱۴۰۴/۰۳/۲۵">' +
       '</div>' +
-      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">مدت اعتبار (روز)</label>' +
+      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">اعتبار (روز)</label>' +
         '<input id="pfValid" type="number" class="form-input" value="' + validVal + '" ' + (readOnly?'disabled':'') + ' min="1" max="365">' +
       '</div>' +
-      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">مالیات ٪</label>' +
-        '<input id="pfTax" type="number" class="form-input" value="' + taxVal + '" ' + (readOnly?'disabled':'') + ' min="0" max="100" onchange="pfRecalc()">' +
+    '</div>' +
+    // ── Buyer Details (مشخصات کامل خریدار)
+    '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:12px">' +
+      '<div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:8px">📋 مشخصات کامل خریدار (خریدار فاکتور رسمی)</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">' +
+        '<div><label style="font-size:10px;color:#64748b;display:block;margin-bottom:2px">شناسه ملی / کد ملی</label>' +
+          '<input id="pfBuyerNatId" class="form-input" style="font-size:12px;padding:4px 8px" value="' + esc(buyerNatIdVal) + '" ' + (readOnly?'disabled':'') + ' placeholder="شناسه ملی">' +
+        '</div>' +
+        '<div><label style="font-size:10px;color:#64748b;display:block;margin-bottom:2px">شماره اقتصادی</label>' +
+          '<input id="pfBuyerEcoCode" class="form-input" style="font-size:12px;padding:4px 8px" value="' + esc(buyerEcoCodeVal) + '" ' + (readOnly?'disabled':'') + ' placeholder="کد اقتصادی">' +
+        '</div>' +
+        '<div><label style="font-size:10px;color:#64748b;display:block;margin-bottom:2px">شماره ثبت</label>' +
+          '<input id="pfBuyerRegId" class="form-input" style="font-size:12px;padding:4px 8px" value="' + esc(buyerRegIdVal) + '" ' + (readOnly?'disabled':'') + ' placeholder="شماره ثبت">' +
+        '</div>' +
+        '<div><label style="font-size:10px;color:#64748b;display:block;margin-bottom:2px">تلفن خریدار</label>' +
+          '<input id="pfBuyerPhone" class="form-input" style="font-size:12px;padding:4px 8px" value="' + esc(buyerPhoneVal) + '" ' + (readOnly?'disabled':'') + ' placeholder="تلفن">' +
+        '</div>' +
+        '<div><label style="font-size:10px;color:#64748b;display:block;margin-bottom:2px">کد پستی خریدار</label>' +
+          '<input id="pfBuyerPostal" class="form-input" style="font-size:12px;padding:4px 8px" value="' + esc(buyerPostalVal) + '" ' + (readOnly?'disabled':'') + ' placeholder="کد پستی">' +
+        '</div>' +
+        '<div style="grid-column: 1 / -1"><label style="font-size:10px;color:#64748b;display:block;margin-bottom:2px">آدرس کامل خریدار</label>' +
+          '<input id="pfBuyerAddress" class="form-input" style="font-size:12px;padding:4px 8px" value="' + esc(buyerAddressVal) + '" ' + (readOnly?'disabled':'') + ' placeholder="آدرس">' +
+        '</div>' +
       '</div>' +
     '</div>' +
+    // ── Tax row
+    '<div style="display:flex;align-items:center;gap:16px;margin-bottom:14px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px">' +
+      '<span style="font-size:12px;font-weight:700;color:#166534">مالیات ارزش افزوده:</span>' +
+      '<label style="display:flex;align-items:center;gap:6px;cursor:' + (readOnly?'default':'pointer') + ';font-size:13px;color:#374151">' +
+        '<input type="radio" name="pfTaxOpt" id="pfTax0" value="0" ' + (!is10?'checked':'') + ' ' + (readOnly?'disabled':'') + ' onchange="pfSetTax(0)">' +
+        '<span>بدون مالیات (۰٪)</span>' +
+      '</label>' +
+      '<label style="display:flex;align-items:center;gap:6px;cursor:' + (readOnly?'default':'pointer') + ';font-size:13px;color:#374151">' +
+        '<input type="radio" name="pfTaxOpt" id="pfTax10" value="10" ' + (is10?'checked':'') + ' ' + (readOnly?'disabled':'') + ' onchange="pfSetTax(10)">' +
+        '<span>مالیات ۱۰٪</span>' +
+      '</label>' +
+      '<input type="hidden" id="pfTax" value="' + taxVal + '">' +
+    '</div>' +
+    // ── Product picker
+    '<div id="pfProductPickerWrap">' + productPicker + '</div>' +
+    // ── Items header
     '<div style="margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">' +
       '<strong style="font-size:13px">ردیف‌های کالا</strong>' +
-      (readOnly ? '' : '<button onclick="pfAddRow()" style="padding:4px 10px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit">+ افزودن ردیف</button>') +
+      (readOnly ? '' : '<button onclick="pfAddRow()" style="padding:4px 10px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit">+ ردیف خالی</button>') +
     '</div>' +
-    '<div id="pfItemsWrap" style="margin-bottom:16px">' + itemRows + '</div>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">' +
-      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">تخفیف ٪</label>' +
-        '<input id="pfDisc" type="number" class="form-input" value="' + discVal + '" ' + (readOnly?'disabled':'') + ' min="0" max="100" onchange="pfRecalc()">' +
+    // ── Items table
+    '<div style="overflow-x:auto;margin-bottom:14px">' +
+      '<table style="width:100%;border-collapse:collapse;min-width:700px">' +
+        '<thead>' +
+          '<tr style="background:#f8fafc;font-size:11px;font-weight:700;color:#64748b">' +
+            '<th style="padding:6px 8px;text-align:right;border-bottom:2px solid #e2e8f0;min-width:200px">کالا</th>' +
+            '<th style="padding:6px 8px;text-align:center;border-bottom:2px solid #e2e8f0;width:80px">تعداد</th>' +
+            '<th style="padding:6px 8px;text-align:center;border-bottom:2px solid #e2e8f0;width:120px">قیمت واحد (ریال)</th>' +
+            '<th style="padding:6px 8px;text-align:center;border-bottom:2px solid #e2e8f0;width:110px">تخفیف ردیف</th>' +
+            '<th style="padding:6px 8px;text-align:center;border-bottom:2px solid #e2e8f0;width:110px">جمع ردیف (ریال)</th>' +
+            (readOnly ? '' : '<th style="padding:6px 8px;text-align:center;border-bottom:2px solid #e2e8f0;width:40px"></th>') +
+          '</tr>' +
+        '</thead>' +
+        '<tbody id="pfItemsWrap">' + itemRows + '</tbody>' +
+      '</table>' +
+    '</div>' +
+    // ── Totals & discount
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">' +
+      '<div>' +
+        '<label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">تخفیف کلی ٪</label>' +
+        '<input id="pfDisc" type="number" class="form-input" value="' + discVal + '" ' + (readOnly?'disabled':'') + ' min="0" max="100" step="0.01" oninput="pfRecalc()" style="text-align:center">' +
       '</div>' +
       '<div id="pfTotalsBox" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;font-size:13px"></div>' +
     '</div>' +
-    '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">توضیحات</label>' +
-      '<textarea id="pfNote" rows="2" class="form-input" ' + (readOnly?'disabled':'') + ' style="resize:vertical">' + esc(noteVal) + '</textarea>' +
+    // ── Two Notes (Tohid & internal)
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
+      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">📝 توضیحات پیش‌فاکتور (در چاپ می‌آید)</label>' +
+        '<textarea id="pfNote" rows="2" class="form-input" ' + (readOnly?'disabled':'') + ' style="resize:vertical">' + esc(noteVal) + '</textarea>' +
+      '</div>' +
+      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">🔒 یادداشت داخلی / مذاکرات مدیریت (عدم چاپ)</label>' +
+        '<textarea id="pfManagerNote" rows="2" class="form-input" ' + (readOnly?'disabled':'') + ' style="resize:vertical">' + esc(managerNoteVal) + '</textarea>' +
+      '</div>' +
     '</div>' +
-    (pf && pf.managerNote ? '<div style="margin-top:10px;padding:10px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:12px"><strong>نظر مدیر:</strong> ' + esc(pf.managerNote) + '</div>' : '');
+    // ── Commission section
+    '<div style="margin-top:12px;border:1px solid #fde68a;border-radius:8px;padding:12px;background:#fffbeb">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:' + (((pf&&pf.hasCommission)||!readOnly)?'10px':'0') + '">' +
+        '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:700;color:#b45309">' +
+          '<input type="checkbox" id="pfHasCommission" ' + ((pf&&pf.hasCommission)?'checked':'') + ' ' + (readOnly?'disabled':'') + ' onchange="pfToggleCommission()">' +
+          '💸 پورسانت خارج سازمانی' +
+        '</label>' +
+      '</div>' +
+      '<div id="pfCommissionSection" style="display:' + ((pf&&pf.hasCommission)?'grid':'none') + ';grid-template-columns:1fr 2fr;gap:10px">' +
+        '<div><label style="font-size:11px;font-weight:600;color:#92400e;display:block;margin-bottom:3px">مبلغ پورسانت (﷼)</label>' +
+          '<input type="number" id="pfCommissionAmt" class="form-input" value="' + ((pf&&pf.commissionAmt)||0) + '" min="0" ' + (readOnly?'disabled':'') + ' placeholder="مبلغ پورسانت">' +
+        '</div>' +
+        '<div><label style="font-size:11px;font-weight:600;color:#92400e;display:block;margin-bottom:3px">توضیحات پورسانت</label>' +
+          '<input type="text" id="pfCommissionNote" class="form-input" value="' + esc((pf&&pf.commissionNote)||'') + '" ' + (readOnly?'disabled':'') + ' placeholder="نام دریافت‌کننده، درصد، شرایط...">' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    (pf && pf.actionNote ? '<div style="margin-top:10px;padding:10px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:12px"><strong>نظر مدیر:</strong> ' + esc(pf.actionNote) + '</div>' : '');
 
   document.getElementById('pfModalFooter').innerHTML =
-    (readOnly ? '<button onclick="pfPrint(\'' + (pf.id) + '\')" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">🖨️ چاپ</button>' : '') +
+    (readOnly ? '<button onclick="pfPrint(\'' + (pf.id) + '\')" style="padding:8px 16px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">🖨️ چاپ پیش‌فاکتور</button>' : '') +
+    (pf && pf.versions && pf.versions.length ? '<button onclick="pfShowVersions(\'' + pf.id + '\')" style="padding:8px 12px;background:#f0f9ff;color:#0284c7;border:1px solid #bae6fd;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">🕐 تاریخچه (' + pf.versions.length + ')</button>' : '') +
     '<button onclick="document.getElementById(\'pfModal\').style.display=\'none\'" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">بستن</button>' +
     (!readOnly ? '<button onclick="pfSave()" style="padding:8px 18px;background:var(--brand);color:white;border:none;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">💾 ذخیره</button>' : '');
+
 
   modal.style.display = 'flex';
   pfRecalc();
 } catch(e) { alert('Error in _pfShowModal: ' + e.message); } }
 
+// ── Item row (table row) ──────────────────────────────────────────────────
+function pfToggleCommission() {
+  var cb  = document.getElementById('pfHasCommission');
+  var sec = document.getElementById('pfCommissionSection');
+  if (sec) sec.style.display = (cb && cb.checked) ? 'grid' : 'none';
+}
+
 function _pfItemRow(i, item, readOnly) {
-  return '<div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:8px;align-items:center;margin-bottom:8px;padding:8px;background:#f8fafc;border-radius:6px;border:1px solid #e2e8f0" id="pfRow_' + i + '">' +
-    '<div><label style="font-size:10px;color:#64748b;display:block">کالا</label>' +
+  var lineAfterDisc = _pfItemLineTotal(item);
+  return '<tr id="pfRow_' + i + '" style="border-bottom:1px solid #f1f5f9">' +
+    '<td style="padding:6px 8px">' +
       (readOnly
-        ? '<span style="font-size:13px">' + esc(item.name || '') + '</span>'
-        : '<input class="form-input pf-item-name" data-idx="' + i + '" style="font-size:13px" value="' + esc(item.name||'') + '" placeholder="نام کالا" autocomplete="off" oninput="_pfRowChange(' + i + ',\'name\',this.value); pfSearchProduct(' + i + ', this.value)">' +
-          '<div id="pfProdDrop_' + i + '" style="position:absolute;z-index:200;background:white;border:1px solid #e2e8f0;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.1);display:none;max-height:180px;overflow-y:auto"></div>') +
-    '</div>' +
-    '<div><label style="font-size:10px;color:#64748b;display:block">تعداد</label>' +
+        ? '<div style="font-size:13px;font-weight:600">' + esc(item.name || '') + '</div>' +
+          (item.catalogCode ? '<div style="font-family:monospace;font-size:10px;color:#0284c7;margin-top:2px">' + esc(item.catalogCode) + '</div>' : '')
+        : '<div style="position:relative">' +
+            '<input class="form-input pf-item-name" data-idx="' + i + '" style="font-size:13px" value="' + esc(item.name||'') + '" placeholder="نام کالا" autocomplete="off" oninput="_pfRowChange(' + i + ',\'name\',this.value); pfSearchProduct(' + i + ', this.value)">' +
+            (item.catalogCode ? '<div class="pf-item-cat-display" data-idx="' + i + '" style="font-family:monospace;font-size:10px;color:#0284c7;margin-top:2px;padding:1px 4px">' + esc(item.catalogCode) + '</div>' : '<div class="pf-item-cat-display" data-idx="' + i + '" style="font-family:monospace;font-size:10px;color:#0284c7;margin-top:2px;padding:1px 4px"></div>') +
+            '<div id="pfProdDrop_' + i + '" style="position:fixed;z-index:9999;background:white;border:1px solid #e2e8f0;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.1);display:none;max-height:180px;overflow-y:auto"></div>' +
+          '</div>') +
+    '</td>' +
+    '<td style="padding:6px 8px;text-align:center">' +
       (readOnly
         ? '<span style="font-size:13px">' + fmtNum(item.qty) + '</span>'
-        : '<input type="number" class="form-input pf-item-qty" data-idx="' + i + '" value="' + item.qty + '" min="1" oninput="_pfRowChange(' + i + ',\'qty\',this.value)">') +
-    '</div>' +
-    '<div><label style="font-size:10px;color:#64748b;display:block">قیمت واحد (ریال)</label>' +
+        : '<input type="number" class="form-input pf-item-qty" data-idx="' + i + '" value="' + item.qty + '" min="1" oninput="_pfRowChange(' + i + ',\'qty\',this.value)" style="text-align:center">') +
+    '</td>' +
+    '<td style="padding:6px 8px;text-align:center">' +
       (readOnly
         ? '<span style="font-size:13px;font-family:monospace">' + fmtNum(item.unitPrice) + '</span>'
-        : '<input type="number" class="form-input pf-item-price" data-idx="' + i + '" value="' + item.unitPrice + '" min="0" oninput="_pfRowChange(' + i + ',\'unitPrice\',this.value)">') +
-    '</div>' +
-    (readOnly ? '<span></span>' :
-      '<button onclick="pfRemoveRow(' + i + ')" style="padding:4px 8px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:5px;cursor:pointer;font-size:14px;margin-top:16px">✕</button>') +
-    '</div>';
+        : '<input type="number" class="form-input pf-item-price" data-idx="' + i + '" value="' + item.unitPrice + '" min="0" oninput="_pfRowChange(' + i + ',\'unitPrice\',this.value)" style="text-align:center">') +
+    '</td>' +
+    '<td style="padding:6px 8px;text-align:center">' +
+      (readOnly
+        ? '<span style="font-size:13px">' + (item.discPct ? item.discPct + '٪' : '—') + '</span>'
+        : '<div style="display:flex;gap:3px;align-items:center">' +
+            '<input type="number" class="form-input pf-item-disc" data-idx="' + i + '" value="' + (item.discPct || 0) + '" min="0" max="100" step="0.01" oninput="_pfRowChange(' + i + ',\'discPct\',this.value)" style="text-align:center;width:52px" placeholder="٪" title="تخفیف ردیف ٪">' +
+            '<span style="font-size:10px;color:#94a3b8">٪</span>' +
+          '</div>') +
+    '</td>' +
+    '<td style="padding:6px 8px;text-align:center;font-family:monospace;font-size:13px;color:#1e293b">' +
+      fmtNum(lineAfterDisc) +
+    '</td>' +
+    (readOnly ? '' :
+      '<td style="padding:6px 8px;text-align:center">' +
+        '<button onclick="pfRemoveRow(' + i + ')" style="padding:2px 7px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:5px;cursor:pointer;font-size:14px">✕</button>' +
+      '</td>') +
+  '</tr>';
 }
 
-function _pfProdOptions(selId) {
-  var products = [];
-  try {
-    var wmsData = null;
-    // items from WMS inventory would come here in future
-  } catch(e) {}
-  return '';
-}
-
-function _pfRowAutofill(i, val) {
-  var match = _pfWmsProds.find(function(p){ return (p.full_name || p.name) === val; });
-  if (!match) return;
-  if (!_pfItems[i]) return;
-  _pfItems[i].unit = match.unit || 'عدد';
-  var unitEl = document.querySelector('.pf-item-qty[data-idx="' + i + '"]');
-  if (unitEl) unitEl.placeholder = match.unit || 'عدد';
+function _pfItemLineTotal(item) {
+  var raw   = (item.qty || 0) * (item.unitPrice || 0);
+  var disc  = Math.round(raw * (Number(item.discPct) || 0) / 100);
+  return raw - disc;
 }
 
 function _pfRowChange(i, field, val) {
   if (!_pfItems[i]) return;
-  if (field === 'qty' || field === 'unitPrice') _pfItems[i][field] = Number(val) || 0;
+  if (['qty','unitPrice','discPct'].indexOf(field) !== -1) _pfItems[i][field] = Number(val) || 0;
   else _pfItems[i][field] = val;
-  _pfItems[i].lineTotal = (_pfItems[i].qty || 0) * (_pfItems[i].unitPrice || 0);
+  _pfItems[i].lineTotal = _pfItemLineTotal(_pfItems[i]);
+  // Update the lineTotal cell in DOM only
+  var row = document.getElementById('pfRow_' + i);
+  if (row) {
+    var cells = row.querySelectorAll('td');
+    var ltCell = cells[4]; // lineTotal column
+    if (ltCell) ltCell.innerHTML = fmtNum(_pfItems[i].lineTotal);
+  }
   pfRecalc();
 }
 
 function pfAddRow() {
-  _pfItems.push({ prodId:'', name:'', unit:'عدد', qty:1, unitPrice:0, lineTotal:0 });
+  _pfItems.push({ prodId:'', catalogCode:'', name:'', unit:'عدد', qty:1, unitPrice:0, discPct:0, discAmt:0, lineTotal:0 });
   var wrap = document.getElementById('pfItemsWrap');
   if (wrap) {
-    var div = document.createElement('div');
+    var tr = document.createElement('tr');
+    tr.outerHTML = ''; // placeholder
+    var div = document.createElement('tbody');
     div.innerHTML = _pfItemRow(_pfItems.length - 1, _pfItems[_pfItems.length - 1], false);
     wrap.appendChild(div.firstChild);
   }
@@ -416,10 +824,18 @@ function pfRemoveRow(i) {
   pfRecalc();
 }
 
+function pfSetTax(pct) {
+  var el = document.getElementById('pfTax');
+  if (el) el.value = pct;
+  pfRecalc();
+}
+
 function pfRecalc() {
-  var taxPct  = Number(document.getElementById('pfTax')  ? document.getElementById('pfTax').value  : 9)  || 0;
+  var taxPct  = Number(document.getElementById('pfTax')  ? document.getElementById('pfTax').value  : 0)  || 0;
   var discPct = Number(document.getElementById('pfDisc') ? document.getElementById('pfDisc').value : 0)  || 0;
-  var subtotal = _pfItems.reduce(function(s, i){ return s + (i.lineTotal || 0); }, 0);
+  var subtotal = _pfItems.reduce(function(s, item) {
+    return s + _pfItemLineTotal(item);
+  }, 0);
   var discAmt  = Math.round(subtotal * discPct / 100);
   var taxAmt   = Math.round((subtotal - discAmt) * taxPct / 100);
   var total    = subtotal - discAmt + taxAmt;
@@ -427,7 +843,7 @@ function pfRecalc() {
   if (box) {
     box.innerHTML =
       '<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>جمع ناخالص</span><span style="font-family:monospace">' + fmtNum(subtotal) + ' ﷼</span></div>' +
-      (discPct ? '<div style="display:flex;justify-content:space-between;margin-bottom:4px;color:#c2410c"><span>تخفیف ' + discPct + '٪</span><span style="font-family:monospace">−' + fmtNum(discAmt) + ' ﷼</span></div>' : '') +
+      (discPct ? '<div style="display:flex;justify-content:space-between;margin-bottom:4px;color:#c2410c"><span>تخفیف کلی ' + discPct + '٪</span><span style="font-family:monospace">−' + fmtNum(discAmt) + ' ﷼</span></div>' : '') +
       '<div style="display:flex;justify-content:space-between;margin-bottom:4px;color:#475569"><span>مالیات ' + taxPct + '٪</span><span style="font-family:monospace">+' + fmtNum(taxAmt) + ' ﷼</span></div>' +
       '<div style="display:flex;justify-content:space-between;border-top:1px solid #e2e8f0;padding-top:6px;font-weight:700;font-size:14px"><span>جمع کل</span><span style="font-family:monospace;color:#1d4ed8">' + fmtNum(total) + ' ﷼</span></div>';
   }
@@ -488,7 +904,7 @@ function pfSearchCenter(q) {
   var inp = document.getElementById('pfCenterName');
   if (inp) {
     var rect = inp.getBoundingClientRect();
-    drop.style.top    = (rect.bottom + window.scrollY) + 'px';
+    drop.style.top    = (rect.bottom) + 'px';
     drop.style.right  = (window.innerWidth - rect.right) + 'px';
     drop.style.position = 'fixed';
   }
@@ -500,6 +916,26 @@ function pfSelectCenter(key, name) {
   var drop = document.getElementById('pfCenterDrop');
   if (inp)  { inp.value = name; inp.dataset.key = key; }
   if (drop) drop.style.display = 'none';
+
+  // Smart Auto-fill: find last proforma for this center to pre-populate details
+  var lastPf = _pfList.find(function(p) { return p.centerKey === key; });
+  if (lastPf) {
+    if (document.getElementById('pfBuyerNatId'))   document.getElementById('pfBuyerNatId').value = lastPf.buyerNatId || '';
+    if (document.getElementById('pfBuyerEcoCode'))  document.getElementById('pfBuyerEcoCode').value = lastPf.buyerEcoCode || '';
+    if (document.getElementById('pfBuyerRegId'))   document.getElementById('pfBuyerRegId').value = lastPf.buyerRegId || '';
+    if (document.getElementById('pfBuyerAddress')) document.getElementById('pfBuyerAddress').value = lastPf.buyerAddress || '';
+    if (document.getElementById('pfBuyerPhone'))   document.getElementById('pfBuyerPhone').value = lastPf.buyerPhone || '';
+    if (document.getElementById('pfBuyerPostal'))  document.getElementById('pfBuyerPostal').value = lastPf.buyerPostal || '';
+  } else {
+    // Fallback: load from DB.edits center details if available
+    var ce = (typeof DB !== 'undefined' && DB.edits && DB.edits[key]) || {};
+    if (document.getElementById('pfBuyerNatId'))   document.getElementById('pfBuyerNatId').value = '';
+    if (document.getElementById('pfBuyerEcoCode'))  document.getElementById('pfBuyerEcoCode').value = ce.tax_code || '';
+    if (document.getElementById('pfBuyerRegId'))   document.getElementById('pfBuyerRegId').value = '';
+    if (document.getElementById('pfBuyerAddress')) document.getElementById('pfBuyerAddress').value = ce.address || '';
+    if (document.getElementById('pfBuyerPhone'))   document.getElementById('pfBuyerPhone').value = (ce.phones && ce.phones.join(', ')) || '';
+    if (document.getElementById('pfBuyerPostal'))  document.getElementById('pfBuyerPostal').value = '';
+  }
 }
 
 // ── Save ──────────────────────────────────────────────────────────────────
@@ -508,30 +944,49 @@ async function pfSave() {
   var centerName = centerInp ? centerInp.value.trim() : '';
   var centerKey  = centerInp ? (centerInp.dataset.key || '') : '';
   var date  = document.getElementById('pfDate')  ? document.getElementById('pfDate').value.trim()  : todayStr();
-  var taxPct  = Number(document.getElementById('pfTax')  ? document.getElementById('pfTax').value  : 9);
+  var taxPct  = Number(document.getElementById('pfTax')  ? document.getElementById('pfTax').value  : 0);
   var discPct = Number(document.getElementById('pfDisc') ? document.getElementById('pfDisc').value : 0);
   var note    = document.getElementById('pfNote')  ? document.getElementById('pfNote').value.trim()  : '';
-  var valid   = Number(document.getElementById('pfValid') ? document.getElementById('pfValid').value : 30);
+  var valid   = Number(document.getElementById('pfValid') ? document.getElementById('pfValid').value : 3);
+
+  // New fields
+  var managerNote  = document.getElementById('pfManagerNote') ? document.getElementById('pfManagerNote').value.trim() : '';
+  var buyerNatId   = document.getElementById('pfBuyerNatId')   ? document.getElementById('pfBuyerNatId').value.trim()   : '';
+  var buyerEcoCode = document.getElementById('pfBuyerEcoCode') ? document.getElementById('pfBuyerEcoCode').value.trim() : '';
+  var buyerRegId   = document.getElementById('pfBuyerRegId')   ? document.getElementById('pfBuyerRegId').value.trim()   : '';
+  var buyerAddress = document.getElementById('pfBuyerAddress') ? document.getElementById('pfBuyerAddress').value.trim() : '';
+  var buyerPhone   = document.getElementById('pfBuyerPhone')   ? document.getElementById('pfBuyerPhone').value.trim()   : '';
+  var buyerPostal  = document.getElementById('pfBuyerPostal')  ? document.getElementById('pfBuyerPostal').value.trim()  : '';
 
   // Sync any un-fired input values from DOM before saving
   _pfItems.forEach(function(item, i) {
     var nameEl  = document.querySelector('.pf-item-name[data-idx="' + i + '"]');
     var qtyEl   = document.querySelector('.pf-item-qty[data-idx="' + i + '"]');
     var priceEl = document.querySelector('.pf-item-price[data-idx="' + i + '"]');
-    if (nameEl)  item.name      = nameEl.value.trim();
-    if (qtyEl)   item.qty       = Number(qtyEl.value)   || 0;
-    if (priceEl) item.unitPrice = Number(priceEl.value) || 0;
-    item.lineTotal = item.qty * item.unitPrice;
+    var discEl  = document.querySelector('.pf-item-disc[data-idx="' + i + '"]');
+    if (nameEl)  item.name        = nameEl.value.trim();
+    // catalogCode is stored in _pfItems directly when product is selected from WMS
+    if (qtyEl)   item.qty         = Number(qtyEl.value)   || 0;
+    if (priceEl) item.unitPrice   = Number(priceEl.value) || 0;
+    if (discEl)  item.discPct     = Number(discEl.value)  || 0;
+    item.lineTotal = _pfItemLineTotal(item);
   });
 
   var items = _pfItems.filter(function(i){ return i.name && i.qty > 0; });
   if (!items.length) { showToast('❌ حداقل یک ردیف کالا با نام وارد کنید'); return; }
 
+  var hasCommission  = !!(document.getElementById('pfHasCommission') && document.getElementById('pfHasCommission').checked);
+  var commissionAmt  = Number(document.getElementById('pfCommissionAmt')  ? document.getElementById('pfCommissionAmt').value  : 0) || 0;
+  var commissionNote = document.getElementById('pfCommissionNote') ? document.getElementById('pfCommissionNote').value.trim() : '';
+
   var body = {
     centerKey: centerKey, centerName: centerName,
-    items: items, note: note,
+    items: items, note: note, managerNote: managerNote,
     taxPct: taxPct, discountPct: discPct,
     jalaliDate: date, validDays: valid,
+    buyerNatId: buyerNatId, buyerEcoCode: buyerEcoCode, buyerRegId: buyerRegId,
+    buyerAddress: buyerAddress, buyerPhone: buyerPhone, buyerPostal: buyerPostal,
+    hasCommission: hasCommission, commissionAmt: commissionAmt, commissionNote: commissionNote
   };
 
   try {
@@ -555,9 +1010,62 @@ async function pfSave() {
 }
 
 // ── Print ─────────────────────────────────────────────────────────────────
+// ── Template management helpers ──────────────────────────────────────────
+function _pfGetTemplates() {
+  var saved = (typeof DB !== 'undefined' && DB.settings && DB.settings.pfPrintTemplates);
+  if (saved && saved.length) return saved;
+  // Default two built-in templates
+  return [
+    { id: 'official', name: 'رسمی — با مشخصات فروشنده', includeSeller: true,  isDefault: true,  html: null },
+    { id: 'blank',    name: 'بی‌نام — بدون فروشنده',      includeSeller: false, isDefault: false, html: null },
+  ];
+}
+function _pfSaveTemplates(tpls) {
+  if (!DB.settings) DB.settings = {};
+  DB.settings.pfPrintTemplates = tpls;
+  saveDB();
+}
+function _pfDefaultTplForPrint() {
+  return _pfGetTemplates().find(function(t){ return t.isDefault; }) || _pfGetTemplates()[0];
+}
+
 function pfPrint(id) {
   var pf = _pfList.find(function(p){ return p.id === id; });
   if (!pf) return;
+  var tpls = _pfGetTemplates();
+
+  var cardsHtml = tpls.map(function(t, idx) {
+    var isDefault = t.isDefault;
+    return '<button onclick="pfDoPrint(\'' + id + '\',\'' + t.id + '\')" style="display:flex;flex-direction:column;align-items:flex-start;padding:14px 18px;border:' +
+      (isDefault ? '2px solid var(--brand)' : '1px solid #cbd5e1') +
+      ';border-radius:10px;background:' + (isDefault ? '#eff6ff' : '#f8fafc') + ';cursor:pointer;text-align:right;width:100%;font-family:inherit;gap:4px">' +
+      '<div style="display:flex;align-items:center;gap:8px;width:100%">' +
+        '<span style="font-size:18px">' + (t.includeSeller ? '📜' : '📄') + '</span>' +
+        '<span style="font-weight:700;font-size:13px;color:#1e293b;flex:1">' + esc(t.name) + '</span>' +
+        (isDefault ? '<span style="background:var(--brand);color:white;font-size:10px;padding:1px 8px;border-radius:10px">پیش‌فرض</span>' : '') +
+      '</div>' +
+      '<span style="font-size:11px;color:#64748b">' + (t.includeSeller ? 'همراه با مشخصات فروشنده' : 'بدون اطلاعات فروشنده') + (t.html ? ' · قالب سفارشی' : ' · قالب پیش‌فرض') + '</span>' +
+    '</button>';
+  }).join('');
+
+  var html = '<div style="display:flex;flex-direction:column;gap:10px;padding:8px 0">' + cardsHtml + '</div>';
+
+  openModal('pfPrintSelectModal', '🖨️ انتخاب قالب چاپ پیش‌فاکتور', html,
+    '<button onclick="document.getElementById(\'pfPrintSelectModal\').style.display=\'none\'" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">انصراف</button>',
+    {lg:false}
+  );
+}
+
+function pfDoPrint(id, templateId) {
+  var modal = document.getElementById('pfPrintSelectModal');
+  if (modal) modal.style.display = 'none';
+
+  var pf = _pfList.find(function(p){ return p.id === id; });
+  if (!pf) return;
+
+  var tpls = _pfGetTemplates();
+  var tpl = (templateId ? tpls.find(function(t){ return t.id === templateId; }) : null) || _pfDefaultTplForPrint();
+
   var zone = document.getElementById('pfPrintZone');
   if (!zone) {
     zone = document.createElement('div');
@@ -565,85 +1073,119 @@ function pfPrint(id) {
     zone.style.display = 'none';
     document.body.appendChild(zone);
   }
-  zone.innerHTML = _pfPrintHTML(pf);
+  zone.innerHTML = _pfPrintHTML(pf, tpl.includeSeller, tpl.html || null);
   window.print();
 }
 
-
-function _pfPrintHTML(pf) {
+function _pfPrintHTML(pf, includeSeller, customHtml) {
   var subtotal = pf.subtotal || 0;
   var discAmt  = pf.discAmt  || 0;
   var taxAmt   = pf.taxAmt   || 0;
   var total    = pf.total    || 0;
   
-  var template = (typeof DB !== 'undefined' && DB.settings && DB.settings.pfPrintTemplate) 
-                 ? DB.settings.pfPrintTemplate : _pfDefaultTemplate();
+  var template = customHtml || (typeof DB !== 'undefined' && DB.settings && DB.settings.pfPrintTemplate) 
+                 ? (customHtml || DB.settings.pfPrintTemplate) : _pfDefaultTemplate();
 
   var itemRows = (pf.items || []).map(function(item, i) {
+    var discVal = Number(item.discPct || 0);
     return '<tr>' +
       '<td style="border:1px solid #000;text-align:center;padding:5px">' + (i+1) + '</td>' +
-      '<td style="border:1px solid #000;text-align:center;padding:5px">' + esc(item.prodId || '') + '</td>' +
+      '<td style="border:1px solid #000;text-align:center;padding:5px;font-family:monospace">' + esc(item.catalogCode || item.prodId || '') + '</td>' +
       '<td style="border:1px solid #000;text-align:right;padding:5px">' + esc(item.name || '') + '</td>' +
       '<td style="border:1px solid #000;text-align:center;padding:5px">' + fmtNum(item.qty) + '</td>' +
       '<td style="border:1px solid #000;text-align:center;padding:5px">' + esc(item.unit || 'عدد') + '</td>' +
       '<td style="border:1px solid #000;text-align:center;font-family:monospace;padding:5px">' + fmtNum(item.unitPrice) + '</td>' +
+      '<td style="border:1px solid #000;text-align:center;padding:5px">' + (discVal ? discVal + '٪' : '—') + '</td>' +
       '<td style="border:1px solid #000;text-align:center;font-family:monospace;padding:5px">' + fmtNum(item.lineTotal) + '</td>' +
       '</tr>';
   }).join('');
 
-  var seller = (typeof DB !== 'undefined' && DB.settings && DB.settings.sellerInfo) || {
-    name: 'آتنا زیست درمان', natId: '۱۰۱۰۴۲۳۴۵۶۷', regId: '۱۲۳۴۵۶', ecoCode: '۴۱۱۱۲۳۴۵۶۷۸۹',
-    address: 'تهران، خیابان ولیعصر، نرسیده به پارک وی، کوچه ...', postal: '۱۹۶۶۶۴۵۳۲۱', phone: '۰۲۱-۸۸۸۸۸۸۸۸'
-  };
+  var sellerSection = '';
+  var sellerHeader = '';
+
+  if (includeSeller) {
+    var seller = (typeof DB !== 'undefined' && DB.settings && DB.settings.sellerInfo) || {
+      name: 'آتنا زیست درمان', natId: '۱۰۱۰۴۲۳۴۵۶۷', regId: '۱۲۳۴۵۶', ecoCode: '۴۱۱۱۲۳۴۵۶۷۸۹',
+      address: 'تهران، خیابان ولیعصر، نرسیده به پارک وی، کوچه ...', postal: '۱۹۶۶۶۴۵۳۲۱', phone: '۰۲۱-۸۸۸۸۸۸۸۸'
+    };
+
+    sellerHeader = 
+      '<div style="text-align:center;font-weight:bold;font-size:18px;margin-bottom:15px;border-bottom:2px solid #000;padding-bottom:10px">' +
+        'صورتحساب فروش کالا و خدمات' +
+      '</div>';
+
+    sellerSection = 
+      '<div style="border:1px solid #000;border-radius:4px;margin-bottom:15px;font-size:12px">' +
+        '<div style="background:#f0f0f0;padding:5px;border-bottom:1px solid #000;font-weight:bold">مشخصات فروشنده</div>' +
+        '<div style="padding:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">' +
+          '<div><strong>فروشنده:</strong> ' + esc(seller.name) + '</div>' +
+          '<div><strong>شماره اقتصادی:</strong> ' + esc(seller.ecoCode) + '</div>' +
+          '<div><strong>شناسه ملی:</strong> ' + esc(seller.natId) + '</div>' +
+          '<div><strong>شماره ثبت:</strong> ' + esc(seller.regId) + '</div>' +
+          '<div style="grid-column:1/-1"><strong>آدرس:</strong> ' + esc(seller.address) + ' &nbsp;&nbsp; <strong>کد پستی:</strong> ' + esc(seller.postal) + ' &nbsp;&nbsp; <strong>تلفن:</strong> ' + esc(seller.phone) + '</div>' +
+        '</div>' +
+      '</div>';
+  } else {
+    // Blank header margin for pre-printed letterheads
+    sellerHeader = '<div style="height:120px"></div>';
+  }
+
+  var noteHtml = '';
+  if (pf.note && pf.note.trim()) {
+    noteHtml = 
+      '<div style="font-size:12px;margin-bottom:10px;border:1px solid #000;padding:10px;border-radius:4px;white-space:pre-wrap">' +
+        '<strong>توضیحات:</strong> ' + esc(pf.note) +
+      '</div>';
+  }
 
   var html = template
-    .replace(/\{\{seller\.name\}\}/g, esc(seller.name))
-    .replace(/\{\{seller\.natId\}\}/g, esc(seller.natId))
-    .replace(/\{\{seller\.regId\}\}/g, esc(seller.regId))
-    .replace(/\{\{seller\.ecoCode\}\}/g, esc(seller.ecoCode))
-    .replace(/\{\{seller\.address\}\}/g, esc(seller.address))
-    .replace(/\{\{seller\.postal\}\}/g, esc(seller.postal))
-    .replace(/\{\{seller\.phone\}\}/g, esc(seller.phone))
+    .replace(/\{\{seller_header\}\}/g, sellerHeader)
+    .replace(/\{\{seller_section\}\}/g, sellerSection)
     .replace(/\{\{pf\.no\}\}/g, esc(pf.no))
     .replace(/\{\{pf\.jalaliDate\}\}/g, esc(pf.jalaliDate||''))
     .replace(/\{\{pf\.centerName\}\}/g, esc(pf.centerName||'—'))
+    .replace(/\{\{pf\.buyerNatId\}\}/g, esc(pf.buyerNatId||'—'))
+    .replace(/\{\{pf\.buyerEcoCode\}\}/g, esc(pf.buyerEcoCode||'—'))
+    .replace(/\{\{pf\.buyerRegId\}\}/g, esc(pf.buyerRegId||'—'))
+    .replace(/\{\{pf\.buyerPhone\}\}/g, esc(pf.buyerPhone||'—'))
+    .replace(/\{\{pf\.buyerPostal\}\}/g, esc(pf.buyerPostal||'—'))
+    .replace(/\{\{pf\.buyerAddress\}\}/g, esc(pf.buyerAddress||'—'))
     .replace(/\{\{pf\.creatorName\}\}/g, esc(_pfCreatorName(pf.createdBy)))
     .replace(/\{\{items_html\}\}/g, itemRows)
     .replace(/\{\{subtotal\}\}/g, fmtNum(subtotal))
     .replace(/\{\{discAmt\}\}/g, fmtNum(discAmt))
-    .replace(/\{\{taxPct\}\}/g, pf.taxPct||9)
+    .replace(/\{\{taxPct\}\}/g, pf.taxPct||0)
     .replace(/\{\{taxAmt\}\}/g, fmtNum(taxAmt))
     .replace(/\{\{total\}\}/g, fmtNum(total))
-    .replace(/\{\{totalWords\}\}/g, _numToWords(total));
+    .replace(/\{\{totalWords\}\}/g, _numToWords(total))
+    .replace(/\{\{pf\.note\}\}/g, noteHtml);
 
   return html;
 }
 
 function _pfDefaultTemplate() {
   return `<div class="pf-print" style="font-family:Vazirmatn,sans-serif;direction:rtl;color:#000;padding:20px;width:100%;max-width:900px;margin:0 auto">
-  <div style="text-align:center;font-weight:bold;font-size:18px;margin-bottom:15px;border-bottom:2px solid #000;padding-bottom:10px">
-    صورتحساب فروش کالا و خدمات
-  </div>
+  {{seller_header}}
   <div style="display:flex;justify-content:space-between;margin-bottom:15px;font-size:13px">
-    <div><strong>شماره:</strong> <span style="font-family:monospace">{{pf.no}}</span></div>
+    <div><strong>شماره پیش‌فاکتور:</strong> <span style="font-family:monospace">{{pf.no}}</span></div>
     <div><strong>تاریخ:</strong> {{pf.jalaliDate}}</div>
   </div>
-  <div style="border:1px solid #000;border-radius:4px;margin-bottom:15px;font-size:12px">
-    <div style="background:#f0f0f0;padding:5px;border-bottom:1px solid #000;font-weight:bold">مشخصات فروشنده</div>
-    <div style="padding:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-      <div><strong>فروشنده:</strong> {{seller.name}}</div>
-      <div><strong>شماره اقتصادی:</strong> {{seller.ecoCode}}</div>
-      <div><strong>شناسه ملی:</strong> {{seller.natId}}</div>
-      <div><strong>شماره ثبت:</strong> {{seller.regId}}</div>
-      <div style="grid-column:1/-1"><strong>آدرس:</strong> {{seller.address}} &nbsp;&nbsp; <strong>کد پستی:</strong> {{seller.postal}} &nbsp;&nbsp; <strong>تلفن:</strong> {{seller.phone}}</div>
-    </div>
-  </div>
+  
+  {{seller_section}}
+
   <div style="border:1px solid #000;border-radius:4px;margin-bottom:15px;font-size:12px">
     <div style="background:#f0f0f0;padding:5px;border-bottom:1px solid #000;font-weight:bold">مشخصات خریدار</div>
-    <div style="padding:10px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <div style="padding:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
       <div><strong>نام شخص حقیقی/حقوقی:</strong> {{pf.centerName}}</div>
+      <div><strong>شناسه ملی / کد ملی:</strong> {{pf.buyerNatId}}</div>
+      <div><strong>شماره اقتصادی:</strong> {{pf.buyerEcoCode}}</div>
+      <div><strong>شماره ثبت:</strong> {{pf.buyerRegId}}</div>
+      <div><strong>تلفن خریدار:</strong> {{pf.buyerPhone}}</div>
+      <div><strong>کد پستی:</strong> {{pf.buyerPostal}}</div>
+      <div style="grid-column:1/-1"><strong>آدرس:</strong> {{pf.buyerAddress}}</div>
     </div>
   </div>
+
   <table style="width:100%;border-collapse:collapse;margin-bottom:15px;font-size:12px;border:1px solid #000;text-align:center">
     <thead style="background:#f0f0f0">
       <tr>
@@ -653,6 +1195,7 @@ function _pfDefaultTemplate() {
         <th style="border:1px solid #000;padding:5px">تعداد</th>
         <th style="border:1px solid #000;padding:5px">واحد</th>
         <th style="border:1px solid #000;padding:5px">مبلغ واحد (ریال)</th>
+        <th style="border:1px solid #000;padding:5px">تخفیف</th>
         <th style="border:1px solid #000;padding:5px">مبلغ کل (ریال)</th>
       </tr>
     </thead>
@@ -661,23 +1204,26 @@ function _pfDefaultTemplate() {
     </tbody>
     <tfoot>
       <tr>
-        <td colspan="6" style="text-align:left;padding:5px;border:1px solid #000;font-weight:bold">جمع کل قبل از تخفیف:</td>
+        <td colspan="7" style="text-align:left;padding:5px;border:1px solid #000;font-weight:bold">جمع کل قبل از تخفیف کلی:</td>
         <td style="border:1px solid #000;padding:5px;font-family:monospace">{{subtotal}}</td>
       </tr>
       <tr>
-        <td colspan="6" style="text-align:left;padding:5px;border:1px solid #000;font-weight:bold">تخفیف:</td>
+        <td colspan="7" style="text-align:left;padding:5px;border:1px solid #000;font-weight:bold">تخفیف کلی:</td>
         <td style="border:1px solid #000;padding:5px;font-family:monospace">{{discAmt}}</td>
       </tr>
       <tr>
-        <td colspan="6" style="text-align:left;padding:5px;border:1px solid #000;font-weight:bold">مالیات و عوارض ارزش افزوده ({{taxPct}}٪):</td>
+        <td colspan="7" style="text-align:left;padding:5px;border:1px solid #000;font-weight:bold">مالیات و عوارض ارزش افزوده ({{taxPct}}٪):</td>
         <td style="border:1px solid #000;padding:5px;font-family:monospace">{{taxAmt}}</td>
       </tr>
       <tr style="background:#f0f0f0">
-        <td colspan="6" style="text-align:left;padding:5px;border:1px solid #000;font-weight:bold">جمع کل فاکتور (ریال):</td>
+        <td colspan="7" style="text-align:left;padding:5px;border:1px solid #000;font-weight:bold">جمع کل فاکتور (ریال):</td>
         <td style="border:1px solid #000;padding:5px;font-weight:bold;font-family:monospace">{{total}}</td>
       </tr>
     </tfoot>
   </table>
+  
+  {{pf.note}}
+
   <div style="font-size:12px;margin-bottom:20px;border:1px solid #000;padding:10px;border-radius:4px">
     <strong>مبلغ کل به حروف:</strong> {{totalWords}} ریال
   </div>
@@ -688,51 +1234,231 @@ function _pfDefaultTemplate() {
 </div>`;
 }
 
-function pfOpenTemplateEditor() {
+// ── pfManageTemplates — multi-template management ──────────────────────────
+var _pfMgTpls = null; // working copy during edit
+
+function pfManageTemplates() {
   if (!_isManager()) { showToast('⚠ دسترسی فقط برای مدیر امکان‌پذیر است'); return; }
-  var tpl = (typeof DB !== 'undefined' && DB.settings && DB.settings.pfPrintTemplate) || _pfDefaultTemplate();
-  var html = '<div style="margin-bottom:12px;font-size:12px;color:#475569">شما می‌توانید کد HTML قالب چاپ را مستقیماً ویرایش کنید. از متغیرهای <code style="direction:ltr;display:inline-block">\{\{...\}\}</code> استفاده کنید.</div>' +
-    '<div style="font-size:11px;color:#0284c7;margin-bottom:8px;background:#f0f9ff;padding:8px;border-radius:6px;border:1px solid #bae6fd">' +
-    '<strong>متغیرهای قابل استفاده:</strong><br>' +
-    '\{\{seller.name\}\}, \{\{seller.ecoCode\}\}, \{\{seller.natId\}\}, \{\{seller.regId\}\}, \{\{seller.address\}\}, \{\{seller.postal\}\}, \{\{seller.phone\}\}<br>' +
-    '\{\{pf.no\}\}, \{\{pf.jalaliDate\}\}, \{\{pf.centerName\}\}, \{\{pf.creatorName\}\}<br>' +
-    '\{\{items_html\}\}, \{\{subtotal\}\}, \{\{discAmt\}\}, \{\{taxPct\}\}, \{\{taxAmt\}\}, \{\{total\}\}, \{\{totalWords\}\}' +
-    '</div>' +
-    '<textarea id="pfTemplateCode" style="width:100%;height:400px;font-family:monospace;font-size:12px;direction:ltr;text-align:left;padding:10px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical">' + esc(tpl) + '</textarea>';
-  
-  openModal('pfTemplateModal', '✏️ ویرایش قالب چاپ پیش‌فاکتور (HTML)', html,
-    '<button onclick="pfResetTemplate()" style="padding:8px 16px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;margin-left:8px">بازگشت به پیش‌فرض</button>' +
-    '<button onclick="document.getElementById(\'pfTemplateModal\').style.display=\'none\'" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;margin-left:8px">انصراف</button>' +
-    '<button onclick="pfSaveTemplate()" style="padding:8px 18px;background:var(--brand);color:white;border:none;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">💾 ذخیره قالب</button>',
+  _pfMgTpls = JSON.parse(JSON.stringify(_pfGetTemplates())); // deep copy
+  _pfRenderManageTemplates();
+}
+
+function _pfRenderManageTemplates() {
+  var tpls = _pfMgTpls;
+  var vars = '<div style=\"font-size:11px;color:#0284c7;background:#f0f9ff;padding:8px 12px;border-radius:6px;border:1px solid #bae6fd;margin-bottom:12px;line-height:1.8\">' +
+    '<strong>متغیرهای قابل استفاده در HTML:</strong><br>' +
+    '{{seller.name}}, {{seller.ecoCode}}, {{seller.natId}}, {{seller.regId}}, {{seller.address}}, {{seller.postal}}, {{seller.phone}}<br>' +
+    '{{pf.no}}, {{pf.jalaliDate}}, {{pf.centerName}}, {{pf.creatorName}}<br>' +
+    '{{items_html}}, {{subtotal}}, {{discAmt}}, {{taxPct}}, {{taxAmt}}, {{total}}, {{totalWords}}, {{seller_header}}, {{seller_section}}' +
+    '</div>';
+
+  var listHtml = tpls.map(function(t, idx) {
+    return '<div style=\"border:' + (t.isDefault?'2px solid var(--brand)':'1px solid #e2e8f0') + ';border-radius:10px;padding:12px 16px;margin-bottom:10px;background:' + (t.isDefault?'#eff6ff':'#f8fafc') + '\">' +
+      '<div style=\"display:flex;align-items:center;gap:8px;margin-bottom:8px\">' +
+        '<input type=\"text\" value=\"' + esc(t.name) + '\" placeholder=\"نام قالب\" ' +
+          'oninput=\"_pfMgTpls[' + idx + '].name=this.value\" ' +
+          'style=\"flex:1;padding:6px 10px;border:1px solid #cbd5e1;border-radius:6px;font-family:inherit;font-size:13px\">' +
+        '<label style=\"display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;white-space:nowrap\">' +
+          '<input type=\"checkbox\" ' + (t.includeSeller?'checked':'') + ' onchange=\"_pfMgTpls[' + idx + '].includeSeller=this.checked\"> مشخصات فروشنده' +
+        '</label>' +
+        '<label style=\"display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;white-space:nowrap\">' +
+          '<input type=\"radio\" name=\"pfDefaultTpl\" ' + (t.isDefault?'checked':'') + ' onchange=\"_pfMgTpls.forEach(function(x,i){x.isDefault=(i===' + idx + ')})\"> پیش‌فرض' +
+        '</label>' +
+        '<button onclick=\"_pfMgEditHtml(' + idx + ')\" style=\"padding:4px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;cursor:pointer;background:white\">✏️ HTML</button>' +
+        (tpls.length > 1 ? '<button onclick=\"_pfMgTpls.splice(' + idx + ',1);_pfRenderManageTemplates()\" style=\"padding:4px 8px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:6px;font-size:12px;cursor:pointer\">🗑</button>' : '') +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  var html = vars + listHtml +
+    '<button onclick=\"_pfMgAddTpl()\" style=\"width:100%;padding:10px;border:2px dashed #cbd5e1;border-radius:10px;background:transparent;color:#64748b;font-family:inherit;font-size:13px;cursor:pointer;margin-top:4px\">+ افزودن قالب جدید</button>';
+
+  openModal('pfTplMgModal', '🎨 مدیریت قالب‌های چاپ', html,
+    '<button onclick="_pfCloseMgModal()" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;margin-left:8px">انصراف</button>' +
+    '<button onclick="_pfMgSave()" style="padding:8px 18px;background:var(--brand);color:white;border:none;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">💾 ذخیره همه</button>',
     {lg:true}
   );
 }
+function _pfCloseMgModal() { var m=document.getElementById('pfTplMgModal'); if(m) m.style.display='none'; }
 
-function pfSaveTemplate() {
-  var code = document.getElementById('pfTemplateCode').value;
-  if (!DB.settings) DB.settings = {};
-  DB.settings.pfPrintTemplate = code;
-  saveDB();
-  document.getElementById('pfTemplateModal').style.display = 'none';
-  showToast('✅ قالب چاپ ذخیره شد');
+function _pfMgAddTpl() {
+  _pfMgTpls.push({ id: 'tpl_' + Date.now(), name: 'قالب جدید', includeSeller: true, isDefault: false, html: null });
+  _pfRenderManageTemplates();
 }
 
+function _pfMgEditHtml(idx) {
+  var t = _pfMgTpls[idx];
+  var currentHtml = t.html || _pfDefaultTemplate();
+  var body = '<textarea id=\"pfTplHtmlArea\" style=\"width:100%;height:450px;font-family:monospace;font-size:12px;direction:ltr;text-align:left;padding:10px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical\">' + esc(currentHtml) + '</textarea>';
+  openModal('pfTplHtmlModal', '✏️ ویرایش HTML — ' + esc(t.name), body,
+    '<button onclick="_pfResetTplHtml()" style="padding:8px 12px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer;margin-left:8px">🔄 پیش‌فرض</button>' +
+    '<button onclick="_pfCloseTplHtmlModal()" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;margin-left:8px">انصراف</button>' +
+    '<button onclick="_pfApplyTplHtml(' + idx + ')" style="padding:8px 18px;background:var(--brand);color:white;border:none;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">💾 اعمال</button>',
+    {lg:true}
+  );
+}
+function _pfCloseTplHtmlModal() { var m=document.getElementById('pfTplHtmlModal'); if(m) m.style.display='none'; }
+function _pfResetTplHtml() { if(confirm('بازگشت به قالب پیش‌فرض؟')){ var a=document.getElementById('pfTplHtmlArea'); if(a) a.value=_pfDefaultTemplate(); } }
+function _pfApplyTplHtml(idx) {
+  var a=document.getElementById('pfTplHtmlArea');
+  if(a && _pfMgTpls) _pfMgTpls[idx].html=a.value;
+  _pfCloseTplHtmlModal();
+  showToast('✅ HTML ذخیره موقت شد');
+}
+
+function _pfMgSave() {
+  _pfSaveTemplates(_pfMgTpls);
+  document.getElementById('pfTplMgModal').style.display = 'none';
+  showToast('✅ قالب‌های چاپ ذخیره شدند');
+}
+
+// Keep old pfOpenTemplateEditor as alias for backward compat
+function pfOpenTemplateEditor() { pfManageTemplates(); }
+function pfSaveTemplate() { _pfMgSave(); }
 function pfResetTemplate() {
-  if(confirm('آیا مطمئن هستید که می‌خواهید قالب به حالت پیش‌فرض (فاکتور رسمی دارایی) بازگردد؟')) {
-    document.getElementById('pfTemplateCode').value = _pfDefaultTemplate();
+  var a = document.getElementById('pfTplHtmlArea');
+  if (a && confirm('بازگشت به قالب پیش‌فرض؟')) a.value = _pfDefaultTemplate();
+}
+
+// ── Open proformas for a specific center ─────────────────────────────────
+async function pfOpenForCenter(centerKey, centerName) {
+  // Switch to proforma tab
+  if (typeof switchTab === 'function') switchTab('proforma');
+  // Pre-filter to this center
+  _pfSearch = centerName || centerKey;
+  _pfFilter = 'all';
+  _pfPage   = 0;
+  // Render
+  var el = document.getElementById('proformaPanel');
+  if (el) {
+    try {
+      el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8">در حال بارگذاری…</div>';
+      await pfLoad();
+      _renderPfPanel(el);
+    } catch(e) { console.error('[proforma] pfOpenForCenter:', e); }
   }
 }
 
-// ── Modal & Print zone HTML ───────────────────────────────────────────────
+// ── Navigate to center from proforma panel ───────────────────────────────
+function pfCenterClick(idx) {
+  var entry = _pfCenterMap[idx] || {};
+  var centerKey = entry.key || '';
+  var centerName = entry.name || '';
+  if (!centerKey) return;
+  var parts = centerKey.split('_');
+  var rtype = parts[0];
+  var rid   = parts.slice(1).join('_');
+
+  // Switch to provinces tab
+  if (typeof switchTab === 'function') switchTab('provinces');
+
+  setTimeout(function() {
+    if (rtype === 'center' || rtype === 'c') {
+      // Tehran center — find its province and open it
+      if (typeof openCenterModal === 'function') {
+        openCenterModal(rtype, rid);
+      }
+    } else if (rtype === 'pc') {
+      // Province center — extract province id
+      var provId = rid.split('||')[0];
+      if (typeof openProvince === 'function') openProvince(provId);
+    }
+  }, 300);
+}
+
+// ── Version history modal ────────────────────────────────────────────────
+async function pfShowVersions(id) {
+  var pf = _pfList.find(function(p){ return p.id === id; });
+  if (!pf) return;
+  var versions = pf.versions || [];
+  if (!versions.length) { showToast('هیچ نسخه قبلی‌ای ثبت نشده است'); return; }
+  // Show newest first
+  var revs = versions.slice().reverse();
+  var html = '<div style="max-height:60vh;overflow-y:auto">' +
+    revs.map(function(v, i) {
+      var items = (v.items || []);
+      var itemsStr = items.map(function(it){ return (it.catalogCode||it.prodId?'['+it.catalogCode+'] ':'') + it.name + ' ×' + it.qty; }).join('، ');
+      var dateStr = '';
+      try { var d=new Date(v.at); dateStr=d.toLocaleDateString('fa-IR')+' '+d.toLocaleTimeString('fa-IR',{hour:'2-digit',minute:'2-digit'}); } catch(e){}
+      return '<div style="border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;margin-bottom:10px;background:' + (i===0?'#fffbeb':'#f8fafc') + '">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
+          '<span style="font-weight:700;font-size:13px;color:#1e293b">نسخه ' + (revs.length - i) + (i===0?' <span style="background:#f59e0b;color:white;font-size:10px;padding:1px 7px;border-radius:10px;margin-right:4px">آخرین</span>':'') + '</span>' +
+          '<span style="font-size:11px;color:#64748b">' + dateStr + ' · ' + esc(v.by||'') + '</span>' +
+        '</div>' +
+        '<div style="font-family:monospace;font-size:13px;color:#15803d;margin-bottom:6px">جمع کل: ' + fmtNum(v.total) + ' ﷼</div>' +
+        (v.subtotal !== v.total ? '<div style="font-size:11px;color:#475569">ناخالص: ' + fmtNum(v.subtotal) + ' — تخفیف: ' + fmtNum(v.discAmt) + ' — مالیات: ' + fmtNum(v.taxAmt) + '</div>' : '') +
+        '<div style="font-size:11px;color:#64748b;margin-top:6px;border-top:1px solid #e2e8f0;padding-top:6px">' + esc(itemsStr) + '</div>' +
+        (v.note ? '<div style="font-size:11px;color:#475569;margin-top:4px">📝 ' + esc(v.note) + '</div>' : '') +
+      '</div>';
+    }).join('') + '</div>';
+
+  openModal('pfVersionsModal', '🕐 تاریخچه نسخه‌ها — ' + esc(pf.no), html,
+    '<button onclick="document.getElementById(\'pfVersionsModal\').style.display=\'none\'" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">بستن</button>',
+    {lg:false}
+  );
+}
+
+// ── Schedule follow-up in week plan ──────────────────────────────────────
+function pfScheduleFollowup(pfId) {
+  var pf = _pfList.find(function(p){ return p.id === pfId; });
+  if (!pf || !pf.centerKey) return;
+  var parts = pf.centerKey.split('_');
+  var rtype = parts[0]; // 'center' or 'pc'
+  var rid   = parts.slice(1).join('_');
+  var cname = pf.centerName || pf.centerKey;
+
+  // Use the convertFollowupToTask pattern but for week entries
+  var today = todayStr ? todayStr() : '';
+  var html =
+    '<div style="margin-bottom:12px;font-size:13px;color:#475569">پیگیری پیشفاکتور <strong>' + esc(pf.no) + '</strong> برای <strong>' + esc(cname) + '</strong> ثبت می‌شود:</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
+      '<div><label style="font-size:12px;color:#64748b;display:block;margin-bottom:4px">تاریخ</label>' +
+        '<input type="text" id="pfWpDate" value="' + today + '" placeholder="YYYY/MM/DD" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:13px" onclick="openJDP(this,function(v){document.getElementById(\'pfWpDate\').value=v})"></div>' +
+      '<div><label style="font-size:12px;color:#64748b;display:block;margin-bottom:4px">نوع اقدام</label>' +
+        '<select id="pfWpType" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:13px">' +
+          '<option value="call">📞 تماس</option><option value="visit">🤝 ملاقات</option>' +
+        '</select></div>' +
+    '</div>';
+
+  openModal('pfWpModal', '📅 ثبت پیگیری در برنامه هفته', html,
+    '<button onclick="document.getElementById(\'pfWpModal\').style.display=\'none\'" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;margin-left:8px">انصراف</button>' +
+    '<button onclick="_pfDoSchedule(\'' + rtype + '\',\'' + esc(rid) + '\',\'' + esc(cname) + '\')" style="padding:8px 18px;background:var(--brand);color:white;border:none;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">📅 ثبت</button>',
+    {lg:false}
+  );
+}
+
+function _pfDoSchedule(rtype, rid, cname) {
+  var dateEl = document.getElementById('pfWpDate');
+  var typeEl = document.getElementById('pfWpType');
+  if (!dateEl || !dateEl.value) { showToast('تاریخ را وارد کنید'); return; }
+  var scheduledDate = dateEl.value;
+  var actionType = typeEl ? typeEl.value : 'call';
+
+  // Find week key from date
+  var weekId = scheduledDate; // simplified — same as date for now
+  var recKey = rtype + '_' + rid;
+  var entryKey = weekId + ':::' + recKey + '_pf_' + Date.now();
+  if (!DB.weekEntries) DB.weekEntries = {};
+  DB.weekEntries[entryKey] = {
+    rtype: rtype, rid: rid, recKey: recKey,
+    scheduledDate: scheduledDate, actionType: actionType,
+    done: false, doneDate: null, addedBy: currentUser, centerName: cname
+  };
+  saveDB();
+  document.getElementById('pfWpModal').style.display = 'none';
+  showToast('✅ پیگیری در برنامه هفته ثبت شد — ' + scheduledDate);
+}
+
+// ── Modal HTML ───────────────────────────────────────────────────────────
 function _pfModalHTML() {
-  return '<div id="pfModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center;backdrop-filter:blur(2px)" onclick="if(event.target===this)this.style.display=\'none\'">' +
-    '<div style="background:white;border-radius:14px;width:720px;max-width:95vw;max-height:92vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2)">' +
-      '<div style="padding:18px 20px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:white;z-index:1">' +
-        '<span style="font-size:15px;font-weight:800">📄 پیشفاکتور</span>' +
-        '<button onclick="document.getElementById(\'pfModal\').style.display=\'none\'" style="background:none;border:none;font-size:18px;cursor:pointer;color:#94a3b8;padding:2px 6px;border-radius:4px">✕</button>' +
+  return '<div id="pfModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;align-items:flex-start;justify-content:center;backdrop-filter:blur(3px);padding:16px;overflow-y:auto" onclick="if(event.target===this)this.style.display=\'none\'">' +
+    '<div style="background:white;border-radius:16px;width:min(98vw,1200px);min-height:80vh;box-shadow:0 24px 64px rgba(0,0,0,.25);display:flex;flex-direction:column">' +
+      '<div style="padding:18px 24px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:white;z-index:1;border-radius:16px 16px 0 0">' +
+        '<span style="font-size:16px;font-weight:800">📄 پیشفاکتور</span>' +
+        '<button onclick="document.getElementById(\'pfModal\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:#94a3b8;padding:2px 8px;border-radius:6px;line-height:1">✕</button>' +
       '</div>' +
-      '<div id="pfModalBody" style="padding:20px"></div>' +
-      '<div id="pfModalFooter" style="padding:14px 20px;border-top:1px solid #e2e8f0;display:flex;gap:8px;justify-content:flex-end;background:#f8fafc;border-radius:0 0 14px 14px"></div>' +
+      '<div id="pfModalBody" style="padding:24px;flex:1;overflow-y:auto"></div>' +
+      '<div id="pfModalFooter" style="padding:14px 24px;border-top:1px solid #e2e8f0;display:flex;gap:8px;justify-content:flex-end;background:#f8fafc;border-radius:0 0 16px 16px;position:sticky;bottom:0"></div>' +
     '</div>' +
   '</div>';
 }
@@ -775,12 +1501,18 @@ function _numToWords(n) {
 }
 
 // ── Vue bridge callbacks ──────────────────────────────────────────────────
-// Called by ProformaPanel.vue emits via window._pfXxx?.()
+// Called by ProformaPanel.vue — pf is the full object from Vue's API fetch.
+// We merge it into _pfList so pfOpenEdit/pfAction can find it by ID.
+function _vMerge(pf) {
+  if (!pf || !pf.id) return;
+  var idx = _pfList.findIndex(function(p) { return p.id === pf.id; });
+  if (idx === -1) { _pfList.push(pf); } else { _pfList[idx] = pf; }
+}
 window._pfNew     = function()    { pfOpenNew(); };
-window._pfView    = function(pf)  { pfOpenEdit(pf.id); };
-window._pfSend    = function(pf)  { pfAction(pf.id, 'send'); };
-window._pfApprove = function(pf)  { pfAction(pf.id, 'approve'); };
-window._pfReject  = function(pf)  { pfReject(pf.id); };
+window._pfView    = function(pf)  { _vMerge(pf); pfOpenEdit(pf.id); };
+window._pfSend    = function(pf)  { _vMerge(pf); pfAction(pf.id, 'send'); };
+window._pfApprove = function(pf)  { _vMerge(pf); pfAction(pf.id, 'approve'); };
+window._pfReject  = function(pf)  { _vMerge(pf); pfReject(pf.id); };
 
 // Print CSS (injected once) ───────────────────────────────────────────────
 (function() {
@@ -799,7 +1531,7 @@ window._pfReject  = function(pf)  { pfReject(pf.id); };
 }());
 
 
-// ── Product search dropdown ────────────────────────────────────────────────
+// ── Product search dropdown (inline autocomplete) ────────────────────────
 function pfSearchProduct(i, q) {
   var drop = document.getElementById('pfProdDrop_' + i);
   if (!drop) return;
@@ -813,14 +1545,19 @@ function pfSearchProduct(i, q) {
   
   drop.innerHTML = results.map(function(r) {
     var n = esc(r.full_name || r.name);
-    var u = esc(r.unit || 'عدد');
-    return '<div onclick="pfSelectProduct(' + i + ', \'' + n + '\', \'' + u + '\')" style="padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid #f1f5f9" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'white\'">' + n + ' <span style="color:#94a3b8;font-size:11px">(' + u + ')</span></div>';
+    var u = esc(r.unit || '\u0639\u062f\u062f');
+    var price = Number(r.sale_price || 0);
+    var cc = esc(r.catalog_code || '');
+    return '<div onclick="pfSelectProduct(' + i + ', \'' + n + '\', \'' + u + '\', ' + price + ', \'' + cc + '\')" style="padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid #f1f5f9" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'white\'"><div>' + n + ' <span style="color:#94a3b8;font-size:11px">(' + u + ')</span>' +
+      (cc ? '<span style="color:#0284c7;font-size:10px;margin-right:6px">' + cc + '</span>' : '') + '</div>' +
+      (price ? '<span style="color:#6366f1;font-size:11px">' + price.toLocaleString('fa-IR') + ' \u0631\u06cc\u0627\u0644</span>' : '') +
+    '</div>';
   }).join('');
   
   var inp = document.querySelector('.pf-item-name[data-idx="' + i + '"]');
   if (inp) {
     var rect = inp.getBoundingClientRect();
-    drop.style.top = (rect.bottom + window.scrollY) + 'px';
+    drop.style.top = (rect.bottom) + 'px';
     drop.style.left = rect.left + 'px';
     drop.style.width = rect.width + 'px';
     drop.style.position = 'fixed';
@@ -828,13 +1565,80 @@ function pfSearchProduct(i, q) {
   drop.style.display = 'block';
 }
 
-function pfSelectProduct(i, name, unit) {
+function pfSelectProduct(i, name, unit, price, catalogCode) {
   var drop = document.getElementById('pfProdDrop_' + i);
   if (drop) drop.style.display = 'none';
   var inp = document.querySelector('.pf-item-name[data-idx="' + i + '"]');
   if (inp) {
     inp.value = name;
-    _pfRowChange(i, 'name', name);
-    _pfRowAutofill(i, name);
+    _pfItems[i].name        = name;
+    _pfItems[i].unit        = unit;
+    _pfItems[i].unitPrice   = price || 0;
+    _pfItems[i].catalogCode = catalogCode || '';
+    _pfItems[i].lineTotal   = _pfItemLineTotal(_pfItems[i]);
   }
+  // Also update price cell
+  var priceInp = document.querySelector('.pf-item-price[data-idx="' + i + '"]');
+  if (priceInp && price) priceInp.value = price;
+  // Show catalogCode as a small badge next to name input (read-only hint)
+  var catDisplay = document.querySelector('.pf-item-cat-display[data-idx="' + i + '"]');
+  if (catDisplay) catDisplay.textContent = catalogCode || '';
+  pfRecalc();
+}
+
+// ── Seller Info Editor (مشخصات فروشنده) ──────────────────────────────────
+function pfOpenSellerEditor() {
+  if (!_isManager()) { showToast('⚠ دسترسی فقط برای مدیر امکان‌پذیر است'); return; }
+  var seller = (typeof DB !== 'undefined' && DB.settings && DB.settings.sellerInfo) || {
+    name: 'آتنا زیست درمان', natId: '۱۰۱۰۴۲۳۴۵۶۷', regId: '۱۲۳۴۵۶', ecoCode: '۴۱۱۱۲۳۴۵۶۷۸۹',
+    address: 'تهران، خیابان ولیعصر، نرسیده به پارک وی، کوچه ...', postal: '۱۹۶۶۶۴۵۳۲۱', phone: '۰۲۱-۸۸۸۸۸۸۸۸'
+  };
+
+  var html = 
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
+      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">نام شرکت (فروشنده)</label>' +
+        '<input id="mSellerName" class="form-input" value="' + esc(seller.name) + '">' +
+      '</div>' +
+      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">شناسه ملی</label>' +
+        '<input id="mSellerNatId" class="form-input" value="' + esc(seller.natId) + '">' +
+      '</div>' +
+      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">شماره ثبت</label>' +
+        '<input id="mSellerRegId" class="form-input" value="' + esc(seller.regId) + '">' +
+      '</div>' +
+      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">کد اقتصادی</label>' +
+        '<input id="mSellerEcoCode" class="form-input" value="' + esc(seller.ecoCode) + '">' +
+      '</div>' +
+      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">تلفن تماس</label>' +
+        '<input id="mSellerPhone" class="form-input" value="' + esc(seller.phone) + '">' +
+      '</div>' +
+      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">کد پستی</label>' +
+        '<input id="mSellerPostal" class="form-input" value="' + esc(seller.postal) + '">' +
+      '</div>' +
+      '<div style="grid-column: 1 / -1"><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">آدرس کامل</label>' +
+        '<textarea id="mSellerAddress" class="form-input" style="height:60px;resize:vertical">' + esc(seller.address) + '</textarea>' +
+      '</div>' +
+    '</div>';
+
+  openModal('pfSellerModal', '🏢 ویرایش مشخصات فروشنده', html,
+    '<button onclick="closeModal(\'pfSellerModal\')" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;margin-left:8px">انصراف</button>' +
+    '<button onclick="pfSaveSellerInfo()" style="padding:8px 18px;background:var(--brand);color:white;border:none;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">💾 ذخیره مشخصات</button>',
+    {lg:false}
+  );
+
+}
+
+function pfSaveSellerInfo() {
+  if (!DB.settings) DB.settings = {};
+  DB.settings.sellerInfo = {
+    name:    (document.getElementById('mSellerName')    || {}).value || '',
+    natId:   (document.getElementById('mSellerNatId')   || {}).value || '',
+    regId:   (document.getElementById('mSellerRegId')   || {}).value || '',
+    ecoCode: (document.getElementById('mSellerEcoCode') || {}).value || '',
+    phone:   (document.getElementById('mSellerPhone')   || {}).value || '',
+    postal:  (document.getElementById('mSellerPostal')  || {}).value || '',
+    address: (document.getElementById('mSellerAddress') || {}).value || ''
+  };
+  saveDB();
+  if (typeof closeModal === 'function') closeModal('pfSellerModal');
+  if (typeof showToast === 'function') showToast('✅ مشخصات فروشنده ذخیره شد');
 }

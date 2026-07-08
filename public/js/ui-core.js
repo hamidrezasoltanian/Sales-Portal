@@ -58,7 +58,7 @@ function switchTab(tab){
   var pfPanel=document.getElementById('proformaPanel');if(pfPanel)pfPanel.style.display=(tab==='proforma')?'':'none';
   if(tab==='mtr'&&typeof mtrLazyInit==='function')mtrLazyInit();
   if(tab==='pricing'&&typeof pricingLazyInit==='function')pricingLazyInit();
-  if(tab==='proforma'){if(window._pfVueRefresh)window._pfVueRefresh();else if(typeof renderProformaPanel==='function')renderProformaPanel();}
+  if(tab==='proforma'&&typeof renderProformaPanel==='function')renderProformaPanel();
   var hcpP=document.getElementById('hcpPanel');if(hcpP)hcpP.style.display=(tab==='hcp')?'':'none';
   if(tab==='hcp'&&typeof renderHCPPanel==='function')renderHCPPanel();
   var spPanel=document.getElementById('supportPanel');if(spPanel)spPanel.style.display=(tab==='support')?'':'none';

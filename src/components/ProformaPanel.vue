@@ -33,7 +33,7 @@
           <div class="pf-date">{{ pf.jalaliDate || '—' }}</div>
         </div>
         <div class="pf-card-actions">
-          <button class="pf-btn" @click="$emit('view', pf)">مشاهده</button>
+          <button class="pf-btn" @click="openProforma(pf)">مشاهده</button>
           <button v-if="pf.status === 'draft'" class="pf-btn pf-btn-send" @click="$emit('send', pf)">ارسال</button>
           <button v-if="canApprove && pf.status === 'sent'" class="pf-btn pf-btn-approve" @click="$emit('approve', pf)">تأیید</button>
           <button v-if="canApprove && pf.status === 'sent'" class="pf-btn pf-btn-reject" @click="$emit('reject', pf)">رد</button>
@@ -165,6 +165,19 @@ function loadMore() {
 watch(activeFilter, () => { page.value = 0; });
 
 onMounted(fetchAll);
+
+function openProforma(pf: Proforma) {
+  // Try window._pfView first (defined in proforma.js), fallback to emit
+  const w = window as any;
+  if (typeof w._pfView === 'function') {
+    w._pfView(pf);
+  } else {
+    // _pfView not ready yet — try pfOpenEdit directly
+    if (typeof w.pfOpenEdit === 'function') {
+      w.pfOpenEdit(pf.id);
+    }
+  }
+}
 
 defineExpose({ refresh: fetchAll });
 </script>
