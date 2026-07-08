@@ -5387,8 +5387,9 @@ function importProdExcel(event){
 
 function processProdImportData(data){
   if(!data||data.length<2){toast('فایل خالی یا نامعتبر','e');return;}
-  const headers=data[0].map(h=>String(h||'').trim().toLowerCase());
-  
+  // Normalize headers: remove ZWNJ (\u200c), zero-width spaces, trim, lowercase
+  const headers=data[0].map(h=>String(h||'').replace(/[\u200c\u200b\u200d\u00a0]/g,'').trim().toLowerCase());
+
   // Detect columns (Persian / English)
   // nameCol: prioritize exact «نام کالا» first to avoid grabbing «نام کامل»
   const nameCol = (()=>{
@@ -5397,15 +5398,29 @@ function processProdImportData(data){
     if(i===-1) i = headers.findIndex(h=>h.includes('نام')&&!h.includes('کامل')&&!h.includes('فنی'));
     return i;
   })();
-  const codeCol  = headers.findIndex(h=>h.includes('کد کالا')||h.includes('کد کاتالوگ')||h.includes('کاتالوگ')||h==='code'||h==='catalogcode');
+  const codeCol  = headers.findIndex(h=>h.includes('کد کالا')||h.includes('کد کاتالوگ')||h.includes('کاتالوگ')||h==='code'||h==='catalogcode'||h.includes('catalog'));
   const brandCol = headers.findIndex(h=>h.includes('برند')||h==='brand');
   const ircCol   = headers.findIndex(h=>h.includes('irc')||h.includes('ای ار سی'));
   const unitCol  = headers.findIndex(h=>h.includes('واحد')||h==='unit');
   const sizeCol  = headers.findIndex(h=>h.includes('تعداد در بسته')||h.includes('بسته')||h==='size');
   const fullCol  = headers.findIndex(h=>h.toLowerCase()==='stuffnamewithtechnicalcode'||h.includes('نام کامل')||h.includes('نام فنی'));
-  // «دسته کالایی» / «دسته‌بندی» / «دسته محصول» / «دسته» / «category»
-  const catCol   = headers.findIndex(h=>h.includes('دسته')||h==='category');
-  
+  // Category: «دسته کالایی» / «دستهبندی» / «دسته‌بندی» / «گروه کالا» / «گروه» / «category»
+  const catCol = (()=>{
+    let i = headers.findIndex(h=>h==='دسته کالایی'||h==='دستهبندی'||h==='دستهبند'||h==='category');
+    if(i===-1) i = headers.findIndex(h=>h.includes('دسته')&&h.includes('کالا'));
+    if(i===-1) i = headers.findIndex(h=>h.includes('دستهبند')||h.includes('دسته‌بند'));
+    if(i===-1) i = headers.findIndex(h=>h.includes('گروه کالا')||h.includes('گروهبندی'));
+    if(i===-1) i = headers.findIndex(h=>h.includes('دسته'));
+    if(i===-1) i = headers.findIndex(h=>h.includes('گروه'));
+    if(i===-1) i = headers.findIndex(h=>h.includes('category')||h.includes('cat'));
+    return i;
+  })();
+
+  // Debug: show detected column mapping in console
+  console.log('[WMS Import] Headers:', headers);
+  console.log('[WMS Import] Columns detected:', {nameCol,codeCol,brandCol,ircCol,unitCol,sizeCol,fullCol,catCol});
+  if(catCol===-1) console.warn('[WMS Import] ⚠️ category column not detected! Make sure header contains "دسته" or "گروه" or "category"');
+
   _importProdRows=[];
   for(let i=1;i<data.length;i++){
     const row=data[i];

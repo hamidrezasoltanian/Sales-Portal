@@ -202,8 +202,9 @@ router.put('/:id', requireAuth, async (req, res) => {
   try {
     const existing = await query('SELECT * FROM proformas WHERE id = $1', [req.params.id]);
     if (!existing.rows.length) return res.status(404).json({ error: 'پیشفاکتور یافت نشد' });
-    if (existing.rows[0].status !== 'draft') {
-      return res.status(400).json({ error: 'فقط پیش‌نویس قابل ویرایش است' });
+    const isSuperAdmin = req.session?.user?.role === 'سوپر ادمین';
+    if (existing.rows[0].status !== 'draft' && !isSuperAdmin) {
+      return res.status(400).json({ error: 'فقط پیش‌نویس قابل ویرایش است (سوپر ادمین می‌تواند هر وضعیتی را ویرایش کند)' });
     }
 
     const d = validate(CreateSchema.partial(), req.body, res);
@@ -354,7 +355,8 @@ router.delete('/:id', requireAuth, async (req, res) => {
   try {
     const existing = await query('SELECT status FROM proformas WHERE id = $1', [req.params.id]);
     if (!existing.rows.length) return res.status(404).json({ error: 'پیشفاکتور یافت نشد' });
-    if (!['draft','cancelled'].includes(existing.rows[0].status)) {
+    const isSuperAdmin = req.session?.user?.role === 'سوپر ادمین';
+    if (!isSuperAdmin && !['draft','cancelled'].includes(existing.rows[0].status)) {
       return res.status(400).json({ error: 'فقط پیش‌نویس یا لغو شده را می‌توان حذف کرد' });
     }
     await query('DELETE FROM proformas WHERE id = $1', [req.params.id]);

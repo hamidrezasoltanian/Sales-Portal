@@ -250,9 +250,17 @@ function _pfSetFilter(f) {
 function _pfActions(pf) {
   var btns = [];
   var isManager = _isManager();
+  var isSuperAdmin = (typeof currentUser !== 'undefined') &&
+    (function(){
+      var u = (typeof USERS !== 'undefined' && USERS) ? USERS[currentUser] : null;
+      if (!u) return false;
+      var members = (typeof DB !== 'undefined' && DB.settings && DB.settings.members) ? DB.settings.members : [];
+      var m = members.find(function(mb){ return mb.id === currentUser; });
+      return m && m.role === 'سوپر ادمین';
+    })();
 
   // View / Edit — label changes based on status and permission
-  var canEdit = (pf.status === 'draft') && (isManager || pf.createdBy === currentUser);
+  var canEdit = (pf.status === 'draft' && (isManager || pf.createdBy === currentUser)) || isSuperAdmin;
   var btnLbl  = canEdit ? '✏️ ویرایش' : '👁️ مشاهده';
   var btnTitle = canEdit ? 'ویرایش پیش‌فاکتور' : 'مشاهده پیش‌فاکتور';
   btns.push('<button onclick="pfOpenEdit(\'' + pf.id + '\')" style="padding:4px 10px;font-size:11px;font-weight:600;border:1px solid #cbd5e1;border-radius:6px;background:white;cursor:pointer;font-family:inherit" title="' + btnTitle + '">' + btnLbl + '</button>');
@@ -291,8 +299,8 @@ function _pfActions(pf) {
     btns.push('<button onclick="pfAction(\'' + pf.id + '\',\'reopen\')" style="padding:3px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px;background:white;cursor:pointer">بازگشایی</button>');
   }
 
-  // Delete (draft or cancelled only)
-  if (['draft','cancelled'].includes(pf.status) && (isManager || pf.createdBy === currentUser)) {
+  // Delete: super admin → any status | others → draft/cancelled only
+  if (isSuperAdmin || (['draft','cancelled'].includes(pf.status) && (isManager || pf.createdBy === currentUser))) {
     btns.push('<button onclick="pfDelete(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #fecaca;border-radius:5px;background:#fef2f2;color:#b91c1c;cursor:pointer" title="حذف">🗑️</button>');
   }
 
