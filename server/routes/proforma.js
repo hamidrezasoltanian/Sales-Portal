@@ -148,8 +148,6 @@ router.post('/', requireAuth, async (req, res) => {
 
     const seq = String(nextSeq).padStart(4, '0');
     const no = `PF-${year}-${seq}`;
-    
-    console.log('[proforma POST] Generated proforma number:', no, 'nextSeq:', nextSeq);
 
     // Item-level discount calculation
     const itemsFull = d.items.map(function(i) {
