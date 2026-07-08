@@ -750,7 +750,7 @@ function _pfShowModal(pf) { try {
   document.getElementById('pfModalFooter').innerHTML =
     (readOnly ? '<button onclick="pfPrint(\'' + (pf.id) + '\')" style="padding:8px 16px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">🖨️ چاپ پیش‌فاکتور</button>' : '') +
     (pf && pf.versions && pf.versions.length ? '<button onclick="pfShowVersions(\'' + pf.id + '\')" style="padding:8px 12px;background:#f0f9ff;color:#0284c7;border:1px solid #bae6fd;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">🕐 تاریخچه (' + pf.versions.length + ')</button>' : '') +
-    '<button onclick="document.getElementById(\'pfModal\').style.display=\'none\'" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">بستن</button>' +
+    '<button onclick="var _el=document.getElementById(\'pfModal\');if(_el)_el.style.display=\'none\';" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">بستن</button>' +
     (!readOnly ? '<button onclick="pfSave()" style="padding:8px 18px;background:var(--brand);color:white;border:none;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">💾 ذخیره</button>' : '');
 
 
@@ -1025,7 +1025,7 @@ async function pfSave() {
     });
     var data = await r.json();
     if (!r.ok) { showToast('❌ ' + (data.error || 'خطا')); return; }
-    document.getElementById('pfModal').style.display = 'none';
+    var _pfM=document.getElementById('pfModal'); if(_pfM) _pfM.style.display='none';
     showToast('✅ پیشفاکتور ' + (_pfEditId ? 'ویرایش' : 'ایجاد') + ' شد — شماره: ' + data.no);
     await pfLoad();
     var el = document.getElementById('proformaPanel');
@@ -1077,7 +1077,7 @@ function pfPrint(id) {
   var html = '<div style="display:flex;flex-direction:column;gap:10px;padding:8px 0">' + cardsHtml + '</div>';
 
   openModal('pfPrintSelectModal', '🖨️ انتخاب قالب چاپ پیش‌فاکتور', html,
-    '<button onclick="document.getElementById(\'pfPrintSelectModal\').style.display=\'none\'" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">انصراف</button>',
+    '<button onclick="var _el=document.getElementById(\'pfPrintSelectModal\');if(_el)_el.style.display=\'none\';" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">انصراف</button>',
     {lg:false}
   );
 }
@@ -1334,7 +1334,8 @@ function _pfApplyTplHtml(idx) {
 
 function _pfMgSave() {
   _pfSaveTemplates(_pfMgTpls);
-  document.getElementById('pfTplMgModal').style.display = 'none';
+  var _mgModal = document.getElementById('pfTplMgModal');
+  if (_mgModal) _mgModal.style.display = 'none';
   showToast('✅ قالب‌های چاپ ذخیره شدند');
 }
 
@@ -1419,7 +1420,7 @@ async function pfShowVersions(id) {
     }).join('') + '</div>';
 
   openModal('pfVersionsModal', '🕐 تاریخچه نسخه‌ها — ' + esc(pf.no), html,
-    '<button onclick="document.getElementById(\'pfVersionsModal\').style.display=\'none\'" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">بستن</button>',
+    '<button onclick="var _el=document.getElementById(\'pfVersionsModal\');if(_el)_el.style.display=\'none\';" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">بستن</button>',
     {lg:false}
   );
 }
@@ -1447,7 +1448,7 @@ function pfScheduleFollowup(pfId) {
     '</div>';
 
   openModal('pfWpModal', '📅 ثبت پیگیری در برنامه هفته', html,
-    '<button onclick="document.getElementById(\'pfWpModal\').style.display=\'none\'" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;margin-left:8px">انصراف</button>' +
+    '<button onclick="var _el=document.getElementById(\'pfWpModal\');if(_el)_el.style.display=\'none\';" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;margin-left:8px">انصراف</button>' +
     '<button onclick="_pfDoSchedule(\'' + rtype + '\',\'' + esc(rid) + '\',\'' + esc(cname) + '\')" style="padding:8px 18px;background:var(--brand);color:white;border:none;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">📅 ثبت</button>',
     {lg:false}
   );
@@ -1471,7 +1472,7 @@ function _pfDoSchedule(rtype, rid, cname) {
     done: false, doneDate: null, addedBy: currentUser, centerName: cname
   };
   saveDB();
-  document.getElementById('pfWpModal').style.display = 'none';
+  var _pfWM=document.getElementById('pfWpModal'); if(_pfWM) _pfWM.style.display='none';
   showToast('✅ پیگیری در برنامه هفته ثبت شد — ' + scheduledDate);
 }
 
@@ -1481,7 +1482,7 @@ function _pfModalHTML() {
     '<div style="background:white;border-radius:16px;width:min(98vw,1200px);min-height:80vh;box-shadow:0 24px 64px rgba(0,0,0,.25);display:flex;flex-direction:column">' +
       '<div style="padding:18px 24px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:white;z-index:1;border-radius:16px 16px 0 0">' +
         '<span style="font-size:16px;font-weight:800">📄 پیشفاکتور</span>' +
-        '<button onclick="document.getElementById(\'pfModal\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:#94a3b8;padding:2px 8px;border-radius:6px;line-height:1">✕</button>' +
+        '<button onclick="var _el=document.getElementById(\'pfModal\');if(_el)_el.style.display=\'none\';" style="background:none;border:none;font-size:20px;cursor:pointer;color:#94a3b8;padding:2px 8px;border-radius:6px;line-height:1">✕</button>' +
       '</div>' +
       '<div id="pfModalBody" style="padding:24px;flex:1;overflow-y:auto"></div>' +
       '<div id="pfModalFooter" style="padding:14px 24px;border-top:1px solid #e2e8f0;display:flex;gap:8px;justify-content:flex-end;background:#f8fafc;border-radius:0 0 16px 16px;position:sticky;bottom:0"></div>' +
