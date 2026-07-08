@@ -771,9 +771,30 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
     <!-- PRODUCTS -->
     <div class="page" id="p-prods">
       <div class="ph"><div><div class="pt">مدیریت کالاها</div></div>
-        <div class="pa"><button class="btn btn-primary" onclick="openProdModal()">➕ کالای جدید</button></div>
+        <div class="pa">
+          <label class="btn btn-ghost btn-sm" style="cursor:pointer">📥 ورود از اکسل<input type="file" accept=".xlsx,.xls,.csv" onchange="importProdExcel(event)" style="display:none"/></label>
+          <button class="btn btn-primary" onclick="openProdModal()">➕ کالای جدید</button>
+        </div>
       </div>
-      <div class="search-row"><input class="si" id="prodSearch" placeholder="جستجو..." oninput="renderProds()"></div>
+      <div style="padding:12px 16px;background:white;border-bottom:1px solid #e2e8f0;display:flex;flex-direction:column;gap:10px">
+        <!-- Search + Status -->
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <div style="position:relative;flex:1;min-width:200px">
+            <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);color:#94a3b8;font-size:14px">🔍</span>
+            <input class="si" id="prodSearch" placeholder="جستجوی نام، کد کاتالوگ، IRC، برند..." oninput="renderProds()" style="padding-right:32px;width:100%">
+          </div>
+          <div style="display:flex;gap:4px">
+            <button id="psFlt_all" onclick="setProdStatusFilter('all',this)" style="padding:5px 12px;border-radius:20px;border:1px solid var(--brand);background:var(--brand);color:white;font-size:12px;font-family:inherit;cursor:pointer">همه</button>
+            <button id="psFlt_active" onclick="setProdStatusFilter('active',this)" style="padding:5px 12px;border-radius:20px;border:1px solid #e2e8f0;background:white;color:#64748b;font-size:12px;font-family:inherit;cursor:pointer">فعال</button>
+            <button id="psFlt_inactive" onclick="setProdStatusFilter('inactive',this)" style="padding:5px 12px;border-radius:20px;border:1px solid #e2e8f0;background:white;color:#64748b;font-size:12px;font-family:inherit;cursor:pointer">غیرفعال</button>
+          </div>
+        </div>
+        <!-- Category chips -->
+        <div id="prodCatFilters" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <span style="font-size:11px;color:#94a3b8;font-weight:600">دسته:</span>
+          <button id="pcFlt_all" onclick="setProdCatFilter('',this)" style="padding:4px 10px;border-radius:16px;border:1px solid var(--brand);background:var(--brand);color:white;font-size:11px;font-family:inherit;cursor:pointer">همه</button>
+        </div>
+      </div>
       <div class="card"><div class="tw"><table><thead><tr><th>اسم</th><th>اسم کامل</th><th>برند</th><th>سایز</th><th>کد کاتالوگ</th><th>کد IRC</th><th>واحد</th><th>دسته</th><th>حداقل موجودی</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody id="prodsBody"></tbody></table></div></div>
     </div>
 
@@ -978,6 +999,7 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
         </div>
         <div class="fg"><label class="fl">دسته‌بندی</label><input class="fi" id="mProdCatg" placeholder="بیوپسی، کاتتر..."/></div>
         <div class="fg"><label class="fl">حداقل موجودی (reorder)</label><input class="fi" type="number" id="mProdReo" placeholder="10"/></div>
+        <div class="fg"><label class="fl">💰 قیمت فروش پیشفاکتور (ریال)</label><input class="fi" type="number" id="mProdSalePrice" placeholder="0" style="border-color:#6366f1"/></div>
         <div class="fg"><label class="fl">یادداشت</label><input class="fi" id="mProdNote" placeholder=""/></div>
       </div>
     </div>
@@ -1104,6 +1126,30 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
     <div class="mf">
       <button class="btn btn-success" onclick="confirmCPImport()">✅ Import موارد انتخابی</button>
       <button class="btn btn-ghost" onclick="closeModal('mCPImport')">انصراف</button>
+    </div>
+  </div>
+</div>
+
+<!-- Product Import Modal -->
+<div class="mo" id="mProdImport">
+  <div class="md wide">
+    <div class="mh"><span class="mt" id="mProdImportTitle">پیش‌نمایش Import کالا</span><button class="mx" onclick="closeModal('mProdImport')">✕</button></div>
+    <div class="mb">
+      <div id="mProdImportStats" style="margin-bottom:12px"></div>
+      <div class="card" style="padding:10px;margin-bottom:12px;font-size:12px;background:var(--surface2)">
+        <strong>ستون‌های شناسایی‌شده:</strong> نام کالا | کد کالا (کاتالوگ) | <strong>دسته‌بندی</strong> | برند | IRC | واحد | تعداد در بسته | نام کامل فنی
+        <span style="margin-right:12px;color:var(--brand)">📋 موارد تکراری با حالت <strong>مرج</strong> مشخص می‌شوند — با تیک زدن، اطلاعات جدید روی رکورد موجود اعمال می‌شود</span>
+      </div>
+      <div style="max-height:400px;overflow-y:auto">
+        <div class="tw"><table id="mProdImportTable">
+          <thead><tr><th><input type="checkbox" id="prodImportAll" onchange="toggleAllProdImport(this)"/></th><th>وضعیت</th><th>نام</th><th>دسته‌بندی</th><th>کد فنی</th><th>برند</th><th>IRC</th><th>واحد</th><th>بسته</th></tr></thead>
+          <tbody id="mProdImportBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+    <div class="mf">
+      <button class="btn btn-success" onclick="confirmProdImport()">✅ Import موارد انتخابی</button>
+      <button class="btn btn-ghost" onclick="closeModal('mProdImport')">انصراف</button>
     </div>
   </div>
 </div>
@@ -2436,9 +2482,60 @@ function renderAlerts(){
 // ══════════════════════════════════════════
 // PRODUCTS CRUD
 // ══════════════════════════════════════════
+// ── Product filter state ─────────────────────────────────────────────────
+var _prodCatFilter = '';
+var _prodStatusFilter = 'all';
+
+function setProdCatFilter(cat, btn) {
+  _prodCatFilter = cat;
+  document.querySelectorAll('#prodCatFilters button').forEach(b => {
+    b.style.background = 'white'; b.style.color = '#64748b'; b.style.borderColor = '#e2e8f0';
+  });
+  btn.style.background = 'var(--brand)'; btn.style.color = 'white'; btn.style.borderColor = 'var(--brand)';
+  renderProds();
+}
+
+function setProdStatusFilter(status, btn) {
+  _prodStatusFilter = status;
+  ['all','active','inactive'].forEach(s => {
+    const b = document.getElementById('psFlt_' + s);
+    if (!b) return;
+    b.style.background = 'white'; b.style.color = '#64748b'; b.style.borderColor = '#e2e8f0';
+  });
+  btn.style.background = 'var(--brand)'; btn.style.color = 'white'; btn.style.borderColor = 'var(--brand)';
+  renderProds();
+}
+
+function _buildProdCatChips() {
+  const container = document.getElementById('prodCatFilters');
+  if (!container) return;
+  // Collect unique non-empty categories
+  const cats = [...new Set(S.products.map(p => (p.category||'').trim()).filter(Boolean))].sort();
+  const allBtn = `<button id="pcFlt_all" onclick="setProdCatFilter('',this)" style="padding:4px 10px;border-radius:16px;border:1px solid ${_prodCatFilter===''?'var(--brand)':'#e2e8f0'};background:${_prodCatFilter===''?'var(--brand)':'white'};color:${_prodCatFilter===''?'white':'#64748b'};font-size:11px;font-family:inherit;cursor:pointer">همه (${S.products.length})</button>`;
+  const chipBtns = cats.map(cat => {
+    const cnt = S.products.filter(p => (p.category||'').trim() === cat).length;
+    const active = _prodCatFilter === cat;
+    return `<button onclick="setProdCatFilter('${cat.replace(/'/g,"&#39;")}',(this))" style="padding:4px 10px;border-radius:16px;border:1px solid ${active?'var(--brand)':'#e2e8f0'};background:${active?'var(--brand)':'white'};color:${active?'white':'#475569'};font-size:11px;font-family:inherit;cursor:pointer">${cat} <span style="opacity:.7">(${cnt})</span></button>`;
+  }).join('');
+  container.innerHTML = `<span style="font-size:11px;color:#94a3b8;font-weight:600">دسته:</span>${allBtn}${chipBtns}`;
+}
+
 function renderProds(){
-  const s=(document.getElementById('prodSearch')?.value||'').toLowerCase();
-  let rows=S.products.filter(p=>!s||p.name.includes(s)||p.catalogCode.toLowerCase().includes(s)||p.ircCode.includes(s));
+  _buildProdCatChips();
+  const s=(document.getElementById('prodSearch')?.value||'').trim().toLowerCase();
+  let rows=S.products.filter(p=>{
+    // Status filter
+    if(_prodStatusFilter==='active'   && !p.active) return false;
+    if(_prodStatusFilter==='inactive' &&  p.active) return false;
+    // Category filter
+    if(_prodCatFilter && (p.category||'').trim() !== _prodCatFilter) return false;
+    // Text search
+    if(s){
+      const hay = [(p.name||''),(p.fullName||''),(p.brand||''),(p.catalogCode||''),(p.ircCode||''),(p.category||'')].join(' ').toLowerCase();
+      if(!hay.includes(s)) return false;
+    }
+    return true;
+  });
   document.getElementById('prodsBody').innerHTML=rows.length?rows.map(p=>`<tr>
     <td><strong>${p.fullName||p.name}</strong></td>
     <td style="max-width:200px;white-space:normal;font-size:12px">${p.fullName}</td>
@@ -2447,7 +2544,7 @@ function renderProds(){
     <td><code>${p.catalogCode}</code></td>
     <td><code>${p.ircCode}</code></td>
     <td>${p.unit}</td>
-    <td>${p.category}</td>
+    <td>${p.category?`<span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;background:#f0f4ff;color:#6366f1;font-weight:600">${p.category}</span>`:''}</td>
     <td>${p.reorderPoint}</td>
     <td><span class="dot ${p.active?'dot-green':'dot-red'}"></span>${p.active?'فعال':'غیرفعال'}</td>
     <td style="white-space:nowrap">
@@ -2465,6 +2562,7 @@ function openProdModal(id=null){
   const f=['Name','Full','Brand','Size','Cat','Irc','Unit','Catg','Reo','Note'];
   const v=p?[p.name,p.fullName,p.brand,p.size,p.catalogCode,p.ircCode,p.unit,p.category,p.reorderPoint,p.note]:Array(10).fill('');
   f.forEach((k,i)=>{const el=document.getElementById('mProd'+k);if(el)el.value=v[i]||'';});
+  const spEl=document.getElementById('mProdSalePrice');if(spEl)spEl.value=p?(p.salePrice||0):0;
   openModal('mProd');
 }
 function saveProd(){
@@ -2472,7 +2570,7 @@ function saveProd(){
   const n=document.getElementById('mProdName').value.trim();
   const fn=document.getElementById('mProdFull').value.trim();
   if(!n||!fn){toast('اسم کوتاه و اسم کامل الزامی است','e');return;}
-  const obj={id:id||uid(),name:n,fullName:fn,brand:document.getElementById('mProdBrand').value.trim(),size:document.getElementById('mProdSize').value.trim(),catalogCode:document.getElementById('mProdCat').value.trim(),ircCode:document.getElementById('mProdIrc').value.trim(),unit:document.getElementById('mProdUnit').value,category:document.getElementById('mProdCatg').value.trim(),reorderPoint:parseInt(document.getElementById('mProdReo').value)||10,note:document.getElementById('mProdNote').value.trim(),active:true};
+  const obj={id:id||uid(),name:n,fullName:fn,brand:document.getElementById('mProdBrand').value.trim(),size:document.getElementById('mProdSize').value.trim(),catalogCode:document.getElementById('mProdCat').value.trim(),ircCode:document.getElementById('mProdIrc').value.trim(),unit:document.getElementById('mProdUnit').value,category:document.getElementById('mProdCatg').value.trim(),reorderPoint:parseInt(document.getElementById('mProdReo').value)||10,salePrice:parseInt(document.getElementById('mProdSalePrice')?.value)||0,note:document.getElementById('mProdNote').value.trim(),active:true};
   if(id) Object.assign(S.products.find(x=>x.id===id),obj);
   else S.products.push(obj);
   const _pMethod=id?'PUT':'POST';
@@ -5253,6 +5351,194 @@ function confirmCPImport(){
   closeModal('mCPImport');
   renderCp();
   toast(`✅ ${added} طرف‌حساب اضافه شد | ${skipped} تکراری رد شد`);
+}
+
+// ══════════════════════════════════════════
+// PRODUCT EXCEL IMPORT (SheetJS)
+// ══════════════════════════════════════════
+let _importProdRows=[];
+function importProdExcel(event){
+  const file=event.target.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      if(typeof XLSX!=='undefined'){
+        const wb=XLSX.read(e.target.result,{type:'binary'});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const data=XLSX.utils.sheet_to_json(ws,{header:1});
+        processProdImportData(data);
+      } else {
+        const script=document.createElement('script');
+        script.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+        script.onload=()=>{
+          const wb=XLSX.read(e.target.result,{type:'binary'});
+          const ws=wb.Sheets[wb.SheetNames[0]];
+          const data=XLSX.utils.sheet_to_json(ws,{header:1});
+          processProdImportData(data);
+        };
+        script.onerror=()=>toast('خطا در بارگذاری کتابخانه Excel','e');
+        document.head.appendChild(script);
+      }
+    }catch(err){toast('خطا در خواندن فایل: '+err.message,'e');}
+  };
+  reader.readAsBinaryString(file);
+  event.target.value=''; // reset input
+}
+
+function processProdImportData(data){
+  if(!data||data.length<2){toast('فایل خالی یا نامعتبر','e');return;}
+  const headers=data[0].map(h=>String(h||'').trim().toLowerCase());
+  
+  // Detect columns (Persian / English)
+  // nameCol: prioritize exact «نام کالا» first to avoid grabbing «نام کامل»
+  const nameCol = (()=>{
+    let i = headers.findIndex(h=>h==='نام کالا'||h==='name');
+    if(i===-1) i = headers.findIndex(h=>h.includes('نام کالا'));
+    if(i===-1) i = headers.findIndex(h=>h.includes('نام')&&!h.includes('کامل')&&!h.includes('فنی'));
+    return i;
+  })();
+  const codeCol  = headers.findIndex(h=>h.includes('کد کالا')||h.includes('کد کاتالوگ')||h.includes('کاتالوگ')||h==='code'||h==='catalogcode');
+  const brandCol = headers.findIndex(h=>h.includes('برند')||h==='brand');
+  const ircCol   = headers.findIndex(h=>h.includes('irc')||h.includes('ای ار سی'));
+  const unitCol  = headers.findIndex(h=>h.includes('واحد')||h==='unit');
+  const sizeCol  = headers.findIndex(h=>h.includes('تعداد در بسته')||h.includes('بسته')||h==='size');
+  const fullCol  = headers.findIndex(h=>h.toLowerCase()==='stuffnamewithtechnicalcode'||h.includes('نام کامل')||h.includes('نام فنی'));
+  // «دسته کالایی» / «دسته‌بندی» / «دسته محصول» / «دسته» / «category»
+  const catCol   = headers.findIndex(h=>h.includes('دسته')||h==='category');
+  
+  _importProdRows=[];
+  for(let i=1;i<data.length;i++){
+    const row=data[i];
+    if(!row) continue;
+    
+    const rawName = row[nameCol>-1?nameCol:0];
+    if(!rawName) continue;
+    const name=String(rawName).trim();
+    if(!name) continue;
+    
+    const catalogCode=codeCol>-1?String(row[codeCol]||'').trim():'';
+    const brand=brandCol>-1?String(row[brandCol]||'').trim():'';
+    const ircCode=ircCol>-1?String(row[ircCol]||'').trim():'';
+    const unit=unitCol>-1&&row[unitCol]?String(row[unitCol]).trim():'عدد';
+    const size=sizeCol>-1?String(row[sizeCol]||'').trim():'';
+    const category=catCol>-1?String(row[catCol]||'').trim():'';
+    const fullName=fullCol>-1?String(row[fullCol]||'').trim():(catalogCode?(name+' '+catalogCode):name);
+    
+    _importProdRows.push({name,fullName,brand,catalogCode,ircCode,unit,size,category,selected:true,mergeId:null});
+  }
+  
+  // Match existing: by catalogCode → ircCode → name (in priority order)
+  _importProdRows.forEach(r=>{
+    let existProd = null;
+    if(r.catalogCode) existProd=S.products.find(p=>p.catalogCode&&p.catalogCode.trim().toLowerCase()===r.catalogCode.toLowerCase());
+    if(!existProd&&r.ircCode) existProd=S.products.find(p=>p.ircCode&&p.ircCode.trim().toLowerCase()===r.ircCode.toLowerCase());
+    if(!existProd) existProd=S.products.find(p=>p.name&&p.name.trim().toLowerCase()===r.name.toLowerCase());
+    
+    if(existProd){
+      r.duplicate=true;
+      r.mergeId=existProd.id;  // store ID for PUT
+      r.selected=true;          // merge selected by default
+      r.mergeMode=true;
+    }
+  });
+  
+  const newRows=_importProdRows.filter(r=>!r.duplicate);
+  const dupRows=_importProdRows.filter(r=>r.duplicate);
+  
+  document.getElementById('mProdImportTitle').textContent=`Import کالا — ${_importProdRows.length} رکورد (${newRows.length} جدید، ${dupRows.length} مرج)`;
+  document.getElementById('mProdImportStats').innerHTML=`
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <span class="badge bg">${newRows.length} جدید</span>
+      <span class="badge bb">${dupRows.length} مرج (اطلاعات تکمیل می‌شود)</span>
+      <span class="badge bgr">${_importProdRows.length} کل</span>
+    </div>`;
+  
+  document.getElementById('mProdImportBody').innerHTML=_importProdRows.slice(0,500).map((r,i)=>`<tr style="background:${r.mergeMode?'#fffbeb':'white'}">
+    <td><input type="checkbox" class="prod-import-chk" data-idx="${i}" ${r.selected?'checked':''} onchange="_importProdRows[${i}].selected=this.checked"/></td>
+    <td style="font-size:11px;white-space:nowrap">${r.mergeMode?'<span class="badge bb" style="font-size:9px;padding:2px 5px">🔀 مرج</span>':'<span class="badge bg" style="font-size:9px;padding:2px 5px">✨ جدید</span>'}</td>
+    <td style="font-size:12px"><strong>${r.name}</strong></td>
+    <td style="font-size:11px;color:${r.category?'#6366f1':'#94a3b8'}">${r.category||'—'}</td>
+    <td style="font-size:11px;font-family:monospace">${r.catalogCode||'—'}</td>
+    <td style="font-size:11px">${r.brand||'—'}</td>
+    <td style="font-size:11px;font-family:monospace">${r.ircCode||'—'}</td>
+    <td style="font-size:11px">${r.unit||'—'}</td>
+    <td style="font-size:11px">${r.size||'—'}</td>
+  </tr>`).join('');
+  
+  document.getElementById('prodImportAll').checked=true;
+  openModal('mProdImport');
+}
+
+function toggleAllProdImport(chk){
+  _importProdRows.forEach(r=>{ r.selected=chk.checked; });
+  document.querySelectorAll('.prod-import-chk').forEach(el=>el.checked=chk.checked);
+}
+
+async function confirmProdImport(){
+  const toImport=_importProdRows.filter(r=>r.selected);
+  if(!toImport.length){toast('موردی انتخاب نشده','w');return;}
+  
+  let added=0, merged=0, failed=0;
+  
+  const btn = document.querySelector('#mProdImport .btn-success');
+  if(btn) { btn.disabled=true; btn.textContent='در حال ثبت...'; }
+  
+  for(const r of toImport){
+    // Only send fields that have actual values (for merge: don't overwrite with empty)
+    const obj={};
+    if(r.name)         obj.name        = r.name;
+    if(r.fullName)     obj.fullName    = r.fullName;
+    if(r.brand)        obj.brand       = r.brand;
+    if(r.size)         obj.size        = r.size;
+    if(r.catalogCode)  obj.catalogCode = r.catalogCode;
+    if(r.ircCode)      obj.ircCode     = r.ircCode;
+    if(r.unit)         obj.unit        = r.unit;
+    if(r.category)     obj.category    = r.category;
+    
+    try {
+      let res, savedProd;
+      if(r.mergeMode && r.mergeId){
+        // MERGE: PUT to existing product — only fills in missing/new data
+        res = await fetch('/api/wms/products/'+r.mergeId, {
+          method: 'PUT',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(obj)
+        });
+        if(res.ok){
+          savedProd = await res.json();
+          // Update local S.products
+          const idx = S.products.findIndex(p=>p.id===r.mergeId);
+          if(idx!==-1) S.products[idx]=savedProd;
+          merged++;
+        } else { failed++; }
+      } else {
+        // NEW: POST
+        obj.reorderPoint = 10;
+        obj.note = 'وارد شده از فایل اکسل';
+        obj.active = true;
+        res = await fetch('/api/wms/products', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(obj)
+        });
+        if(res.ok){
+          savedProd = await res.json();
+          S.products.push(savedProd);
+          added++;
+        } else { failed++; }
+      }
+    } catch(e) { failed++; }
+  }
+  
+  if(btn) { btn.disabled=false; btn.textContent='✅ Import موارد انتخابی'; }
+  closeModal('mProdImport');
+  renderProds();
+  
+  const parts=[];
+  if(added)   parts.push(`✅ ${added} کالای جدید ثبت شد`);
+  if(merged)  parts.push(`🔀 ${merged} کالا مرج شد`);
+  if(failed)  parts.push(`❌ خطا در ${failed} کالا`);
+  toast(parts.join(' | '), failed?'w':'s');
 }
 
 // ══════════════════════════════════════════

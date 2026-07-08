@@ -5200,7 +5200,7 @@ document.addEventListener('click', function(ev) {
   var popup = document.getElementById('centerContactPopup');
   if (popup && popup.classList.contains('show') && !popup.contains(ev.target)) hideContactPopup();
 });
-function openCenterAudit(centerKey, centerName) {
+async function openCenterAudit(centerKey, centerName) {
   var _ckParts=centerKey.split('_');var rtype=_ckParts[0], rid=_ckParts.slice(1).join('_');
   var events=[];
   // changeLog
@@ -5238,6 +5238,33 @@ function openCenterAudit(centerKey, centerName) {
       title:(t.done?'وظیفه انجام شد':'وظیفه')+': '+String(t.title||'').substring(0,30),
       detail:t.note||'',by:t.owner||'',at:null,dateStr:t.dueDate||''});
   });
+
+  // proformas — fetch from API and add to timeline
+  try {
+    var _pfResp = await fetch('/api/proforma?center=' + encodeURIComponent(centerKey));
+    if (_pfResp.ok) {
+      var _pfData = await _pfResp.json();
+      (_pfData || []).forEach(function(pf) {
+        var d = new Date(pf.createdAt || pf.updatedAt || Date.now());
+        var statusLabel = {draft:'پیش‌نویس',sent:'ارسال شده',approved:'تأیید شده',rejected:'رد شده',cancelled:'لغو شده'}[pf.status] || pf.status;
+        var total = Number(pf.total || 0).toLocaleString('fa-IR');
+        var itemCount = (pf.items || []).length;
+        var commBadge = pf.hasCommission ? ' | 💸 پورسانت: ' + Number(pf.commissionAmt||0).toLocaleString('fa-IR') + ' ﷼' : '';
+        events.push({
+          ts: d.getTime(),
+          type: 'proforma',
+          icon: '📋',
+          color: '#6366f1',
+          title: 'پیشفاکتور ' + esc(pf.no) + ' — ' + statusLabel,
+          detail: 'مبلغ: ' + total + ' ﷼ | ' + itemCount + ' ردیف' + commBadge,
+          by: pf.createdBy || '',
+          at: d,
+          dateStr: pf.jalaliDate || '',
+          pfId: pf.id,
+        });
+      });
+    }
+  } catch(_pfErr) {}
 
   events.sort(function(a,b){return b.ts-a.ts;});
 

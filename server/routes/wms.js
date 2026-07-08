@@ -16,7 +16,8 @@ router.use((req, res, next) => {
 function rowToProduct(r) {
   return { id:r.id, name:r.name, fullName:r.full_name, brand:r.brand, size:r.size,
            catalogCode:r.catalog_code, ircCode:r.irc_code, unit:r.unit,
-           category:r.category, reorderPoint:r.reorder_point, note:r.note, active:r.active };
+           category:r.category, reorderPoint:r.reorder_point,
+           salePrice:Number(r.sale_price||0), note:r.note, active:r.active };
 }
 function rowToWarehouse(r) {
   return { id:r.id, name:r.name, location:r.location, managerId:r.manager_id, note:r.note, active:r.active };
@@ -25,6 +26,86 @@ function rowToCounterparty(r) {
   return { id:r.id, name:r.name, type:r.type, phone:r.phone, address:r.address,
            taxCode:r.tax_code, email:r.email, note:r.note, active:r.active };
 }
+
+async function loadAllCounterparties() {
+  const cpRes = await query("SELECT * FROM wms_counterparties WHERE active = true");
+  const suppliers = cpRes.rows.map(rowToCounterparty);
+
+  const cmRes = await query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS', 'PC_RAW')");
+  let tehranCenters = [];
+  let provinceCentersMap = {};
+  cmRes.rows.forEach(r => {
+    if (r.key === 'CENTERS') tehranCenters = r.data || [];
+    else if (r.key === 'PC_RAW') provinceCentersMap = r.data || {};
+  });
+
+  const extraRes = await query("SELECT id, name, province_id, type, owner FROM center_extras");
+
+  const counterparties = [...suppliers];
+  const seenIds = new Set(counterparties.map(c => c.id));
+
+  tehranCenters.forEach(c => {
+    const id = `center_${c.id}`;
+    if (!seenIds.has(id)) {
+      seenIds.add(id);
+      counterparties.push({
+        id,
+        name: c.name,
+        type: 'customer',
+        phone: c.phone || '',
+        address: c.address || '',
+        taxCode: '',
+        email: '',
+        note: '',
+        active: true
+      });
+    }
+  });
+
+  Object.keys(provinceCentersMap).forEach(provId => {
+    const list = provinceCentersMap[provId] || [];
+    list.forEach(c => {
+      const id = `pc_${c.id}`;
+      if (!seenIds.has(id)) {
+        seenIds.add(id);
+        counterparties.push({
+          id,
+          name: c.name,
+          type: 'customer',
+          phone: c.phone || '',
+          address: c.address || '',
+          taxCode: '',
+          email: '',
+          note: '',
+          active: true
+        });
+      }
+    });
+  });
+
+  extraRes.rows.forEach(c => {
+    const rtype = (c.province_id === 'tehran' || c.province_id === 'تهران') ? 'center' : 'pc';
+    const id = `${rtype}_${c.id}`;
+    if (!seenIds.has(id)) {
+      seenIds.add(id);
+      counterparties.push({
+        id,
+        name: c.name,
+        type: 'customer',
+        phone: '',
+        address: c.province_id || '',
+        taxCode: '',
+        email: '',
+        note: `مالک: ${c.owner || ''}`,
+        active: true
+      });
+    }
+  });
+
+  counterparties.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'fa'));
+  return counterparties;
+}
+
 function rowToLot(r) {
   return { id:r.id, productId:r.product_id, warehouseId:r.warehouse_id, lotNo:r.lot_no,
            qty:Number(r.qty), expiry:r.expiry?r.expiry.toISOString().split('T')[0]:null,
@@ -89,16 +170,16 @@ async function _nextTxnNo(client, type) {
 
 router.get('/', requireAuth, async (req, res) => {
   try {
-    const [products, warehouses, counterparties, lots, transactions, purchaseOrders, recalls] =
+    const [products, warehouses, lots, transactions, purchaseOrders, recalls] =
       await Promise.all([
         query('SELECT * FROM wms_products WHERE active = true ORDER BY name'),
         query('SELECT * FROM wms_warehouses WHERE active = true ORDER BY name'),
-        query('SELECT * FROM wms_counterparties WHERE active = true ORDER BY name'),
         query('SELECT * FROM wms_lots WHERE qty > 0 ORDER BY created_at DESC LIMIT 2000'),
         query('SELECT * FROM wms_transactions ORDER BY txn_date DESC LIMIT 500'),
         query('SELECT * FROM wms_purchase_orders ORDER BY created_at DESC LIMIT 500'),
         query('SELECT * FROM wms_recalls WHERE status != $1 ORDER BY created_at DESC LIMIT 200', ['resolved']),
       ]);
+    const counterparties = await loadAllCounterparties();
 
     const settingsRows = await query('SELECT key, value FROM wms_settings');
     const settings = {};
@@ -117,7 +198,7 @@ router.get('/', requireAuth, async (req, res) => {
 
       products: products.rows.map(rowToProduct),
       warehouses: warehouses.rows.map(rowToWarehouse),
-      counterparties: counterparties.rows.map(rowToCounterparty),
+      counterparties: counterparties,
       lots:         lots.rows.map(rowToLot),
       transactions: transactions.rows.map(rowToTransaction),
       purchaseOrders: purchaseOrders.rows.map(rowToPO),
@@ -163,6 +244,8 @@ router.put('/', requireAuth, async (req, res) => {
         );
       }
       for (const c of (S.counterparties || [])) {
+        // Skip CRM centers - they are read-only and come from centers_master/center_extras
+        if (String(c.id).startsWith('center_') || String(c.id).startsWith('pc_')) continue;
         const t = ['supplier','customer','both'].includes(c.type) ? c.type : 'both';
         await client.query(
           `INSERT INTO wms_counterparties (id,name,type,phone,address,tax_code,email,note,active)
@@ -248,14 +331,24 @@ router.get('/inventory', requireAuth, async (req, res) => {
     const rows = await query(`
       SELECT
         p.id, p.name, p.full_name, p.unit, p.reorder_point,
+        p.category, p.catalog_code, p.brand, p.size,
         COALESCE(SUM(l.qty), 0)::int AS total_qty,
         COUNT(l.id)::int AS lot_count,
-        MIN(l.expiry) AS nearest_expiry
+        MIN(l.expiry) AS nearest_expiry,
+        COALESCE(
+          NULLIF(p.sale_price, 0),
+          (
+            SELECT t.sale_price FROM wms_transactions t
+            WHERE t.product_id = p.id AND t.type = 'exit' AND t.sale_price > 0
+            ORDER BY t.txn_date DESC LIMIT 1
+          ),
+          0
+        ) AS sale_price
       FROM wms_products p
       LEFT JOIN wms_lots l ON l.product_id = p.id AND l.qty > 0
       WHERE p.active = true
-      GROUP BY p.id, p.name, p.full_name, p.unit, p.reorder_point
-      ORDER BY p.name
+      GROUP BY p.id, p.name, p.full_name, p.unit, p.reorder_point, p.category, p.catalog_code, p.brand, p.size, p.sale_price
+      ORDER BY p.category NULLS LAST, p.name
     `);
     res.json(rows.rows);
   } catch(e) {
@@ -263,6 +356,8 @@ router.get('/inventory', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'خطای سرور' });
   }
 });
+
+
 
 router.get('/lots/scan/:code', requireAuth, async (req, res) => {
   try {
@@ -316,10 +411,10 @@ router.post('/products', requireAuth, async (req, res) => {
     if (!b.name) return res.status(400).json({ error: 'نام محصول الزامی است' });
     const id = _genId();
     const r = await query(
-      `INSERT INTO wms_products (id,name,full_name,brand,size,catalog_code,irc_code,unit,category,reorder_point,note,active,updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true,NOW()) RETURNING *`,
+      `INSERT INTO wms_products (id,name,full_name,brand,size,catalog_code,irc_code,unit,category,reorder_point,sale_price,note,active,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,NOW()) RETURNING *`,
       [id, b.name, b.fullName||'', b.brand||'', b.size||'', b.catalogCode||'',
-       b.ircCode||'', b.unit||'عدد', b.category||'', b.reorderPoint||10, b.note||'']
+       b.ircCode||'', b.unit||'عدد', b.category||'', b.reorderPoint||10, b.salePrice||0, b.note||'']
     );
     res.status(201).json(rowToProduct(r.rows[0]));
   } catch(e) {
@@ -336,11 +431,11 @@ router.put('/products/:id', requireAuth, async (req, res) => {
          name=COALESCE($2,name), full_name=COALESCE($3,full_name), brand=COALESCE($4,brand),
          size=COALESCE($5,size), catalog_code=COALESCE($6,catalog_code), irc_code=COALESCE($7,irc_code),
          unit=COALESCE($8,unit), category=COALESCE($9,category), reorder_point=COALESCE($10,reorder_point),
-         note=COALESCE($11,note), updated_at=NOW()
+         sale_price=COALESCE($11,sale_price), note=COALESCE($12,note), updated_at=NOW()
        WHERE id=$1 AND active=true RETURNING *`,
       [req.params.id, b.name||null, b.fullName||null, b.brand||null, b.size||null,
        b.catalogCode||null, b.ircCode||null, b.unit||null, b.category||null,
-       b.reorderPoint||null, b.note||null]
+       b.reorderPoint||null, b.salePrice != null ? Number(b.salePrice) : null, b.note||null]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'محصول یافت نشد' });
     res.json(rowToProduct(r.rows[0]));
@@ -434,14 +529,11 @@ router.delete('/warehouses/:id', requireAuth, async (req, res) => {
 router.get('/counterparties', requireAuth, async (req, res) => {
   try {
     const { type } = req.query;
-    const params = [];
-    let where = 'WHERE active = true';
+    let list = await loadAllCounterparties();
     if (type && ['supplier','customer','both'].includes(type)) {
-      where += ' AND type = $1';
-      params.push(type);
+      list = list.filter(c => c.type === type || c.type === 'both');
     }
-    const r = await query(`SELECT * FROM wms_counterparties ${where} ORDER BY name`, params);
-    res.json(r.rows.map(rowToCounterparty));
+    res.json(list);
   } catch(e) {
     console.error('[wms/counterparties GET]', e.message);
     res.status(500).json({ error: 'خطای سرور' });

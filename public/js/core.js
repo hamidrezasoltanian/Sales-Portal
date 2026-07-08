@@ -382,13 +382,35 @@ function _backupLocalDB() {
   try {
     localStorage.setItem('atena_db_backup', JSON.stringify(DB));
     if (_lastSyncedDB) {
-      localStorage.setItem('atena_db_last_synced', JSON.stringify(_lastSyncedDB));
+      try {
+        localStorage.setItem('atena_db_last_synced', JSON.stringify(_lastSyncedDB));
+      } catch(e2) {
+        // If last-synced snapshot is too large, skip it — server is source of truth
+        localStorage.removeItem('atena_db_last_synced');
+      }
     }
     localStorage.setItem('atena_db_synced', 'false');
   } catch(e) {
-    console.warn('[AtenaBackup] LocalStorage backup failed:', e.message);
+    // Full backup failed (quota). Try a lightweight backup with just settings/edits/notes/tags.
+    try {
+      var lite = {
+        settings:   DB.settings   || {},
+        edits:      DB.edits      || {},
+        notes:      DB.notes      || {},
+        tags:       DB.tags       || {},
+        events:     DB.events     || [],
+        extra:      DB.extra      || [],
+        _lite:      true
+      };
+      localStorage.setItem('atena_db_backup', JSON.stringify(lite));
+      localStorage.removeItem('atena_db_last_synced');
+      localStorage.setItem('atena_db_synced', 'false');
+    } catch(e3) {
+      // Nothing we can do — ignore silently
+    }
   }
 }
+
 function _clearLocalBackup() {
   try {
     localStorage.setItem('atena_db_synced', 'true');

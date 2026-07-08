@@ -337,14 +337,18 @@ async function initSchema() {
       unit        VARCHAR(50) DEFAULT 'عدد',
       category    VARCHAR(100),
       reorder_point INTEGER DEFAULT 10,
+      sale_price  BIGINT DEFAULT 0,
       note        TEXT DEFAULT '',
       active      BOOLEAN DEFAULT true,
       created_at  TIMESTAMPTZ DEFAULT NOW(),
       updated_at  TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  // Add sale_price column if it doesn't exist (for existing DBs)
+  await query(`ALTER TABLE wms_products ADD COLUMN IF NOT EXISTS sale_price BIGINT DEFAULT 0`);
   await query(`CREATE INDEX IF NOT EXISTS idx_wms_prod_active ON wms_products(active)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_wms_prod_code ON wms_products(catalog_code)`);
+
 
   await query(`
     CREATE TABLE IF NOT EXISTS wms_warehouses (
@@ -517,16 +521,30 @@ async function initSchema() {
       sent_at        TIMESTAMPTZ,
       responded_at   TIMESTAMPTZ,
       responded_by   VARCHAR(100),
-      manager_note   TEXT DEFAULT ''
+      manager_note   TEXT DEFAULT '',
+      buyer_nat_id   VARCHAR(50),
+      buyer_eco_code VARCHAR(50),
+      buyer_reg_id   VARCHAR(50),
+      buyer_address  TEXT,
+      buyer_phone    VARCHAR(50),
+      buyer_postal   VARCHAR(50)
     )
   `);
   await query(`CREATE INDEX IF NOT EXISTS idx_pf_status ON proformas(status)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_pf_center ON proformas(center_key)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_pf_created_by ON proformas(created_by)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_pf_created_at ON proformas(created_at DESC)`);
+  // Add versions column for existing DBs (tracks draft edit history)
+  await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS versions JSONB DEFAULT '[]'`);
+  // Add commission columns for external commission tracking
+  await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS has_commission BOOLEAN DEFAULT FALSE`);
+  await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS commission_amt BIGINT DEFAULT 0`);
+  await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS commission_note TEXT DEFAULT ''`);
 
   // Auto-migrate proformas from blob → table (run once)
   await _migrateProformasFromBlob();
+
+
 
   // Auto-migrate WMS from blob → tables (run once)
   await _migrateWMSFromBlob();
