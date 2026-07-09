@@ -222,7 +222,7 @@ All dates are Persian/Solar Hijri, format `'YYYY/MM/DD'` (string comparison work
 - Default members: `Sarah.hosseini` (مدیر), `Reyhane.kashisaz`, `Mohammad.seyedsalehi`, `Rambod.ghasemi` (کارشناس فروش), `guest`. Actual list lives in `DB.settings.members`, editable in Settings.
 - `_isManager()` — checks `'مدیر'` role · `_isExpert()` — checks `'کارشناس فروش'` role
 - Non-managers only see week-plan cards / center lists for centers they own.
-- **Access password `62604193`** (checked ~line 2720): gates margin (حاشیه) display and pricing settings — required even for managers.
+- **Access password for pricing margins** — verified server-side via `POST /api/pricing/mgmt/verify`; costs from `GET /api/pricing/costs` (env: `PRICING_ACCESS_PASSWORD` or hash)
 
 ### Function Map (app.js, approximate line numbers)
 

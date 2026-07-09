@@ -4,7 +4,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { query } = require('../db');
-const { requireAuth, JWT_SECRET } = require('../auth');
+const { requireAuth, JWT_SECRET, invalidateAuthCache } = require('../auth');
 
 const router = express.Router();
 
@@ -13,6 +13,9 @@ const COOKIE_OPTIONS = {
   sameSite: 'lax',
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
 };
+if (process.env.NODE_ENV === 'production') {
+  COOKIE_OPTIONS.secure = true;
+}
 
 // ── In-memory rate limiter for login (no external dependency) ──────────────
 // Tracks failed attempts per IP. Resets on successful login.
@@ -79,7 +82,7 @@ router.post('/login', async (req, res) => {
 
   try {
     const result = await query(
-      'SELECT username, display_name, role, color, password_hash, active FROM app_users WHERE username = $1',
+      'SELECT username, display_name, role, color, password_hash, active, COALESCE(token_version, 0) AS token_version FROM app_users WHERE username = $1',
       [username]
     );
 
@@ -108,7 +111,7 @@ router.post('/login', async (req, res) => {
     _clearAttempts(ip);
 
     const token = jwt.sign(
-      { username: user.username, role: user.role, name: user.display_name },
+      { username: user.username, role: user.role, name: user.display_name, tv: user.token_version },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -156,8 +159,28 @@ router.get('/me', requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/auth/logout
-router.post('/logout', (req, res) => {
+// POST /api/auth/logout — invalidate token server-side when session is known
+router.post('/logout', async (req, res) => {
+  let username = null;
+  const token = (req.cookies && req.cookies.atena_token) ||
+    (req.headers.authorization && req.headers.authorization.split(' ')[1]);
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      username = decoded.username;
+    } catch (e) {}
+  }
+  if (username) {
+    try {
+      await query(
+        'UPDATE app_users SET token_version = COALESCE(token_version, 0) + 1 WHERE username = $1',
+        [username]
+      );
+      invalidateAuthCache(username);
+    } catch (e) {
+      console.error('[auth/logout]', e.message);
+    }
+  }
   res.clearCookie('atena_token');
   return res.json({ ok: true });
 });

@@ -26,7 +26,23 @@ try { compression = require('compression'); } catch(e) {}
 const app = express();
 
 // Security & perf middleware
-if (helmet) app.use(helmet({ contentSecurityPolicy: false }));
+if (helmet) {
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", 'cdn.jsdelivr.net', 'cdnjs.cloudflare.com'],
+        styleSrc: ["'self'", "'unsafe-inline'", 'cdn.jsdelivr.net'],
+        fontSrc: ["'self'", 'cdn.jsdelivr.net', 'data:'],
+        imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+        connectSrc: ["'self'", 'https://api.anthropic.com'],
+        frameSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+      },
+    },
+  }));
+}
 if (compression) app.use(compression());
 
 // Middleware

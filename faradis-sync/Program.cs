@@ -12,24 +12,30 @@ namespace FaradisSync
 {
     class Program
     {
-        // ─── تنظیمات ──────────────────────────────────────────────────────────
+        // ─── تنظیمات (از متغیرهای محیطی) ───────────────────────────────────
         static readonly string SrcConn =
-            "Server=192.168.4.4\\FARADISSOFT,50727;" +
-            "Database=faradissoftatenazist;" +
-            "User Id=ma;Password=adminS@2;" +
-            "TrustServerCertificate=True;Encrypt=False;";
+            Environment.GetEnvironmentVariable("FARADIS_CONNECTION_STRING") ??
+            BuildConnFromEnv();
+
+        static string BuildConnFromEnv()
+        {
+            var server = Environment.GetEnvironmentVariable("FARADIS_SERVER");
+            var port = Environment.GetEnvironmentVariable("FARADIS_PORT") ?? "50727";
+            var database = Environment.GetEnvironmentVariable("FARADIS_DATABASE") ?? "faradissoftatenazist";
+            var user = Environment.GetEnvironmentVariable("FARADIS_USER") ?? "ma";
+            var password = Environment.GetEnvironmentVariable("FARADIS_PASSWORD");
+            if (string.IsNullOrEmpty(server) || string.IsNullOrEmpty(password))
+                throw new InvalidOperationException("Set FARADIS_SERVER and FARADIS_PASSWORD (or FARADIS_CONNECTION_STRING)");
+            return $"Server={server}\\FARADISSOFT,{port};Database={database};User Id={user};Password={password};TrustServerCertificate=True;Encrypt=False;";
+        }
 
         static readonly string DstConn =
-            "Server=localhost\\SQLEXPRESS;" +
-            "Database=faradis_local;" +
-            "Integrated Security=True;" +
-            "TrustServerCertificate=True;";
+            Environment.GetEnvironmentVariable("FARADIS_LOCAL_CONNECTION_STRING") ??
+            "Server=localhost\\SQLEXPRESS;Database=faradis_local;Integrated Security=True;TrustServerCertificate=True;";
 
         static readonly string DstMaster =
-            "Server=localhost\\SQLEXPRESS;" +
-            "Database=master;" +
-            "Integrated Security=True;" +
-            "TrustServerCertificate=True;";
+            Environment.GetEnvironmentVariable("FARADIS_LOCAL_MASTER_CONNECTION_STRING") ??
+            "Server=localhost\\SQLEXPRESS;Database=master;Integrated Security=True;TrustServerCertificate=True;";
 
         static int LoopSec = 60;        // فاصله بین هر دور سینک (ثانیه)
         static int GCEvery = 60;        // هر چند دور garbage-collect انجام شود (60 دور = هر ساعت)

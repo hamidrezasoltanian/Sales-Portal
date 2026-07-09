@@ -5,8 +5,13 @@ const { query } = require('./db');
 
 const _DEFAULT_SECRET = 'change-this-to-a-random-secret-string';
 const JWT_SECRET = process.env.JWT_SECRET || _DEFAULT_SECRET;
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 if (JWT_SECRET === _DEFAULT_SECRET) {
+  if (IS_PRODUCTION) {
+    console.error('[SECURITY] JWT_SECRET must be set in production. Refusing to start.');
+    process.exit(1);
+  }
   console.warn('[SECURITY WARNING] JWT_SECRET is using the default insecure value.');
   console.warn('[SECURITY WARNING] Set a strong JWT_SECRET in your .env file before deploying.');
 }
@@ -48,13 +53,15 @@ async function requireAuth(req, res, next) {
   try {
     const cached = _activeCache.get(decoded.username);
     let active;
+    let tokenVersion;
     if (cached && (Date.now() - cached.ts) < CACHE_TTL) {
       active = cached.active;
       userPerms = cached.permissions || {};
       userDept = cached.department || '';
+      tokenVersion = cached.token_version;
     } else {
       const userResult = await query(
-        'SELECT active, permissions, department FROM app_users WHERE username = $1',
+        'SELECT active, permissions, department, COALESCE(token_version, 0) AS token_version FROM app_users WHERE username = $1',
         [decoded.username]
       );
       if (userResult.rows.length === 0) {
@@ -63,14 +70,25 @@ async function requireAuth(req, res, next) {
       active = userResult.rows[0].active;
       userPerms = userResult.rows[0].permissions || {};
       userDept = userResult.rows[0].department || '';
-      _activeCache.set(decoded.username, { active, permissions: userPerms, department: userDept, ts: Date.now() });
+      tokenVersion = userResult.rows[0].token_version;
+      _activeCache.set(decoded.username, {
+        active,
+        permissions: userPerms,
+        department: userDept,
+        token_version: tokenVersion,
+        ts: Date.now(),
+      });
     }
     if (!active) {
       return res.status(401).json({ error: 'حساب کاربری غیرفعال است' });
     }
+    const jwtVersion = decoded.tv != null ? decoded.tv : 0;
+    if (jwtVersion !== tokenVersion) {
+      return res.status(401).json({ error: 'نشست منقضی شده — لطفاً دوباره وارد شوید' });
+    }
   } catch (e) {
-    // If DB check fails, allow through to avoid blocking all requests on DB error
     console.error('[requireAuth] DB check error:', e.message);
+    return res.status(503).json({ error: 'سرویس احراز هویت موقتاً در دسترس نیست' });
   }
 
   req.user = { username: decoded.username, role: decoded.role, name: decoded.name, permissions: userPerms, department: userDept };

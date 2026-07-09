@@ -40,9 +40,9 @@ let _originalDB = null; // backup of main DB before tests
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
-function token(username) {
+function token(username, role, tv) {
   return jwt.sign(
-    { username, role: 'کارشناس فروش', name: 'Test ' + username },
+    { username, role: role || 'مدیر', name: 'Test ' + username, tv: tv != null ? tv : 0 },
     JWT_SECRET,
     { expiresIn: '1h' }
   );

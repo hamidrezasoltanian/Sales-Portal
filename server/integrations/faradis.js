@@ -3,21 +3,22 @@
 let sql;
 try { sql = require('mssql'); } catch(e) {}
 
-const config = {
-  server: process.env.FARADIS_SERVER || '192.168.4.4',
-  port: parseInt(process.env.FARADIS_PORT || '50727'),
-  database: process.env.FARADIS_DATABASE || 'faradissoftatenazist',
-  user: process.env.FARADIS_USER || 'ma',
-  password: process.env.FARADIS_PASSWORD || '',
-  options: {
-    instanceName: process.env.FARADIS_INSTANCE || 'FARADISSOFT',
-    encrypt: false,
-    trustServerCertificate: true,
-    connectTimeout: 10000,
-    requestTimeout: 30000,
-  },
-  pool: { max: 3, min: 0, idleTimeoutMillis: 30000 },
-};
+const { getFaradisConfig } = require('../lib/faradis-config');
+
+function buildPoolConfig() {
+  const base = getFaradisConfig();
+  if (!base) return null;
+  return {
+    ...base,
+    options: {
+      ...base.options,
+      instanceName: base.instanceName,
+    },
+    pool: { max: 3, min: 0, idleTimeoutMillis: 30000 },
+  };
+}
+
+const config = buildPoolConfig();
 
 let pool = null;
 let poolConnected = false;
@@ -26,6 +27,7 @@ const RECONNECT_INTERVAL = 60000; // retry every 60s if down
 
 async function getPool() {
   if (!sql) throw new Error('mssql package not available');
+  if (!config) throw new Error('Faradis not configured (set FARADIS_SERVER and FARADIS_PASSWORD)');
   const now = Date.now();
   if (pool && poolConnected) return pool;
   if (now - lastConnectAttempt < RECONNECT_INTERVAL) throw new Error('Faradis DB unavailable (cooldown)');

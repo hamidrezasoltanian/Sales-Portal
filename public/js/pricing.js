@@ -5,52 +5,52 @@ var _plPayMode='d30',_plViewMode='both',_plActiveMethod='rate',_plPending=null;
 var _plMgmtOk=false;
 
 var PL_DEFAULT_PRODUCTS=[
- {id:1,name:'سوزن تمام اتوماتیک برند Geotek',commType:'geotek_full',buyPrice:34121824,
+ {id:1,name:'سوزن تمام اتوماتیک برند Geotek',commType:'geotek_full',
   channels:{hospital:56870000,faradis:56900000,daramazon:62040000,tamin:70210000,modd:64700000,noor:70210000,barakat:63189000,bahman:59864000,salajeghe:60890000,doctor:54060000},
   repPrices:{base:56900000,tiers:[[55200000,56900000,53500000],[53500000,56900000,51800000],[51800000,53500000,50100000],[50100000,51800000,48400000]]}},
- {id:2,name:'سوزن نیمه اتوماتیک برند Geotek + کواکسیال',commType:'geotek_semi',buyPrice:22977196,
+ {id:2,name:'سوزن نیمه اتوماتیک برند Geotek + کواکسیال',commType:'geotek_semi',
   channels:{hospital:38296000,faradis:38300000,daramazon:41777000,tamin:47279000,modd:43600000,noor:47279000,barakat:42552000,bahman:40312000,salajeghe:40990000,doctor:36390000},
   repPrices:{base:38300000,tiers:[[37200000,38300000,36100000],[36100000,38300000,34900000],[34900000,36100000,33800000],[33800000,34900000,32600000]]}},
- {id:3,name:'سوزن گان برند Geotek',commType:'geotek_gun',buyPrice:14144046,
+ {id:3,name:'سوزن گان برند Geotek',commType:'geotek_gun',
   channels:{hospital:23574000,faradis:23600000,daramazon:25717000,tamin:29104000,modd:26800000,noor:29104000,barakat:26194000,bahman:24815000,salajeghe:25260000,doctor:22420000},
   repPrices:{base:23600000,tiers:[[22900000,23600000,22200000],[22200000,23600000,21500000],[21500000,22200000,20800000],[20800000,21500000,20100000]]}},
- {id:4,name:'سوزن شیبا برند Geotek',commType:'geotek_shiba',buyPrice:10645580,
+ {id:4,name:'سوزن شیبا برند Geotek',commType:'geotek_shiba',
   channels:{hospital:17743000,faradis:17800000,daramazon:19356000,tamin:21905000,modd:20200000,noor:21905000,barakat:19715000,bahman:18677000,salajeghe:19050000,doctor:16910000},
   repPrices:{base:17800000,tiers:[[17300000,17800000,16800000],[16800000,17800000,16200000],[16200000,16800000,15700000],[15700000,16200000,15200000]]}},
- {id:5,name:'سوزن مغز استخوان برند Geotek',commType:'geotek_bone',buyPrice:21050964,
+ {id:5,name:'سوزن مغز استخوان برند Geotek',commType:'geotek_bone',
   channels:{hospital:35085000,faradis:35100000,daramazon:38275000,tamin:43315000,modd:39900000,noor:43315000,barakat:38984000,bahman:36932000,salajeghe:37560000,doctor:33350000},
   repPrices:{base:35100000,tiers:[[34100000,35100000,33000000],[33000000,35100000,32000000],[32000000,33000000,30900000],[30900000,32000000,29900000]]}},
- {id:6,name:'سوزن تمام اتوماتیک برند Geotek مدل Pro',commType:'geotek_full',buyPrice:46782047,
+ {id:6,name:'سوزن تمام اتوماتیک برند Geotek مدل Pro',commType:'geotek_full',
   channels:{hospital:77971000,faradis:78000000,daramazon:85059000,tamin:96260000,modd:88700000,noor:96260000,barakat:86635000,bahman:82075000,salajeghe:83460000,doctor:74100000},
   repPrices:{base:78000000,tiers:[[75700000,78000000,73400000],[73400000,78000000,71000000],[71000000,73400000,68700000],[68700000,71000000,66300000]]}},
- {id:7,name:'سوزن تمام اتوماتیک برند Curaway',commType:'curaway',buyPrice:30328724,
+ {id:7,name:'سوزن تمام اتوماتیک برند Curaway',commType:'curaway',
   channels:{hospital:51000000,faradis:51000000,daramazon:null,tamin:62963000,modd:66667000,noor:null,barakat:56667000,bahman:null,salajeghe:null,doctor:48450000},
   repPrices:{base:51000000,tiers:[[49500000,51000000,48000000],[48000000,51000000,46500000],[46500000,48000000,44900000],[44900000,46500000,43400000]]}},
- {id:8,name:'سوزن نیمه اتوماتیک برند Curaway',commType:'curaway',buyPrice:18507376,
+ {id:8,name:'سوزن نیمه اتوماتیک برند Curaway',commType:'curaway',
   channels:{hospital:31100000,faradis:31100000,daramazon:null,tamin:38396000,modd:40654000,noor:null,barakat:34556000,bahman:null,salajeghe:null,doctor:29550000},
   repPrices:{base:31100000,tiers:[[30200000,31100000,29300000],[29300000,31100000,28400000],[28400000,29300000,27400000],[27400000,28400000,26500000]]}},
- {id:9,name:'سوزن کواکسیال برند Curaway',commType:'curaway',buyPrice:5059530,
+ {id:9,name:'سوزن کواکسیال برند Curaway',commType:'curaway',
   channels:{hospital:8510000,faradis:8510000,daramazon:null,tamin:10507000,modd:11125000,noor:null,barakat:9456000,bahman:null,salajeghe:null,doctor:8090000},
   repPrices:{base:8510000,tiers:[[8300000,8510000,8000000],[8000000,8510000,7800000],[7800000,8000000,7500000],[7500000,7800000,7300000]]}},
- {id:10,name:'کاتتر آرتر لاین Intra 4fr×18g×11cm',commType:'intra',buyPrice:31516980,
+ {id:10,name:'کاتتر آرتر لاین Intra 4fr×18g×11cm',commType:'intra',
   channels:{hospital:50500000,faradis:50500000,daramazon:null,tamin:62346000,modd:66014000,noor:null,barakat:56112000,bahman:null,salajeghe:null,doctor:47980000},
   repPrices:{base:50500000,tiers:[[49000000,50500000,47500000],[47500000,50500000,46000000],[46000000,47500000,44500000],[44500000,46000000,43000000]]}},
- {id:11,name:'کاتتر آرتر لاین Intra 3fr×20g×8cm',commType:'intra',buyPrice:31516980,
+ {id:11,name:'کاتتر آرتر لاین Intra 3fr×20g×8cm',commType:'intra',
   channels:{hospital:50500000,faradis:50500000,daramazon:null,tamin:62346000,modd:66014000,noor:null,barakat:56112000,bahman:null,salajeghe:null,doctor:47980000},
   repPrices:{base:50500000,tiers:[[49000000,50500000,47500000],[47500000,50500000,46000000],[46000000,47500000,44500000],[44500000,46000000,43000000]]}},
- {id:12,name:'کاتتر آرتر لاین Intra 2fr×22g×6cm',commType:'intra',buyPrice:35224860,
+ {id:12,name:'کاتتر آرتر لاین Intra 2fr×22g×6cm',commType:'intra',
   channels:{hospital:56400000,faradis:56400000,daramazon:null,tamin:69630000,modd:73726000,noor:null,barakat:62667000,bahman:null,salajeghe:null,doctor:53580000},
   repPrices:{base:56400000,tiers:[[54800000,56400000,53100000],[53100000,56400000,51400000],[51400000,53100000,49700000],[49700000,51400000,48000000]]}},
- {id:13,name:'رابط یورین بگ آتنا',commType:'intra',buyPrice:2780910,
+ {id:13,name:'رابط یورین بگ آتنا',commType:'intra',
   channels:{hospital:4450000,faradis:4450000,daramazon:null,tamin:5494000,modd:5817000,noor:null,barakat:4945000,bahman:null,salajeghe:null,doctor:4230000},
   repPrices:{base:4450000,tiers:[[4400000,4450000,4200000],[4200000,4450000,4100000],[4100000,4200000,4000000],[4000000,4100000,3800000]]}},
- {id:14,name:'ست نفروستومی PCN با مکانیزم قفل (سینگل نخدار)',commType:'neph_single',buyPrice:19813000,
+ {id:14,name:'ست نفروستومی PCN با مکانیزم قفل (سینگل نخدار)',commType:'neph_single',
   channels:{hospital:128900000,faradis:131400000,daramazon:null,tamin:162223000,modd:171765000,noor:162223000,barakat:146000000,bahman:null,salajeghe:null,doctor:124830000},
   repPrices:{base:131400000,tiers:[[127600000,131400000,123600000],[123400000,127100000,119600000],[119400000,123000000,115700000],[115300000,118700000,111700000]]}},
- {id:15,name:'ست نفروستومی PIGTAIL سینگل (Direct Puncture)',commType:'neph_single',buyPrice:18021000,
+ {id:15,name:'ست نفروستومی PIGTAIL سینگل (Direct Puncture)',commType:'neph_single',
   channels:{hospital:117200000,faradis:119800000,daramazon:null,tamin:147902000,modd:156602000,noor:147902000,barakat:133112000,bahman:null,salajeghe:null,doctor:113810000},
   repPrices:{base:119800000,tiers:[[116100000,119800000,112700000],[112600000,116000000,109100000],[108900000,112100000,105500000],[105200000,108300000,101900000]]}},
- {id:16,name:'ست نفروستومی PIGTAIL با مکانیزم قفل (فول)',commType:'neph_full',buyPrice:36032000,
+ {id:16,name:'ست نفروستومی PIGTAIL با مکانیزم قفل (فول)',commType:'neph_full',
   channels:{hospital:234400000,faradis:236900000,daramazon:null,tamin:292470000,modd:309674000,noor:292470000,barakat:263223000,bahman:null,salajeghe:null,doctor:225060000},
   repPrices:{base:236900000,tiers:[[229800000,236900000,222700000],[222400000,229200000,215600000],[215200000,221900000,208500000],[207900000,214300000,201400000]]}}
 ];
@@ -113,6 +113,8 @@ function pricingLazyInit(){
   if(_plInited)return;
   _plInited=true;
   plLoadData();
+  _plP.forEach(function(p){if(p.buyPrice==null)p.buyPrice=0;});
+  plInitMgmtAccess();
   plRenderRep();
   document.getElementById('pl-upd-date').textContent='آخرین آپدیت: '+new Date().toLocaleDateString('fa-IR');
 }
@@ -130,19 +132,53 @@ function plSwitchTab(t){
 function plCheckPw(){
   var inp=document.getElementById('pl-pw-inp');
   if(!inp)return;
-  if(inp.value==='62604193'){
-    _plMgmtOk=true;
-    document.getElementById('pl-mgmt-lock').style.display='none';
-    document.getElementById('pl-mgmt-panel').style.display='';
-    document.getElementById('pl-pw-err').style.display='none';
-    inp.value='';
-    plRenderOverview();plRenderBuyInputs();plRenderSett();
-    var exp=document.getElementById('pl-expert');
-    if(exp&&exp.style.display!=='none')plRenderExpert();
-  } else {
-    document.getElementById('pl-pw-err').style.display='block';
-    inp.value='';inp.focus();
-  }
+  fetch('/api/pricing/mgmt/verify',{
+    method:'POST',credentials:'include',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({password:inp.value})
+  }).then(function(r){return r.json().then(function(j){return {ok:r.ok,body:j};});})
+  .then(function(res){
+    if(res.ok){
+      _plMgmtOk=true;
+      document.getElementById('pl-mgmt-lock').style.display='none';
+      document.getElementById('pl-mgmt-panel').style.display='';
+      document.getElementById('pl-pw-err').style.display='none';
+      inp.value='';
+      plLoadCostsFromServer().then(function(){
+        plRenderOverview();plRenderBuyInputs();plRenderSett();
+        var exp=document.getElementById('pl-expert');
+        if(exp&&exp.style.display!=='none')plRenderExpert();
+      });
+    } else {
+      document.getElementById('pl-pw-err').style.display='block';
+      inp.value='';inp.focus();
+    }
+  }).catch(function(){showToast('⚠ خطا در ارتباط با سرور');});
+}
+function plLoadCostsFromServer(){
+  return fetch('/api/pricing/costs',{credentials:'include'})
+    .then(function(r){if(!r.ok)return null;return r.json();})
+    .then(function(costs){
+      if(!costs||!_plP)return;
+      _plP.forEach(function(p){
+        var c=costs[String(p.id)];
+        p.buyPrice=(c!=null)?Number(c):0;
+      });
+    }).catch(function(){});
+}
+function plInitMgmtAccess(){
+  fetch('/api/pricing/mgmt/status',{credentials:'include'})
+    .then(function(r){return r.ok?r.json():null;})
+    .then(function(st){
+      if(st&&st.unlocked){
+        _plMgmtOk=true;
+        var lock=document.getElementById('pl-mgmt-lock');
+        var panel=document.getElementById('pl-mgmt-panel');
+        if(lock)lock.style.display='none';
+        if(panel)panel.style.display='';
+        plLoadCostsFromServer();
+      }
+    }).catch(function(){});
 }
 function plLockMgmt(){
   _plMgmtOk=false;
@@ -359,23 +395,28 @@ function plCatShr(fileId, filename){
 function plCatDel(fileId, prodId){
   var pw=prompt('🔒 برای حذف، رمز مدیریتی را وارد کنید:');
   if(pw===null)return;
-  if(pw!=='62604193'){showToast('⛔ رمز اشتباه است');return;}
-  fetch('/api/files/'+fileId,{method:'DELETE',credentials:'include'})
-    .then(function(r){return r.ok?r.json():Promise.reject('خطا');})
-    .then(function(){
-      showToast('🗑 فایل حذف شد');
-      // find prodIdx from prodId
-      var prodIdx=_plP.findIndex(function(p){return p&&p.id===prodId;});
-      if(_plCatBadge[prodIdx]>0)_plCatBadge[prodIdx]--;
-      var b=document.querySelector('[data-plbadge="'+prodIdx+'"]');
-      if(b){
-        var n=_plCatBadge[prodIdx]||0;
-        b.textContent=n>0?n:'';b.style.display=n>0?'inline':'none';
-      }
-      // reload list
-      _plCatLoadList(prodIdx, prodId);
-    })
-    .catch(function(){showToast('⚠ خطا در حذف فایل');});
+  fetch('/api/pricing/mgmt/verify-delete',{
+    method:'POST',credentials:'include',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({password:pw})
+  }).then(function(r){return r.json().then(function(j){return {ok:r.ok,body:j};});})
+  .then(function(res){
+    if(!res.ok){showToast('⛔ '+(res.body.error||'رمز اشتباه است'));return;}
+    return fetch('/api/files/'+fileId,{method:'DELETE',credentials:'include'})
+      .then(function(r){return r.ok?r.json():Promise.reject('خطا');})
+      .then(function(){
+        showToast('🗑 فایل حذف شد');
+        var prodIdx=_plP.findIndex(function(p){return p&&p.id===prodId;});
+        if(_plCatBadge[prodIdx]>0)_plCatBadge[prodIdx]--;
+        var b=document.querySelector('[data-plbadge="'+prodIdx+'"]');
+        if(b){
+          var n=_plCatBadge[prodIdx]||0;
+          b.textContent=n>0?n:'';b.style.display=n>0?'inline':'none';
+        }
+        _plCatLoadList(prodIdx, prodId);
+      });
+  })
+  .catch(function(){showToast('⚠ خطا در حذف فایل');});
 }
 
 // ── EXPERT VIEW ───────────────────────────────────────────────────────────────

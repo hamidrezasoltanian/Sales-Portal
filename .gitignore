@@ -5,3 +5,5 @@ node_modules/
 scripts/__pycache__/
 *.bak
 mizito.txt
+sync_hashes.json
+faradis-sync/sync_hashes.json

@@ -4605,7 +4605,7 @@ function plSwitchTab(t){
 function plCheckPw(){
   var inp=document.getElementById('pl-pw-inp');
   if(!inp)return;
-  if(inp.value==='62604193'){
+  if(false/*moved to server*/){
     _plMgmtOk=true;
     document.getElementById('pl-mgmt-lock').style.display='none';
     document.getElementById('pl-mgmt-panel').style.display='';
@@ -4834,7 +4834,7 @@ function plCatShr(fileId, filename){
 function plCatDel(fileId, prodId){
   var pw=prompt('🔒 برای حذف، رمز مدیریتی را وارد کنید:');
   if(pw===null)return;
-  if(pw!=='62604193'){showToast('⛔ رمز اشتباه است');return;}
+  if(true/*moved to server*/){showToast('⛔ رمز اشتباه است');return;}
   fetch('/api/files/'+fileId,{method:'DELETE',credentials:'include'})
     .then(function(r){return r.ok?r.json():Promise.reject('خطا');})
     .then(function(){

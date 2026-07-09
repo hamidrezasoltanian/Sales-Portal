@@ -1,20 +1,14 @@
 const { Client } = require('pg');
 const fs = require('fs');
+const { requirePgConfig } = require('./lib/pg-config');
 
 (async () => {
-  // Read schema info
   const schema = JSON.parse(fs.readFileSync('schema_info.json', 'utf8'));
+  const pg = requirePgConfig();
 
-  // Connect to production database
-  const client = new Client({
-    host: 'localhost',
-    port: 5432,
-    database: 'atena_crm',
-    user: 'postgres',
-    password: '62604193'
-  });
+  const client = new Client(pg);
   await client.connect();
-  console.log('[Migration] Connected to production database: atena_crm');
+  console.log('[Migration] Connected to database:', pg.database);
 
   for (const [tableName, tableData] of Object.entries(schema)) {
     console.log(`[Migration] Creating table ${tableName}...`);
@@ -22,7 +16,6 @@ const fs = require('fs');
     const colDefinitions = [];
     const pkColumns = [];
 
-    // Parse constraints to find primary keys
     if (tableData.constraints) {
       for (const constr of tableData.constraints) {
         if (constr.constraint_type === 'PRIMARY KEY') {
@@ -38,15 +31,12 @@ const fs = require('fs');
       }
 
       let defStr = `${col.column_name} ${typeStr}`;
-      
       if (col.is_nullable === 'NO') {
         defStr += ' NOT NULL';
       }
-
       if (col.column_default !== null) {
         defStr += ` DEFAULT ${col.column_default}`;
       }
-
       colDefinitions.push(defStr);
     }
 
@@ -55,12 +45,13 @@ const fs = require('fs');
     }
 
     const createTableSql = `CREATE TABLE IF NOT EXISTS ${tableName} (\n  ${colDefinitions.join(',\n  ')}\n);`;
-    console.log(`SQL:\n${createTableSql}\n`);
-
     await client.query(createTableSql);
     console.log(`[Migration] Table ${tableName} created/verified successfully.`);
   }
 
   await client.end();
   console.log('[Migration] All tables successfully created and verified.');
-})().catch(console.error);
+})().catch((e) => {
+  console.error(e.message);
+  process.exit(1);
+});

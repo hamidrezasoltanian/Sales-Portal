@@ -4,6 +4,7 @@ const express = require('express');
 const { query, pool } = require('../db');
 const { requireAuth, requireManager } = require('../auth');
 const { requirePermission } = require('../permissions');
+const { buildOwnerMaps, filterDbForUser, filterPutBodyForUser, isManagerRole } = require('../lib/center-ownership');
 let _broadcast = null;
 try { _broadcast = require('./events').broadcast; } catch(e) {}
 
@@ -130,14 +131,31 @@ async function loadDBFromSQL(client) {
   };
 }
 
+// Helper: load ownership context for RBAC filtering
+async function loadOwnerContext(client) {
+  const c = client || pool;
+  const [masterR, extraR, editsR] = await Promise.all([
+    c.query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS', 'PC_RAW')"),
+    c.query('SELECT id, row_num as row, province_id, owner FROM center_extras'),
+    c.query('SELECT center_key, data FROM center_edits'),
+  ]);
+  const centersMaster = {};
+  masterR.rows.forEach(function (r) { centersMaster[r.key] = r.data; });
+  const edits = {};
+  editsR.rows.forEach(function (r) { edits[r.center_key] = r.data || {}; });
+  return { ownerMaps: buildOwnerMaps(centersMaster, extraR.rows), edits };
+}
+
 // GET /api/data/db — load from normalized SQL tables
 router.get('/db', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ');
     const db = await loadDBFromSQL(client);
+    const { ownerMaps } = await loadOwnerContext(client);
     await client.query('COMMIT');
-    return res.json(db);
+    const filtered = filterDbForUser(db, req.user, ownerMaps);
+    return res.json(filtered);
   } catch (e) {
     await client.query('ROLLBACK').catch(function() {});
     console.error('[data/db GET]', e.message);
@@ -171,6 +189,13 @@ router.put('/db', async (req, res) => {
     const user = req.user.username;
     const _cid = req.headers['x-cid'] || '';
 
+    const ownerCtx = await loadOwnerContext(client);
+    const rbac = filterPutBodyForUser(body, req.user, ownerCtx.edits, ownerCtx.ownerMaps);
+    body = rbac.body;
+    if (rbac.rejected.length && !isManagerRole(req.user.role)) {
+      console.warn('[data/db PUT] RBAC stripped keys for', user, rbac.rejected.slice(0, 5));
+    }
+
     // Conflict detection: only block if a DIFFERENT user OR a DIFFERENT tab/client ID made changes since client's last known timestamp
     const metaRow = await client.query(
       "SELECT value, updated_at, updated_by FROM app_data WHERE key = '_db_meta' FOR UPDATE"
@@ -182,7 +207,9 @@ router.put('/db', async (req, res) => {
       const lastCid = lastVal.cid || null;
 
       const isDifferentTab = (lastSaveBy !== user) || (lastCid && lastCid !== _cid);
-      console.log('[DEBUG CONFLICT]', { _clientTs, serverTs, lastSaveBy, lastCid, user, _cid, match: serverTs === _clientTs, isDifferentTab });
+      if (process.env.DEBUG_CONFLICT === '1') {
+        console.log('[DEBUG CONFLICT]', { _clientTs, serverTs, lastSaveBy, lastCid, user, _cid, match: serverTs === _clientTs, isDifferentTab });
+      }
       if (_clientTs && serverTs !== _clientTs && isDifferentTab) {
         await client.query('ROLLBACK');
         return res.status(409).json({ error: 'تغییرات توسط کاربر دیگری یا در تب دیگری ذخیره شده', by: lastSaveBy });

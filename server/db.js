@@ -1194,7 +1194,7 @@ async function initSchema() {
   await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS department VARCHAR(100) DEFAULT ''`).catch(()=>{});
   await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS direct_manager VARCHAR(100) DEFAULT ''`).catch(()=>{});
   await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS permissions JSONB DEFAULT '{}'`).catch(()=>{});
-  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS commission_pct DECIMAL(5,2) DEFAULT 1.0`).catch(()=>{});
+  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS token_version INTEGER DEFAULT 0`).catch(()=>{});
   await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS salary_amount DECIMAL(15,2) DEFAULT 0`).catch(()=>{});
   await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS department VARCHAR(100) DEFAULT ''`).catch(()=>{});
 

@@ -1,8 +1,18 @@
 'use strict';
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const { query } = require('../db');
 const { requirePermission } = require('../permissions');
 const { requireAuth, requireManager } = require('../auth');
+const {
+  COOKIE_NAME,
+  isPricingMgmtConfigured,
+  verifyPricingPassword,
+  issuePricingMgmtToken,
+  hasPricingMgmtAccess,
+  pricingMgmtCookieOptions,
+} = require('../lib/pricing-access');
 const router = express.Router();
 router.use(requireAuth);
 router.use(requirePermission('pricing', 'view'));
@@ -13,6 +23,95 @@ const PAY_TYPES   = ['d30', 'd60', 'cash'];
 function tierOf(qty) {
   return qty <= 20 ? 0 : qty <= 50 ? 1 : qty <= 100 ? 2 : 3;
 }
+
+async function loadBuyCosts() {
+  const r = await query("SELECT value FROM app_settings WHERE key = 'pricing_buy_costs'");
+  if (r.rows.length && r.rows[0].value) {
+    return r.rows[0].value;
+  }
+  const seedPath = path.join(__dirname, '..', 'data', 'pricing-costs.json');
+  const seed = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
+  await query(
+    `INSERT INTO app_settings (key, value, updated_at, updated_by)
+     VALUES ('pricing_buy_costs', $1, NOW(), 'system')
+     ON CONFLICT (key) DO NOTHING`,
+    [JSON.stringify(seed)]
+  );
+  return seed;
+}
+
+// ── GET /api/pricing/mgmt/status ─────────────────────────────────────────────
+router.get('/mgmt/status', (req, res) => {
+  res.json({
+    configured: isPricingMgmtConfigured(),
+    unlocked: hasPricingMgmtAccess(req),
+  });
+});
+
+// ── POST /api/pricing/mgmt/verify ────────────────────────────────────────────
+router.post('/mgmt/verify', async (req, res) => {
+  const { password } = req.body || {};
+  if (!password) return res.status(400).json({ error: 'رمز الزامی است' });
+  if (!isPricingMgmtConfigured()) {
+    return res.status(503).json({ error: 'رمز مدیریت قیمت‌گذاری در سرور تنظیم نشده است' });
+  }
+  const ok = await verifyPricingPassword(password);
+  if (!ok) return res.status(401).json({ error: 'رمز اشتباه است' });
+  const token = issuePricingMgmtToken(req.user.username);
+  res.cookie(COOKIE_NAME, token, pricingMgmtCookieOptions());
+  return res.json({ ok: true });
+});
+
+// ── POST /api/pricing/mgmt/logout ────────────────────────────────────────────
+router.post('/mgmt/logout', (req, res) => {
+  res.clearCookie(COOKIE_NAME, { path: '/api/pricing' });
+  return res.json({ ok: true });
+});
+
+// ── GET /api/pricing/costs — buy prices (mgmt access only) ───────────────────
+router.get('/costs', async (req, res) => {
+  if (!hasPricingMgmtAccess(req)) {
+    return res.status(403).json({ error: 'دسترسی به قیمت تمام‌شده نیاز به مجوز مدیریت دارد' });
+  }
+  try {
+    const costs = await loadBuyCosts();
+    res.json(costs);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── PUT /api/pricing/costs — update buy price for a product ──────────────────
+router.put('/costs', requireManager, async (req, res) => {
+  const { product_id, buy_price } = req.body || {};
+  if (!product_id) return res.status(400).json({ error: 'product_id required' });
+  try {
+    const costs = await loadBuyCosts();
+    costs[String(product_id)] = parseInt(buy_price, 10) || 0;
+    await query(
+      `INSERT INTO app_settings (key, value, updated_at, updated_by)
+       VALUES ('pricing_buy_costs', $1, NOW(), $2)
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
+      [JSON.stringify(costs), req.user.username]
+    );
+    res.json({ ok: true, costs });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── POST /api/pricing/mgmt/verify-delete — one-shot auth for destructive ops ─
+router.post('/mgmt/verify-delete', async (req, res) => {
+  const { password } = req.body || {};
+  if (!password) return res.status(400).json({ error: 'رمز الزامی است' });
+  if (hasPricingMgmtAccess(req)) return res.json({ ok: true });
+  if (!isPricingMgmtConfigured()) {
+    return res.status(503).json({ error: 'رمز مدیریت تنظیم نشده' });
+  }
+  const ok = await verifyPricingPassword(password);
+  if (!ok) return res.status(401).json({ error: 'رمز اشتباه است' });
+  return res.json({ ok: true });
+});
 
 // ── GET /api/pricing/products ────────────────────────────────────────────────
 router.get('/products', async (req, res) => {

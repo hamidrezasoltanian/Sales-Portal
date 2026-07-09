@@ -11,7 +11,7 @@
     "vue:dev": "vite",
     "setup": "node server/setup.js",
     "migrate": "node scripts/migrate_blob_to_sql.js",
-    "test": "node tests/behavioral.test.js"
+    "test": "node tests/behavioral.test.js && node tests/security.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
