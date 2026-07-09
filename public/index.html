@@ -32,6 +32,7 @@
     <button class="top-btn" id="tab_checklist" onclick="switchTab('checklist')" title="چک‌لیست روزانه" style="font-size:15px;padding:4px 8px">☑</button>
     <button class="top-btn" id="tab_activity_btn" onclick="switchTab('activity')" title="فعالیت‌ها" style="font-size:13px">📜</button>
     <span class="notif-bell-wrap"><div id="vue-notifications" style="display:inline-block"></div><button class="top-btn" id="notifBell" onclick="toggleNotifPanel()" title="اعلان‌ها" style="display:none">🔔</button><span id="notifBadge" class="notif-badge" style="display:none">0</span></span>
+    <span id="vue-sync-status" style="display:inline-block;vertical-align:middle"></span>
     <button class="top-btn" onclick="openGSearch()" title="جستجو سریع (Ctrl+K)" style="background:rgba(255,255,255,.15);font-size:13px">🔍 <span style="font-size:11px;opacity:.7">Ctrl+K</span></button>
     <button class="top-btn" onclick="doLogout()" style="background:rgba(220,38,38,.2);border-color:rgba(220,38,38,.4)">خروج</button>
     <button class="top-btn" id="themeTglBtn" onclick="toggleTheme()" title="تغییر تم" style="font-size:13px;min-width:72px">🌙 دارک</button>
@@ -303,6 +304,7 @@
 <div class="toast" id="toast"></div>
 
 <!-- DATA — split from app.bundle.js into modules -->
+<script src="/js/safe-dom.js?v=20260709a"></script>
 <script src="/js/core.js?v=20260708h"></script>
 <script src="/js/settings.js?v=20260708h"></script>
 <script src="/js/data.js?v=20260708h"></script>

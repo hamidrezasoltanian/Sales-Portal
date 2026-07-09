@@ -821,7 +821,12 @@ function setE(type,id,field,val){var k=recK(type,id);if(!DB.edits[k])DB.edits[k]
   if(typeof wpReconcileFollowupDates==='function'){
     wpReconcileFollowupDates();
   }
-  saveDB();
+  if(typeof savePatchDB==='function'){
+    var _patchEdits={};_patchEdits[k]=DB.edits[k];
+    savePatchDB({edits:_patchEdits});
+  } else {
+    saveDB();
+  }
   flashRow(id);
   if(currentTab==='kpi'&&(field==='status'||field==='lead'||field==='owner'))setTimeout(renderKPIPanel,300);
   if(currentTab==='manager'&&(field==='status'||field==='lead'||field==='owner'||field==='followupDate'))setTimeout(renderManagerPanel,300);

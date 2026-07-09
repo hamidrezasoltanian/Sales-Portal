@@ -14,9 +14,21 @@ function openModal(id,titleHTML,bodyHTML,footHTML,opts){
   box.className='m-box'+(opts&&opts.lg?' lg':'')+(opts&&opts.xl?' xl':'');
   box.addEventListener('click',function(e){if(typeof closeTagMenu==='function')closeTagMenu();e.stopPropagation();});
   var head=document.createElement('div');head.className='m-head';
-  head.innerHTML='<span>'+titleHTML+'</span><button class="m-close" onclick="closeModal(\''+id+'\')">✕</button>';
-  var body=document.createElement('div');body.className='m-body';body.innerHTML=bodyHTML;
-  var foot=document.createElement('div');foot.className='m-foot';foot.innerHTML=footHTML;
+  var titleSpan=document.createElement('span');
+  if(opts&&opts.rawTitle){titleSpan.innerHTML=titleHTML;}
+  else{safeUserHTML(titleSpan,titleHTML);}
+  head.appendChild(titleSpan);
+  var closeBtn=document.createElement('button');
+  closeBtn.className='m-close';
+  closeBtn.textContent='✕';
+  closeBtn.onclick=function(){closeModal(id);};
+  head.appendChild(closeBtn);
+  var body=document.createElement('div');body.className='m-body';
+  if(opts&&opts.rawBody){body.innerHTML=bodyHTML;}
+  else{body.innerHTML=typeof stripScripts==='function'?stripScripts(bodyHTML):bodyHTML;}
+  var foot=document.createElement('div');foot.className='m-foot';
+  if(opts&&opts.rawFoot){foot.innerHTML=footHTML;}
+  else{foot.innerHTML=typeof stripScripts==='function'?stripScripts(footHTML):footHTML;}
   box.appendChild(head);box.appendChild(body);box.appendChild(foot);
   overlay.appendChild(box);document.body.appendChild(overlay);
   return{overlay,box,body,foot};
@@ -47,8 +59,8 @@ function showContactPopup(ev, rtype, id) {
   var html = '';
   contacts.forEach(function(c, ci) {
     if(c.name||c.title||(c.phones&&c.phones.length)){
-      if(contacts.length>1) html += '<div style="font-size:10px;font-weight:700;color:var(--text-secondary);margin-top:'+(ci>0?'8':'0')+'px;margin-bottom:3px">'+(c.name||'مخاطب '+(ci+1))+(c.title?' — '+c.title:'')+'</div>';
-      else if(c.name||c.title) html += '<div class="contact-popup-row" style="font-weight:600;font-size:12px">'+(c.name||'')+(c.title?' ('+c.title+')':'')+'</div>';
+      if(contacts.length>1) html += '<div style="font-size:10px;font-weight:700;color:var(--text-secondary);margin-top:'+(ci>0?'8':'0')+'px;margin-bottom:3px">'+esc(c.name||'مخاطب '+(ci+1))+(c.title?' — '+esc(c.title):'')+'</div>';
+      else if(c.name||c.title) html += '<div class="contact-popup-row" style="font-weight:600;font-size:12px">'+esc(c.name||'')+(c.title?' ('+esc(c.title)+')':'')+'</div>';
       (c.phones||[]).forEach(function(p){
         if(p) html += '<div class="contact-popup-row"><a href="'+_phoneHref(p)+'" title="'+_phoneTitle()+'" onclick="event.stopPropagation()" style="color:#0369a1;text-decoration:none;direction:ltr;display:block">📞 '+esc(p)+'</a></div>';
       });

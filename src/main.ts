@@ -3,6 +3,7 @@ import ProformaPanel from './components/ProformaPanel.vue';
 import NotificationsPanel from './components/NotificationsPanel.vue';
 import TasksPanel from './components/TasksPanel.vue';
 import LettersPanel from './components/LettersPanel.vue';
+import SyncStatusBadge from './components/SyncStatusBadge.vue';
 
 fetch('/api/auth/me')
   .then(r => r.ok ? r.json() : null)
@@ -65,6 +66,12 @@ fetch('/api/auth/me')
       const li = createApp(LettersPanel, { username, userRole, isManager });
       const lm = li.mount(lettersEl);
       (window as any)._lettersVueLoad = () => (lm as any).load?.();
+    }
+
+    // Sync status indicator in header
+    const syncEl = document.getElementById('vue-sync-status');
+    if (syncEl) {
+      createApp(SyncStatusBadge).mount(syncEl);
     }
   })
   .catch(() => {});

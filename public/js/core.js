@@ -320,6 +320,54 @@ function _weRemove(k){
   if(!DB._weDeletedKeys)DB._weDeletedKeys=[];
   if(DB._weDeletedKeys.indexOf(k)<0)DB._weDeletedKeys.push(k);
 }
+
+var _patchQueue={};
+var _patchTimer=null;
+
+function savePatchDB(fragment){
+  if(!fragment||typeof fragment!=='object')return;
+  ['edits','notes','rTags','tags','weekEntries'].forEach(function(key){
+    var alt=key==='rTags'?'tags':null;
+    var src=fragment[key]||fragment[alt];
+    if(!src) return;
+    var qk=key==='tags'?'rTags':key;
+    if(!_patchQueue[qk])_patchQueue[qk]={};
+    if(typeof src==='object'&&!Array.isArray(src)){
+      Object.keys(src).forEach(function(ck){_patchQueue[qk][ck]=src[ck];});
+    } else {
+      _patchQueue[qk]=src;
+    }
+  });
+  if(fragment._weDeletedKeys){
+    _patchQueue._weDeletedKeys=(_patchQueue._weDeletedKeys||[]).concat(fragment._weDeletedKeys);
+  }
+  _backupLocalDB();
+  clearTimeout(_patchTimer);
+  _patchTimer=setTimeout(function(){_flushPatchQueue();},400);
+}
+
+function _flushPatchQueue(){
+  if(!Object.keys(_patchQueue).length)return;
+  var payload=JSON.parse(JSON.stringify(_patchQueue));
+  _patchQueue={};
+  if(_dbServerTs)payload._clientTs=_dbServerTs;
+  var seq=++_saveSeq;
+  fetch('/api/data/patch',{
+    method:'PATCH',
+    headers:{'Content-Type':'application/json','X-Cid':_sseClientId},
+    body:JSON.stringify(payload)
+  }).then(function(r){
+    return r.json().then(function(res){
+      if(r.ok&&res&&res._serverTs&&seq===_saveSeq){
+        _dbServerTs=res._serverTs;
+        DB._weDeletedKeys=[];
+        _lastSyncedDB=JSON.parse(JSON.stringify(DB));
+        _clearLocalBackup();
+      }
+    });
+  }).catch(function(e){console.warn('savePatchDB failed:',e.message);});
+}
+
 function _saveDBNow(){
   var payload=JSON.parse(JSON.stringify(DB));
   if(_dbServerTs)payload._clientTs=_dbServerTs;

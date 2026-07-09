@@ -10,8 +10,8 @@
     "build:watch": "vite build --watch",
     "vue:dev": "vite",
     "setup": "node server/setup.js",
-    "migrate": "node scripts/migrate_blob_to_sql.js",
-    "test": "node tests/behavioral.test.js && node tests/security.test.js"
+    "migrate": "node -e \"require('./server/db').initSchema().then(()=>process.exit(0)).catch(e=>{console.error(e);process.exit(1)})\"",
+    "test": "node tests/unit.test.js && node tests/behavioral.test.js && node tests/security.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

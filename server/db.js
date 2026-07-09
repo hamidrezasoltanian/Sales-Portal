@@ -1823,6 +1823,9 @@ async function initSchema() {
   await _migrateRemainingBlobsToSQL();
   await _migrateContactsToHCPs();
 
+  const { runMigrations } = require('./migrations/runner');
+  await runMigrations(pool);
+
   console.log('[DB] Schema initialized');
 }
 

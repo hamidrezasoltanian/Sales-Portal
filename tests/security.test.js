@@ -177,6 +177,33 @@ async function testPricingVerify() {
   assert(ok.status === 200, 'correct password → 200');
 }
 
+async function testPatchPartialSave() {
+  console.log('\n📋 API: PATCH /api/data/patch saves without full DB wipe');
+  const tok1 = token(EXPERT, 'کارشناس فروش', 0);
+  const tok2 = token(OTHER, 'کارشناس فروش', 0);
+
+  const p1 = await req('PATCH', '/api/data/patch', {
+    edits: { center_owned: { status: 'فعال', owner: EXPERT, _ts: Date.now() } },
+  }, tok1);
+  assert(p1.status === 200, 'expert patches owned center → 200');
+
+  const p2 = await req('PATCH', '/api/data/patch', {
+    edits: { center_foreign: { status: 'ملاقات', owner: OTHER, _ts: Date.now() } },
+  }, tok2);
+  assert(p2.status === 200, 'other expert patches own center → 200');
+
+  const g1 = await req('GET', '/api/data/db', null, tok1);
+  assert(g1.body.edits.center_owned, 'expert still sees owned center');
+  assert(!g1.body.edits.center_foreign, 'expert cannot see foreign center');
+
+  const denied = await req('PATCH', '/api/data/patch', {
+    edits: { center_foreign: { status: 'hack' } },
+  }, tok1);
+  assert(denied.status === 200, 'unauthorized patch returns 200 but strips');
+  const g2 = await req('GET', '/api/data/db', null, token(MANAGER, 'مدیر'));
+  assert(g2.body.edits.center_foreign.status === 'ملاقات', 'foreign center not overwritten by expert');
+}
+
 async function testLogoutRevokesToken() {
   console.log('\n📋 API: logout increments token_version');
   const tok = token(EXPERT, 'کارشناس فروش', 0);
@@ -203,6 +230,7 @@ async function main() {
     await testManagerSeesAll();
     await testPricingCostsGated();
     await testPricingVerify();
+    await testPatchPartialSave();
     await testLogoutRevokesToken();
   } finally {
     await teardown().catch(() => {});

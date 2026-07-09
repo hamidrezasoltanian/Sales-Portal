@@ -101,9 +101,21 @@ function openModal(id,titleHTML,bodyHTML,footHTML,opts){
   box.className='m-box'+(opts&&opts.lg?' lg':'')+(opts&&opts.xl?' xl':'');
   box.addEventListener('click',function(e){if(typeof closeTagMenu==='function')closeTagMenu();e.stopPropagation();});
   var head=document.createElement('div');head.className='m-head';
-  head.innerHTML='<span>'+titleHTML+'</span><button class="m-close" onclick="closeModal(\''+id+'\')">✕</button>';
-  var body=document.createElement('div');body.className='m-body';body.innerHTML=bodyHTML;
-  var foot=document.createElement('div');foot.className='m-foot';foot.innerHTML=footHTML;
+  var titleSpan=document.createElement('span');
+  if(opts&&opts.rawTitle){titleSpan.innerHTML=titleHTML;}
+  else{safeUserHTML(titleSpan,titleHTML);}
+  head.appendChild(titleSpan);
+  var closeBtn=document.createElement('button');
+  closeBtn.className='m-close';
+  closeBtn.textContent='✕';
+  closeBtn.onclick=function(){closeModal(id);};
+  head.appendChild(closeBtn);
+  var body=document.createElement('div');body.className='m-body';
+  if(opts&&opts.rawBody){body.innerHTML=bodyHTML;}
+  else{body.innerHTML=typeof stripScripts==='function'?stripScripts(bodyHTML):bodyHTML;}
+  var foot=document.createElement('div');foot.className='m-foot';
+  if(opts&&opts.rawFoot){foot.innerHTML=footHTML;}
+  else{foot.innerHTML=typeof stripScripts==='function'?stripScripts(footHTML):footHTML;}
   box.appendChild(head);box.appendChild(body);box.appendChild(foot);
   overlay.appendChild(box);document.body.appendChild(overlay);
   return{overlay,box,body,foot};

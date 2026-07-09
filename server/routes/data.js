@@ -5,6 +5,7 @@ const { query, pool } = require('../db');
 const { requireAuth, requireManager } = require('../auth');
 const { requirePermission } = require('../permissions');
 const { buildOwnerMaps, filterDbForUser, filterPutBodyForUser, isManagerRole } = require('../lib/center-ownership');
+const { mergeNoteArrays } = require('../lib/db-merge');
 let _broadcast = null;
 try { _broadcast = require('./events').broadcast; } catch(e) {}
 
@@ -231,15 +232,23 @@ router.put('/db', async (req, res) => {
       );
     }
 
-    // ── center_notes ──────────────────────────────────────────────────────────
+    // ── center_notes (merge — don't wipe notes added by other users) ─────────
     if (notes && typeof notes === 'object' && Object.keys(notes).length > 0) {
-      await client.query(
-        `INSERT INTO center_notes (center_key, notes, updated_at, updated_by)
-         SELECT key, value, NOW(), $2 FROM jsonb_each($1::jsonb)
-         ON CONFLICT (center_key) DO UPDATE
-           SET notes = EXCLUDED.notes, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
-        [JSON.stringify(notes), user]
-      );
+      for (const [centerKey, incomingNotes] of Object.entries(notes)) {
+        const cur = await client.query(
+          'SELECT notes FROM center_notes WHERE center_key = $1',
+          [centerKey]
+        );
+        const serverNotes = cur.rows.length ? cur.rows[0].notes : [];
+        const merged = mergeNoteArrays(serverNotes, incomingNotes);
+        await client.query(
+          `INSERT INTO center_notes (center_key, notes, updated_at, updated_by)
+           VALUES ($1, $2, NOW(), $3)
+           ON CONFLICT (center_key) DO UPDATE
+             SET notes = $2, updated_at = NOW(), updated_by = $3`,
+          [centerKey, JSON.stringify(merged), user]
+        );
+      }
     }
 
     // ── center_tags ───────────────────────────────────────────────────────────
@@ -507,6 +516,113 @@ router.put('/db', async (req, res) => {
   } catch (e) {
     if (client) await client.query('ROLLBACK').catch(function() {});
     console.error('[data/db PUT]', e.message);
+    return res.status(500).json({ error: 'خطای سرور' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// PATCH /api/data/patch — partial save (edits/notes/tags/weekEntries only; no destructive table wipes)
+router.patch('/patch', async (req, res) => {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return res.status(400).json({ error: 'داده نامعتبر' });
+  }
+
+  let client;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const user = req.user.username;
+    const _cid = req.headers['x-cid'] || '';
+    const _clientTs = body._clientTs || null;
+
+    const ownerCtx = await loadOwnerContext(client);
+    const rbac = filterPutBodyForUser(body, req.user, ownerCtx.edits, ownerCtx.ownerMaps);
+    const patch = rbac.body;
+    if (rbac.rejected.length && !isManagerRole(req.user.role)) {
+      console.warn('[data/patch] RBAC stripped keys for', user, rbac.rejected.slice(0, 5));
+    }
+
+    const { edits, notes, rTags, tags, weekEntries, _weDeletedKeys } = patch;
+
+    if (edits && typeof edits === 'object' && Object.keys(edits).length > 0) {
+      await client.query(
+        `INSERT INTO center_edits (center_key, data, updated_at, updated_by)
+         SELECT key, value, NOW(), $2 FROM jsonb_each($1::jsonb)
+         ON CONFLICT (center_key) DO UPDATE
+           SET data = center_edits.data || EXCLUDED.data, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+        [JSON.stringify(edits), user]
+      );
+    }
+
+    if (notes && typeof notes === 'object' && Object.keys(notes).length > 0) {
+      for (const [centerKey, incomingNotes] of Object.entries(notes)) {
+        const cur = await client.query(
+          'SELECT notes FROM center_notes WHERE center_key = $1',
+          [centerKey]
+        );
+        const serverNotes = cur.rows.length ? cur.rows[0].notes : [];
+        const merged = mergeNoteArrays(serverNotes, incomingNotes);
+        await client.query(
+          `INSERT INTO center_notes (center_key, notes, updated_at, updated_by)
+           VALUES ($1, $2, NOW(), $3)
+           ON CONFLICT (center_key) DO UPDATE
+             SET notes = $2, updated_at = NOW(), updated_by = $3`,
+          [centerKey, JSON.stringify(merged), user]
+        );
+      }
+    }
+
+    const tagsData = rTags || tags;
+    if (tagsData && typeof tagsData === 'object' && Object.keys(tagsData).length > 0) {
+      await client.query(
+        `INSERT INTO center_tags (center_key, tags, updated_at, updated_by)
+         SELECT key, value, NOW(), $2 FROM jsonb_each($1::jsonb)
+         ON CONFLICT (center_key) DO UPDATE
+           SET tags = EXCLUDED.tags, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+        [JSON.stringify(tagsData), user]
+      );
+    }
+
+    const incomingWE = weekEntries || {};
+    const deletedKeys = (Array.isArray(_weDeletedKeys) ? _weDeletedKeys : [])
+      .filter(function (k) { return !incomingWE[k]; });
+    if (deletedKeys.length > 0) {
+      await client.query(
+        'DELETE FROM week_entries WHERE key = ANY($1::text[])',
+        [deletedKeys]
+      ).catch(function (e) { console.warn('[patch week_entries DELETE]', e.message); });
+    }
+    if (Object.keys(incomingWE).length > 0) {
+      await client.query(
+        `INSERT INTO week_entries (key, value, updated_at, updated_by)
+         SELECT e.key, e.value, NOW(), $2 FROM jsonb_each($1::jsonb) AS e(key, value)
+         ON CONFLICT (key) DO UPDATE
+           SET value = EXCLUDED.value, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+        [JSON.stringify(incomingWE), user]
+      );
+    }
+
+    const upserted = await client.query(
+      `INSERT INTO app_data (key, value, updated_at, updated_by)
+       VALUES ('_db_meta', $1, NOW(), $2)
+       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2
+       RETURNING updated_at`,
+      [JSON.stringify({ cid: _cid, partial: true }), user]
+    );
+
+    await client.query('COMMIT');
+
+    const _serverTs = upserted.rows[0].updated_at.toISOString();
+    try {
+      if (_broadcast) _broadcast('db-updated', { by: user, at: Date.now(), partial: true }, _cid);
+    } catch (e) {}
+    return res.json({ ok: true, _serverTs, partial: true });
+  } catch (e) {
+    if (client) await client.query('ROLLBACK').catch(function () {});
+    console.error('[data/patch]', e.message);
     return res.status(500).json({ error: 'خطای سرور' });
   } finally {
     if (client) client.release();
