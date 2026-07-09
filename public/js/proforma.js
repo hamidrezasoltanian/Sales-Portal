@@ -12,6 +12,7 @@ var _pfEditId = null;    // currently open modal id (null = new)
 var _pfItems  = [];      // rows in open modal
 var _pfWmsProds = [];    // WMS product list (fetched once per session)
 var _pfWmsProdTs = 0;   // timestamp of last fetch (ms)
+var _pfWarehouses = []; // WMS warehouses for dispatch target
 var _pfProdViewMode = 'tree'; // 'tree' | 'list'
 var _pfProdSearch = '';
 var _pfActiveCat = null; // expanded category in tree view
@@ -19,6 +20,7 @@ var _pfSearch    = '';   // live search query
 var _pfOwnerF    = '';   // owner/creator filter
 var _pfExpanded  = {};   // expanded row IDs in list {pfId: true}
 var _pfCenterMap = [];  // center lookup for proforma list clicks
+var _pfOpenPf = null;   // proforma object currently open in modal
 
 function _pfRoot() {
   return document.getElementById('pfVanillaRoot');
@@ -37,6 +39,54 @@ var PF_STATUS = {
 function pfStatusBadge(s) {
   var st = PF_STATUS[s] || { label: s, cls: 'bgr' };
   return '<span class="status-badge status-' + s + '">' + st.label + '</span>';
+}
+
+function _pfIsManager() {
+  return typeof _isManager === 'function' && _isManager();
+}
+
+function _pfCanUploadAttachments(pf) {
+  var pfId = (pf && pf.id) || _pfEditId;
+  if (!pfId) return false;
+  var status = pf ? pf.status : 'draft';
+  var isOwner = pf && pf.createdBy === currentUser;
+  if (status === 'draft' || status === 'sent') return isOwner || _pfIsManager();
+  if (status === 'approved') return _pfIsManager();
+  return false;
+}
+
+function _pfCanDeleteFile(pf, file) {
+  if (!pf) return true;
+  if (pf.status === 'draft') return (file.uploaded_by === currentUser) || _pfIsManager();
+  return _pfIsManager();
+}
+
+async function _pfLoadWarehouses() {
+  if (_pfWarehouses.length) return;
+  try {
+    var r = await fetch('/api/wms/warehouses');
+    if (r.ok) {
+      var list = await r.json();
+      _pfWarehouses = (list || []).filter(function(w) { return w.active !== false; });
+    }
+  } catch (e) { /* ignore */ }
+}
+
+async function pfWarehouseChange(sel) {
+  if (!_pfEditId) return;
+  var whId = sel.value || '';
+  try {
+    var r = await fetch('/api/proforma/' + _pfEditId, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wmsWarehouseId: whId }),
+    });
+    var data = await r.json();
+    if (!r.ok) { showToast('❌ ' + (data.error || 'خطا در ذخیره انبار')); return; }
+    showToast('✅ انبار خروج ذخیره شد');
+  } catch (e) {
+    showToast('❌ ' + e.message);
+  }
 }
 
 // ── Load from API ────────────────────────────────────────────────────────
@@ -59,6 +109,7 @@ async function renderProformaPanel() {
     await pfLoad();
     await _pfLoadWmsProds();
     _renderPfPanel(el);
+    _pfHandleDeepLink();
   } catch(e) {
     el.innerHTML = '<div style="padding:40px;text-align:center;color:#dc2626">خطا: ' + (e && e.message ? e.message : String(e)) + '</div>';
     console.error('[proforma] renderProformaPanel error:', e);
@@ -728,8 +779,10 @@ window._pfSaveNoteTexts = function() {
 
 // ── Show modal ────────────────────────────────────────────────────────────
 async function _pfShowModal(pf) { try {
+  _pfOpenPf = pf || null;
   var readOnly = pf && pf.status !== 'draft';
   if (pf && pf.id) { await _pfLoadFiles(pf.id); } else { _pfFiles = []; }
+  await _pfLoadWarehouses();
   var modal = document.getElementById('pfModal');
   if (!modal) {
     var div = document.createElement('div');
@@ -793,6 +846,20 @@ async function _pfShowModal(pf) { try {
 
   var productPicker = _pfBuildProductPicker(readOnly);
 
+  var whVal = pf ? (pf.wmsWarehouseId || '') : '';
+  var canEditWh = !pf || pf.status === 'draft' || pf.status === 'sent';
+  var whOpts = '<option value="">پیش‌فرض (اولین انبار فعال)</option>' +
+    _pfWarehouses.map(function(w) {
+      return '<option value="' + esc(w.id) + '"' + (w.id === whVal ? ' selected' : '') + '>' + esc(w.name) + '</option>';
+    }).join('');
+  var whLabel = whVal ? ((_pfWarehouses.find(function(w) { return w.id === whVal; }) || {}).name || whVal) : 'پیش‌فرض';
+  var whBlock = '<div style="margin-bottom:12px;padding:10px 12px;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px">' +
+    '<label style="font-size:11px;font-weight:700;color:#6d28d9;display:block;margin-bottom:4px">📦 انبار خروج (حواله)</label>' +
+    (canEditWh
+      ? '<select id="pfWarehouse" class="form-input" onchange="pfWarehouseChange(this)" style="max-width:360px">' + whOpts + '</select>'
+      : '<div style="font-size:13px;color:#374151">' + esc(whLabel) + '</div>') +
+    '<div style="font-size:10px;color:#7c3aed;margin-top:4px">پس از تأیید، حواله خروج (FEFO) در این انبار صادر می‌شود</div></div>';
+
   document.getElementById('pfModalBody').innerHTML =
     // ── Header row: customer + date + validity
     '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px;margin-bottom:12px">' +
@@ -807,6 +874,7 @@ async function _pfShowModal(pf) { try {
         '<input id="pfValid" type="number" class="form-input" value="' + validVal + '" ' + (readOnly?'disabled':'') + ' min="1" max="365">' +
       '</div>' +
     '</div>' +
+    whBlock +
     // ── Buyer Details (مشخصات کامل خریدار)
     '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:12px">' +
       '<div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:8px">📋 مشخصات کامل خریدار (خریدار فاکتور رسمی)</div>' +
@@ -905,7 +973,7 @@ async function _pfShowModal(pf) { try {
         '</div>' +
       '</div>' +
     '</div>' +
-    _pfRenderAttachmentsHtml(pf ? pf.id : null, readOnly) +
+    _pfRenderAttachmentsHtml(pf) +
     (pf && pf.actionNote ? '<div style="margin-top:10px;padding:10px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:12px"><strong>نظر مدیر:</strong> ' + esc(pf.actionNote) + '</div>' : '');
 
   document.getElementById('pfModalFooter').innerHTML =
@@ -1170,6 +1238,7 @@ async function pfSave() {
   var hasCommission  = !!(document.getElementById('pfHasCommission') && document.getElementById('pfHasCommission').checked);
   var commissionAmt  = Number(document.getElementById('pfCommissionAmt')  ? document.getElementById('pfCommissionAmt').value  : 0) || 0;
   var commissionNote = document.getElementById('pfCommissionNote') ? document.getElementById('pfCommissionNote').value.trim() : '';
+  var wmsWarehouseId = document.getElementById('pfWarehouse') ? document.getElementById('pfWarehouse').value : '';
 
   var body = {
     centerKey: centerKey, centerName: centerName,
@@ -1178,7 +1247,8 @@ async function pfSave() {
     jalaliDate: date, validDays: valid,
     buyerNatId: buyerNatId, buyerEcoCode: buyerEcoCode, buyerRegId: buyerRegId,
     buyerAddress: buyerAddress, buyerPhone: buyerPhone, buyerPostal: buyerPostal,
-    hasCommission: hasCommission, commissionAmt: commissionAmt, commissionNote: commissionNote
+    hasCommission: hasCommission, commissionAmt: commissionAmt, commissionNote: commissionNote,
+    wmsWarehouseId: wmsWarehouseId
   };
 
   try {
@@ -1713,25 +1783,46 @@ async function _pfLoadFiles(pfId) {
   } catch (e) {}
 }
 
-function _pfRenderAttachmentsHtml(pfId, readOnly) {
-  var canUpload = pfId && !readOnly;
+function _pfRenderAttachmentsHtml(pf) {
+  var canUpload = _pfCanUploadAttachments(pf);
   var list = _pfFiles.length
     ? _pfFiles.map(function(f) {
         var isImg = (f.mime_type || '').indexOf('image/') === 0;
         var viewBtn = '<button type="button" onclick="pfViewAttachment(' + f.id + ')" style="padding:3px 8px;font-size:11px;border:1px solid #bfdbfe;border-radius:5px;background:#eff6ff;color:#1d4ed8;cursor:pointer;font-family:inherit">' + (isImg ? '🖼️' : '📄') + ' مشاهده</button>';
-        var delBtn = (!readOnly ? ' <button type="button" onclick="pfDeleteAttachment(' + f.id + ')" style="padding:3px 8px;font-size:11px;border:1px solid #fecaca;border-radius:5px;background:#fef2f2;color:#b91c1c;cursor:pointer;font-family:inherit">حذف</button>' : '');
+        var delBtn = _pfCanDeleteFile(pf, f)
+          ? ' <button type="button" onclick="pfDeleteAttachment(' + f.id + ')" style="padding:3px 8px;font-size:11px;border:1px solid #fecaca;border-radius:5px;background:#fef2f2;color:#b91c1c;cursor:pointer;font-family:inherit">حذف</button>'
+          : '';
         return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:white;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:6px">' +
           '<div style="min-width:0;flex:1"><div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(f.filename) + '</div>' +
           '<div style="font-size:10px;color:#94a3b8">' + _pfFormatFileSize(f.file_size) + ' · ' + esc(f.uploaded_by || '') + '</div></div>' +
           '<div style="display:flex;gap:4px;flex-shrink:0">' + viewBtn + delBtn + '</div></div>';
       }).join('')
     : '<div style="font-size:12px;color:#94a3b8;padding:8px 0">پیوستی ثبت نشده</div>';
+  var pfId = (pf && pf.id) || _pfEditId;
   var uploadBox = canUpload
     ? '<label style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;cursor:pointer;font-size:12px;color:#475569;margin-top:8px">📎 افزودن تصویر / فایل<input type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none" onchange="pfUploadAttachment(this)"></label>'
     : (!pfId ? '<div style="font-size:11px;color:#f59e0b;margin-top:6px">💡 ابتدا پیشفاکتور را ذخیره کنید، سپس پیوست اضافه کنید.</div>' : '');
   return '<div style="margin-top:12px;border:1px solid #e2e8f0;border-radius:8px;padding:12px;background:#f8fafc">' +
     '<div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:8px">📎 پیوست‌ها (تصویر / فایل)</div>' +
     '<div id="pfAttachmentsList">' + list + '</div>' + uploadBox + '</div>';
+}
+
+function _pfRefreshAttachmentsUi() {
+  var wrap = document.getElementById('pfAttachmentsList');
+  if (!wrap || !wrap.parentElement) return;
+  var html = _pfRenderAttachmentsHtml(_pfOpenPf);
+  var tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  var nl = tmp.querySelector('#pfAttachmentsList');
+  var lb = tmp.querySelector('label');
+  if (nl) wrap.innerHTML = nl.innerHTML;
+  var oldLb = wrap.parentElement.querySelector('label');
+  if (lb) {
+    if (oldLb) oldLb.replaceWith(lb);
+    else wrap.parentElement.appendChild(lb);
+  } else if (oldLb) {
+    oldLb.remove();
+  }
 }
 
 function pfViewAttachment(fileId) { window.open('/api/proforma/files/' + fileId, '_blank'); }
@@ -1749,15 +1840,7 @@ async function pfUploadAttachment(input) {
     if (!r.ok) { showToast('❌ ' + (data.error || 'خطا')); return; }
     showToast('✅ فایل پیوست شد');
     await _pfLoadFiles(_pfEditId);
-    var wrap = document.getElementById('pfAttachmentsList');
-    if (wrap && wrap.parentElement) {
-      var tmp = document.createElement('div');
-      tmp.innerHTML = _pfRenderAttachmentsHtml(_pfEditId, false);
-      var nl = tmp.querySelector('#pfAttachmentsList');
-      var lb = tmp.querySelector('label');
-      if (nl) wrap.innerHTML = nl.innerHTML;
-      if (lb && !wrap.parentElement.querySelector('label')) wrap.parentElement.appendChild(lb);
-    }
+    _pfRefreshAttachmentsUi();
   } catch (e) { showToast('❌ خطا: ' + e.message); }
   input.value = '';
 }
@@ -1770,13 +1853,7 @@ async function pfDeleteAttachment(fileId) {
     if (!r.ok) { showToast('❌ ' + (data.error || 'خطا')); return; }
     showToast('🗑️ پیوست حذف شد');
     await _pfLoadFiles(_pfEditId);
-    var wrap = document.getElementById('pfAttachmentsList');
-    if (wrap) {
-      var tmp = document.createElement('div');
-      tmp.innerHTML = _pfRenderAttachmentsHtml(_pfEditId, false);
-      var nl = tmp.querySelector('#pfAttachmentsList');
-      if (nl) wrap.innerHTML = nl.innerHTML;
-    }
+    _pfRefreshAttachmentsUi();
   } catch (e) { showToast('❌ ' + e.message); }
 }
 
@@ -1950,4 +2027,16 @@ function pfSaveSellerInfo() {
   saveDB();
   if (typeof closeModal === 'function') closeModal('pfSellerModal');
   if (typeof showToast === 'function') showToast('✅ مشخصات فروشنده ذخیره شد');
+}
+
+function _pfHandleDeepLink() {
+  var m = /[?&]pf=([^&]+)/.exec(window.location.search || '');
+  if (!m) return;
+  var pfId = decodeURIComponent(m[1]);
+  var pf = _pfList.find(function(p) { return p.id === pfId; });
+  if (!pf) return;
+  setTimeout(function() { pfOpenEdit(pfId); }, 200);
+  if (window.history && window.history.replaceState) {
+    window.history.replaceState({}, '', window.location.pathname);
+  }
 }

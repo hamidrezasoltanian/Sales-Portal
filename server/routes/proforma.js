@@ -60,6 +60,7 @@ const CreateSchema = z.object({
   hasCommission:  z.coerce.boolean().default(false),
   commissionAmt:  z.coerce.number().min(0).default(0),
   commissionNote: z.string().default(''),
+  wmsWarehouseId: z.string().default(''),
 });
 
 const ActionSchema = z.object({
@@ -80,6 +81,9 @@ function canViewProforma(user, row) {
 function canEditProforma(user, row) {
   if (isSuperAdminRole(user.role)) return true;
   if (row.status === 'draft') {
+    return row.created_by === user.username || isManagerRole(user.role);
+  }
+  if (row.status === 'sent') {
     return row.created_by === user.username || isManagerRole(user.role);
   }
   if (row.status === 'approved') return isManagerRole(user.role);
@@ -132,6 +136,7 @@ function rowToObj(r) {
     buyerPhone:     r.buyer_phone || '',
     buyerPostal:    r.buyer_postal || '',
     wmsDispatchIds: r.wms_dispatch_ids || [],
+    wmsWarehouseId: r.wms_warehouse_id || '',
   };
 }
 
@@ -206,21 +211,22 @@ router.post('/', requireAuth, async (req, res) => {
           subtotal, discount_pct, disc_amt, tax_pct, tax_amt, total,
           note, manager_note, buyer_nat_id, buyer_eco_code, buyer_reg_id,
           buyer_address, buyer_phone, buyer_postal,
-          has_commission, commission_amt, commission_note,
+          has_commission, commission_amt, commission_note, wms_warehouse_id,
           status, created_by, created_at, updated_at)
        VALUES 
          ($1, $2, $3, $4, $5, $6, $7, 
           $8, $9, $10, $11, $12, $13, 
           $14, $15, $16, $17, $18, 
           $19, $20, $21, 
-          $22, $23, $24, 
-          'draft', $25, NOW(), NOW())
+          $22, $23, $24, $25,
+          'draft', $26, NOW(), NOW())
        RETURNING *`,
       [id, no, d.jalaliDate||null, d.validDays, d.centerKey, d.centerName,
        JSON.stringify(itemsFull), subtotal, d.discountPct, discAmt,
        d.taxPct, taxAmt, total, d.note, d.managerNote,
        d.buyerNatId, d.buyerEcoCode, d.buyerRegId, d.buyerAddress, d.buyerPhone, d.buyerPostal,
        d.hasCommission||false, d.commissionAmt||0, d.commissionNote||'',
+       d.wmsWarehouseId || null,
        req.user.username]
     );
     res.status(201).json(rowToObj(r.rows[0]));
@@ -274,8 +280,8 @@ router.delete('/files/:fileId', requireAuth, async (req, res) => {
     const isOwner = row.uploaded_by === req.user.username;
     const isMgr = isManagerRole(req.user.role);
     if (!isOwner && !isMgr) return res.status(403).json({ error: 'دسترسی ندارید' });
-    if (row.status !== 'draft' && !isMgr) {
-      return res.status(400).json({ error: 'فقط در وضعیت پیش‌نویس قابل حذف است' });
+    if (!['draft', 'sent'].includes(row.status) && !isMgr) {
+      return res.status(400).json({ error: 'فقط در وضعیت پیش‌نویس یا ارسال‌شده قابل حذف است' });
     }
     await query('DELETE FROM proforma_files WHERE id = $1', [fileId]);
     res.json({ ok: true });
@@ -332,8 +338,11 @@ router.post('/:id/files', requireAuth, handleUpload, async (req, res) => {
     const pf = await query('SELECT id, status, created_by FROM proformas WHERE id = $1', [req.params.id]);
     if (!pf.rows.length) return res.status(404).json({ error: 'پیشفاکتور یافت نشد' });
     const row = pf.rows[0];
-    const canUpload = ['draft', 'sent'].includes(row.status) &&
-      (row.created_by === req.user.username || isManagerRole(req.user.role));
+    const isMgr = isManagerRole(req.user.role);
+    const canUpload =
+      (['draft', 'sent'].includes(row.status) &&
+        (row.created_by === req.user.username || isMgr)) ||
+      (row.status === 'approved' && isMgr);
     if (!canUpload) {
       return res.status(403).json({ error: 'در این وضعیت امکان افزودن پیوست نیست' });
     }
@@ -380,8 +389,8 @@ router.put('/:id', requireAuth, async (req, res) => {
     if (!canEditProforma(req.user, row) && !isSuperAdmin) {
       return res.status(403).json({ error: 'دسترسی ویرایش ندارید' });
     }
-    if (!['draft','approved'].includes(row.status) && !isSuperAdmin) {
-      return res.status(400).json({ error: 'فقط پیش‌نویس یا تایید شده قابل ویرایش است (سوپر ادمین می‌تواند هر وضعیتی را ویرایش کند)' });
+    if (!['draft','approved','sent'].includes(row.status) && !isSuperAdmin) {
+      return res.status(400).json({ error: 'فقط پیش‌نویس، ارسال‌شده یا تایید شده قابل ویرایش است (سوپر ادمین می‌تواند هر وضعیتی را ویرایش کند)' });
     }
 
     const d = validate(CreateSchema.partial(), req.body, res);
@@ -424,9 +433,10 @@ router.put('/:id', requireAuth, async (req, res) => {
          buyer_nat_id=$14, buyer_eco_code=$15, buyer_reg_id=$16, buyer_address=$17,
          buyer_phone=$18, buyer_postal=$19,
          has_commission=$20, commission_amt=$21, commission_note=$22,
+         wms_warehouse_id=$23,
          updated_at=NOW(),
-         versions = versions || $23::jsonb
-       WHERE id=$24 RETURNING *`,
+         versions = versions || $24::jsonb
+       WHERE id=$25 RETURNING *`,
       [d.jalaliDate||pf.jalaliDate, d.validDays||pf.validDays,
        d.centerKey||pf.centerKey, d.centerName||pf.centerName,
        JSON.stringify(items), subtotal, discPct, discAmt,
@@ -441,6 +451,7 @@ router.put('/:id', requireAuth, async (req, res) => {
        d.hasCommission!==undefined?d.hasCommission:pf.hasCommission,
        d.commissionAmt!==undefined?d.commissionAmt:pf.commissionAmt,
        d.commissionNote!==undefined?d.commissionNote:pf.commissionNote,
+       d.wmsWarehouseId !== undefined ? (d.wmsWarehouseId || null) : (pf.wmsWarehouseId || null),
        JSON.stringify([snapshot]),
        req.params.id]
     );

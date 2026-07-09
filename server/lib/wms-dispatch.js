@@ -6,6 +6,13 @@ function _genId() {
   return 'wms_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
+/** CRM center_key maps 1:1 to WMS counterparty id (center_* / pc_*). */
+function resolveCounterpartyFromCenterKey(centerKey) {
+  if (!centerKey || typeof centerKey !== 'string') return null;
+  if (/^(center_|pc_)/.test(centerKey)) return centerKey;
+  return null;
+}
+
 async function _nextTxnNo(client, type) {
   const prefix = type === 'exit' ? 'EXT' : 'ENT';
   const settingKey = type === 'exit' ? 'seq_exit' : 'seq_entry';
@@ -45,6 +52,18 @@ async function _defaultWarehouseId(client) {
   return r.rows[0]?.id || null;
 }
 
+async function _resolveWarehouseId(client, proforma) {
+  const wh = proforma.wms_warehouse_id || proforma.wmsWarehouseId;
+  if (wh) {
+    const r = await client.query(
+      'SELECT id FROM wms_warehouses WHERE id = $1 AND active = true',
+      [wh]
+    );
+    if (r.rows.length) return r.rows[0].id;
+  }
+  return _defaultWarehouseId(client);
+}
+
 /**
  * Create pending WMS exit transactions (حواله خروج) from an approved proforma.
  * Uses FEFO lot allocation — one transaction row per lot chunk (matches WMS approve flow).
@@ -68,10 +87,14 @@ async function createDispatchFromProforma(proforma, byUser) {
       };
     }
 
-    const warehouseId = await _defaultWarehouseId(client);
+    const warehouseId = await _resolveWarehouseId(client, proforma);
     if (!warehouseId) {
       throw new Error('انبار فعالی در سیستم WMS تعریف نشده است');
     }
+
+    const counterpartyId = resolveCounterpartyFromCenterKey(
+      proforma.center_key || proforma.centerKey || ''
+    );
 
     const items = Array.isArray(proforma.items) ? proforma.items : [];
     const txnIds = [];
@@ -95,7 +118,6 @@ async function createDispatchFromProforma(proforma, byUser) {
         [productId, warehouseId]
       );
 
-      let allocated = 0;
       for (const lot of lotsRes.rows) {
         if (rem <= 0) break;
         const lotQty = Number(lot.qty) || 0;
@@ -110,12 +132,13 @@ async function createDispatchFromProforma(proforma, byUser) {
         await client.query(
           `INSERT INTO wms_transactions
              (id, txn_no, type, txn_type, product_id, lot_id, warehouse_id, qty,
-              unit_price, sale_price, by_user, txn_date, status, note, ref_no, proforma_id)
-           VALUES ($1,$2,'exit','sale',$3,$4,$5,$6,$7,$8,$9,NOW(),'pending',$10,$11,$12)`,
+              unit_price, sale_price, counterparty_id, by_user, txn_date, status, note, ref_no, proforma_id)
+           VALUES ($1,$2,'exit','sale',$3,$4,$5,$6,$7,$8,$9,$10,NOW(),'pending',$11,$12,$13)`,
           [
             id, txnNo, productId, lot.id, warehouseId, take,
             Number(lot.purchase_price) || 0,
             Number(item.unitPrice) || 0,
+            counterpartyId,
             byUser || null,
             note,
             proforma.no || '',
@@ -124,7 +147,6 @@ async function createDispatchFromProforma(proforma, byUser) {
         );
         txnIds.push(id);
         rem -= take;
-        allocated += take;
       }
 
       if (rem > 0) {
@@ -135,11 +157,13 @@ async function createDispatchFromProforma(proforma, byUser) {
         await client.query(
           `INSERT INTO wms_transactions
              (id, txn_no, type, txn_type, product_id, lot_id, warehouse_id, qty,
-              unit_price, sale_price, by_user, txn_date, status, note, ref_no, proforma_id)
-           VALUES ($1,$2,'exit','sale',$3,NULL,$4,$5,$6,$7,$8,NOW(),'pending',$9,$10,$11)`,
+              unit_price, sale_price, counterparty_id, by_user, txn_date, status, note, ref_no, proforma_id)
+           VALUES ($1,$2,'exit','sale',$3,NULL,$4,$5,$6,$7,$8,$9,NOW(),'pending',$10,$11,$12)`,
           [
             id, txnNo, productId, warehouseId, rem,
-            0, Number(item.unitPrice) || 0, byUser || null,
+            0, Number(item.unitPrice) || 0,
+            counterpartyId,
+            byUser || null,
             note, proforma.no || '', proforma.id,
           ]
         );
@@ -176,4 +200,8 @@ async function getDispatchForProforma(proformaId) {
   return r.rows;
 }
 
-module.exports = { createDispatchFromProforma, getDispatchForProforma };
+module.exports = {
+  createDispatchFromProforma,
+  getDispatchForProforma,
+  resolveCounterpartyFromCenterKey,
+};

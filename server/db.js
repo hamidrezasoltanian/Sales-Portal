@@ -558,6 +558,7 @@ async function initSchema() {
   `);
   await query(`CREATE INDEX IF NOT EXISTS idx_proforma_files_pf ON proforma_files(proforma_id)`);
   await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS wms_dispatch_ids JSONB DEFAULT '[]'`);
+  await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS wms_warehouse_id VARCHAR(50)`).catch(() => {});
   await query(`ALTER TABLE wms_transactions ADD COLUMN IF NOT EXISTS proforma_id VARCHAR(50)`).catch(() => {});
   await query(`CREATE INDEX IF NOT EXISTS idx_wms_txn_proforma ON wms_transactions(proforma_id)`).catch(() => {});
 

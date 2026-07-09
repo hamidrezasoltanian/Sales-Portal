@@ -129,7 +129,7 @@ function rowToTransaction(r) {
            toWarehouseId:r.to_warehouse_id, by:r.by_user,
            date:r.txn_date, status:r.status, note:r.note, refNo:r.ref_no,
            imedStatus:r.imed_status, imedRefNo:r.imed_ref_no, imedDate:r.imed_date,
-           ttacNo:r.ttac_no };
+           ttacNo:r.ttac_no, proformaId:r.proforma_id || null };
 }
 function rowToPO(r) {
   return { id:r.id, poNo:r.po_no, supplierId:r.supplier_id, warehouseId:r.warehouse_id,
@@ -744,8 +744,8 @@ router.post('/transactions', requireAuth, async (req, res) => {
         `INSERT INTO wms_transactions
            (id,txn_no,type,txn_type,product_id,lot_id,warehouse_id,qty,unit_price,sale_price,
             counterparty_id,from_warehouse_id,to_warehouse_id,by_user,txn_date,status,note,
-            ref_no,imed_status,imed_ref_no,imed_date,ttac_no)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+            ref_no,imed_status,imed_ref_no,imed_date,ttac_no,proforma_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
          RETURNING *`,
         [id, txnNo, b.type, b.txnType||'',
          b.productId, b.lotId||null, b.warehouseId||null,
@@ -753,7 +753,8 @@ router.post('/transactions', requireAuth, async (req, res) => {
          b.fromWarehouseId||null, b.toWarehouseId||null,
          b.by || req.user.username || null,
          b.date||new Date(), b.status||'pending', b.note||'',
-         b.refNo||'', b.imedStatus||'not_registered', b.imedRefNo||'', b.imedDate||'', b.ttacNo||'']
+         b.refNo||'', b.imedStatus||'not_registered', b.imedRefNo||'', b.imedDate||'', b.ttacNo||'',
+         b.proformaId || null]
       );
 
       // If approved immediately, update lot qty atomically

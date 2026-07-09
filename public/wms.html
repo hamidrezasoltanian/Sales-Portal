@@ -2334,7 +2334,7 @@ function suggestFEFO(){
 function renderPendExits(){
   const rows=S.transactions.filter(t=>t.type==='exit'&&t.status==='pending');
   document.getElementById('pendExits').innerHTML=rows.length?rows.map(t=>`<tr>
-    <td><code>${t.txnNo}</code></td>
+    <td><code>${t.txnNo}</code>${t.proformaId?` <a href="/?pf=${encodeURIComponent(t.proformaId)}" target="_blank" rel="noopener" title="پیشفاکتور" style="font-size:10px;color:#6d28d9">📄</a>`:''}</td>
     <td><span class="chip">${TXNT_EXIT[t.txnType]||t.txnType}</span></td>
     <td>${pn(t.productId)}</td>
     <td>${fmt(t.qty)}</td>
@@ -2343,7 +2343,7 @@ function renderPendExits(){
     <td>${fmtDate(t.date)}</td>
     <td><button class="btn btn-xs btn-primary" onclick="openPrint('${t.id}')">🖨️</button></td></tr>`).join(''):emptyRow(8,'خروج معلقی وجود ندارد');
 }
-function submitExit(){
+async function submitExit(){
   const type=document.getElementById('exType').value;
   const pid=document.getElementById('exProd').value;
   const whId=document.getElementById('exWh').value;
@@ -2361,18 +2361,30 @@ function submitExit(){
   const lots=S.lots.filter(l=>l.productId===pid&&l.qty>0&&l.warehouseId===whId).sort((a,b)=>new Date(a.expiry)-new Date(b.expiry));
   const total=lots.reduce((s,l)=>s+l.qty,0);
   if(total<qty){toast('موجودی کافی نیست','e');return;}
-  const firstLot=lots[0];
-  const txnNo=nextSeq('exit');
   const imedStEx=document.getElementById('exImed')?.value||'not_registered';
-  const courier=document.getElementById('exCourier')?.value||'';
-  const trackingNo=document.getElementById('exTracking')?.value.trim()||'';
-  const delivPhone=document.getElementById('exDelivPhone')?.value.trim()||'';
   const imedRefEx=document.getElementById('exImedRef')?.value.trim()||'';
-  const txn={id:uid(),txnNo,type:'exit',txnType:type,productId:pid,lotId:firstLot.id,warehouseId:whId,qty,unitPrice:firstLot.purchasePrice,salePrice,counterpartyId:cpId||'',fromWarehouseId:null,toWarehouseId:toWh||null,by:currentUserId,date:new Date().toISOString(),status:'pending',note,refNo:ref,imedStatus:imedStEx,imedRefNo:imedRefEx,imedDate:imedStEx==='registered'?new Date().toISOString():''};
-  S.transactions.push(txn); saveS();
-  logAudit('exit_created','transaction',txn.id,`خروج ${prod(pid).name} — ${qty} عدد → ${cp(cpId||'').name}`);
+  const useFefo=type==='sale'||type==='consignment_out'||type==='sample';
+  const chunks=useFefo?(()=>{let rem=qty;const out=[];for(const l of lots){if(rem<=0)break;const take=Math.min(rem,l.qty);if(take>0){out.push({lot:l,qty:take});rem-=take;}}return out;})():[{lot:lots[0],qty}];
+  const created=[];
+  try{
+    for(const ch of chunks){
+      const payload={
+        type:'exit',txnType:type,productId:pid,lotId:ch.lot.id,warehouseId:whId,qty:ch.qty,
+        unitPrice:ch.lot.purchasePrice||0,salePrice,counterpartyId:cpId||null,
+        toWarehouseId:toWh||null,by:currentUserId,date:new Date().toISOString(),
+        status:'pending',note,refNo:ref,imedStatus:imedStEx,imedRefNo:imedRefEx,
+        imedDate:imedStEx==='registered'?new Date().toISOString():''
+      };
+      const res=await fetch('/api/wms/transactions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const data=await res.json();
+      if(!res.ok){toast(data.error||'خطا در ثبت حواله','e');return;}
+      S.transactions.push(data);
+      created.push(data);
+    }
+  }catch(e){toast('خطای شبکه در ثبت حواله','e');return;}
+  logAudit('exit_created','transaction',created[0]?.id||'',`خروج ${prod(pid).name} — ${qty} عدد → ${cp(cpId||'').name}`);
   clearExit(); renderPendExits(); updateBadges();
-  toast(`حواله خروج ثبت شد — ${txnNo} — در انتظار تأیید`,'w');
+  toast(`حواله خروج ثبت شد — ${created.map(t=>t.txnNo).join('، ')} — در انتظار تأیید`,'w');
 }
 
 // ══════════════════════════════════════════
@@ -2432,6 +2444,8 @@ function renderAppr(){
           <div style="font-weight:700;font-size:14px">${t.txnNo} — ${p.fullName||p.name} — ${fmt(t.qty)} ${p.unit}</div>
           <div style="font-size:12px;color:var(--text3);margin-top:3px">
             ${t.type==='entry'?'ورود':'خروج'} | Lot: ${l?l.lotNo:'?'} | ${cp(t.counterpartyId).name} | ${wh(t.warehouseId).name} | ثبت: ${usr(t.by).name} | ${fmtDate(t.date)}
+            ${t.refNo?` | مرجع: <code>${t.refNo}</code>`:''}
+            ${t.proformaId?` | <a href="/?pf=${encodeURIComponent(t.proformaId)}" target="_blank" rel="noopener" style="color:#6d28d9">📄 پیشفاکتور</a>`:''}
             ${t.note?`<br>یادداشت: ${t.note}`:''}
           </div>
         </div>

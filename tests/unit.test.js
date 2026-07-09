@@ -1,6 +1,7 @@
 'use strict';
 
 const { mergeNoteArrays } = require('../server/lib/db-merge');
+const { resolveCounterpartyFromCenterKey } = require('../server/lib/wms-dispatch');
 
 let passed = 0;
 let failed = 0;
@@ -35,6 +36,12 @@ const merged2 = mergeNoteArrays(
   [{ text: 'a', by: 'u1', date: '1' }, { text: 'b', by: 'u2', date: '2' }]
 );
 assert(merged2.length === 2, 'mergeNoteArrays dedupes identical notes');
+
+console.log('\n📦 WMS dispatch helpers');
+assert(resolveCounterpartyFromCenterKey('center_c_12') === 'center_c_12', 'center key maps to counterparty');
+assert(resolveCounterpartyFromCenterKey('pc_tehran||3') === 'pc_tehran||3', 'pc key maps to counterparty');
+assert(resolveCounterpartyFromCenterKey('') === null, 'empty key returns null');
+assert(resolveCounterpartyFromCenterKey('foo') === null, 'invalid key returns null');
 
 console.log('\n────────────────────────────────');
 console.log('Results: ' + passed + ' passed, ' + failed + ' failed');
