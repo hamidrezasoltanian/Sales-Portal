@@ -1,5 +1,4 @@
 import { createApp } from 'vue';
-import ProformaPanel from './components/ProformaPanel.vue';
 import NotificationsPanel from './components/NotificationsPanel.vue';
 import TasksPanel from './components/TasksPanel.vue';
 import LettersPanel from './components/LettersPanel.vue';
@@ -13,20 +12,7 @@ fetch('/api/auth/me')
     const username = user.username || '';
     const isManager = userRole === 'مدیر' || userRole === 'سوپر ادمین';
 
-    // ProformaPanel
-    const pfEl = document.getElementById('vue-proforma');
-    if (pfEl) {
-      const instance = createApp(ProformaPanel, {
-        userRole,
-        onNew:     () => (window as any)._pfNew?.(),
-        onView:    (pf: any) => (window as any)._pfView?.(pf),
-        onSend:    (pf: any) => (window as any)._pfSend?.(pf),
-        onApprove: (pf: any) => (window as any)._pfApprove?.(pf),
-        onReject:  (pf: any) => (window as any)._pfReject?.(pf),
-      });
-      const mounted = instance.mount(pfEl);
-      (window as any)._pfVueRefresh = () => (mounted as any).refresh?.();
-    }
+    // ProformaPanel — vanilla proforma.js owns the UI (#pfVanillaRoot); Vue mount disabled.
 
     // NotificationsPanel
     const notifEl = document.getElementById('vue-notifications');

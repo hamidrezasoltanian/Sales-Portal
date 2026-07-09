@@ -16,11 +16,15 @@ function isManager(role) {
 async function nextInvoiceNo(jalaliDate) {
   const year = (jalaliDate || '').split('/')[0] || String(new Date().getFullYear());
   const r = await query(
-    `SELECT COUNT(*) AS cnt FROM invoices WHERE invoice_no LIKE $1`,
+    `SELECT MAX(CAST(SUBSTRING(invoice_no FROM '\\d+$') AS INTEGER)) AS max_seq
+     FROM invoices WHERE invoice_no LIKE $1`,
     [`INV-${year}-%`]
   );
-  const n = (parseInt(r.rows[0].cnt) || 0) + 1;
-  return `INV-${year}-${String(n).padStart(4, '0')}`;
+  let nextSeq = 1;
+  if (r.rows.length > 0 && r.rows[0].max_seq !== null) {
+    nextSeq = parseInt(r.rows[0].max_seq, 10) + 1;
+  }
+  return `INV-${year}-${String(nextSeq).padStart(4, '0')}`;
 }
 
 // GET /api/invoices
@@ -60,9 +64,18 @@ router.get('/', requireAuth, async (req, res) => {
 // POST /api/invoices/from-proforma/:id — convert approved proforma to invoice
 router.post('/from-proforma/:id', requireAuth, async (req, res) => {
   try {
+    if (!isManager(req.user.role)) {
+      return res.status(403).json({ error: 'فقط مدیر می‌تواند فاکتور صادر کند' });
+    }
+
     // Check if invoice already exists for this proforma
     const existing = await query('SELECT id, invoice_no FROM invoices WHERE proforma_id = $1', [req.params.id]);
     if (existing.rows.length) {
+      await query(
+        `UPDATE proformas SET status = 'invoiced', updated_at = NOW()
+         WHERE id = $1 AND status = 'approved'`,
+        [req.params.id]
+      );
       return res.json({ already: true, invoice: existing.rows[0] });
     }
 
@@ -79,9 +92,10 @@ router.post('/from-proforma/:id', requireAuth, async (req, res) => {
 
     const items = pf.items || [];
     const subtotal = parseFloat(pf.subtotal) || 0;
-    const taxPct = parseFloat(req.body.tax_pct) || 9;
-    const taxAmt = Math.round(subtotal * taxPct / 100);
-    const total = subtotal + taxAmt;
+    const discAmt  = parseFloat(pf.disc_amt) || 0;
+    const taxPct   = parseFloat(pf.tax_pct) || parseFloat(req.body.tax_pct) || 9;
+    const taxAmt   = parseFloat(pf.tax_amt) || Math.round((subtotal - discAmt) * taxPct / 100);
+    const total    = parseFloat(pf.total) || (subtotal - discAmt + taxAmt);
 
     const r = await query(
       `INSERT INTO invoices (id, invoice_no, proforma_id, jalali_date, center_key, center_name, items, subtotal, tax_pct, tax_amt, total, status, created_by)
@@ -89,6 +103,12 @@ router.post('/from-proforma/:id', requireAuth, async (req, res) => {
       [id, invoiceNo, pf.id, jalaliDate, pf.center_key, pf.center_name,
        JSON.stringify(items), subtotal, taxPct, taxAmt, total, req.user.username]
     );
+
+    await query(
+      `UPDATE proformas SET status = 'invoiced', updated_at = NOW() WHERE id = $1`,
+      [pf.id]
+    );
+
     res.status(201).json(r.rows[0]);
   } catch (e) {
     console.error('[invoices from-proforma]', e.message);

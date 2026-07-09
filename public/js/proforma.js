@@ -20,6 +20,10 @@ var _pfOwnerF    = '';   // owner/creator filter
 var _pfExpanded  = {};   // expanded row IDs in list {pfId: true}
 var _pfCenterMap = [];  // center lookup for proforma list clicks
 
+function _pfRoot() {
+  return document.getElementById('pfVanillaRoot');
+}
+
 // ── Status labels & colors ───────────────────────────────────────────────
 var PF_STATUS = {
   draft:     { label: 'پیش‌نویس',   cls: 'bgr' },
@@ -48,7 +52,7 @@ async function pfLoad() {
 
 // ── Render tab panel ─────────────────────────────────────────────────────
 async function renderProformaPanel() {
-  var el = document.getElementById('proformaPanel');
+  var el = _pfRoot();
   if (!el) return;
   try {
     el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8">در حال بارگذاری…</div>';
@@ -87,7 +91,7 @@ function _pfApplySearch(list) {
 
 function _pfToggleExpand(id) {
   _pfExpanded[id] = !_pfExpanded[id];
-  var el = document.getElementById('proformaPanel');
+  var el = document.getElementById('pfVanillaRoot');
   if (el) _renderPfPanel(el);
 }
 
@@ -119,13 +123,13 @@ function _renderPfPanel(el) {
   var searchBar =
     '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px">' +
       '<input id="pfSearchInp" type="text" placeholder="🔍 جستجو: مرکز، کالا، کد کاتالوگ، مسئول مرکز..." value="' + esc(_pfSearch) + '" ' +
-        'oninput="if(window._pfSearchTimer)clearTimeout(window._pfSearchTimer);window._pfSearchTimer=setTimeout(function(){_pfSearch=document.getElementById(\'pfSearchInp\').value;_pfPage=0;var el=document.getElementById(\'proformaPanel\');if(el)_renderPfPanel(el);},500)" ' +
+        'oninput="if(window._pfSearchTimer)clearTimeout(window._pfSearchTimer);window._pfSearchTimer=setTimeout(function(){_pfSearch=document.getElementById(\'pfSearchInp\').value;_pfPage=0;var el=document.getElementById(\'pfVanillaRoot\');if(el)_renderPfPanel(el);},500)" ' +
         'style="flex:1;min-width:200px;padding:7px 12px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:13px;outline:none" autocomplete="off">' +
-      '<select onchange="_pfOwnerF=this.value;_pfPage=0;var el=document.getElementById(\'proformaPanel\');if(el)_renderPfPanel(el)" ' +
+      '<select onchange="_pfOwnerF=this.value;_pfPage=0;var el=document.getElementById(\'pfVanillaRoot\');if(el)_renderPfPanel(el)" ' +
         'style="padding:7px 10px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:12px">' +
         ownerOpts +
       '</select>' +
-      (_pfSearch||_pfOwnerF ? '<button onclick="_pfSearch=\'\';_pfOwnerF=\'\';_pfPage=0;var el=document.getElementById(\'proformaPanel\');if(el)_renderPfPanel(el)" style="padding:6px 12px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer">✕ پاک کردن</button>' : '') +
+      (_pfSearch||_pfOwnerF ? '<button onclick="_pfSearch=\'\';_pfOwnerF=\'\';_pfPage=0;var el=document.getElementById(\'pfVanillaRoot\');if(el)_renderPfPanel(el)" style="padding:6px 12px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer">✕ پاک کردن</button>' : '') +
       '<span style="font-size:12px;color:#94a3b8;white-space:nowrap">' + filtered.length + ' پیشفاکتور</span>' +
     '</div>';
 
@@ -198,7 +202,7 @@ function _renderPfPanel(el) {
     return mainRow + expandRow;
   }).join('') : '<tr><td colspan="8" style="text-align:center;padding:40px;color:#94a3b8">پیشفاکتوری یافت نشد</td></tr>';
 
-  el.innerHTML =
+  el.innerHTML = _pfBuildPendingQueueHtml() +
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap">' + filterBtns + '</div>' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
@@ -238,67 +242,84 @@ function _pfCreatorName(uid) {
   return m ? m.name : uid;
 }
 
-// ── Helper: get center owner name from frontend cache ───────────────────────
+function _pfParseCenterKey(centerKey) {
+  if (!centerKey) return { rtype: null, rid: null };
+  var us = centerKey.indexOf('_');
+  if (us < 0) return { rtype: null, rid: null };
+  return { rtype: centerKey.slice(0, us), rid: centerKey.slice(us + 1) };
+}
+
+// ── Helper: canonical center owner (same chain as _wpGetOwner) ─────────────
+function _pfGetCenterOwnerId(centerKey) {
+  var parsed = _pfParseCenterKey(centerKey);
+  var rtype = parsed.rtype, rid = parsed.rid;
+  if (!rtype || !rid) return null;
+
+  if (typeof getE === 'function') {
+    var e = getE(rtype, rid);
+    if (e && e.owner) return e.owner;
+  }
+  if (rtype === 'center' && typeof CENTERS !== 'undefined') {
+    var c = CENTERS.find(function(x) { return x.id === rid; });
+    if (c && c.owner) return c.owner;
+  }
+  if (rtype === 'pc') {
+    if (typeof _buildPCCache === 'function') { try { _buildPCCache(); } catch (_) {} }
+    if (typeof _PC_CACHE !== 'undefined') {
+      var provId = rid.split('||')[0];
+      var arr = _PC_CACHE[provId] || [];
+      var pc = arr.find(function(x) { return x.id === rid; });
+      if (pc && pc.owner) return pc.owner;
+    }
+  }
+  if (typeof DB !== 'undefined' && DB.extra) {
+    var extra = DB.extra.find(function(x) { return x.id === rid; });
+    if (extra && extra.owner) return extra.owner;
+  }
+  return null;
+}
+
 function _pfGetCenterOwner(centerKey) {
   if (!centerKey) return '—';
-  var parts = centerKey.split('_');
-  var rtype = parts[0];
-  var rid = parts.slice(1).join('_');
-  var ownerId = null;
-
-  // ۱. بررسی سرنخ‌ها و مراکز فرعی (DB.extra)
-  if (typeof DB !== 'undefined' && DB.extra) {
-    var extra = DB.extra.find(function(c) { return c.id === rid; });
-    if (extra && extra.owner) ownerId = extra.owner;
-  }
-
-  // ۲. بررسی مراکز استانی (PC) برای یافتن مالک کل استان
-  if (!ownerId && rtype === 'pc' && typeof DB !== 'undefined' && DB.settings && DB.settings.provinces) {
-    var provId = rid.split('||')[0];
-    var prov = DB.settings.provinces.find(function(p) { return p.id === provId; });
-    if (prov && prov.owner) ownerId = prov.owner;
-  }
-
-  // در صورت نیاز، منطق مراکز تهران (center) را هم می‌توان اینجا اضافه کرد
-  
+  var ownerId = _pfGetCenterOwnerId(centerKey);
   return ownerId ? _pfCreatorName(ownerId) : 'نامشخص';
 }
 
-// ── Helper: get center owner ID (for filtering) ───────────────────────────
-function _pfGetCenterOwnerId(centerKey) {
-  if (!centerKey) return null;
-  var parts = centerKey.split('_');
-  var rtype = parts[0];
-  var rid = parts.slice(1).join('_');
-  var ownerId = null;
-
-  // ۱. بررسی سرنخ‌ها و مراکز فرعی (DB.extra)
-  if (typeof DB !== 'undefined' && DB.extra) {
-    var extra = DB.extra.find(function(c) { return c.id === rid; });
-    if (extra && extra.owner) ownerId = extra.owner;
-  }
-
-  // ۲. بررسی مراکز استانی (PC) برای یافتن مالک کل استان
-  if (!ownerId && rtype === 'pc' && typeof DB !== 'undefined' && DB.settings && DB.settings.provinces) {
-    var provId = rid.split('||')[0];
-    var prov = DB.settings.provinces.find(function(p) { return p.id === provId; });
-    if (prov && prov.owner) ownerId = prov.owner;
-  }
-
-  return ownerId;
+function _pfBuildPendingQueueHtml() {
+  if (typeof _isManager !== 'function' || !_isManager()) return '';
+  var pending = _pfList.filter(function(p) { return p.status === 'sent'; });
+  if (!pending.length) return '';
+  var cards = pending.map(function(pf) {
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:white;border:1px solid #bfdbfe;border-radius:8px;margin-bottom:6px;flex-wrap:wrap">' +
+      '<div style="flex:1;min-width:180px">' +
+        '<div style="font-weight:700;font-size:13px;color:#1e40af">' + esc(pf.no) + ' — ' + esc(pf.centerName || '—') + '</div>' +
+        '<div style="font-size:11px;color:#64748b;margin-top:2px">ثبت‌کننده: ' + esc(_pfCreatorName(pf.createdBy)) +
+          ' · مسئول: ' + esc(_pfGetCenterOwner(pf.centerKey)) +
+          ' · <strong>' + fmtNum(pf.total) + ' ﷼</strong></div>' +
+      '</div>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+        '<button onclick="pfOpenEdit(\'' + pf.id + '\')" style="padding:4px 10px;font-size:11px;border:1px solid #cbd5e1;border-radius:6px;background:white;cursor:pointer;font-family:inherit">👁️ مشاهده</button>' +
+        '<button onclick="pfAction(\'' + pf.id + '\',\'approve\')" style="padding:4px 10px;font-size:11px;border:1px solid #16a34a;border-radius:6px;background:#f0fdf4;color:#15803d;cursor:pointer;font-family:inherit;font-weight:600">✅ تأیید</button>' +
+        '<button onclick="pfReject(\'' + pf.id + '\')" style="padding:4px 10px;font-size:11px;border:1px solid #dc2626;border-radius:6px;background:#fef2f2;color:#b91c1c;cursor:pointer;font-family:inherit">❌ رد</button>' +
+      '</div></div>';
+  }).join('');
+  return '<div style="margin-bottom:14px;background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1px solid #93c5fd;border-radius:12px;padding:14px 16px">' +
+    '<div style="font-weight:700;font-size:14px;color:#1d4ed8;margin-bottom:10px">📋 پیشفاکتورهای در انتظار تأیید ' +
+      '<span style="background:#1d4ed8;color:white;border-radius:10px;padding:2px 8px;font-size:11px;margin-right:6px">' + pending.length + '</span></div>' +
+    cards + '</div>';
 }
 
 // ── Filter setter ─────────────────────────────────────────────────────────
 function _pfLoadMore() {
   _pfPage++;
-  var el = document.getElementById('proformaPanel');
+  var el = document.getElementById('pfVanillaRoot');
   if (el) _renderPfPanel(el);
 }
 
 function _pfSetFilter(f) {
   _pfFilter = f;
   _pfPage = 0;
-  var el = document.getElementById('proformaPanel');
+  var el = document.getElementById('pfVanillaRoot');
   if (el) _renderPfPanel(el);
 }
 
@@ -379,6 +400,9 @@ async function pfIssueInvoice(pfId) {
     } else {
       showToast('✅ فاکتور ' + data.invoice_no + ' صادر شد');
     }
+    await pfLoad();
+    var el = _pfRoot();
+    if (el) _renderPfPanel(el);
   } catch(e) {
     showToast('❌ خطا: ' + e.message);
   }
@@ -394,7 +418,7 @@ async function pfDelete(id) {
     if (!r.ok) { showToast('❌ ' + (data.error || 'خطا')); return; }
     showToast('🗑️ پیشفاکتور حذف شد');
     await pfLoad();
-    var el = document.getElementById('proformaPanel');
+    var el = document.getElementById('pfVanillaRoot');
     if (el) _renderPfPanel(el);
   } catch(e) {
     showToast('❌ خطا: ' + e.message);
@@ -414,7 +438,7 @@ async function pfAction(id, action, note) {
     var data = await r.json();
     if (!r.ok) { showToast('❌ ' + (data.error || 'خطا')); return; }
     await pfLoad();
-    var el = document.getElementById('proformaPanel');
+    var el = document.getElementById('pfVanillaRoot');
     if (el) _renderPfPanel(el);
     var labels = { send:'ارسال شد', approve:'تأیید شد', reject:'رد شد', cancel:'لغو شد', reopen:'بازگشایی شد' };
     showToast('✅ پیشفاکتور ' + (labels[action] || action));
@@ -494,7 +518,7 @@ async function pfOpenEdit(id) {
     await _pfLoadWmsProds();
     _pfShowModal(pf);
   } catch(e) {
-    alert("Error in pfOpenEdit: " + e.message + "\\n" + e.stack);
+    showToast('❌ خطا در باز کردن پیشفاکتور: ' + e.message);
   }
 }
 
@@ -1170,8 +1194,6 @@ async function pfSave() {
     hasCommission: hasCommission, commissionAmt: commissionAmt, commissionNote: commissionNote
   };
 
-  console.log('[Proforma POST] Sending body:', body);
-
   try {
     var url = _pfEditId ? '/api/proforma/' + _pfEditId : '/api/proforma';
     var method = _pfEditId ? 'PUT' : 'POST';
@@ -1185,7 +1207,7 @@ async function pfSave() {
     var _pfM=document.getElementById('pfModal'); if(_pfM) _pfM.style.display='none';
     showToast('✅ پیشفاکتور ' + (_pfEditId ? 'ویرایش' : 'ایجاد') + ' شد — شماره: ' + data.no);
     await pfLoad();
-    var el = document.getElementById('proformaPanel');
+    var el = document.getElementById('pfVanillaRoot');
     if (el) _renderPfPanel(el);
   } catch(e) {
     showToast('❌ خطا: ' + e.message);
@@ -1513,7 +1535,7 @@ async function pfOpenForCenter(centerKey, centerName) {
   _pfFilter = 'all';
   _pfPage   = 0;
   // Render
-  var el = document.getElementById('proformaPanel');
+  var el = document.getElementById('pfVanillaRoot');
   if (el) {
     try {
       el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8">در حال بارگذاری…</div>';

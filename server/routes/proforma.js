@@ -50,6 +50,25 @@ const ActionSchema = z.object({
   note:   z.string().default(''),
 });
 
+function isManagerRole(role) {
+  return ['مدیر', 'سوپر ادمین'].includes(role);
+}
+function isSuperAdminRole(role) {
+  return role === 'سوپر ادمین';
+}
+function canViewProforma(user, row) {
+  if (isManagerRole(user.role)) return true;
+  return row.created_by === user.username;
+}
+function canEditProforma(user, row) {
+  if (isSuperAdminRole(user.role)) return true;
+  if (row.status === 'draft') {
+    return row.created_by === user.username || isManagerRole(user.role);
+  }
+  if (row.status === 'approved') return isManagerRole(user.role);
+  return false;
+}
+
 // ── Helper: validate with zod, return 400 on error ─────────────────────────
 function validate(schema, data, res) {
   const r = schema.safeParse(data);
@@ -198,6 +217,9 @@ router.get('/:id', requireAuth, async (req, res) => {
   try {
     const r = await query('SELECT * FROM proformas WHERE id = $1', [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'پیشفاکتور یافت نشد' });
+    if (!canViewProforma(req.user, r.rows[0])) {
+      return res.status(403).json({ error: 'دسترسی ندارید' });
+    }
     res.json(rowToObj(r.rows[0]));
   } catch(e) { res.status(500).json({ error: 'خطای سرور' }); }
 });
@@ -205,8 +227,11 @@ router.get('/:id', requireAuth, async (req, res) => {
 // ── GET /api/proforma/:id/versions ──────────────────────────────────
 router.get('/:id/versions', requireAuth, async (req, res) => {
   try {
-    const r = await query('SELECT versions FROM proformas WHERE id = $1', [req.params.id]);
+    const r = await query('SELECT created_by, versions FROM proformas WHERE id = $1', [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'پیشفاکتور یافت نشد' });
+    if (!canViewProforma(req.user, r.rows[0])) {
+      return res.status(403).json({ error: 'دسترسی ندارید' });
+    }
     res.json(r.rows[0].versions || []);
   } catch(e) { res.status(500).json({ error: 'خطای سرور' }); }
 });
@@ -216,20 +241,24 @@ router.put('/:id', requireAuth, async (req, res) => {
   try {
     const existing = await query('SELECT * FROM proformas WHERE id = $1', [req.params.id]);
     if (!existing.rows.length) return res.status(404).json({ error: 'پیشفاکتور یافت نشد' });
-    const isSuperAdmin = req.session?.user?.role === 'سوپر ادمین';
-    if (!['draft','approved'].includes(existing.rows[0].status) && !isSuperAdmin) {
+    const row = existing.rows[0];
+    const isSuperAdmin = isSuperAdminRole(req.user.role);
+    if (!canEditProforma(req.user, row) && !isSuperAdmin) {
+      return res.status(403).json({ error: 'دسترسی ویرایش ندارید' });
+    }
+    if (!['draft','approved'].includes(row.status) && !isSuperAdmin) {
       return res.status(400).json({ error: 'فقط پیش‌نویس یا تایید شده قابل ویرایش است (سوپر ادمین می‌تواند هر وضعیتی را ویرایش کند)' });
     }
 
     const d = validate(CreateSchema.partial(), req.body, res);
     if (!d) return;
 
-    const pf = rowToObj(existing.rows[0]);
+    const pf = rowToObj(row);
 
     // Snapshot current state before updating (version history)
     const snapshot = {
       at:       new Date().toISOString(),
-      by:       pf.createdBy,
+      by:       req.user.username,
       items:    pf.items,
       total:    pf.total,
       subtotal: pf.subtotal,
@@ -295,6 +324,7 @@ const TRANSITIONS = {
   approved:  ['cancel','reject'],
   rejected:  ['reopen'],
   cancelled: ['reopen'],
+  invoiced:  [],
 };
 
 router.post('/:id/action', requireAuth, async (req, res) => {
@@ -306,6 +336,10 @@ router.post('/:id/action', requireAuth, async (req, res) => {
     if (!existing.rows.length) return res.status(404).json({ error: 'پیشفاکتور یافت نشد' });
     const pf = existing.rows[0];
 
+    if (!canViewProforma(req.user, pf)) {
+      return res.status(403).json({ error: 'دسترسی ندارید' });
+    }
+
     const allowed = TRANSITIONS[pf.status] || [];
     if (!allowed.includes(d.action)) {
       return res.status(400).json({
@@ -313,7 +347,18 @@ router.post('/:id/action', requireAuth, async (req, res) => {
       });
     }
 
-    const isManager = ['مدیر', 'سوپر ادمین'].includes(req.user.role);
+    const isManager = isManagerRole(req.user.role);
+    const isOwner   = pf.created_by === req.user.username;
+
+    if (d.action === 'send' && !isOwner && !isManager) {
+      return res.status(403).json({ error: 'فقط سازنده می‌تواند ارسال کند' });
+    }
+    if (d.action === 'cancel' && !isOwner && !isManager) {
+      return res.status(403).json({ error: 'دسترسی ندارید' });
+    }
+    if (d.action === 'reopen' && !isOwner && !isManager) {
+      return res.status(403).json({ error: 'دسترسی ندارید' });
+    }
 
     let updateSQL = '';
     let params    = [];
@@ -367,14 +412,24 @@ router.post('/:id/action', requireAuth, async (req, res) => {
 // ── DELETE /api/proforma/:id ─────────────────────────────────────────────────
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
-    const existing = await query('SELECT status FROM proformas WHERE id = $1', [req.params.id]);
+    const existing = await query('SELECT status, created_by FROM proformas WHERE id = $1', [req.params.id]);
     if (!existing.rows.length) return res.status(404).json({ error: 'پیشفاکتور یافت نشد' });
-    const isSuperAdmin = req.session?.user?.role === 'سوپر ادمین';
-    const status = existing.rows[0].status;
-    // Allow deletion of draft, cancelled, rejected, or approved statuses
-    // Super admin can delete any status
-    if (!isSuperAdmin && !['draft','cancelled','rejected','approved'].includes(status)) {
-      return res.status(400).json({ error: 'فقط پیش‌نویس، لغو شده، رد شده یا تایید شده را می‌توان حذف کرد' });
+    const isSuperAdmin = isSuperAdminRole(req.user.role);
+    const isManager = isManagerRole(req.user.role);
+    const row = existing.rows[0];
+    const status = row.status;
+    const isOwner = row.created_by === req.user.username;
+
+    if (!isSuperAdmin) {
+      if (!isManager && !isOwner) {
+        return res.status(403).json({ error: 'دسترسی ندارید' });
+      }
+      if (!isManager && status === 'approved') {
+        return res.status(403).json({ error: 'فقط مدیر می‌تواند پیشفاکتور تأییدشده را حذف کند' });
+      }
+      if (!['draft','cancelled','rejected','approved'].includes(status)) {
+        return res.status(400).json({ error: 'فقط پیش‌نویس، لغو شده، رد شده یا تایید شده را می‌توان حذف کرد' });
+      }
     }
     await query('DELETE FROM proformas WHERE id = $1', [req.params.id]);
     res.json({ ok: true });

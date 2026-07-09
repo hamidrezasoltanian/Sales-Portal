@@ -340,6 +340,47 @@ function deleteTagFromSettings(tagId){
 }
 
 // ════════════════════════ MANAGER KPI PANEL ══════════════════════
+function _mgrLoadPendingProformas() {
+  var box = document.getElementById('mgrPendingPf');
+  if (!box) return;
+  var members = (DB.settings && DB.settings.members) || _DEFAULT_MEMBERS;
+  var me = members.find(function(m) { return m.id === currentUser; });
+  if (!me || (me.role !== 'مدیر' && me.role !== 'سوپر ادمین')) {
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = '<div style="padding:12px 14px;font-size:12px;color:#64748b;background:var(--bg-card);border-radius:10px;border:1px solid var(--border);margin-bottom:18px">در حال بارگذاری پیشفاکتورها…</div>';
+  fetch('/api/proforma?status=sent')
+    .then(function(r) { return r.ok ? r.json() : []; })
+    .then(function(list) {
+      if (!list.length) {
+        box.innerHTML = '<div style="padding:12px 14px;font-size:12px;color:#64748b;background:var(--bg-card);border-radius:10px;border:1px solid var(--border);margin-bottom:18px">📄 پیشفاکتور در انتظار تأییدی وجود ندارد</div>';
+        return;
+      }
+      var html = '<div style="background:var(--bg-card);border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden;margin-bottom:18px;border:1px solid #bfdbfe">'
+        + '<div style="padding:10px 14px;font-weight:700;font-size:13px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">'
+        + '<span>📄 پیشفاکتورهای در انتظار تأیید <span style="background:#1d4ed8;color:white;border-radius:10px;padding:1px 8px;font-size:11px;margin-right:4px">' + list.length + '</span></span>'
+        + '<button onclick="switchTab(\'proforma\')" style="font-size:11px;padding:4px 10px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:6px;cursor:pointer;font-family:inherit">مشاهده در تب پیشفاکتور ←</button>'
+        + '</div><div style="padding:10px 14px">';
+      list.slice(0, 8).forEach(function(pf) {
+        var creator = pf.createdBy || '';
+        var mem = members.find(function(m) { return m.id === creator; });
+        var creatorName = mem ? mem.name : creator;
+        html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f1f5f9;gap:8px;flex-wrap:wrap">'
+          + '<div><strong style="font-size:12px">' + esc(pf.no) + '</strong> — ' + esc(pf.centerName || '—')
+          + '<br><span style="font-size:11px;color:var(--text-muted)">' + esc(creatorName) + ' · ' + (Number(pf.total) || 0).toLocaleString('fa-IR') + ' ﷼</span></div>'
+          + '<button onclick="switchTab(\'proforma\');setTimeout(function(){if(typeof pfOpenEdit===\'function\')pfOpenEdit(\'' + pf.id + '\');},500)" style="font-size:11px;padding:4px 10px;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;border-radius:6px;cursor:pointer;font-family:inherit">بررسی</button>'
+          + '</div>';
+      });
+      if (list.length > 8) {
+        html += '<div style="text-align:center;padding:8px;font-size:11px;color:#64748b">+' + (list.length - 8) + ' مورد دیگر — تب پیشفاکتور را ببینید</div>';
+      }
+      html += '</div></div>';
+      box.innerHTML = html;
+    })
+    .catch(function() { box.innerHTML = ''; });
+}
+
 function renderManagerPanel(){
   var el=document.getElementById('managerPanel');if(!el)return;
   var today=todayStr();
@@ -383,6 +424,7 @@ function renderManagerPanel(){
     +'<button onclick="openDailyMonitor()" style="flex:1;min-width:200px;background:#1d4ed8;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">📋 گزارش فعالیت امروز</button>'
     +'<button onclick="openOverdueList()" style="flex:1;min-width:160px;background:#dc2626;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">🔴 پیگیری‌های معوق</button>'
     +'</div>';
+  html+='<div id="mgrPendingPf"></div>';
   // summary cards
   html+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:18px">';
   [
@@ -1108,6 +1150,7 @@ function renderManagerPanel(){
     +'</div></div>';
 
   el.innerHTML=html;
+  _mgrLoadPendingProformas();
 }
 
 // ════════════════════════ MANAGER DRILLDOWN ════════════════════

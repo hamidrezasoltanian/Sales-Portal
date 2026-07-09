@@ -514,7 +514,7 @@ async function initSchema() {
       total          BIGINT DEFAULT 0,
       note           TEXT DEFAULT '',
       status         VARCHAR(20) DEFAULT 'draft'
-                     CHECK(status IN ('draft','sent','approved','rejected','cancelled')),
+                     CHECK(status IN ('draft','sent','approved','rejected','cancelled','invoiced')),
       created_by     VARCHAR(100),
       created_at     TIMESTAMPTZ DEFAULT NOW(),
       updated_at     TIMESTAMPTZ DEFAULT NOW(),
@@ -534,6 +534,9 @@ async function initSchema() {
   await query(`CREATE INDEX IF NOT EXISTS idx_pf_center ON proformas(center_key)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_pf_created_by ON proformas(created_by)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_pf_created_at ON proformas(created_at DESC)`);
+  // Allow invoiced status on existing databases
+  await query(`ALTER TABLE proformas DROP CONSTRAINT IF EXISTS proformas_status_check`).catch(() => {});
+  await query(`ALTER TABLE proformas ADD CONSTRAINT proformas_status_check CHECK (status IN ('draft','sent','approved','rejected','cancelled','invoiced'))`).catch(() => {});
   // Add versions column for existing DBs (tracks draft edit history)
   await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS versions JSONB DEFAULT '[]'`);
   // Add commission columns for external commission tracking
