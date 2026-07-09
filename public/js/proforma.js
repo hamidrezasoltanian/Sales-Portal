@@ -336,6 +336,11 @@ function _pfActions(pf) {
     btns.push('<button onclick="pfReject(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #dc2626;border-radius:5px;background:#fef2f2;color:#b91c1c;cursor:pointer">رد</button>');
   }
 
+  // WMS dispatch (approved / invoiced)
+  if (['approved','invoiced'].includes(pf.status)) {
+    btns.push('<button onclick="pfShowDispatch(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #a78bfa;border-radius:5px;background:#f5f3ff;color:#6d28d9;cursor:pointer" title="حواله انبار">📦 حواله</button>');
+  }
+
   // Issue Invoice (manager, approved only)
   if (isManager && pf.status === 'approved') {
     btns.push('<button onclick="pfIssueInvoice(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #7c3aed;border-radius:5px;background:#f5f3ff;color:#6d28d9;cursor:pointer" title="صدور فاکتور رسمی">🧾 فاکتور</button>');
@@ -411,7 +416,16 @@ async function pfAction(id, action, note) {
     var el = document.getElementById('pfVanillaRoot');
     if (el) _renderPfPanel(el);
     var labels = { send:'ارسال شد', approve:'تأیید شد', reject:'رد شد', cancel:'لغو شد', reopen:'بازگشایی شد' };
-    showToast('✅ پیشفاکتور ' + (labels[action] || action));
+    var msg = '✅ پیشفاکتور ' + (labels[action] || action);
+    if (action === 'approve' && data.wmsDispatch) {
+      if (data.wmsDispatch.error) msg += ' — ⚠️ حواله: ' + data.wmsDispatch.error;
+      else if (data.wmsDispatch.already) msg += ' — 📦 حواله قبلاً صادر شده';
+      else if (data.wmsDispatch.transactionIds && data.wmsDispatch.transactionIds.length) {
+        msg += ' — 📦 ' + data.wmsDispatch.transactionIds.length + ' حواله انبار';
+        if (data.wmsDispatch.warnings && data.wmsDispatch.warnings.length) msg += ' (هشدار کسری موجودی)';
+      }
+    }
+    showToast(msg);
   } catch(e) {
     showToast('❌ خطا: ' + e.message);
   }
@@ -713,8 +727,9 @@ window._pfSaveNoteTexts = function() {
 };
 
 // ── Show modal ────────────────────────────────────────────────────────────
-function _pfShowModal(pf) { try {
+async function _pfShowModal(pf) { try {
   var readOnly = pf && pf.status !== 'draft';
+  if (pf && pf.id) { await _pfLoadFiles(pf.id); } else { _pfFiles = []; }
   var modal = document.getElementById('pfModal');
   if (!modal) {
     var div = document.createElement('div');
@@ -890,9 +905,11 @@ function _pfShowModal(pf) { try {
         '</div>' +
       '</div>' +
     '</div>' +
+    _pfRenderAttachmentsHtml(pf ? pf.id : null, readOnly) +
     (pf && pf.actionNote ? '<div style="margin-top:10px;padding:10px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:12px"><strong>نظر مدیر:</strong> ' + esc(pf.actionNote) + '</div>' : '');
 
   document.getElementById('pfModalFooter').innerHTML =
+    (pf && ['approved','invoiced'].includes(pf.status) ? '<button onclick="pfShowDispatch(\'' + pf.id + '\')" style="padding:8px 12px;background:#f5f3ff;color:#6d28d9;border:1px solid #ddd6fe;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">📦 حواله انبار</button>' : '') +
     (readOnly ? '<button onclick="pfPrint(\'' + (pf.id) + '\')" style="padding:8px 16px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">🖨️ چاپ پیش‌فاکتور</button>' : '') +
     (pf && pf.versions && pf.versions.length ? '<button onclick="pfShowVersions(\'' + pf.id + '\')" style="padding:8px 12px;background:#f0f9ff;color:#0284c7;border:1px solid #bae6fd;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">🕐 تاریخچه (' + pf.versions.length + ')</button>' : '') +
     '<button onclick="var _el=document.getElementById(\'pfModal\');if(_el)_el.style.display=\'none\';" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">بستن</button>' +
@@ -1175,7 +1192,8 @@ async function pfSave() {
     var data = await r.json();
     if (!r.ok) { showToast('❌ ' + (data.error || 'خطا')); return; }
     var _pfM=document.getElementById('pfModal'); if(_pfM) _pfM.style.display='none';
-    showToast('✅ پیشفاکتور ' + (_pfEditId ? 'ویرایش' : 'ایجاد') + ' شد — شماره: ' + data.no);
+    _pfEditId = data.id;
+    showToast('✅ پیشفاکتور ' + (method === 'PUT' ? 'ویرایش' : 'ایجاد') + ' شد — شماره: ' + data.no);
     await pfLoad();
     var el = document.getElementById('pfVanillaRoot');
     if (el) _renderPfPanel(el);
@@ -1674,6 +1692,121 @@ function _numToWords(n) {
     scaleIdx++;
   }
   return (negative ? 'منفی ' : '') + segments.join(' و ');
+}
+
+// ── Attachments (images / files) ───────────────────────────────────────────
+var _pfFiles = [];
+
+function _pfFormatFileSize(n) {
+  n = Number(n) || 0;
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
+  return (n / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+async function _pfLoadFiles(pfId) {
+  _pfFiles = [];
+  if (!pfId) return;
+  try {
+    var r = await fetch('/api/proforma/' + pfId + '/files/list');
+    if (r.ok) { var data = await r.json(); _pfFiles = data.files || []; }
+  } catch (e) {}
+}
+
+function _pfRenderAttachmentsHtml(pfId, readOnly) {
+  var canUpload = pfId && !readOnly;
+  var list = _pfFiles.length
+    ? _pfFiles.map(function(f) {
+        var isImg = (f.mime_type || '').indexOf('image/') === 0;
+        var viewBtn = '<button type="button" onclick="pfViewAttachment(' + f.id + ')" style="padding:3px 8px;font-size:11px;border:1px solid #bfdbfe;border-radius:5px;background:#eff6ff;color:#1d4ed8;cursor:pointer;font-family:inherit">' + (isImg ? '🖼️' : '📄') + ' مشاهده</button>';
+        var delBtn = (!readOnly ? ' <button type="button" onclick="pfDeleteAttachment(' + f.id + ')" style="padding:3px 8px;font-size:11px;border:1px solid #fecaca;border-radius:5px;background:#fef2f2;color:#b91c1c;cursor:pointer;font-family:inherit">حذف</button>' : '');
+        return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:white;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:6px">' +
+          '<div style="min-width:0;flex:1"><div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(f.filename) + '</div>' +
+          '<div style="font-size:10px;color:#94a3b8">' + _pfFormatFileSize(f.file_size) + ' · ' + esc(f.uploaded_by || '') + '</div></div>' +
+          '<div style="display:flex;gap:4px;flex-shrink:0">' + viewBtn + delBtn + '</div></div>';
+      }).join('')
+    : '<div style="font-size:12px;color:#94a3b8;padding:8px 0">پیوستی ثبت نشده</div>';
+  var uploadBox = canUpload
+    ? '<label style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;cursor:pointer;font-size:12px;color:#475569;margin-top:8px">📎 افزودن تصویر / فایل<input type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none" onchange="pfUploadAttachment(this)"></label>'
+    : (!pfId ? '<div style="font-size:11px;color:#f59e0b;margin-top:6px">💡 ابتدا پیشفاکتور را ذخیره کنید، سپس پیوست اضافه کنید.</div>' : '');
+  return '<div style="margin-top:12px;border:1px solid #e2e8f0;border-radius:8px;padding:12px;background:#f8fafc">' +
+    '<div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:8px">📎 پیوست‌ها (تصویر / فایل)</div>' +
+    '<div id="pfAttachmentsList">' + list + '</div>' + uploadBox + '</div>';
+}
+
+function pfViewAttachment(fileId) { window.open('/api/proforma/files/' + fileId, '_blank'); }
+
+async function pfUploadAttachment(input) {
+  if (!_pfEditId) { showToast('❌ ابتدا پیشفاکتور را ذخیره کنید'); return; }
+  var file = input.files && input.files[0];
+  if (!file) return;
+  if (file.size > 15 * 1024 * 1024) { showToast('❌ حداکثر حجم ۱۵ مگابایت'); return; }
+  var fd = new FormData();
+  fd.append('file', file);
+  try {
+    var r = await fetch('/api/proforma/' + _pfEditId + '/files', { method: 'POST', body: fd });
+    var data = await r.json();
+    if (!r.ok) { showToast('❌ ' + (data.error || 'خطا')); return; }
+    showToast('✅ فایل پیوست شد');
+    await _pfLoadFiles(_pfEditId);
+    var wrap = document.getElementById('pfAttachmentsList');
+    if (wrap && wrap.parentElement) {
+      var tmp = document.createElement('div');
+      tmp.innerHTML = _pfRenderAttachmentsHtml(_pfEditId, false);
+      var nl = tmp.querySelector('#pfAttachmentsList');
+      var lb = tmp.querySelector('label');
+      if (nl) wrap.innerHTML = nl.innerHTML;
+      if (lb && !wrap.parentElement.querySelector('label')) wrap.parentElement.appendChild(lb);
+    }
+  } catch (e) { showToast('❌ خطا: ' + e.message); }
+  input.value = '';
+}
+
+async function pfDeleteAttachment(fileId) {
+  if (!confirm('این پیوست حذف شود؟')) return;
+  try {
+    var r = await fetch('/api/proforma/files/' + fileId, { method: 'DELETE' });
+    var data = await r.json();
+    if (!r.ok) { showToast('❌ ' + (data.error || 'خطا')); return; }
+    showToast('🗑️ پیوست حذف شد');
+    await _pfLoadFiles(_pfEditId);
+    var wrap = document.getElementById('pfAttachmentsList');
+    if (wrap) {
+      var tmp = document.createElement('div');
+      tmp.innerHTML = _pfRenderAttachmentsHtml(_pfEditId, false);
+      var nl = tmp.querySelector('#pfAttachmentsList');
+      if (nl) wrap.innerHTML = nl.innerHTML;
+    }
+  } catch (e) { showToast('❌ ' + e.message); }
+}
+
+async function pfShowDispatch(pfId) {
+  try {
+    var r = await fetch('/api/proforma/' + pfId + '/dispatch');
+    var data = await r.json();
+    if (!r.ok) { showToast('❌ ' + (data.error || 'خطا')); return; }
+    var txns = data.transactions || [];
+    if (!txns.length) {
+      openModal('pfDispatchModal', '📦 حواله انبار',
+        '<div style="padding:20px;text-align:center;color:#94a3b8">حواله‌ای برای این پیشفاکتور ثبت نشده</div>',
+        '<button onclick="closeModal(\'pfDispatchModal\')" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;cursor:pointer">بستن</button>');
+      return;
+    }
+    var rows = txns.map(function(t) {
+      var st = t.status === 'approved' ? '✅ تأیید شده' : (t.status === 'pending' ? '⏳ در انتظار' : esc(t.status));
+      return '<tr><td style="padding:8px;font-family:monospace;font-size:12px">' + esc(t.txn_no) + '</td>' +
+        '<td style="padding:8px;font-size:12px">' + esc(t.product_name || t.product_id || '') + '</td>' +
+        '<td style="padding:8px;text-align:center">' + t.qty + '</td>' +
+        '<td style="padding:8px;font-size:11px">' + st + '</td></tr>';
+    }).join('');
+    var body = '<p style="font-size:12px;color:#64748b;margin-bottom:10px">حواله‌های خروج کالا (FEFO) — تأیید نهایی در WMS → تأییدات</p>' +
+      '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#f8fafc">' +
+      '<th style="padding:8px;text-align:right">شماره</th><th style="padding:8px;text-align:right">کالا</th>' +
+      '<th style="padding:8px;text-align:center">تعداد</th><th style="padding:8px;text-align:right">وضعیت</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    var foot = '<button onclick="window.open(\'/wms\',\'_blank\')" style="padding:8px 14px;background:#7c3aed;color:white;border:none;border-radius:8px;font-family:inherit;cursor:pointer;font-size:12px">📦 باز کردن WMS</button>' +
+      '<button onclick="closeModal(\'pfDispatchModal\')" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;cursor:pointer;margin-right:8px">بستن</button>';
+    openModal('pfDispatchModal', '📦 حواله‌های انبار', body, foot);
+  } catch (e) { showToast('❌ ' + e.message); }
 }
 
 // ── Vue bridge callbacks ──────────────────────────────────────────────────

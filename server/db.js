@@ -544,6 +544,23 @@ async function initSchema() {
   await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS commission_amt BIGINT DEFAULT 0`);
   await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS commission_note TEXT DEFAULT ''`);
 
+  await query(`
+    CREATE TABLE IF NOT EXISTS proforma_files (
+      id           SERIAL PRIMARY KEY,
+      proforma_id  VARCHAR(50) NOT NULL,
+      filename     TEXT NOT NULL,
+      mime_type    TEXT DEFAULT '',
+      file_size    INTEGER DEFAULT 0,
+      data         BYTEA NOT NULL,
+      uploaded_by  VARCHAR(100),
+      created_at   TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_proforma_files_pf ON proforma_files(proforma_id)`);
+  await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS wms_dispatch_ids JSONB DEFAULT '[]'`);
+  await query(`ALTER TABLE wms_transactions ADD COLUMN IF NOT EXISTS proforma_id VARCHAR(50)`).catch(() => {});
+  await query(`CREATE INDEX IF NOT EXISTS idx_wms_txn_proforma ON wms_transactions(proforma_id)`).catch(() => {});
+
   // Auto-migrate proformas from blob → table (run once)
   await _migrateProformasFromBlob();
 

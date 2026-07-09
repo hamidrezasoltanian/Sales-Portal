@@ -1,10 +1,27 @@
 'use strict';
 
 const express    = require('express');
+const multer     = require('multer');
 const { z }      = require('zod');
 const { query }  = require('../db');
 const { requirePermission } = require('../permissions');
 const { requireAuth } = require('../auth');
+const { createDispatchFromProforma, getDispatchForProforma } = require('../lib/wms-dispatch');
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 },
+});
+
+function handleUpload(req, res, next) {
+  upload.single('file')(req, res, function(err) {
+    if (err && err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: 'حجم فایل بیش از ۱۵ مگابایت است' });
+    }
+    if (err) return res.status(400).json({ error: 'خطا در آپلود فایل' });
+    next();
+  });
+}
 
 const router = express.Router();
 router.use(requireAuth);
@@ -114,6 +131,7 @@ function rowToObj(r) {
     buyerAddress:   r.buyer_address || '',
     buyerPhone:     r.buyer_phone || '',
     buyerPostal:    r.buyer_postal || '',
+    wmsDispatchIds: r.wms_dispatch_ids || [],
   };
 }
 
@@ -212,6 +230,61 @@ router.post('/', requireAuth, async (req, res) => {
   }
 });
 
+// ── Proforma file attachments (routes before /:id) ───────────────────────────
+
+router.get('/files/:fileId', requireAuth, async (req, res) => {
+  try {
+    const fileId = parseInt(req.params.fileId, 10);
+    if (isNaN(fileId)) return res.status(400).json({ error: 'شناسه نامعتبر' });
+    const r = await query(
+      `SELECT f.*, p.created_by FROM proforma_files f
+       JOIN proformas p ON p.id = f.proforma_id WHERE f.id = $1`,
+      [fileId]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'فایل یافت نشد' });
+    const row = r.rows[0];
+    if (!canViewProforma(req.user, { created_by: row.created_by })) {
+      return res.status(403).json({ error: 'دسترسی ندارید' });
+    }
+    const dl = req.query.dl === '1';
+    res.setHeader('Content-Type', row.mime_type || 'application/octet-stream');
+    res.setHeader(
+      'Content-Disposition',
+      (dl ? 'attachment' : 'inline') + '; filename*=UTF-8\'\'' + encodeURIComponent(row.filename)
+    );
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(row.data);
+  } catch (e) {
+    console.error('[proforma file GET]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+router.delete('/files/:fileId', requireAuth, async (req, res) => {
+  try {
+    const fileId = parseInt(req.params.fileId, 10);
+    if (isNaN(fileId)) return res.status(400).json({ error: 'شناسه نامعتبر' });
+    const meta = await query(
+      `SELECT f.id, f.uploaded_by, p.status, p.created_by FROM proforma_files f
+       JOIN proformas p ON p.id = f.proforma_id WHERE f.id = $1`,
+      [fileId]
+    );
+    if (!meta.rows.length) return res.status(404).json({ error: 'فایل یافت نشد' });
+    const row = meta.rows[0];
+    const isOwner = row.uploaded_by === req.user.username;
+    const isMgr = isManagerRole(req.user.role);
+    if (!isOwner && !isMgr) return res.status(403).json({ error: 'دسترسی ندارید' });
+    if (row.status !== 'draft' && !isMgr) {
+      return res.status(400).json({ error: 'فقط در وضعیت پیش‌نویس قابل حذف است' });
+    }
+    await query('DELETE FROM proforma_files WHERE id = $1', [fileId]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[proforma file DELETE]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
 // ── GET /api/proforma/:id ───────────────────────────────────────────────────
 router.get('/:id', requireAuth, async (req, res) => {
   try {
@@ -234,6 +307,67 @@ router.get('/:id/versions', requireAuth, async (req, res) => {
     }
     res.json(r.rows[0].versions || []);
   } catch(e) { res.status(500).json({ error: 'خطای سرور' }); }
+});
+
+router.get('/:id/files/list', requireAuth, async (req, res) => {
+  try {
+    const pf = await query('SELECT created_by FROM proformas WHERE id = $1', [req.params.id]);
+    if (!pf.rows.length) return res.status(404).json({ error: 'پیشفاکتور یافت نشد' });
+    if (!canViewProforma(req.user, pf.rows[0])) {
+      return res.status(403).json({ error: 'دسترسی ندارید' });
+    }
+    const r = await query(
+      `SELECT id, filename, mime_type, file_size, uploaded_by, created_at
+       FROM proforma_files WHERE proforma_id = $1 ORDER BY created_at ASC`,
+      [req.params.id]
+    );
+    res.json({ files: r.rows });
+  } catch (e) {
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+router.post('/:id/files', requireAuth, handleUpload, async (req, res) => {
+  try {
+    const pf = await query('SELECT id, status, created_by FROM proformas WHERE id = $1', [req.params.id]);
+    if (!pf.rows.length) return res.status(404).json({ error: 'پیشفاکتور یافت نشد' });
+    const row = pf.rows[0];
+    const canUpload = ['draft', 'sent'].includes(row.status) &&
+      (row.created_by === req.user.username || isManagerRole(req.user.role));
+    if (!canUpload) {
+      return res.status(403).json({ error: 'در این وضعیت امکان افزودن پیوست نیست' });
+    }
+    if (!req.file) return res.status(400).json({ error: 'فایلی ارسال نشده' });
+    const f = req.file;
+    const allowed = /^(image\/|application\/pdf|application\/msword|application\/vnd\.|text\/plain)/;
+    if (!allowed.test(f.mimetype || '')) {
+      return res.status(400).json({ error: 'فرمت مجاز: تصویر، PDF، Word، Excel' });
+    }
+    const r = await query(
+      `INSERT INTO proforma_files (proforma_id, filename, mime_type, file_size, data, uploaded_by)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id, filename, mime_type, file_size, uploaded_by, created_at`,
+      [req.params.id, f.originalname, f.mimetype, f.size, f.buffer, req.user.username]
+    );
+    res.status(201).json({ ok: true, file: r.rows[0] });
+  } catch (e) {
+    console.error('[proforma file POST]', e.message);
+    res.status(500).json({ error: 'خطای ذخیره فایل' });
+  }
+});
+
+router.get('/:id/dispatch', requireAuth, async (req, res) => {
+  try {
+    const pf = await query('SELECT created_by FROM proformas WHERE id = $1', [req.params.id]);
+    if (!pf.rows.length) return res.status(404).json({ error: 'پیشفاکتور یافت نشد' });
+    if (!canViewProforma(req.user, pf.rows[0])) {
+      return res.status(403).json({ error: 'دسترسی ندارید' });
+    }
+    const transactions = await getDispatchForProforma(req.params.id);
+    res.json({ transactions: transactions });
+  } catch (e) {
+    res.status(500).json({ error: 'خطای سرور' });
+  }
 });
 
 // ── PUT /api/proforma/:id — update draft ────────────────────────────────────
@@ -384,7 +518,21 @@ router.post('/:id/action', requireAuth, async (req, res) => {
 
     const r = await query(`UPDATE proformas ${updateSQL} RETURNING *`, params);
     const updated = rowToObj(r.rows[0]);
-    res.json(updated);
+
+    let wmsDispatch = null;
+    if (d.action === 'approve') {
+      try {
+        wmsDispatch = await createDispatchFromProforma(updated, req.user.username);
+        if (wmsDispatch && wmsDispatch.transactionIds) {
+          updated.wmsDispatchIds = wmsDispatch.transactionIds;
+        }
+      } catch (dispatchErr) {
+        console.error('[proforma approve dispatch]', dispatchErr.message);
+        wmsDispatch = { error: dispatchErr.message };
+      }
+    }
+
+    res.json(Object.assign({}, updated, { wmsDispatch: wmsDispatch }));
 
     // Push Telegram notifications (non-blocking, only if enabled in settings)
     try {

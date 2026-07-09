@@ -1516,6 +1516,17 @@ async function doApprovePf(chatId, msgId, pfId, sess) {
   );
   if (!r.rows.length) { await sendMsg(chatId, '⚠️ این پیشفاکتور قابل تأیید نیست.'); return; }
   const pf = r.rows[0];
+  try {
+    const { createDispatchFromProforma } = require('../lib/wms-dispatch');
+    const dispatch = await createDispatchFromProforma({
+      id: pf.id, no: pf.no, centerName: pf.center_name, items: pf.items,
+    }, sess.username);
+    if (dispatch.transactionIds && dispatch.transactionIds.length) {
+      await sendMsg(chatId, '📦 ' + dispatch.transactionIds.length + ' حواله انبار صادر شد (در انتظار تأیید WMS).');
+    }
+  } catch (e) {
+    console.error('[telegram approve dispatch]', e.message);
+  }
   await editMsg(chatId, msgId,
     '✅ <b>پیشفاکتور ' + pf.no + ' تأیید شد.</b>\n' +
     '👤 مشتری: ' + (pf.center_name || '—') + '\n' +
