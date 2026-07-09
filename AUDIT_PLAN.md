@@ -59,7 +59,7 @@
 ## 🟠 مهم
 
 ### H-1 — مدل تک‌بلاب با last-write-wins (ریسک از دست رفتن داده)
-- **وضعیت:** ✅ انجام‌شده (مرحله ۱: `PATCH /api/data/patch` + merge یادداشت‌ها + `savePatchDB` در `setE`)
+- **وضعیت:** ✅ انجام‌شده (مرحله ۲: slim PUT + `_fullSync` + PATCH گسترده + lazy tab loader)
 - **مدرک:** `server/routes/data.js:151-190` (PUT کل DB + تشخیص conflict شکننده)؛ اعتراف‌شده در `CLAUDE.md` (بخش Roadmap → Data layer evolution).
 - **اثر:** تحت همزمانی چند کاربر، بازنویسی داده‌ی واقعی ممکن است.
 - **راه‌حل:** مهاجرت تدریجی به endpointهای per-collection (tasks/notifications/changeLog از قبل SQL هستند)، merge خوش‌بینانه به‌جای overwrite، استفاده از کانال SSE موجود (`/api/events`) برای refresh زنده.
@@ -120,7 +120,7 @@
 - **معیار پذیرش:** تغییرات اسکیمای ورژن‌دار و قابل rollback.
 
 ### N-6 — مونولیت فرانت‌اند
-- **وضعیت:** 🔄 در حال انجام (`SyncStatusBadge.vue` + پنل‌های Vue موجود)
+- **وضعیت:** ✅ انجام‌شده (مرحله ۲: `tab-loader.js` lazy-load + Vue panels + ماژول‌های جدا)
 - **مدرک:** `public/js/app.bundle.js` (~۱۵هزار خط، دارای NBSP).
 - **راه‌حل:** مهاجرت تدریجی به کامپوننت‌های Vue در `src/` (اسکلت موجود).
 - **معیار پذیرش:** ماژول‌های جدید به‌جای بلاب در `src/` نوشته شوند.
@@ -160,5 +160,5 @@
 - [x] N-3 ممیزی XSS (مرحله ۱)
 - [x] N-4 بهداشت مخزن (sync_hashes.json / کد مرده)
 - [x] N-5 فریم‌ورک مهاجرت DB
-- [ ] N-6 مهاجرت تدریجی فرانت به Vue (ادامه‌دار)
+- [x] N-6 مهاجرت تدریجی فرانت به Vue (lazy loader + Vue panels)
 - [x] N-7 جداسازی DB dev/prod

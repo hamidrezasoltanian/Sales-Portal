@@ -2028,6 +2028,27 @@ function mtrLazyInit(){
       }
     }).catch(function(){});
   }
+  if(typeof _mtrStartSyncPoll==='function')_mtrStartSyncPoll();
+}
+
+var _mtrSyncTimer=null;
+function _mtrPullSync(){
+  if(typeof DB==='undefined'||!(DB.settings&&DB.settings.mtrSyncEnabled))return;
+  fetch('/api/mtr/sync').then(function(r){return r.ok?r.json():null;}).then(function(d){
+    if(!d||!d.enabled)return;
+    if(d.rows&&d.rows.length){
+      DATA=d.rows;
+      if(typeof matchCentersToData==='function')matchCentersToData();
+      if(typeof render==='function')render();
+      toast('🔄 مطالبات بروز شد ('+d.rows.length+' فاکتور · '+d.source+')');
+    }
+  }).catch(function(){});
+}
+function _mtrStartSyncPoll(){
+  if(_mtrSyncTimer){clearInterval(_mtrSyncTimer);_mtrSyncTimer=null;}
+  if(typeof DB==='undefined'||!(DB.settings&&DB.settings.mtrSyncEnabled))return;
+  _mtrPullSync();
+  _mtrSyncTimer=setInterval(_mtrPullSync,5*60*1000);
 }
 
 

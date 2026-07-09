@@ -111,7 +111,10 @@ function getKPITarget(userId,month){
 }
 function saveKPITarget(userId,month,targets){
   ensureKPIDB();
-  DB.kpiTargets[userId+':'+month]=targets;saveDB();
+  var k=userId+':'+month;
+  DB.kpiTargets[k]=targets;
+  var o={};o[k]=targets;
+  savePatchDB({kpiTargets:o});
 }
 
 // ── داده‌های ماه ──────────────────────────────────────────────────
@@ -382,7 +385,12 @@ function saveTeamKPITargets(month){
     });
     DB.kpiTargets.weights=weights;
   }
-  saveDB();
+  var kpiPatch={};
+  userKeys.forEach(function(u){
+    kpiPatch[u+':'+month]=DB.kpiTargets[u+':'+month];
+  });
+  if(DB.kpiTargets.weights)kpiPatch.weights=DB.kpiTargets.weights;
+  savePatchDB({kpiTargets:kpiPatch});
   closeModal('teamKpiModal');
   showToast('✅ اهداف '+saved+' کارشناس ذخیره شد',2500);
   if(typeof renderKPIPanel==='function')renderKPIPanel();
@@ -404,7 +412,9 @@ function saveProvKPITarget(provId, targets) {
   if (!DB.kpiTargets) DB.kpiTargets = {};
   if (!DB.kpiTargets.provinces) DB.kpiTargets.provinces = {};
   DB.kpiTargets.provinces[provId] = targets;
-  saveDB();
+  var o = { provinces: {} };
+  o.provinces[provId] = targets;
+  savePatchDB({ kpiTargets: o });
 }
 
 function openProvTargetsModal() {
@@ -663,7 +673,7 @@ function _discImport(cid) {
       biopsyScore: c.score,
       biopsyDoctors: (c.doctors||[]).map(function(d){ return d.label+': '+d.name; }).join(', '),
     });
-    saveDB();
+    savePatchDB({extra:[DB.extra[DB.extra.length-1]]});
   }
   fetch('/api/discovery/' + cid, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'imported'})});
   _discoveredCenters = (_discoveredCenters||[]).map(function(x){ return x.id===cid ? Object.assign({},x,{status:'imported'}) : x; });

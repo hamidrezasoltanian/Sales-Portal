@@ -562,7 +562,7 @@ router.put('/db', async (req, res) => {
   }
 });
 
-// PATCH /api/data/patch — partial save (edits/notes/tags/weekEntries only; no destructive table wipes)
+// PATCH /api/data/patch — partial save (no destructive table wipes)
 router.patch('/patch', async (req, res) => {
   const body = req.body;
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -585,7 +585,8 @@ router.patch('/patch', async (req, res) => {
       console.warn('[data/patch] RBAC stripped keys for', user, rbac.rejected.slice(0, 5));
     }
 
-    const { edits, notes, rTags, tags, weekEntries, _weDeletedKeys } = patch;
+    const { edits, notes, rTags, tags, weekEntries, _weDeletedKeys,
+            events, checklist, settings, kpiTargets, provOverrides, _deletedEventIds, extra } = patch;
 
     if (edits && typeof edits === 'object' && Object.keys(edits).length > 0) {
       await client.query(
@@ -645,6 +646,119 @@ router.patch('/patch', async (req, res) => {
       );
     }
 
+    if (events && Array.isArray(events)) {
+      for (const ev of events) {
+        if (!ev || ev.id === undefined) continue;
+        await client.query(
+          `INSERT INTO app_events (id, title, description, start_ms, all_day, color, owner, updated_at, updated_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)
+           ON CONFLICT (id) DO UPDATE SET
+             title = EXCLUDED.title, description = EXCLUDED.description,
+             start_ms = EXCLUDED.start_ms, all_day = EXCLUDED.all_day,
+             color = EXCLUDED.color, owner = EXCLUDED.owner,
+             updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+          [ev.id, ev.title || '', ev.desc || '', ev.startMs || 0, !!ev.allDay, ev.color || null, ev.owner || null, user]
+        );
+      }
+    }
+    if (_deletedEventIds && Array.isArray(_deletedEventIds) && _deletedEventIds.length > 0) {
+      await client.query('DELETE FROM app_events WHERE id = ANY($1::int[])', [_deletedEventIds]);
+    }
+
+    if (checklist && typeof checklist === 'object') {
+      for (const [key, value] of Object.entries(checklist)) {
+        if (!value) continue;
+        const parts = key.split('_');
+        if (parts.length >= 2) {
+          const date = parts[0];
+          const username = parts.slice(1).join('_');
+          await client.query(
+            `INSERT INTO daily_checklists (date, username, items, note, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, NOW(), $5)
+             ON CONFLICT (date, username) DO UPDATE SET
+               items = EXCLUDED.items, note = EXCLUDED.note,
+               updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+            [date, username, JSON.stringify(value.items || []), value.note || '', user]
+          );
+        }
+      }
+    }
+
+    if (settings && typeof settings === 'object') {
+      for (const [key, value] of Object.entries(settings)) {
+        if (key === 'anthropicKey' && value === '***') continue;
+        await client.query(
+          `INSERT INTO app_settings (key, value, updated_at, updated_by)
+           VALUES ($1, $2, NOW(), $3)
+           ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW(), updated_by = $3`,
+          [key, JSON.stringify(value), user]
+        );
+      }
+    }
+
+    if (provOverrides !== undefined && typeof provOverrides === 'object') {
+      await client.query(
+        `INSERT INTO app_settings (key, value, updated_at, updated_by)
+         VALUES ('provOverrides', $1, NOW(), $2)
+         ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
+        [JSON.stringify(provOverrides), user]
+      );
+    }
+
+    if (kpiTargets !== undefined && typeof kpiTargets === 'object' && kpiTargets !== null) {
+      if (kpiTargets.weights) {
+        await client.query(
+          `INSERT INTO app_settings (key, value, updated_at, updated_by)
+           VALUES ('kpi_weights', $1, NOW(), $2)
+           ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW(), updated_by=$2`,
+          [JSON.stringify(kpiTargets.weights), user]
+        );
+      }
+      if (kpiTargets.provinces && typeof kpiTargets.provinces === 'object') {
+        for (const [provId, targets] of Object.entries(kpiTargets.provinces)) {
+          if (!targets) continue;
+          await client.query(
+            `INSERT INTO kpi_province_targets (province_id, calls, visits, sales, extra, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, $5, NOW(), $6)
+             ON CONFLICT (province_id) DO UPDATE
+               SET calls = EXCLUDED.calls, visits = EXCLUDED.visits, sales = EXCLUDED.sales,
+                   extra = EXCLUDED.extra, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+            [provId, targets.calls || 0, targets.visits || 0, targets.sales || 0, targets.extra || 0, user]
+          );
+        }
+      }
+      for (const [key, value] of Object.entries(kpiTargets)) {
+        if (key === 'weights' || key === 'provinces' || !value) continue;
+        if (key.includes(':')) {
+          const [username, month] = key.split(':');
+          await client.query(
+            `INSERT INTO kpi_user_targets (username, month, calls_per_day, visits_per_week, sales_count, sales_amount, cash_pct, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)
+             ON CONFLICT (username, month) DO UPDATE
+               SET calls_per_day = EXCLUDED.calls_per_day, visits_per_week = EXCLUDED.visits_per_week,
+                   sales_count = EXCLUDED.sales_count, sales_amount = EXCLUDED.sales_amount,
+                   cash_pct = EXCLUDED.cash_pct, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+            [username, month, value.callsPerDay || 10, value.visitsPerWeek || 5, value.salesCount || 5, value.salesAmount || 0, value.cashPct || 50, user]
+          );
+        }
+      }
+    }
+
+    if (extra && Array.isArray(extra)) {
+      for (const c of extra) {
+        if (!c || !c.id) continue;
+        await client.query(
+          `INSERT INTO center_extras (id, row_num, name, potential, type, lead, province_id, owner, updated_at, updated_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)
+           ON CONFLICT (id) DO UPDATE SET
+             row_num = EXCLUDED.row_num, name = EXCLUDED.name, potential = EXCLUDED.potential,
+             type = EXCLUDED.type, lead = EXCLUDED.lead, province_id = EXCLUDED.province_id,
+             owner = EXCLUDED.owner, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+          [c.id, c.row || 0, c.name || '', c.potential || 1, c.type || null, c.lead || 'سرنخ', c.province_id || c.province || '', c.owner || null, user]
+        );
+      }
+    }
+
     const upserted = await client.query(
       `INSERT INTO app_data (key, value, updated_at, updated_by)
        VALUES ('_db_meta', $1, NOW(), $2)
@@ -666,6 +780,34 @@ router.patch('/patch', async (req, res) => {
     return res.status(500).json({ error: 'خطای سرور' });
   } finally {
     if (client) client.release();
+  }
+});
+
+// GET /api/data/collections/events — per-collection read (Phase 4)
+router.get('/collections/events', async (req, res) => {
+  try {
+    const result = await query(
+      'SELECT id, title, description as desc, start_ms as "startMs", all_day as "allDay", color, owner FROM app_events ORDER BY start_ms'
+    );
+    return res.json(result.rows);
+  } catch (e) {
+    console.error('[data/collections/events]', e.message);
+    return res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+// GET /api/data/collections/checklist/:date/:user
+router.get('/collections/checklist/:date/:user', async (req, res) => {
+  try {
+    const result = await query(
+      'SELECT items, note FROM daily_checklists WHERE date = $1 AND username = $2',
+      [req.params.date, req.params.user]
+    );
+    if (!result.rows.length) return res.json({ items: [], note: '' });
+    return res.json(result.rows[0]);
+  } catch (e) {
+    console.error('[data/collections/checklist]', e.message);
+    return res.status(500).json({ error: 'خطای سرور' });
   }
 });
 

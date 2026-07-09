@@ -84,6 +84,7 @@ function switchTab(tab){
       if(panel) panel.innerHTML = '<div style="padding:32px;text-align:center;color:#ef4444;font-size:14px">⚠ خطا در بارگذاری این بخش — لطفاً صفحه را رفرش کنید<br><small style="color:#94a3b8;font-size:11px">' + esc(err.message||String(err)) + '</small></div>';
     }
   }
+  function _renderTabPanels(){
   if(tab==='provinces'){
     _safeRender(function(){renderDashboard();renderBanner();},'provinces');
     if(!_currentProvId){
@@ -92,7 +93,6 @@ function switchTab(tab){
       if(_isExpert()){['fOwner','lblOw'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='none';});}
       var pg=document.getElementById('allCentersToggle');if(pg)pg.style.display='';
     } else {
-      // restore province view UI if navigated back or refreshed with _currentProvId set
       var _act=document.getElementById('allCentersToggle');if(_act)_act.style.display='none';
       var _pb=document.getElementById('provBackBtn');if(_pb)_pb.style.display='';
       var _ab=document.getElementById('addCenterBtn');if(_ab)_ab.style.display='';
@@ -115,8 +115,16 @@ function switchTab(tab){
   else if(tab==='home')_safeRender(renderHome,'home');
   var _clBtn=document.getElementById('tab_changelog');if(_clBtn)_clBtn.style.display=_isManager()?'':'none';
   var _tBtn=document.getElementById('tab_tasks');if(_tBtn)_tBtn.style.display='';
-  // Show tab tutorial for new users
   setTimeout(function(){_showTabTutorial(tab);},400);
+  }
+  if(typeof ensureTabScripts==='function'){
+    ensureTabScripts(tab).then(_renderTabPanels).catch(function(e){
+      console.warn('[switchTab] script load:',e.message);
+      _renderTabPanels();
+    });
+  } else {
+    _renderTabPanels();
+  }
 }
 
 // ════════════════════════ PROVINCE VIEW ═══════════════

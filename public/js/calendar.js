@@ -219,12 +219,14 @@ function saveEv(evId){
   var desc=(document.getElementById('evD')||{}).value||'';
   if(evId&&evId!=='null'){var ev=(DB.events||[]).find(function(e){return e.id===evId;});if(ev){ev.title=title.trim();ev.desc=desc;ev.startMs=startMs;ev.allDay=allDay;ev.color=color;}}
   else DB.events.push({id:_nextEvId++,title:title.trim(),desc:desc,startMs:startMs,allDay:allDay,color:color,owner:currentUser});
-  saveDB();closeModal('evModal');renderCalendar();showToast('رویداد ذخیره شد ✅');
+  var _savedEv=evId&&evId!=='null'?(DB.events||[]).find(function(e){return e.id===evId;}):DB.events[DB.events.length-1];
+  if(_savedEv)savePatchDB({events:[_savedEv]});
+  closeModal('evModal');renderCalendar();showToast('رویداد ذخیره شد ✅');
 }
 
 function deleteEv(id){
   if(!confirm('حذف این رویداد؟'))return;
   DB.events=(DB.events||[]).filter(function(e){return e.id!==id;});
-  saveDB();closeModal('evModal');renderCalendar();
+  savePatchDB({_deletedEventIds:[id]});
 }
 

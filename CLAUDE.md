@@ -324,6 +324,11 @@ The receivables AI tab calls `https://api.anthropic.com/v1/messages` directly fr
 | Weekplan PATCH saves: week entries + notes via `savePatchDB` | public/js/weekplan.js | ✅ |
 | Production env guard + pre-deploy checklist | server/lib/prod-guard.js + scripts/predeploy-check.js | ✅ |
 | Legacy bundle archived to `public/js/_legacy/` | not served | ✅ |
+| Lazy tab script loading | `public/js/tab-loader.js` | ✅ |
+| PATCH expanded: events, checklist, KPI, settings | `core.js` + `data.js` | ✅ |
+| Per-collection GET APIs | `/api/data/collections/events`, `checklist` | ✅ |
+| MTR accounting sync stub | `/api/mtr/sync` + settings toggle | ✅ |
+| Secret rotation checklist | `scripts/rotate-secrets-checklist.js` | ✅ |
 
 ## Planned Integration: Accounting Software → Receivables (مطالبات)
 

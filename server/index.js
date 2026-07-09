@@ -72,6 +72,7 @@ if (fs.existsSync(publicDir)) {
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/data', require('./routes/data'));
+app.use('/api/mtr', require('./routes/mtr-sync'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/distribution', require('./routes/distribution'));
 app.use('/api/ai', require('./routes/ai'));

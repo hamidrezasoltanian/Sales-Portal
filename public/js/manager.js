@@ -186,6 +186,17 @@ function openSettings(){
     + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
     + '<input type="checkbox" id="stgNtGeneral" style="accent-color:var(--brand)" ' + _npChk('general') + '>📩 پیام‌های مستقیم مدیر</label>'
     + '</div></div>';
+  // ── MTR accounting sync (manager) ─────────────────────────────────────────
+  if(_isManager()){
+    var _mtrSync=!!(DB.settings&&DB.settings.mtrSyncEnabled);
+    body+='<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">'
+      +'<div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:8px">💰 همگام‌سازی مطالبات با حسابداری</div>'
+      +'<label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:10px 12px">'
+      +'<input type="checkbox" id="stgMtrSync" style="width:16px;height:16px;accent-color:var(--brand)"'+(_mtrSync?' checked':'')+'>'
+      +'<div><div style="font-size:12px;font-weight:600">بروزرسانی خودکار هر ۵ دقیقه</div>'
+      +'<div style="font-size:10px;color:var(--text-muted)">نیاز به تنظیم FARADIS_* در .env سرور — تا آن زمان حالت stub</div></div></label>'
+      +'</div>';
+  }
   // ── KPI targets quick-access (manager only)
   if(_isManager()){
     var _kpiExperts=(typeof umGetActive==='function'?umGetActive():[]).filter(function(m){return m.id!=='guest'&&m.role!=='مدیر'&&m.role!=='سوپر ادمین';});
@@ -290,7 +301,10 @@ function saveSettings(){
     var _tpTa=document.getElementById('stgTypeList');
     if(_tpTa){var _tl=_tpTa.value.split('\n').map(function(l){return l.trim();}).filter(Boolean);if(_tl.length>=1){DB.settings.typeList=_tl;TYPE_LIST=_tl;}}
   }
+  var _mtrSyncEl=document.getElementById('stgMtrSync');
+  if(_mtrSyncEl)DB.settings.mtrSyncEnabled=_mtrSyncEl.checked;
   saveDB();
+  if(typeof _mtrStartSyncPoll==='function')_mtrStartSyncPoll();
   buildUSERS();
   closeModal('settingsModal');
   rebuildFilters();

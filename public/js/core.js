@@ -326,13 +326,16 @@ var _patchTimer=null;
 
 function savePatchDB(fragment){
   if(!fragment||typeof fragment!=='object')return;
-  ['edits','notes','rTags','tags','weekEntries'].forEach(function(key){
+  ['edits','notes','rTags','tags','weekEntries','events','checklist','settings','kpiTargets','provOverrides'].forEach(function(key){
     var alt=key==='rTags'?'tags':null;
     var src=fragment[key]||fragment[alt];
-    if(!src) return;
+    if(!src && key!=='provOverrides') return;
+    if(key==='provOverrides' && fragment.provOverrides===undefined) return;
     var qk=key==='tags'?'rTags':key;
     if(!_patchQueue[qk])_patchQueue[qk]={};
-    if(typeof src==='object'&&!Array.isArray(src)){
+    if(key==='events' && Array.isArray(src)){
+      _patchQueue.events=(_patchQueue.events||[]).concat(src);
+    } else if(typeof src==='object'&&!Array.isArray(src)){
       Object.keys(src).forEach(function(ck){_patchQueue[qk][ck]=src[ck];});
     } else {
       _patchQueue[qk]=src;
@@ -340,6 +343,12 @@ function savePatchDB(fragment){
   });
   if(fragment._weDeletedKeys){
     _patchQueue._weDeletedKeys=(_patchQueue._weDeletedKeys||[]).concat(fragment._weDeletedKeys);
+  }
+  if(fragment._deletedEventIds){
+    _patchQueue._deletedEventIds=(_patchQueue._deletedEventIds||[]).concat(fragment._deletedEventIds);
+  }
+  if(fragment.extra&&Array.isArray(fragment.extra)){
+    _patchQueue.extra=(_patchQueue.extra||[]).concat(fragment.extra);
   }
   _backupLocalDB();
   clearTimeout(_patchTimer);
