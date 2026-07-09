@@ -882,6 +882,114 @@ async function initSchema() {
     )
   `);
   // ════════════════════════════════════════
+  // SYNC TABLES (Faradis / external sync receiver)
+  // ════════════════════════════════════════
+  await query(`
+    CREATE TABLE IF NOT EXISTS sync_customers (
+      company_num     INTEGER PRIMARY KEY,
+      company_name    VARCHAR(500) DEFAULT '',
+      company_code    VARCHAR(200),
+      manager_name    VARCHAR(200),
+      phone           VARCHAR(100),
+      mobile          VARCHAR(100),
+      state           VARCHAR(200),
+      city            VARCHAR(200),
+      address         TEXT,
+      postal_code     VARCHAR(50),
+      type_name       VARCHAR(200)
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_sync_customers_name ON sync_customers(company_name)`);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS sync_customer_phones (
+      company_num    INTEGER NOT NULL,
+      phone_number   VARCHAR(50) NOT NULL,
+      description    TEXT DEFAULT '',
+      phone_type     VARCHAR(20) DEFAULT '0',
+      is_default     BOOLEAN DEFAULT FALSE,
+      is_sms         BOOLEAN DEFAULT FALSE,
+      PRIMARY KEY (company_num, phone_number)
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS sync_customer_addresses (
+      company_num    INTEGER NOT NULL,
+      address_text   TEXT NOT NULL,
+      country        VARCHAR(200) DEFAULT '',
+      state          VARCHAR(200) DEFAULT '',
+      city           VARCHAR(200) DEFAULT '',
+      region         VARCHAR(200) DEFAULT '',
+      postal_code    VARCHAR(50) DEFAULT '',
+      is_default     BOOLEAN DEFAULT FALSE,
+      PRIMARY KEY (company_num, address_text)
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS sync_stuffs (
+      stuff_num       INTEGER PRIMARY KEY,
+      parent_num      INTEGER,
+      stuff_name      VARCHAR(500) DEFAULT '',
+      stuff_code      VARCHAR(200),
+      technical_code  VARCHAR(200),
+      iran_code       VARCHAR(200),
+      barcode         VARCHAR(200),
+      price           BIGINT DEFAULT 0,
+      active          BOOLEAN DEFAULT TRUE,
+      is_delete       BOOLEAN DEFAULT FALSE,
+      save_date       TIMESTAMPTZ,
+      edit_date       TIMESTAMPTZ,
+      delete_date     TIMESTAMPTZ
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS sync_stores (
+      store_num   INTEGER PRIMARY KEY,
+      store_code  VARCHAR(200),
+      store_name  VARCHAR(500) DEFAULT '',
+      status      INTEGER DEFAULT 1,
+      is_delete   BOOLEAN DEFAULT FALSE,
+      save_date   TIMESTAMPTZ
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS sync_store_stuffs (
+      store_stuff_num   INTEGER PRIMARY KEY,
+      store_num         INTEGER,
+      stuff_num         INTEGER,
+      available_count   NUMERIC(18,4) DEFAULT 0,
+      reserved_count    NUMERIC(18,4) DEFAULT 0,
+      is_delete         BOOLEAN DEFAULT FALSE
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS sync_stuff_price_list (
+      id                VARCHAR(100) PRIMARY KEY,
+      person_name       VARCHAR(500),
+      person_type       VARCHAR(100),
+      type              VARCHAR(100),
+      stuff_name        VARCHAR(500),
+      stuff_code        VARCHAR(200),
+      technical_code    VARCHAR(200),
+      price             BIGINT DEFAULT 0,
+      total_inventory   NUMERIC(18,4) DEFAULT 0,
+      price_imed        BIGINT DEFAULT 0,
+      price_faradis     BIGINT DEFAULT 0,
+      price_dermazon    BIGINT DEFAULT 0,
+      central_store     NUMERIC(18,4) DEFAULT 0,
+      virtual_store     NUMERIC(18,4) DEFAULT 0,
+      scrap_store       NUMERIC(18,4) DEFAULT 0,
+      sobhiyeh_store    NUMERIC(18,4) DEFAULT 0,
+      motamedfar_store  NUMERIC(18,4) DEFAULT 0
+    )
+  `);
+
+  // ════════════════════════════════════════
   // SYNCED FACTORS & FACTOR ROWS (FARADIS)
   // ════════════════════════════════════════
   await query(`

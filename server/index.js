@@ -34,6 +34,8 @@ if (helmet) {
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", "'unsafe-inline'", 'cdn.jsdelivr.net', 'cdnjs.cloudflare.com'],
+        // Vanilla CRM uses onclick/oninput on HTML strings — helmet v4+ defaults script-src-attr to 'none'
+        scriptSrcAttr: ["'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'", 'cdn.jsdelivr.net'],
         fontSrc: ["'self'", 'cdn.jsdelivr.net', 'data:'],
         imgSrc: ["'self'", 'data:', 'blob:', 'https:'],

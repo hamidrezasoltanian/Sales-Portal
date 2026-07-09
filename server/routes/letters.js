@@ -278,6 +278,10 @@ router.get('/customers', requireAuth, async (req, res) => {
     const r = await query('SELECT company_num::text AS id, company_name, company_code FROM sync_customers ORDER BY company_name ASC');
     res.json({ customers: r.rows });
   } catch (e) {
+    if (e.message && e.message.includes('does not exist')) {
+      return res.json({ customers: [] });
+    }
+    console.error('[letters GET /customers]', e.message);
     res.status(500).json({ error: 'خطای سرور' });
   }
 });
