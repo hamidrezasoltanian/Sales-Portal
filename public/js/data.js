@@ -103,6 +103,58 @@ function _buildPCCache(){
   var filteredBase=base.filter(function(c){return!extraIds.has(String(c.id));});
   return filteredBase.concat(extras).concat(movedIn);
 }
+
+/** Province default owner: DB.edits override, then PROVINCES hardcoded fallback. */
+function _getProvinceOwner(provId) {
+  if (!provId) return '';
+  var pe = getE(getProvType(provId), provId);
+  if (pe && pe.owner) return pe.owner;
+  if (provId === 'tehran') return '';
+  var prov = (typeof PROVINCES !== 'undefined' ? PROVINCES : []).find(function(p) { return p.id === provId; });
+  return (prov && prov.owner) || '';
+}
+
+/**
+ * Canonical center owner resolution (keep all copies in sync with this).
+ * Chain: edits.owner → static center → province owner → extra.owner
+ */
+function getCenterOwner(rtype, rid) {
+  if (!rtype || rid == null || rid === '') return '';
+  var e = getE(rtype, rid);
+  if (e && e.owner) return e.owner;
+
+  if (rtype === 'center') {
+    if (typeof CENTERS !== 'undefined') {
+      var tc = CENTERS.find(function(x) { return String(x.id) === String(rid); });
+      if (tc && tc.owner) return tc.owner;
+    }
+  } else if (rtype === 'pc') {
+    if (typeof _buildPCCache === 'function') { try { _buildPCCache(); } catch (_) {} }
+    if (typeof _PC_CACHE !== 'undefined') {
+      var provId = String(rid).split('||')[0];
+      var arr = _PC_CACHE[provId] || [];
+      var pc = arr.find(function(x) { return String(x.id) === String(rid); });
+      if (pc && pc.owner) return pc.owner;
+      var po = _getProvinceOwner(provId);
+      if (po) return po;
+    }
+  }
+
+  if (typeof DB !== 'undefined' && DB.extra) {
+    var ex = DB.extra.find(function(x) { return String(x.id) === String(rid); });
+    if (ex && ex.owner) return ex.owner;
+  }
+  return '';
+}
+
+/** Resolve owner from centerKey e.g. center_42 or pc_p3||5 */
+function getCenterOwnerFromKey(centerKey) {
+  if (!centerKey) return '';
+  var us = centerKey.indexOf('_');
+  if (us < 0) return '';
+  return getCenterOwner(centerKey.slice(0, us), centerKey.slice(us + 1));
+}
+
 function clearPCCache(){_PC_CACHE=null;}
 function isStalled(type,id){
   var e=getE(type,id);var st=e.status||'بدون تماس';

@@ -2289,12 +2289,7 @@ function sendReminderToExpert(expertUser){
     var we=DB.weekEntries[k];
     if(we.done||we.scheduledDate!==today||we.rtype==='mtr')return;
     var rtype=we.rtype||'center',rid=we.rid||'';
-    var e=getE(rtype,rid);
-    var owner=e.owner||'';
-    if(!owner){
-      if(rtype==='center'){var c=CENTERS.find(function(x){return x.id===rid;});if(c&&c.owner)owner=c.owner;}
-      else{_buildPCCache();var _pId=rid.split('||')[0];var _arr=_PC_CACHE[_pId]||[];var _c=_arr.find(function(x){return x.id===rid;});if(_c&&_c.owner)owner=_c.owner;}
-    }
+    var owner = typeof getCenterOwner === 'function' ? getCenterOwner(rtype, rid) : '';
     if(owner!==expertUser)return;
     var acts=_getTodayActivities(rtype,rid,today);
     if(acts.length===0)noActEntries.push(we.centerName||getRecLabel(rtype+'_'+rid)||'?');

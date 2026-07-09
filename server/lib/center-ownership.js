@@ -64,6 +64,18 @@ function resolveCenterOwner(centerKey, edits, ownerMaps) {
   if (edit && edit.owner) return edit.owner;
   if (ownerMaps.staticOwners[centerKey]) return ownerMaps.staticOwners[centerKey];
   if (ownerMaps.extraOwners[centerKey]) return ownerMaps.extraOwners[centerKey];
+  // Province-level owner fallback for pc centers
+  if (centerKey.startsWith('pc_')) {
+    const rest = centerKey.slice(3);
+    const sepIdx = rest.indexOf('||');
+    if (sepIdx > 0) {
+      const provId = rest.slice(0, sepIdx);
+      const provKey = 'pc_' + provId;
+      const provEdit = edits && edits[provKey];
+      if (provEdit && provEdit.owner) return provEdit.owner;
+    }
+  }
+
   return null;
 }
 

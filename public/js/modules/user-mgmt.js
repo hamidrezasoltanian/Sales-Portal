@@ -344,7 +344,7 @@ function _umProvinces(){
   var activeMembers=umGetActive();
   var potColors=['','#16a34a','#0ea5e9','#f59e0b','#dc2626'];
 
-  function getOwner(p){var e=getE(getProvType(p.id),p.id);return e.owner||p.owner||'';}
+  function getOwner(p){return typeof getCenterOwner==='function'?getCenterOwner(getProvType(p.id),p.id):(getE(getProvType(p.id),p.id).owner||p.owner||'');}
 
   // expert cards
   var expertCards=activeMembers.map(function(m){

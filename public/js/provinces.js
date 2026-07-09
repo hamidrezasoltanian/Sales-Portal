@@ -74,7 +74,7 @@ function renderProvList(){
   var effectiveProvOwner=_plOwner||(_isExpert()?currentUser:'');
   var filtProvs=provs.filter(function(p){
     if(_plSearch){var n=fNorm(p.name);if(n.indexOf(fNorm(_plSearch))<0)return false;}
-    if(effectiveProvOwner&&p.id!=='tehran'){var e2=getE('pc',p.id);var ow=e2.owner||p.owner||'';if(ow!==effectiveProvOwner)return false;}
+    if(effectiveProvOwner&&p.id!=='tehran'){var ow=typeof getCenterOwner==='function'?getCenterOwner('pc',p.id):(getE('pc',p.id).owner||p.owner||'');if(ow!==effectiveProvOwner)return false;}
     return true;
   });
   // ترتیب‌بندی استان‌ها
@@ -145,8 +145,7 @@ function renderProvList(){
   // نمای Grid
   pg.style.display='grid';
   var rows=filtProvs.map(function(p, i){
-    var e=getE('pc',p.id);
-    var owner=e.owner||p.owner||'';
+    var owner=typeof getCenterOwner==='function'?getCenterOwner(getProvType(p.id),p.id):(getE('pc',p.id).owner||p.owner||'');
     var _owMem=_DEFAULT_MEMBERS&&_DEFAULT_MEMBERS.find(function(m){return m.id===owner;});
     var _owInactive=_owMem&&_owMem.active===false;
     var ownerName=owner?((USERS[owner]||owner)+(_owInactive?' ⚠️ (غیرفعال)':'')):'بدون مسئول';

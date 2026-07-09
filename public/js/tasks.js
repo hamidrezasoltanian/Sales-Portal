@@ -830,13 +830,8 @@ function convertFollowupToTask(rtype, rid){
 // کمکی: پیدا کردن مسئول یک weekEntry
 function _wpGetOwner(we){
   var rtype = we.rtype||'center', rid = we.rid||'';
-  var e = getE(rtype, rid);
-  if(e.owner) return e.owner;
-  if(rtype==='center'){var c=CENTERS.find(function(x){return x.id===rid;});if(c&&c.owner)return c.owner;}
-  else{var _pId=(rid+'').split('||')[0];var _arr=_PC_CACHE[_pId]||[];var _c=_arr.find(function(x){return x.id===rid;});if(_c&&_c.owner)return _c.owner;}
-  var ex=(DB.extra||[]).find(function(x){return x.id===rid;});
-  if(ex&&ex.owner) return ex.owner;
-  return we.addedBy||'';
+  var owner = typeof getCenterOwner === 'function' ? getCenterOwner(rtype, rid) : '';
+  return owner || we.addedBy || '';
 }
 
 // کمکی: فعالیت‌های یک مرکز در یک تاریخ جلالی مشخص

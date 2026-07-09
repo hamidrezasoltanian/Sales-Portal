@@ -242,41 +242,11 @@ function _pfCreatorName(uid) {
   return m ? m.name : uid;
 }
 
-function _pfParseCenterKey(centerKey) {
-  if (!centerKey) return { rtype: null, rid: null };
-  var us = centerKey.indexOf('_');
-  if (us < 0) return { rtype: null, rid: null };
-  return { rtype: centerKey.slice(0, us), rid: centerKey.slice(us + 1) };
-}
-
-// ── Helper: canonical center owner (same chain as _wpGetOwner) ─────────────
+// ── Helper: canonical center owner (delegates to data.js getCenterOwnerFromKey) ─
 function _pfGetCenterOwnerId(centerKey) {
-  var parsed = _pfParseCenterKey(centerKey);
-  var rtype = parsed.rtype, rid = parsed.rid;
-  if (!rtype || !rid) return null;
-
-  if (typeof getE === 'function') {
-    var e = getE(rtype, rid);
-    if (e && e.owner) return e.owner;
-  }
-  if (rtype === 'center' && typeof CENTERS !== 'undefined') {
-    var c = CENTERS.find(function(x) { return x.id === rid; });
-    if (c && c.owner) return c.owner;
-  }
-  if (rtype === 'pc') {
-    if (typeof _buildPCCache === 'function') { try { _buildPCCache(); } catch (_) {} }
-    if (typeof _PC_CACHE !== 'undefined') {
-      var provId = rid.split('||')[0];
-      var arr = _PC_CACHE[provId] || [];
-      var pc = arr.find(function(x) { return x.id === rid; });
-      if (pc && pc.owner) return pc.owner;
-    }
-  }
-  if (typeof DB !== 'undefined' && DB.extra) {
-    var extra = DB.extra.find(function(x) { return x.id === rid; });
-    if (extra && extra.owner) return extra.owner;
-  }
-  return null;
+  if (!centerKey) return null;
+  var owner = typeof getCenterOwnerFromKey === 'function' ? getCenterOwnerFromKey(centerKey) : '';
+  return owner || null;
 }
 
 function _pfGetCenterOwner(centerKey) {
