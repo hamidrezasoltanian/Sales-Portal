@@ -436,26 +436,35 @@ function tkSaveTask(tid){
     sendNotif(t.owner,'وظیفه «'+t.title+'» به شما واگذار شد',t.centerKey||'',[],'task',{taskId:t.id,taskTitle:t.title});
     t._notifiedOwner=t.owner;
   }
-  saveDB();
-  // SQL dual-write (fire-and-forget)
-  (function(task,isNew){
-    fetch('/api/tasks'+(isNew?'':'/'+encodeURIComponent(String(task.id))),{
-      method:isNew?'POST':'PUT',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        id:task.id,title:task.title,owner:task.owner||null,
-        dueDate:task.dueDate||null,priority:task.priority||2,
-        status:task.status||'todo',centerKey:task.centerKey||null,
-        note:task.note||'',subtasks:task.subtasks||[],
-        done:!!task.done,recurring:task.recurring||'none',
-        activity:task.activity||[],createdBy:task.createdBy||currentUser,
-        department:task.department||''
-      })
-    }).catch(function(){});
-  })(t,!tid);
-  closeModal('taskDetail');
-  showToast(tid?'💾 ذخیره شد':'✅ وظیفه ایجاد شد');
-  renderTasksPanel();
+  var isNew=!tid;
+  var payload={
+    id:t.id,title:t.title,owner:t.owner||null,
+    dueDate:t.dueDate||null,priority:t.priority||2,
+    status:t.status||'todo',centerKey:t.centerKey||null,
+    note:t.note||'',subtasks:t.subtasks||[],
+    done:!!t.done,recurring:t.recurring||'none',
+    activity:t.activity||[],createdBy:t.createdBy||currentUser,
+    department:t.department||''
+  };
+  fetch('/api/tasks'+(isNew?'':'/'+encodeURIComponent(String(t.id))),{
+    method:isNew?'POST':'PUT',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(payload)
+  }).then(function(r){
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    return r.json();
+  }).then(function(saved){
+    var idx=DB.tasks.findIndex(function(x){return String(x.id)===String(saved.id);});
+    if(idx>=0)DB.tasks[idx]=saved;else DB.tasks.push(saved);
+    saveDB();
+    closeModal('taskDetail');
+    showToast(isNew?'✅ وظیفه ایجاد شد':'💾 ذخیره شد');
+    renderTasksPanel();
+  }).catch(function(e){
+    console.warn('tkSaveTask SQL failed:',e.message);
+    if(isNew)DB.tasks=DB.tasks.filter(function(x){return String(x.id)!==String(t.id);});
+    showToast('⚠ خطا در ذخیره وظیفه — دوباره تلاش کنید');
+  });
 }
 
 function tkDeleteTask(tid){

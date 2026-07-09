@@ -18,7 +18,7 @@ router.use(requireAuth);
 async function loadDBFromSQL(client) {
   const c = client || pool;
   const [editsR, notesR, tagsR, settingsR, eventsR, checklistR, userKpiR, provKpiR, extraR,
-         salesR, callR, visitR, missionR, provHistR, kpiHistR, weR, metaR, clR, hcpR] = await Promise.all([
+         salesR, callR, visitR, missionR, provHistR, kpiHistR, weR, metaR, clR, hcpR, tasksR] = await Promise.all([
     c.query('SELECT center_key, data FROM center_edits'),
     c.query('SELECT center_key, notes FROM center_notes'),
     c.query('SELECT center_key, tags FROM center_tags'),
@@ -37,7 +37,10 @@ async function loadDBFromSQL(client) {
     c.query('SELECT id, key, value FROM week_entries').catch(() => ({ rows: [] })),
     c.query("SELECT updated_at FROM app_data WHERE key = '_db_meta'"),
     c.query('SELECT at, "by", rkey, field, val FROM change_log ORDER BY at DESC LIMIT 500').catch(() => ({ rows: [] })),
-    c.query('SELECT a.center_key, h.name, h.specialty, a.role as title, h.phones FROM hcp_affiliations a JOIN healthcare_professionals h ON a.hcp_id = h.id').catch(() => ({ rows: [] }))
+    c.query('SELECT a.center_key, h.name, h.specialty, a.role as title, h.phones FROM hcp_affiliations a JOIN healthcare_professionals h ON a.hcp_id = h.id').catch(() => ({ rows: [] })),
+    c.query(`SELECT id, title, owner, due_date AS "dueDate", priority, status, center_key AS "centerKey",
+      note, subtasks, done, done_at AS "doneAt", created_by AS "createdBy", created_at AS "createdAt",
+      updated_at AS "updatedAt", recurring, activity, department FROM tasks ORDER BY created_at DESC`).catch(() => ({ rows: [] }))
   ]);
 
   const edits = {};
@@ -128,6 +131,7 @@ async function loadDBFromSQL(client) {
     changeLog: clR.rows.map(function(r) {
       return { at: r.at instanceof Date ? r.at.toISOString() : r.at, by: r.by, rkey: r.rkey, field: r.field, val: r.val };
     }).reverse(),
+    tasks: tasksR.rows,
     _serverTs,
   };
 }
@@ -168,7 +172,7 @@ router.get('/db', async (req, res) => {
 
 // PUT /api/data/db — split payload into normalized SQL tables
 router.put('/db', async (req, res) => {
-  const body = req.body;
+  let body = req.body;
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return res.status(400).json({ error: 'داده نامعتبر' });
   }

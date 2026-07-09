@@ -309,12 +309,27 @@ async function loadDB(){
     if (isSynced !== 'false') {
       _clearLocalBackup();
     }
+    await loadTasksFromSQL();
   }catch(e){
     console.warn('Server fetch failed, using empty DB:',e.message);
   }finally{
     var _sp2=document.getElementById('loadingSpinner');if(_sp2)_sp2.style.display='none';
   }
 }
+
+async function loadTasksFromSQL(){
+  try{
+    var r=await fetch('/api/tasks');
+    if(!r.ok)return;
+    var tasks=await r.json();
+    if(Array.isArray(tasks)){
+      DB.tasks=tasks;
+    }
+  }catch(e){
+    console.warn('loadTasksFromSQL failed:',e.message);
+  }
+}
+window.loadTasksFromSQL=loadTasksFromSQL;
 function _weRemove(k){
   delete DB.weekEntries[k];
   if(!DB._weDeletedKeys)DB._weDeletedKeys=[];
@@ -324,8 +339,9 @@ function _weRemove(k){
 var _patchQueue={};
 var _patchTimer=null;
 
-function savePatchDB(fragment){
+function savePatchDB(fragment, opts){
   if(!fragment||typeof fragment!=='object')return;
+  opts=opts||{};
   ['edits','notes','rTags','tags','weekEntries','events','checklist','settings','kpiTargets','provOverrides'].forEach(function(key){
     var alt=key==='rTags'?'tags':null;
     var src=fragment[key]||fragment[alt];
@@ -352,7 +368,8 @@ function savePatchDB(fragment){
   }
   _backupLocalDB();
   clearTimeout(_patchTimer);
-  _patchTimer=setTimeout(function(){_flushPatchQueue();},400);
+  if(opts.immediate){_flushPatchQueue();}
+  else{_patchTimer=setTimeout(function(){_flushPatchQueue();},400);}
 }
 
 function _flushPatchQueue(){
