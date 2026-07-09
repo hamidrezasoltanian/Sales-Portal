@@ -368,8 +368,31 @@ function _flushPatchQueue(){
   }).catch(function(e){console.warn('savePatchDB failed:',e.message);});
 }
 
-function _saveDBNow(){
-  var payload=JSON.parse(JSON.stringify(DB));
+function _buildSavePayload(fullSync){
+  if(fullSync){
+    var full=JSON.parse(JSON.stringify(DB));
+    full._fullSync=true;
+    return full;
+  }
+  var slim={
+    edits:DB.edits||{},
+    notes:DB.notes||{},
+    rTags:DB.rTags||DB.tags||{},
+    weekEntries:DB.weekEntries||{},
+    settings:DB.settings||{},
+    tasks:DB.tasks||[],
+    notifications:DB.notifications||[],
+    changeLog:DB.changeLog||[],
+    kpiTargets:DB.kpiTargets,
+    provOverrides:DB.provOverrides,
+    _weDeletedKeys:DB._weDeletedKeys||[]
+  };
+  if(DB._mtr)slim._mtr=DB._mtr;
+  return slim;
+}
+
+function _saveDBNow(fullSync){
+  var payload=_buildSavePayload(!!fullSync);
   if(_dbServerTs)payload._clientTs=_dbServerTs;
   var seq=++_saveSeq; // capture sequence; ignore late-resolving responses
   return fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json','X-Cid':_sseClientId},body:JSON.stringify(payload)})
@@ -396,7 +419,7 @@ function _saveDBNow(){
             if(conflictBy)showToast('🔄 تغییرات '+conflictBy+' ادغام شد',3000);
             
             // Retry save with updated timestamp
-            var p2=JSON.parse(JSON.stringify(DB));
+            var p2=_buildSavePayload(!!fullSync);
             if(_dbServerTs)p2._clientTs=_dbServerTs;
             return fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json','X-Cid':_sseClientId},body:JSON.stringify(p2)})
               .then(function(r3){
@@ -471,10 +494,10 @@ function saveDB(){
   clearTimeout(_saveDebounceTimer);
   _saveDebounceTimer=setTimeout(function(){_saveDBNow();},600);
 }
-function saveDBSync(){
+function saveDBSync(fullSync){
   _backupLocalDB();
   clearTimeout(_saveDebounceTimer);
-  return _saveDBNow();
+  return _saveDBNow(!!fullSync);
 }
 
 function mergeDatabaseDiff(local, server, lastSynced) {
@@ -646,7 +669,7 @@ function importDBJson(input){
       if(!src||typeof src!=='object'||!src.edits)throw new Error('فایل معتبر نیست');
       if(!confirm('⚠ این عملیات داده‌های فعلی را جایگزین می‌کند. ادامه می‌دهید؟'))return;
       Object.assign(DB,src);
-      saveDBSync();
+      saveDBSync(true);
       showToast('✅ داده‌ها بازیابی شدند — صفحه رفرش می‌شود',2000);
       setTimeout(function(){location.reload();},2200);
     }catch(err){showToast('❌ خطا: '+err.message);}

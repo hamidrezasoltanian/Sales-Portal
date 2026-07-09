@@ -1,10 +1,23 @@
 /* ═══ public/js/weekplan.js ═══ */
 // ════════════════════════ NOTES ════════════════════════
+function _wpSaveNotes(type,id){
+  var k=recK(type,id);
+  var o={};o[k]=DB.notes[k]||[];
+  savePatchDB({notes:o});
+}
+function _wpSaveWeek(keys){
+  var frag={weekEntries:{}};
+  (keys||[]).forEach(function(k){if(DB.weekEntries[k])frag.weekEntries[k]=DB.weekEntries[k];});
+  if(DB._weDeletedKeys&&DB._weDeletedKeys.length)frag._weDeletedKeys=DB._weDeletedKeys.slice();
+  savePatchDB(frag);
+}
+
+
 function addNote(type,id,text,inp){
   if(!text||!text.trim())return;
   var k=recK(type,id);if(!DB.notes[k])DB.notes[k]=[];
   DB.notes[k].push({text:text.trim(),date:todayStr(),user:USERS[currentUser]||currentUser,ts:nowTs()});
-  saveDB();if(inp){inp.value='';showToast('یادداشت ذخیره شد ✅',1500);}
+  _wpSaveNotes(type,id);if(inp){inp.value='';showToast('یادداشت ذخیره شد ✅',1500);}
 }
 
 function openNotes(type,id,name){
@@ -38,7 +51,7 @@ function saveNoteAndRefresh(type,id,name){
 
 function delNoteAndRefresh(type,id,idx){
   var k=recK(type,id);if(!DB.notes[k])return;
-  DB.notes[k].splice(idx,1);saveDB();
+  DB.notes[k].splice(idx,1);_wpSaveNotes(type,id);
   var nl=document.getElementById('nlist_'+id);if(nl)nl.innerHTML=renderNotesList(type,id);
 }
 
@@ -786,7 +799,7 @@ function wpPickSelect(row){
     actionType:'call', addedBy:currentUser
   };
   (function(_k,_we){var _pts=_k.split(':::');fetch('/api/week-entries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),weekId:_pts[0],recKey:_we.recKey || (_we.rtype+'_'+_we.rid),rtype:_we.rtype,rid:_we.rid,scheduledDate:_we.scheduledDate||null,actionType:_we.actionType||'call',done:false,doneDate:null,addedBy:_we.addedBy||currentUser,centerName:_we.centerName||''})}).then(function(r){return r.ok?r.json():null;}).then(function(d){if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;}).catch(function(){});})(eKey,DB.weekEntries[eKey]);
-  saveDB();
+  _wpSaveWeek([eKey]);
   closeModal('wpPickModal');
   renderWeekPlan();
   showToast(_wasInOther ? 'مرکز از هفته قبلی منتقل شد 🔄' : 'مرکز به هفته اضافه شد ✅', 2000);
@@ -845,7 +858,7 @@ function wpFclAddToWeek(weekId, rtype, rid) {
     actionType: 'call', addedBy: currentUser
   };
   (function(_k,_we){var _pts=_k.split(':::');fetch('/api/week-entries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),weekId:_pts[0],recKey:_we.recKey || (_we.rtype+'_'+_we.rid),rtype:_we.rtype,rid:_we.rid,scheduledDate:_we.scheduledDate||null,actionType:_we.actionType||'call',done:false,doneDate:null,addedBy:_we.addedBy||currentUser,centerName:_we.centerName||''})}).then(function(r){return r.ok?r.json():null;}).then(function(d){if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;}).catch(function(){});})(eKey,DB.weekEntries[eKey]);
-  saveDB();
+  _wpSaveWeek([eKey]);
   renderWeekPlan();
   showToast(_wasInOther ? 'مرکز از هفته قبلی منتقل شد 🔄' : 'مرکز به هفته اضافه شد ✅', 2000);
 }
@@ -855,8 +868,8 @@ function toggleWpActionType(eKey) {
   var cur = DB.weekEntries[eKey].actionType || 'call';
   DB.weekEntries[eKey].actionType = (cur === 'call') ? 'visit' : 'call';
   (function(){var _wat=DB.weekEntries[eKey];if(_wat&&_wat.sqlId){fetch('/api/week-entries/'+encodeURIComponent(_wat.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({actionType:_wat.actionType})}).catch(function(){});}})();
-  saveDB();
-  renderWeekPlan();
+  _wpSaveWeek([eKey]);
+  renderWeekPlan();
 }
 
 function renderWpItem(entry,weekId){
@@ -949,7 +962,7 @@ function wpBulkDone(){
   keys.forEach(function(k){
     if(DB.weekEntries[k]){ DB.weekEntries[k].done=true; DB.weekEntries[k].doneDate=todayStr(); }
   });
-  saveDB(); wpClearSelection(); _debouncedRenderWeekPlan();
+  _wpSaveWeek(keys); wpClearSelection(); _debouncedRenderWeekPlan();
   showToast('✅ '+keys.length+' مورد به عنوان انجام‌شده ثبت شد — در تب فعالیت‌ها قابل مشاهده است',3000);
 }
 
@@ -958,7 +971,7 @@ function wpBulkRemove(){
   if(!keys.length) return;
   if(!confirm(keys.length+' مورد از برنامه هفته حذف شود؟')) return;
   keys.forEach(function(k){ _weRemove(k); });
-  saveDB(); wpClearSelection(); _debouncedRenderWeekPlan();
+  _wpSaveWeek([]); wpClearSelection(); _debouncedRenderWeekPlan();
   showToast('🗑 '+keys.length+' مورد حذف شد',2000);
 }
 
@@ -994,7 +1007,7 @@ function wpDoBulkMove(targetWeekId){
     if(newKey !== eKey) DB.weekEntries[newKey] = Object.assign({}, we, {scheduledDate:null, done:false, doneDate:null});
     if(newKey !== eKey) _weRemove(eKey);
   });
-  saveDB(); wpClearSelection(); closeModal('wpBulkMoveModal'); renderWeekPlan();
+  _wpSaveWeek(keys); wpClearSelection(); closeModal('wpBulkMoveModal'); renderWeekPlan();
   showToast('↪ '+keys.length+' مورد منتقل شد',2500);
 }
 
@@ -1235,7 +1248,7 @@ function wpDrop(event, targetDate) {
   if (_we.rtype && _we.rid) {
     setE(_we.rtype, _we.rid, 'followupDate', targetDate);
   }
-  saveDB();
+  _wpSaveWeek([eKey]);
   (function(){var _we=DB.weekEntries[eKey];if(_we&&_we.sqlId){fetch('/api/week-entries/'+encodeURIComponent(_we.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledDate:targetDate})}).catch(function(){});}})();
   renderWeekPlan();
   showToast('📅 تاریخ به ' + targetDate + ' تغییر کرد', 2000);
@@ -1243,7 +1256,7 @@ function wpDrop(event, targetDate) {
 
 function wpRemoveEntry(eKey){
   var _wre=DB.weekEntries[eKey];if(_wre&&_wre.sqlId){fetch('/api/week-entries/'+encodeURIComponent(_wre.sqlId),{method:'DELETE'}).catch(function(){});}
-  _weRemove(eKey);saveDB();_debouncedRenderWeekPlan();
+  _weRemove(eKey);_wpSaveWeek([]);_debouncedRenderWeekPlan();
 }
 // حذف همه ورودی‌های یک مرکز در یک هفته خاص (برای رفع مشکل duplicate)
 function wpRemoveAllInWeek(weekId,recKey){
@@ -1289,7 +1302,7 @@ function wpDoMoveEntry(eKey,targetWeekId){
   DB.weekEntries[newKey]=Object.assign({},we,{scheduledDate:null,done:false,doneDate:null});
   _weRemove(eKey);
   closeModal('wpMoveModal');
-  saveDB();renderWeekPlan();
+  _wpSaveWeek([newKey]);renderWeekPlan();
   showToast('مرکز به هفته جدید منتقل شد',2500);
 }
 
@@ -1297,7 +1310,7 @@ function clearScheduleDate(eKey){
   if(!DB.weekEntries[eKey])return;
   DB.weekEntries[eKey].scheduledDate=null;
   (function(){var _wec=DB.weekEntries[eKey];if(_wec&&_wec.sqlId){fetch('/api/week-entries/'+encodeURIComponent(_wec.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledDate:null})}).catch(function(){});}})();
-  saveDB();closeModal('schModal');_debouncedRenderWeekPlan();
+  _wpSaveWeek([eKey]);closeModal('schModal');_debouncedRenderWeekPlan();
   showToast('تاریخ حذف شد');
 }
 
@@ -1376,7 +1389,7 @@ function saveScheduleFromModal(eKey) {
         if(_sel2){wpBuildSelect();_sel2.value=destWeek.id;}
       }
       (function(){var _wen=DB.weekEntries[newKey2]||DB.weekEntries[eKey];if(_wen&&_wen.sqlId){fetch('/api/week-entries/'+encodeURIComponent(_wen.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({weekId:destWeek.id,scheduledDate:dateVal,actionType:actVal})}).catch(function(){});}})();
-      saveDB();closeModal('schModal');_debouncedRenderWeekPlan();
+      _wpSaveWeek([newKey2||eKey]);closeModal('schModal');_debouncedRenderWeekPlan();
       showToast('↪ انتقال به '+(destWeek?destWeek.label:dateVal), 2500);
       return;
     }
@@ -1392,7 +1405,7 @@ function saveScheduleFromModal(eKey) {
   var rtype = we.rtype; var rid = we.rid;
   if(rtype && rid){setE(rtype, rid, 'followupDate', dateVal);}
   (function(){var _wes=DB.weekEntries[eKey];if(_wes&&_wes.sqlId){fetch('/api/week-entries/'+encodeURIComponent(_wes.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledDate:dateVal,actionType:actVal})}).catch(function(){});}})();
-  saveDB();closeModal('schModal');_debouncedRenderWeekPlan();
+  _wpSaveWeek([eKey]);closeModal('schModal');_debouncedRenderWeekPlan();
   showToast('📅 برنامه تنظیم شد', 2500);
 }
 function openAssignWeekForCenter(rtype,id,name){
@@ -1467,8 +1480,8 @@ function addToWeekAuto(weekId,rtype,id,name,actionType){
   var _rk=rtype+'_'+id;
   wpRemoveFromOtherWeeks(_rk, weekId);
   if(!DB.weekEntries[eKey]||DB.weekEntries[eKey].done){DB.weekEntries[eKey]={scheduledDate:null,done:false,doneDate:null,rtype:rtype,rid:id,recKey:rtype+'_'+id,centerName:getRecLabel(rtype+'_'+id),actionType:actionType||'call',addedBy:currentUser};(function(_k,_we){var _pts=_k.split(':::');fetch('/api/week-entries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),weekId:_pts[0],recKey:_we.recKey || (_we.rtype+'_'+_we.rid),rtype:_we.rtype,rid:_we.rid,scheduledDate:_we.scheduledDate||null,actionType:_we.actionType||'call',done:false,doneDate:null,addedBy:_we.addedBy||currentUser,centerName:_we.centerName||''})}).then(function(r){return r.ok?r.json():null;}).then(function(d){if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;}).catch(function(){});})(eKey,DB.weekEntries[eKey]);}
-  saveDB();
-  var sel=document.getElementById('wpSel');
+  _wpSaveWeek([eKey]);
+  var sel=document.getElementById('wpSel');
   if(sel){
     var parts=weekId.split('/');if(parts[0])_wpYear=parseInt(parts[0]);
     wpBuildSelect();sel.value=weekId;
@@ -1641,7 +1654,7 @@ function bulkMoveSelectedToWeek(targetWeekId) {
     }
   });
   
-  saveDB();
+  _wpSaveWeek(checkedItems.map(function(item){return wpEntryKey(targetWeekId,item.rtype,item.rid);}));
   closeModal('wpAssign');
   closeModal('wpAssignBulkMoveModal');
   
@@ -1664,17 +1677,19 @@ function saveWpAssign(weekId){
     return k.startsWith(weekId+':::') && we && !we.done;
   }).forEach(function(k){_weRemove(k);});
   
+  var assignedKeys=[];
   document.querySelectorAll('#wpAList input[type=checkbox]').forEach(function(cb){
     if(!cb.checked)return;
     var rtype=cb.getAttribute('data-rtype');var rid=cb.getAttribute('data-rid');
     var eKey=wpEntryKey(weekId,rtype,rid);
+    assignedKeys.push(eKey);
     var _rk=rtype+'_'+rid;
     wpRemoveFromOtherWeeks(_rk, weekId);
     if(!DB.weekEntries[eKey] || !DB.weekEntries[eKey].done){
       DB.weekEntries[eKey]={scheduledDate:null,done:false,doneDate:null,rtype:rtype,rid:rid,recKey:rtype+'_'+rid,centerName:getRecLabel(rtype+'_'+rid),actionType:actType,addedBy:currentUser};(function(_k,_we){var _pts=_k.split(':::');fetch('/api/week-entries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),weekId:_pts[0],recKey:_we.recKey || (_we.rtype+'_'+_we.rid),rtype:_we.rtype,rid:_we.rid,scheduledDate:_we.scheduledDate||null,actionType:_we.actionType||'call',done:false,doneDate:null,addedBy:_we.addedBy||currentUser,centerName:_we.centerName||''})}).then(function(r){return r.ok?r.json():null;}).then(function(d){if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;}).catch(function(){});})(eKey,DB.weekEntries[eKey]);
     }
   });
-  saveDB();
+  _wpSaveWeek(assignedKeys);
   var selWp=document.getElementById('wpSel');
   if(selWp&&weekId){var ptsWp=weekId.split('/');if(ptsWp[0])_wpYear=parseInt(ptsWp[0]);wpBuildSelect();selWp.value=weekId;}
   closeModal('wpAssign');renderWeekPlan();showToast('ذخیره شد ✅');
@@ -2558,7 +2573,7 @@ function wpRemoveTodayPlanItem(eKey, dateStr) {
       }).catch(function() {});
     }
     
-    saveDB();
+    _wpSaveWeek([eKey]);
     showToast('❌ از برنامه امروز حذف شد');
     wpOpenTodayPlanModal(dateStr);
     renderWeekPlan();

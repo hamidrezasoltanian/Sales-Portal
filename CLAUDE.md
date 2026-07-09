@@ -16,7 +16,11 @@ cd /home/user/Sales-Portal && node server/index.js
 # then open http://localhost:3000
 
 # Syntax check after any JS edit (mandatory):
-node --check public/js/app.bundle.js
+node --check public/js/core.js
+node --check public/js/weekplan.js
+
+# Pre-deploy checklist (production):
+node scripts/predeploy-check.js
 ```
 
 ## File Structure
@@ -27,19 +31,14 @@ Sales-Portal/
     index.html              ← HTML shell: markup, tab buttons, panel divs
     css/app.css             ← all styles (~1,640 lines), indigo design system
     js/
-      app.bundle.js         ← MAIN app file (15,292 lines) — served to browser
-                              ⚠ has NBSP (\xa0) — ALWAYS edit via Python, NEVER Edit tool
-                              ⚠ is a bundle of all the module files below
-      app.js                ← legacy single-file (NOT loaded) — kept for reference only
+      core.js               ← loadDB, saveDB, savePatchDB, slim PUT payload
+      safe-dom.js           ← XSS-safe DOM helpers
+      provinces.js, weekplan.js, tasks.js, ...  ← tab modules (~30 files, all loaded by index.html)
+      _legacy/
+        app.bundle.js       ← archived monolith (NOT served — reference only, has NBSP)
+        app.js              ← older single-file snapshot (NOT served)
       proforma.js           ← proforma invoice module (~650 lines)
-      modules/              ← extracted module files (organized copies, loaded before bundle)
-        auth-ui.js          ← login/logout UI
-        storage.js          ← loadDB, saveDB, SSE sync
-        user-mgmt.js        ← user CRUD, province ownership
-        tab-nav.js          ← switchTab, openProvince, navigation
-        banner.js           ← followup alerts, recent activity
-        week-plan.js        ← weekly schedule, drag-drop
-        notifications.js    ← bell panel, notification helpers
+      modules/              ← organized copies of some modules (reference)
       core/                 ← pure utility modules (no side effects)
         jalali.js           ← Jalali date conversion (g2j, j2g, todayStr, ...)
         helpers.js          ← esc, fNorm, showToast, flashRow
@@ -92,31 +91,14 @@ Sales-Portal/
 
 ## ⚠️ Critical Edit Constraint
 
-`public/js/app.bundle.js` (the main frontend file) contains **non-breaking spaces (`\xa0`)** mixed into indented lines, plus deeply nested quote-escaping inside HTML-string templates.
-**NEVER use the Edit tool directly on this file** — exact-match will fail or corrupt content.
+**Active frontend** is split across `public/js/*.js` modules loaded by `index.html`. Edit the relevant module file directly (`weekplan.js`, `provinces.js`, `core.js`, etc.).
 
-**Always use Python scripts:**
-```python
-with open('public/js/app.bundle.js', 'r', encoding='utf-8') as f:
-    content = f.read()
-# use content.replace(old, new, 1) with exact strings verified via repr()
-with open('public/js/app.bundle.js', 'w', encoding='utf-8') as f:
-    f.write(content)
-```
-
-To inspect an exact line before replacing (0-indexed):
-```bash
-python3 -c "
-with open('public/js/app.bundle.js','r',encoding='utf-8') as f:
-    lines=f.readlines()
-print(repr(lines[LINE_IDX]))
-"
-```
+`public/js/_legacy/app.bundle.js` is **archived** (not served) but still contains **non-breaking spaces (`\xa0`)** — if you must edit it, use Python scripts only, never the Edit tool.
 
 **Quote-escaping rule for generated HTML:** most UI is built as JS strings with
 `onclick="fn(\''+var+'\')"` patterns. When writing such strings from Python, the
 JS source must contain `\\'` (backslash-quote) inside the double-quoted HTML
-attribute. Always run `node --check public/js/app.bundle.js` after editing.
+attribute. Always run `node --check` on edited files after changes.
 
 ## Architecture
 
@@ -142,7 +124,7 @@ attribute. Always run `node --check public/js/app.bundle.js` after editing.
 | IndexedDB `atenaCRM_master` | — | Master center list cache |
 
 **The primary store is PostgreSQL.** `localStorage` is a fallback/cache.
-The whole `DB` object is saved as one JSON blob — there is no per-record API; concurrency is last-write-wins with SSE refresh hints.
+Routine saves use a **slim PUT** (`saveDB` → `_buildSavePayload`) that omits destructive collections (events, checklist, logs, etc.). Full replace requires `saveDBSync(true)` / `_fullSync: true` (import/backup). Partial center/week changes use `PATCH /api/data/patch` via `savePatchDB()` (used by `setE` and weekplan).
 
 The main `DB` object contains:
 ```
@@ -338,6 +320,10 @@ The receivables AI tab calls `https://api.anthropic.com/v1/messages` directly fr
 | Telegram bot: long-polling, CRM auth, proforma approve/reject inline keyboard, inventory check, QR scan | server/bot/telegram.js | ✅ |
 | Security middleware: helmet (CSP off) + compression (graceful fallback) | server/index.js | ✅ |
 | Vite + TypeScript + Vue 3 scaffold for incremental frontend migration | src/ + vite.config.ts + tsconfig.json | ✅ (placeholder) |
+| Slim PUT save: routine saves omit destructive collections; `_fullSync` for import | public/js/core.js + server/routes/data.js | ✅ |
+| Weekplan PATCH saves: week entries + notes via `savePatchDB` | public/js/weekplan.js | ✅ |
+| Production env guard + pre-deploy checklist | server/lib/prod-guard.js + scripts/predeploy-check.js | ✅ |
+| Legacy bundle archived to `public/js/_legacy/` | not served | ✅ |
 
 ## Planned Integration: Accounting Software → Receivables (مطالبات)
 
@@ -523,8 +509,8 @@ var ACTION_TYPE_LABELS = {
 
 ## Workflow Checklist for every change
 
-1. Read exact lines with `repr()` before replacing (NBSP hazard).
-2. Edit `public/js/app.js` / `public/css/app.css` / `public/index.html` via Python scripts.
-3. `node --check public/js/app.js` — must pass.
+1. Edit the relevant `public/js/<module>.js`, `public/css/app.css`, or `public/index.html`.
+2. `node --check public/js/<edited-file>.js` — must pass.
+3. `node scripts/predeploy-check.js` before production deploy.
 4. Commit with a descriptive message; push to the designated branch.
 5. Update this file's Feature Inventory / Function Map / Roadmap if they changed.

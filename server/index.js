@@ -19,6 +19,7 @@ const path = require('path');
 const fs = require('fs');
 const { initSchema } = require('./db');
 const { checkDevDatabaseGuard } = require('./lib/dev-guard');
+const { checkProductionGuard } = require('./lib/prod-guard');
 
 let helmet, compression;
 try { helmet = require('helmet'); } catch(e) {}
@@ -193,6 +194,7 @@ const PORT = parseInt(process.env.PORT || '3000');
 async function start() {
   try {
     checkDevDatabaseGuard();
+    checkProductionGuard();
     await initSchema();
     app.listen(PORT, function () {
       console.log('[Atena CRM] Server running on http://localhost:' + PORT);

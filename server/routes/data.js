@@ -175,7 +175,7 @@ router.put('/db', async (req, res) => {
   const KNOWN_KEYS = ['edits','notes','tags','rTags','weekEntries','tasks','notifications',
                       'changeLog','settings','events','checklist','kpiTargets','salesLog',
                       'callLog','visitLog','extra','_clientTs','_serverTs','_weDeletedKeys','_mtr',
-                      'missionLog','provHistory','kpiHistory', 'provOverrides'];
+                      'missionLog','provHistory','kpiHistory', 'provOverrides', '_fullSync'];
   const hasKnown = Object.keys(body).some(k => KNOWN_KEYS.includes(k));
   if (!hasKnown && Object.keys(body).length > 0) {
     return res.status(400).json({ error: 'ساختار داده نامعتبر' });
@@ -220,6 +220,7 @@ router.put('/db', async (req, res) => {
     const { edits, notes, rTags, tags, settings, events, checklist, kpiTargets,
             extra, salesLog, callLog, visitLog, missionLog, provHistory, kpiHistory,
             weekEntries, _weDeletedKeys, _mtr, provOverrides } = body;
+    const fullSync = body._fullSync === true;
 
     // ── center_edits ──────────────────────────────────────────────────────────
     if (edits && typeof edits === 'object' && Object.keys(edits).length > 0) {
@@ -286,7 +287,8 @@ router.put('/db', async (req, res) => {
       );
     }
 
-    // ── structured SQL tables saving ─────────────────────────────────────────
+    // ── destructive collections: only on explicit full sync ───────────────────
+    if (fullSync) {
     // 1. events
     if (events !== undefined && Array.isArray(events)) {
       await client.query('DELETE FROM app_events');
@@ -330,44 +332,6 @@ router.put('/db', async (req, res) => {
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)`,
           [c.id, c.row || 0, c.name || '', c.potential || 1, c.type || null, c.lead || 'سرنخ', c.province_id || '', c.owner || null, user]
         );
-      }
-    }
-
-    // 4. kpiTargets
-    if (kpiTargets !== undefined && typeof kpiTargets === 'object' && kpiTargets !== null) {
-      // 1. Weights
-      if (kpiTargets.weights) {
-        await client.query(
-          `INSERT INTO app_settings (key, value, updated_at, updated_by)
-           VALUES ('kpi_weights', $1, NOW(), $2)
-           ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW(), updated_by=$2`,
-          [JSON.stringify(kpiTargets.weights), user]
-        );
-      }
-      // 2. Provinces
-      await client.query('DELETE FROM kpi_province_targets');
-      if (kpiTargets.provinces && typeof kpiTargets.provinces === 'object') {
-        for (const [provId, targets] of Object.entries(kpiTargets.provinces)) {
-          if (!targets) continue;
-          await client.query(
-            `INSERT INTO kpi_province_targets (province_id, calls, visits, sales, extra, updated_at, updated_by)
-             VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
-            [provId, targets.calls || 0, targets.visits || 0, targets.sales || 0, targets.extra || 0, user]
-          );
-        }
-      }
-      // 3. User targets
-      await client.query('DELETE FROM kpi_user_targets');
-      for (const [key, value] of Object.entries(kpiTargets)) {
-        if (key === 'weights' || key === 'provinces' || !value) continue;
-        if (key.includes(':')) {
-          const [username, month] = key.split(':');
-          await client.query(
-            `INSERT INTO kpi_user_targets (username, month, calls_per_day, visits_per_week, sales_count, sales_amount, cash_pct, updated_at, updated_by)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)`,
-            [username, month, value.callsPerDay || 10, value.visitsPerWeek || 5, value.salesCount || 5, value.salesAmount || 0, value.cashPct || 50, user]
-          );
-        }
       }
     }
 
@@ -446,6 +410,82 @@ router.put('/db', async (req, res) => {
            VALUES ($1, $2, $3, NOW())`,
           [s.userId, s.month, JSON.stringify(s)]
         );
+      }
+    }
+
+    // 11. kpiTargets (full replace)
+    if (kpiTargets !== undefined && typeof kpiTargets === 'object' && kpiTargets !== null) {
+      if (kpiTargets.weights) {
+        await client.query(
+          `INSERT INTO app_settings (key, value, updated_at, updated_by)
+           VALUES ('kpi_weights', $1, NOW(), $2)
+           ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW(), updated_by=$2`,
+          [JSON.stringify(kpiTargets.weights), user]
+        );
+      }
+      await client.query('DELETE FROM kpi_province_targets');
+      if (kpiTargets.provinces && typeof kpiTargets.provinces === 'object') {
+        for (const [provId, targets] of Object.entries(kpiTargets.provinces)) {
+          if (!targets) continue;
+          await client.query(
+            `INSERT INTO kpi_province_targets (province_id, calls, visits, sales, extra, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
+            [provId, targets.calls || 0, targets.visits || 0, targets.sales || 0, targets.extra || 0, user]
+          );
+        }
+      }
+      await client.query('DELETE FROM kpi_user_targets');
+      for (const [key, value] of Object.entries(kpiTargets)) {
+        if (key === 'weights' || key === 'provinces' || !value) continue;
+        if (key.includes(':')) {
+          const [username, month] = key.split(':');
+          await client.query(
+            `INSERT INTO kpi_user_targets (username, month, calls_per_day, visits_per_week, sales_count, sales_amount, cash_pct, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)`,
+            [username, month, value.callsPerDay || 10, value.visitsPerWeek || 5, value.salesCount || 5, value.salesAmount || 0, value.cashPct || 50, user]
+          );
+        }
+      }
+    }
+    } // end fullSync
+
+    // ── kpiTargets upsert (slim save — no table wipe) ─────────────────────────
+    if (!fullSync && kpiTargets !== undefined && typeof kpiTargets === 'object' && kpiTargets !== null) {
+      if (kpiTargets.weights) {
+        await client.query(
+          `INSERT INTO app_settings (key, value, updated_at, updated_by)
+           VALUES ('kpi_weights', $1, NOW(), $2)
+           ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW(), updated_by=$2`,
+          [JSON.stringify(kpiTargets.weights), user]
+        );
+      }
+      if (kpiTargets.provinces && typeof kpiTargets.provinces === 'object') {
+        for (const [provId, targets] of Object.entries(kpiTargets.provinces)) {
+          if (!targets) continue;
+          await client.query(
+            `INSERT INTO kpi_province_targets (province_id, calls, visits, sales, extra, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, $5, NOW(), $6)
+             ON CONFLICT (province_id) DO UPDATE
+               SET calls = EXCLUDED.calls, visits = EXCLUDED.visits, sales = EXCLUDED.sales,
+                   extra = EXCLUDED.extra, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+            [provId, targets.calls || 0, targets.visits || 0, targets.sales || 0, targets.extra || 0, user]
+          );
+        }
+      }
+      for (const [key, value] of Object.entries(kpiTargets)) {
+        if (key === 'weights' || key === 'provinces' || !value) continue;
+        if (key.includes(':')) {
+          const [username, month] = key.split(':');
+          await client.query(
+            `INSERT INTO kpi_user_targets (username, month, calls_per_day, visits_per_week, sales_count, sales_amount, cash_pct, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)
+             ON CONFLICT (username, month) DO UPDATE
+               SET calls_per_day = EXCLUDED.calls_per_day, visits_per_week = EXCLUDED.visits_per_week,
+                   sales_count = EXCLUDED.sales_count, sales_amount = EXCLUDED.sales_amount,
+                   cash_pct = EXCLUDED.cash_pct, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+            [username, month, value.callsPerDay || 10, value.visitsPerWeek || 5, value.salesCount || 5, value.salesAmount || 0, value.cashPct || 50, user]
+          );
+        }
       }
     }
 
