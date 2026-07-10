@@ -100,6 +100,39 @@ function validate(schema, data, res) {
   return r.data;
 }
 
+// ── Helper: full snapshot before edit (version history) ─────────────────────
+function buildProformaSnapshot(pf, by) {
+  return {
+    at:              new Date().toISOString(),
+    by:              by || '',
+    jalaliDate:      pf.jalaliDate || '',
+    validDays:       pf.validDays,
+    centerKey:       pf.centerKey || '',
+    centerName:      pf.centerName || '',
+    items:           pf.items || [],
+    subtotal:        pf.subtotal,
+    discountPct:     pf.discountPct,
+    discAmt:         pf.discAmt,
+    taxPct:          pf.taxPct,
+    taxAmt:          pf.taxAmt,
+    total:           pf.total,
+    note:            pf.note || '',
+    managerNote:     pf.managerNote || '',
+    status:          pf.status || '',
+    buyerNatId:      pf.buyerNatId || '',
+    buyerEcoCode:    pf.buyerEcoCode || '',
+    buyerRegId:      pf.buyerRegId || '',
+    buyerAddress:    pf.buyerAddress || '',
+    buyerPhone:      pf.buyerPhone || '',
+    buyerPostal:     pf.buyerPostal || '',
+    hasCommission:   !!pf.hasCommission,
+    commissionAmt:   pf.commissionAmt || 0,
+    commissionNote:  pf.commissionNote || '',
+    wmsWarehouseId:  pf.wmsWarehouseId || '',
+    wmsDispatchIds:  pf.wmsDispatchIds || [],
+  };
+}
+
 // ── Helper: build row object from DB row ───────────────────────────────────
 function rowToObj(r) {
   return {
@@ -398,17 +431,8 @@ router.put('/:id', requireAuth, async (req, res) => {
 
     const pf = rowToObj(row);
 
-    // Snapshot current state before updating (version history)
-    const snapshot = {
-      at:       new Date().toISOString(),
-      by:       req.user.username,
-      items:    pf.items,
-      total:    pf.total,
-      subtotal: pf.subtotal,
-      discAmt:  pf.discAmt,
-      taxAmt:   pf.taxAmt,
-      note:     pf.note,
-    };
+    // Snapshot full state before updating (version history)
+    const snapshot = buildProformaSnapshot(pf, req.user.username);
 
     // Recalculate item-level discounts
     const rawItems = d.items || pf.items;

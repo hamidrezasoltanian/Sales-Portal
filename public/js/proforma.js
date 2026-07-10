@@ -1631,29 +1631,68 @@ function pfCenterClick(idx) {
 }
 
 // ── Version history modal ────────────────────────────────────────────────
+function _pfVerField(label, val) {
+  if (val === undefined || val === null || val === '') return '';
+  return '<div class="pf-ver-field"><span class="pf-ver-lbl">' + esc(label) + '</span><span class="pf-ver-val">' + esc(String(val)) + '</span></div>';
+}
+function _pfRenderVerItems(items) {
+  if (!items || !items.length) return '<div class="pf-ver-empty">بدون ردیف کالا</div>';
+  var rows = items.map(function(it) {
+    var disc = it.discPct ? ' (تخفیف ' + it.discPct + '٪)' : '';
+    return '<tr>'
+      + '<td>' + esc(it.name || '—') + '</td>'
+      + '<td><code>' + esc(it.catalogCode || it.prodId || '—') + '</code></td>'
+      + '<td style="text-align:center">' + (it.qty || 0) + '</td>'
+      + '<td style="text-align:left;direction:ltr">' + fmtNum(it.unitPrice || 0) + '</td>'
+      + '<td style="text-align:left;direction:ltr;font-weight:700">' + fmtNum(it.lineTotal || (it.qty * it.unitPrice) || 0) + disc + '</td>'
+      + '</tr>';
+  }).join('');
+  return '<div class="pf-ver-items-wrap"><table class="pf-ver-items"><thead><tr><th>کالا</th><th>کد</th><th>تعداد</th><th>قیمت واحد</th><th>جمع</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+}
 async function pfShowVersions(id) {
   var pf = _pfList.find(function(p){ return p.id === id; });
   if (!pf) return;
   var versions = pf.versions || [];
   if (!versions.length) { showToast('هیچ نسخه قبلی‌ای ثبت نشده است'); return; }
-  // Show newest first
   var revs = versions.slice().reverse();
-  var html = '<div style="max-height:60vh;overflow-y:auto">' +
+  var html = '<div class="pf-versions-scroll">' +
     revs.map(function(v, i) {
-      var items = (v.items || []);
-      var itemsStr = items.map(function(it){ return (it.catalogCode||it.prodId?'['+it.catalogCode+'] ':'') + it.name + ' ×' + it.qty; }).join('، ');
+      var items = v.items || [];
       var dateStr = '';
-      try { var d=new Date(v.at); dateStr=d.toLocaleDateString('fa-IR')+' '+d.toLocaleTimeString('fa-IR',{hour:'2-digit',minute:'2-digit'}); } catch(e){}
-      return '<div style="border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;margin-bottom:10px;background:' + (i===0?'#fffbeb':'#f8fafc') + '">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
-          '<span style="font-weight:700;font-size:13px;color:#1e293b">نسخه ' + (revs.length - i) + (i===0?' <span style="background:#f59e0b;color:white;font-size:10px;padding:1px 7px;border-radius:10px;margin-right:4px">آخرین</span>':'') + '</span>' +
-          '<span style="font-size:11px;color:#64748b">' + dateStr + ' · ' + esc(v.by||'') + '</span>' +
-        '</div>' +
-        '<div style="font-family:monospace;font-size:13px;color:#15803d;margin-bottom:6px">جمع کل: ' + fmtNum(v.total) + ' ﷼</div>' +
-        (v.subtotal !== v.total ? '<div style="font-size:11px;color:#475569">ناخالص: ' + fmtNum(v.subtotal) + ' — تخفیف: ' + fmtNum(v.discAmt) + ' — مالیات: ' + fmtNum(v.taxAmt) + '</div>' : '') +
-        '<div style="font-size:11px;color:#64748b;margin-top:6px;border-top:1px solid #e2e8f0;padding-top:6px">' + esc(itemsStr) + '</div>' +
-        (v.note ? '<div style="font-size:11px;color:#475569;margin-top:4px">📝 ' + esc(v.note) + '</div>' : '') +
-      '</div>';
+      try { var d = new Date(v.at); dateStr = d.toLocaleDateString('fa-IR') + ' ' + d.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }); } catch (e) {}
+      var buyerBlock = (v.buyerNatId || v.buyerEcoCode || v.buyerAddress || v.buyerPhone)
+        ? '<div class="pf-ver-section"><div class="pf-ver-section-title">خریدار</div><div class="pf-ver-grid">'
+          + _pfVerField('شناسه ملی', v.buyerNatId)
+          + _pfVerField('کد اقتصادی', v.buyerEcoCode)
+          + _pfVerField('شماره ثبت', v.buyerRegId)
+          + _pfVerField('تلفن', v.buyerPhone)
+          + _pfVerField('کد پستی', v.buyerPostal)
+          + _pfVerField('آدرس', v.buyerAddress)
+          + '</div></div>' : '';
+      var commBlock = v.hasCommission
+        ? '<div class="pf-ver-section"><div class="pf-ver-section-title">کمیسیون</div><div class="pf-ver-grid">'
+          + _pfVerField('مبلغ', fmtNum(v.commissionAmt) + ' ﷼')
+          + _pfVerField('یادداشت', v.commissionNote)
+          + '</div></div>' : '';
+      return '<div class="pf-ver-card' + (i === 0 ? ' pf-ver-latest' : '') + '">'
+        + '<div class="pf-ver-head">'
+          + '<span class="pf-ver-num">نسخه ' + (revs.length - i) + (i === 0 ? ' <span class="pf-ver-badge">آخرین</span>' : '') + '</span>'
+          + '<span class="pf-ver-meta">' + dateStr + ' · ' + esc(v.by || '') + '</span>'
+        + '</div>'
+        + '<div class="pf-ver-total">جمع کل: ' + fmtNum(v.total) + ' ﷼</div>'
+        + '<div class="pf-ver-summary">ناخالص ' + fmtNum(v.subtotal) + ' · تخفیف ' + (v.discountPct || 0) + '٪ (' + fmtNum(v.discAmt) + ') · مالیات ' + (v.taxPct || 0) + '٪ (' + fmtNum(v.taxAmt) + ')</div>'
+        + '<div class="pf-ver-grid pf-ver-meta-row">'
+          + _pfVerField('تاریخ پیشفاکتور', v.jalaliDate)
+          + _pfVerField('اعتبار (روز)', v.validDays)
+          + _pfVerField('مرکز', v.centerName || v.centerKey)
+          + _pfVerField('وضعیت', v.status)
+        + '</div>'
+        + '<div class="pf-ver-section"><div class="pf-ver-section-title">ردیف‌های کالا (' + items.length + ')</div>' + _pfRenderVerItems(items) + '</div>'
+        + buyerBlock
+        + commBlock
+        + (v.note ? '<div class="pf-ver-note">📝 ' + esc(v.note) + '</div>' : '')
+        + (v.managerNote ? '<div class="pf-ver-note pf-ver-mgr">👤 مدیر: ' + esc(v.managerNote) + '</div>' : '')
+      + '</div>';
     }).join('') + '</div>';
 
   openModal('pfVersionsModal', '🕐 تاریخچه نسخه‌ها — ' + esc(pf.no), html,

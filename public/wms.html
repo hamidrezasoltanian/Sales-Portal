@@ -1002,6 +1002,18 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
         <div class="fg"><label class="fl">💰 قیمت فروش پیشفاکتور (ریال)</label><input class="fi" type="number" id="mProdSalePrice" placeholder="0" style="border-color:#6366f1"/></div>
         <div class="fg"><label class="fl">یادداشت</label><input class="fi" id="mProdNote" placeholder=""/></div>
       </div>
+      <div id="mProdPricingSec" style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px;display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+          <div class="card-title" style="margin:0">💰 قیمت‌گذاری CRM (هر کالا)</div>
+          <select class="fs" id="mProdPricingBuyer" onchange="loadProdPricing()" style="min-width:150px">
+            <option value="hospital">بیمارستان</option>
+            <option value="colleague">همکار</option>
+            <option value="doctor">پزشک</option>
+            <option value="patient">بیمار</option>
+          </select>
+        </div>
+        <div id="mProdPricingBody"><span style="color:var(--text3);font-size:12px">—</span></div>
+      </div>
     </div>
     <div class="mf"><button class="btn btn-success" onclick="saveProd()">💾 ذخیره</button><button class="btn btn-ghost" onclick="closeModal('mProd')">انصراف</button></div>
   </div>
@@ -2577,7 +2589,42 @@ function openProdModal(id=null){
   const v=p?[p.name,p.fullName,p.brand,p.size,p.catalogCode,p.ircCode,p.unit,p.category,p.reorderPoint,p.note]:Array(10).fill('');
   f.forEach((k,i)=>{const el=document.getElementById('mProd'+k);if(el)el.value=v[i]||'';});
   const spEl=document.getElementById('mProdSalePrice');if(spEl)spEl.value=p?(p.salePrice||0):0;
+  const prSec=document.getElementById('mProdPricingSec');
+  if(prSec)prSec.style.display=id?'':'none';
+  if(id)loadProdPricing();
   openModal('mProd');
+}
+function renderProdPricingPanel(data){
+  if(!data.crmProduct)return '<div style="padding:12px;background:#fef9c3;border-radius:8px;font-size:12px;color:#92400e">⚠️ کالای CRM متصل نیست — کد کاتالوگ را با جدول محصولات CRM تطبیق دهید</div>';
+  if(!data.list||!data.pricing)return '<div style="padding:12px;color:var(--text3);font-size:12px">لیست قیمت فعال برای این نوع خریدار یافت نشد</div>';
+  const m=data.pricing.matrix;
+  const tiers=data.tier_labels||['تا ۲۰','۲۱-۵۰','۵۱-۱۰۰','بیش از ۱۰۰'];
+  const pays=['d30','d60','cash'];
+  const pl=data.pay_labels||{d30:'۳۰ روزه',d60:'۶۰ روزه',cash:'نقدی'};
+  let rows='';
+  tiers.forEach((tl,i)=>{
+    pays.forEach(pt=>{
+      const price=m[i]&&m[i][pt]!=null?fmt(m[i][pt]):'—';
+      rows+=`<tr><td>${tl}</td><td>${pl[pt]}</td><td style="font-weight:700;text-align:left;direction:ltr">${price}</td></tr>`;
+    });
+  });
+  const comm=data.pricing.commissions||{};
+  const commStr=[1,2,3].map(l=>comm[l]!=null?`سطح ${l}: ${fmt(comm[l])}`:'').filter(Boolean).join(' · ')||'—';
+  return `<div style="font-size:11px;color:var(--text2);margin-bottom:8px">متصل به: <strong>${data.crmProduct.name}</strong> · لیست: ${data.list.name} (v${data.list.version})</div>
+    <div class="tw"><table><thead><tr><th>پله تعداد</th><th>نوع پرداخت</th><th>قیمت (ریال)</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div style="margin-top:10px;font-size:11px"><strong>پورسانت:</strong> ${commStr}</div>
+    <div style="margin-top:8px;font-size:10px;color:var(--text3)">منبع: سرور CRM — ویرایش از تب قیمت‌گذاری اصلی</div>`;
+}
+function loadProdPricing(){
+  const id=document.getElementById('mProdId')?.value;
+  const body=document.getElementById('mProdPricingBody');
+  if(!id||!body)return;
+  const bt=document.getElementById('mProdPricingBuyer')?.value||'hospital';
+  body.innerHTML='<div style="text-align:center;padding:16px;color:var(--text3)">⏳</div>';
+  fetch(`/api/wms/products/${id}/pricing?buyer_type=${bt}`,{credentials:'include'})
+    .then(r=>r.json())
+    .then(data=>{body.innerHTML=renderProdPricingPanel(data);})
+    .catch(()=>{body.innerHTML='<div style="color:var(--danger);font-size:12px">خطا در بارگذاری قیمت</div>';});
 }
 function saveProd(){
   const id=document.getElementById('mProdId').value;
@@ -2842,68 +2889,80 @@ function renderPrLists(){
 // ════════════════════════════════════════
 // TAB 2 — PRICING MATRIX
 // ════════════════════════════════════════
-let _matrixListId = 'pl1';
+let _matrixBuyerType = 'hospital';
 function renderPrMatrixFilter(){
   const f=document.getElementById('prTabFilters');
   f.innerHTML=`<div class="card" style="padding:12px">
     <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
       <div class="fg" style="min-width:200px">
-        <label class="fl">لیست قیمت</label>
-        <select class="fs" id="matrixPL" onchange="_matrixListId=this.value;renderPrMatrix()">
-          ${S.priceLists.filter(pl=>pl.active).map(pl=>`<option value="${pl.id}" ${pl.id===_matrixListId?'selected':''}>${pl.name}</option>`).join('')}
+        <label class="fl">نوع خریدار (CRM)</label>
+        <select class="fs" id="matrixBuyerType" onchange="_matrixBuyerType=this.value;renderPrMatrix()">
+          <option value="hospital" ${_matrixBuyerType==='hospital'?'selected':''}>بیمارستان</option>
+          <option value="colleague" ${_matrixBuyerType==='colleague'?'selected':''}>همکار</option>
+          <option value="doctor" ${_matrixBuyerType==='doctor'?'selected':''}>پزشک</option>
+          <option value="patient" ${_matrixBuyerType==='patient'?'selected':''}>بیمار</option>
         </select>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="openBulkModal(_matrixListId)" style="margin-top:16px">📊 بروزرسانی دسته‌ای</button>
-      <button class="btn btn-ghost btn-sm" onclick="printPriceList(_matrixListId)" style="margin-top:16px">🖨️ چاپ لیست</button>
+      <button class="btn btn-ghost btn-sm" onclick="renderPrMatrix()" style="margin-top:16px">🔄 بروزرسانی</button>
+      <a class="btn btn-link btn-sm" href="/" target="_blank" style="margin-top:16px">قیمت‌گذاری CRM ↗</a>
     </div>
   </div>`;
 }
 function switchPrTabTo(tab, listId){
-  _matrixListId=listId||_matrixListId;
+  _matrixBuyerType=listId||_matrixBuyerType;
   document.querySelectorAll('#priceTabs .tab').forEach(t=>t.classList.remove('act'));
   document.querySelector('#priceTabs .tab:nth-child(2)').classList.add('act');
   prTab='matrix';
   renderPrMatrixFilter();
   renderPrMatrix();
 }
-function renderPrMatrix(){
-  const plId=document.getElementById('matrixPL')?.value||_matrixListId;
-  _matrixListId=plId;
-  const pl=S.priceLists.find(x=>x.id===plId);
+async function renderPrMatrix(){
+  const buyerType=document.getElementById('matrixBuyerType')?.value||_matrixBuyerType;
+  _matrixBuyerType=buyerType;
   const con=document.getElementById('prContent');
-  const rows=S.products.filter(p=>p.active).map(p=>{
-    const pi=getCurrentPI(p.id,plId);
-    const price=pi?(pl.type==='usd_based'&&pi.usdPrice?`$${pi.usdPrice} × ${fmt(pi.usdRate)} = ${fmt(Math.round(pi.usdPrice*pi.usdRate))}`:`${fmt(pi.price)}`):null;
-    const priceNum=getPriceValue(p.id,plId);
-    const buyPrice=getPurchasePrice(p.id);
-    const margin=getMargin(p.id,plId);
-    return `<tr>
-      <td>
-        <div><strong>${p.fullName||p.name}</strong></div>
-        <div style="font-size:11px;color:var(--text3)">${p.fullName}</div>
-      </td>
-      <td><code style="font-size:11px">${p.catalogCode}</code></td>
-      <td><code style="font-size:11px">${p.ircCode}</code></td>
-      <td style="font-size:12px;color:var(--text3)">${fmt(buyPrice)||'—'}</td>
-      <td>${pi?`<strong style="font-size:14px">${price}</strong>`:'<span style="color:var(--text3);font-size:12px">تعریف نشده</span>'}</td>
-      <td>${marginBadge(margin)}</td>
-      <td>${pi?fmtDate(pi.effectiveFrom):'—'}</td>
-      <td style="white-space:nowrap">
-        <button class="btn btn-primary btn-xs" onclick="openPIModal('${p.id}','${plId}')">${pi?'ویرایش':'➕ تعریف'}</button>
-        ${pi?`<button class="btn btn-ghost btn-xs" onclick="showPIHistory('${p.id}','${plId}')">📋 تاریخچه</button>`:''}
-      </td>
-    </tr>`;
-  }).join('');
-  con.innerHTML=`<div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-      <div class="card-title" style="margin:0">💰 ${pl?.name||''}</div>
-      <div style="font-size:12px;color:var(--text2)">${pl?.description||''} ${pl?.maxDiscountPct?`| حداکثر تخفیف: ${pl.maxDiscountPct}٪`:''}</div>
-    </div>
-    <div class="tw"><table>
-      <thead><tr><th>کالا</th><th>کد کاتالوگ</th><th>کد IRC</th><th>قیمت خرید</th><th>قیمت این لیست</th><th>مارجین</th><th>از تاریخ</th><th>عملیات</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>
-  </div>`;
+  if(!con)return;
+  con.innerHTML='<div class="card"><div style="text-align:center;padding:40px;color:var(--text3)">⏳ بارگذاری قیمت‌ها از سرور CRM...</div></div>';
+  try{
+    const res=await fetch(`/api/wms/pricing/matrix?buyer_type=${buyerType}`,{credentials:'include'});
+    const data=await res.json();
+    if(!data.list){
+      con.innerHTML=`<div class="card"><div style="padding:24px;text-align:center;color:var(--text3)">لیست قیمت فعالی برای «${buyerType}» یافت نشد.<br><span style="font-size:11px">از تب قیمت‌گذاری CRM import کنید.</span></div></div>`;
+      return;
+    }
+    const rows=(data.products||[]).map(entry=>{
+      const p=entry.wmsProduct;
+      const linked=entry.linked;
+      const m=entry.pricing?.matrix;
+      const price0=m&&m[0]&&m[0].d30!=null?fmt(m[0].d30):null;
+      const price60=m&&m[0]&&m[0].d60!=null?fmt(m[0].d60):null;
+      const priceCash=m&&m[0]&&m[0].cash!=null?fmt(m[0].cash):null;
+      const buyPrice=getPurchasePrice(p.id);
+      return `<tr>
+        <td><strong>${p.fullName||p.name}</strong>${!linked?'<br><span style="font-size:10px;color:#d97706">⚠ بدون اتصال CRM</span>':''}</td>
+        <td><code style="font-size:11px">${p.catalogCode||'—'}</code></td>
+        <td><code style="font-size:11px">${p.ircCode||'—'}</code></td>
+        <td style="font-size:12px;color:var(--text3)">${fmt(buyPrice)||'—'}</td>
+        <td>${price0?`<strong style="font-size:14px">${price0}</strong>`:'<span style="color:var(--text3);font-size:12px">تعریف نشده</span>'}</td>
+        <td style="font-size:11px;color:var(--text2)">${price60||'—'} / ${priceCash||'—'}</td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-primary btn-xs" onclick="openProdModal('${p.id}')">💰 جزئیات</button>
+        </td>
+      </tr>`;
+    }).join('');
+    const linkedN=(data.products||[]).filter(x=>x.linked).length;
+    con.innerHTML=`<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div class="card-title" style="margin:0">💰 ${data.list.name} <span style="font-size:12px;font-weight:400;color:var(--text2)">v${data.list.version}</span></div>
+        <div style="font-size:11px;color:var(--text2)">${linkedN} / ${(data.products||[]).length} کالا متصل · منبع: سرور SQL</div>
+      </div>
+      <div class="tw"><table>
+        <thead><tr><th>کالا</th><th>کد کاتالوگ</th><th>کد IRC</th><th>قیمت خرید</th><th>قیمت ۳۰روز (پله ۱)</th><th>۶۰روز / نقد</th><th>عملیات</th></tr></thead>
+        <tbody>${rows||emptyRow(7)}</tbody>
+      </table></div>
+    </div>`;
+  }catch(e){
+    con.innerHTML='<div class="card"><div style="padding:24px;color:var(--danger)">خطا در بارگذاری قیمت‌ها</div></div>';
+  }
 }
 
 // ════════════════════════════════════════

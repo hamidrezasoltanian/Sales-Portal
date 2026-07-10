@@ -1152,10 +1152,19 @@ function openCenterModal(rtype,id){
   var isExtra=!!(DB.extra&&DB.extra.find(function(x){return x.id===r.id;}));
   var provObj=getAllProvinces().find(function(p){return p.id===(prov||'tehran');});
   var provName=provObj?provObj.name:'تهران';
-  var inpStyle='width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)';
+  var inpStyle='cm-inp';
 
-  var body='<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px">'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+  var body='<div class="cm-profile">'
+    +'<div class="cm-profile-hero">'
+    +'<div class="cm-profile-hero-title">'+esc(displayName)+'</div>'
+    +'<div class="cm-profile-hero-meta">'
+    +'<span class="cm-profile-chip">📍 '+esc(provName)+'</span>'
+    +'<span class="cm-profile-chip cm-chip-lead">'+esc(lead)+'</span>'
+    +'<span class="cm-profile-chip cm-chip-status">'+esc(st)+'</span>'
+  +(pot?'<span class="cm-profile-chip">P'+pot+'</span>':'')
+    +'</div></div>'
+    +'<div class="cm-profile-section"><div class="cm-profile-section-title">🏥 مشخصات مرکز</div>'
+    +'<div class="cm-profile-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
     +'<div><label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">نام مرکز</label>'
     +'<input type="text" value="'+esc(displayName)+'" style="'+inpStyle+'" '
     +'onchange="setE(\''+rtype+'\',\''+r.id+'\',\'nameOverride\',this.value.trim());var _m=document.getElementById(\'mo_cm_'+id+'\');var _th=_m?_m.querySelector(\'.m-head span\'):null;if(_th)_th.textContent=\'🏥 \'+(this.value.trim()||\''+esc(displayName)+'\');if(typeof renderTable===\'function\')renderTable();" placeholder="نام مرکز..."></div>'
@@ -1165,10 +1174,10 @@ function openCenterModal(rtype,id){
         +getAllProvinces().map(function(p){return'<option value="'+p.id+'"'+(p.id===(prov||'tehran')?' selected':'')+'>'+p.name+'</option>';}).join('')
         +'</select></div>'
       :'<div><label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">استان</label>'
-        +'<div style="'+inpStyle+';background:var(--bg-page);color:var(--text-muted)">'+esc(provName)+'</div></div>'
+        +'<div class="cm-inp" style="background:var(--bg-page);color:var(--text-muted)">'+esc(provName)+'</div></div>'
     )
     +'</div></div>'
-    +'<div class="m-2col">'
+    +'<div class="cm-profile-section"><div class="cm-profile-section-title">⚙️ وضعیت و مسئولیت</div><div class="m-2col">'
     +'<div><label>پتانسیل</label><select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'potential\',parseInt(this.value))">'
     +[1,2,3,4].map(function(v){return'<option value="'+v+'"'+(pot==v?' selected':'')+'>'+v+'</option>';}).join('')+'</select></div>'
     +'<div><label>مسئول</label>'
@@ -1186,8 +1195,8 @@ function openCenterModal(rtype,id){
     // Stage validation warning
     +'<div id="cmStageWarn_'+id+'" style="display:none;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;padding:6px 10px;margin-top:4px;font-size:10px;color:#92400e"></div>'
     // ── بخش فرصت (فقط وقتی lead=فرصت) ──
-    +'<div id="cmOppSection_'+id+'" style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:8px 12px;margin-top:6px;'+(lead==='فرصت'?'':'display:none')+'">'
-    +'<div style="font-size:11px;font-weight:700;color:#7c3aed;margin-bottom:8px">🎯 جزئیات فرصت</div>'
+    +'<div id="cmOppSection_'+id+'" class="cm-profile-section cm-profile-accent-opp" style="'+(lead==='فرصت'?'':'display:none')+'">'
+    +'<div class="cm-profile-section-title">🎯 جزئیات فرصت</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px">'
     +'<div><label style="font-size:10px;display:block;margin-bottom:3px">احتمال موفقیت</label>'
     +'<select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'oppProbability\',this.value)">'
@@ -1208,8 +1217,8 @@ function openCenterModal(rtype,id){
     +'<input type="number" min="0" step="1" value="'+(e.oppValue||'')+'" placeholder="مثلاً: 150" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'oppValue\',parseFloat(this.value)||0)" style="width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)">'
     +'</div>'
     // ── بخش مشتری (فقط وقتی lead=مشتری) ──
-    +'<div id="cmCustSection_'+id+'" style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px 12px;margin-top:6px;'+(lead==='مشتری'?'':'display:none')+'">'
-    +'<div style="font-size:11px;font-weight:700;color:#15803d;margin-bottom:8px">🏆 اطلاعات مشتری</div>'
+    +'<div id="cmCustSection_'+id+'" class="cm-profile-section cm-profile-accent-cust" style="'+(lead==='مشتری'?'':'display:none')+'">'
+    +'<div class="cm-profile-section-title">🏆 اطلاعات مشتری</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:4px">'
     +'<div><label style="font-size:10px;display:block;margin-bottom:3px">وضعیت مشتری</label>'
     +'<select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'customerStatus\',this.value)">'
@@ -1239,8 +1248,8 @@ function openCenterModal(rtype,id){
     +'<button class="tag-add-btn" style="width:24px;height:24px;line-height:22px;font-size:14px" onclick="openTagMenu(event,\''+rtype+'\',\''+r.id+'\')">+</button>'
     +'</div>'
         // ── بخش اطلاعات تماس ──
-    +'<div style="background:var(--bg-raised);border-radius:8px;padding:10px 12px;margin-top:6px;border:1px solid var(--border)">'
-    +'<div style="font-size:11px;font-weight:700;color:#0369a1;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">'
+    +'<div class="cm-profile-section cm-profile-accent-contact">'
+    +'<div class="cm-profile-section-title" style="display:flex;align-items:center;justify-content:space-between">'
     +'<span>📞 اطلاعات تماس</span>'
     +'<button onclick="if(typeof _hcpOpenLinkModal===\'function\')_hcpOpenLinkModal(\''+rtype+'\',\''+r.id+'\',\''+id+'\');else addContact(\''+rtype+'\',\''+r.id+'\',\''+id+'\')" style="padding:3px 10px;border-radius:6px;border:none;background:#0ea5e9;color:#fff;font-size:11px;font-family:inherit;cursor:pointer;font-weight:700">+ افزودن مخاطب</button>'
     +'</div>'
@@ -1325,8 +1334,8 @@ function openCenterModal(rtype,id){
 
   var _ckWork=recK(rtype,r.id);
   var _snWork=displayName.replace(/'/g,'&#39;');
-  body+='<div id="cmWorkSec_'+id+'" style="margin-top:10px;padding:10px 12px;background:#f5f3ff;border-radius:8px;border:1px solid #ddd6fe">'
-    +'<div style="font-size:11px;font-weight:700;color:#6d28d9;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">'
+  body+='<div id="cmWorkSec_'+id+'" class="cm-profile-section cm-profile-accent-work">'
+    +'<div class="cm-profile-section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">'
     +'<span>📌 وظایف و تیکت‌های باز</span>'
     +'<span style="display:flex;gap:4px">'
     +'<button type="button" onclick="_openTaskModalLazy(null,{centerKey:\''+_ckWork+'\',title:\'وظیفه: '+esc(displayName)+'\'})" style="font-size:10px;padding:3px 10px;background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;border-radius:5px;cursor:pointer;font-family:inherit">+ وظیفه</button>'
@@ -1339,8 +1348,8 @@ function openCenterModal(rtype,id){
   var rkey=rtype+'_'+r.id;
   var hist=(DB.changeLog||[]).filter(function(h){return h.rkey===rkey;}).slice(-5).reverse();
   var fNames={status:'وضعیت',followupDate:'تاریخ پیگیری',contactName:'مخاطب',owner:'کارشناس',notes:'یادداشت',lead:'سرنخ',potential:'پتانسیل'};
-  body+='<div style="margin-top:10px;padding:8px 12px;background:var(--bg-raised);border-radius:8px;border:1px solid var(--border)">'
-    +'<div style="font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:6px">📋 تغییرات اخیر</div>'
+  body+='<div class="cm-profile-section">'
+    +'<div class="cm-profile-section-title">📋 تغییرات اخیر</div>'
     +(hist.length?hist.map(function(h){
       var d=new Date(h.at);var jd=g2j(d.getFullYear(),d.getMonth()+1,d.getDate());
       var ds=jd[0]+'/'+p2(jd[1])+'/'+p2(jd[2]);
@@ -1366,6 +1375,7 @@ function openCenterModal(rtype,id){
     var mtrHtml=mtrCenterSection(r.id);
     if(mtrHtml) body+=mtrHtml;
   }
+  body+='</div>'; // .cm-profile
   openModal('cm_'+id,'🏥 '+esc(displayName),body,foot,{lg:true});
   // Wire up proforma button (DOM, no onclick string)
   (function(_ck4,_mid4,_nm4){

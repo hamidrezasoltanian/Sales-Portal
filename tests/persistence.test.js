@@ -229,6 +229,12 @@ async function testProforma() {
   });
   assert(upd.status === 200, 'PUT proforma → 200');
   assert(upd.body.note === 'ویرایش شد', 'proforma note updated');
+  assert(upd.body.versions && upd.body.versions.length >= 1, 'proforma version saved');
+  const snap = upd.body.versions[upd.body.versions.length - 1];
+  assert(snap.centerName && snap.centerName.includes(PREFIX), 'snapshot has centerName');
+  assert(Array.isArray(snap.items) && snap.items.length > 0, 'snapshot has items');
+  assert(snap.jalaliDate === '1404/04/01', 'snapshot has jalaliDate');
+  assert(snap.validDays === 30, 'snapshot has validDays');
   const mp = multipart({}, 'file', 'test.txt', Buffer.from('persistence test file'), 'text/plain');
   const fileRes = await req('POST', '/api/proforma/' + pfId + '/files', mp.body, {
     'Content-Type': 'multipart/form-data; boundary=' + mp.boundary,
@@ -258,6 +264,12 @@ async function testWms() {
   const products = await req('GET', '/api/wms/products');
   const prodList = Array.isArray(products.body) ? products.body : [];
   assert(prodList.some(x => x.id === pid), 'product in GET list');
+  const pricing = await req('GET', '/api/wms/products/' + pid + '/pricing?buyer_type=hospital');
+  assert(pricing.status === 200, 'GET wms product pricing → 200');
+  assert(pricing.body.wmsProduct && pricing.body.wmsProduct.id === pid, 'pricing returns wms product');
+  const matrix = await req('GET', '/api/wms/pricing/matrix?buyer_type=hospital');
+  assert(matrix.status === 200, 'GET wms pricing matrix → 200');
+  assert(Array.isArray(matrix.body.products), 'pricing matrix has products array');
   const entry = await req('POST', '/api/wms/transactions', {
     type: 'entry', txnType: 'purchase', productId: pid, warehouseId: wid,
     qty: 5, note: 'ورود تست persistence', status: 'approved',

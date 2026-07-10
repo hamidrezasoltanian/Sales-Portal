@@ -1016,4 +1016,132 @@ router.put('/settings/:key', requireAuth, async (req, res) => {
   }
 });
 
+// ── WMS ↔ CRM pricing (SQL-backed, per product) ─────────────────────────────
+const CRM_BUYER_TYPES = [
+  { id: 'hospital', label: 'بیمارستان' },
+  { id: 'colleague', label: 'همکار' },
+  { id: 'doctor', label: 'پزشک' },
+  { id: 'patient', label: 'بیمار' },
+];
+const CRM_PAY_TYPES = ['d30', 'd60', 'cash'];
+const CRM_TIERS = [0, 1, 2, 3];
+const TIER_LABELS = ['تا ۲۰', '۲۱-۵۰', '۵۱-۱۰۰', 'بیش از ۱۰۰'];
+const PAY_LABELS = { d30: '۳۰ روزه', d60: '۶۰ روزه', cash: 'نقدی' };
+
+async function resolveCrmProduct(wmsRow) {
+  const code = (wmsRow.catalog_code || '').trim();
+  const name = (wmsRow.name || '').trim();
+  if (code) {
+    const byCode = await query(
+      `SELECT id, name, code, unit FROM products WHERE active=true AND code=$1 LIMIT 1`,
+      [code]
+    );
+    if (byCode.rows.length) return byCode.rows[0];
+  }
+  if (name) {
+    const byName = await query(
+      `SELECT id, name, code, unit FROM products WHERE active=true AND name ILIKE $1 LIMIT 1`,
+      [name]
+    );
+    if (byName.rows.length) return byName.rows[0];
+  }
+  return null;
+}
+
+async function getActivePriceList(buyerType, listId) {
+  if (listId) {
+    const r = await query('SELECT * FROM price_lists WHERE id=$1', [listId]);
+    return r.rows[0] || null;
+  }
+  const r = await query(
+    `SELECT * FROM price_lists WHERE buyer_type=$1 AND active=true ORDER BY version DESC LIMIT 1`,
+    [buyerType || 'hospital']
+  );
+  return r.rows[0] || null;
+}
+
+async function getProductPricingMatrix(crmProductId, listId) {
+  const items = await query(
+    `SELECT qty_tier, pay_type, price, base_price FROM price_list_items
+     WHERE price_list_id=$1 AND product_id=$2 ORDER BY qty_tier, pay_type`,
+    [listId, crmProductId]
+  );
+  const matrix = {};
+  CRM_TIERS.forEach((t) => {
+    matrix[t] = {};
+    CRM_PAY_TYPES.forEach((p) => { matrix[t][p] = null; });
+  });
+  items.rows.forEach((row) => {
+    if (!matrix[row.qty_tier]) matrix[row.qty_tier] = {};
+    matrix[row.qty_tier][row.pay_type] = Number(row.price);
+  });
+  const comm = await query(
+    `SELECT level, amount FROM commission_rules WHERE price_list_id=$1 AND product_id=$2`,
+    [listId, crmProductId]
+  );
+  const commissions = {};
+  comm.rows.forEach((r) => { commissions[r.level] = Number(r.amount); });
+  return { matrix, commissions };
+}
+
+router.get('/pricing/matrix', requireAuth, async (req, res) => {
+  try {
+    const buyerType = req.query.buyer_type || 'hospital';
+    const list = await getActivePriceList(buyerType, req.query.list_id ? parseInt(req.query.list_id, 10) : null);
+    if (!list) {
+      return res.json({ buyer_type: buyerType, list: null, products: [], buyer_types: CRM_BUYER_TYPES });
+    }
+    const wmsRes = await query('SELECT * FROM wms_products WHERE active=true ORDER BY name');
+    const products = [];
+    for (const row of wmsRes.rows) {
+      const wms = rowToProduct(row);
+      const crm = await resolveCrmProduct(row);
+      let pricing = null;
+      if (crm) pricing = await getProductPricingMatrix(crm.id, list.id);
+      products.push({
+        wmsProduct: wms,
+        crmProduct: crm ? { id: crm.id, name: crm.name, code: crm.code, unit: crm.unit } : null,
+        pricing,
+        linked: !!crm,
+      });
+    }
+    res.json({
+      buyer_type: buyerType,
+      list: { id: list.id, name: list.name, version: list.version, buyer_type: list.buyer_type },
+      products,
+      buyer_types: CRM_BUYER_TYPES,
+      tier_labels: TIER_LABELS,
+      pay_labels: PAY_LABELS,
+    });
+  } catch (e) {
+    console.error('[wms/pricing/matrix]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+router.get('/products/:id/pricing', requireAuth, async (req, res) => {
+  try {
+    const buyerType = req.query.buyer_type || 'hospital';
+    const wmsRes = await query('SELECT * FROM wms_products WHERE id=$1', [req.params.id]);
+    if (!wmsRes.rows.length) return res.status(404).json({ error: 'کالا یافت نشد' });
+    const wms = rowToProduct(wmsRes.rows[0]);
+    const crm = await resolveCrmProduct(wmsRes.rows[0]);
+    const list = await getActivePriceList(buyerType, req.query.list_id ? parseInt(req.query.list_id, 10) : null);
+    let pricing = null;
+    if (crm && list) pricing = await getProductPricingMatrix(crm.id, list.id);
+    res.json({
+      wmsProduct: wms,
+      crmProduct: crm ? { id: crm.id, name: crm.name, code: crm.code, unit: crm.unit } : null,
+      list: list ? { id: list.id, name: list.name, version: list.version, buyer_type: list.buyer_type } : null,
+      pricing,
+      buyer_types: CRM_BUYER_TYPES,
+      tier_labels: TIER_LABELS,
+      pay_labels: PAY_LABELS,
+    });
+  } catch (e) {
+    console.error('[wms/products/:id/pricing]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
 module.exports = router;
