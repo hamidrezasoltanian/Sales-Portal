@@ -443,6 +443,30 @@ async function test10_weekEntriesBulkUpdate() {
   await req('DELETE', '/api/week-entries/' + encodeURIComponent(entryId), null, tok);
 }
 
+async function test11_centerPatchNotWipedByBulkSave() {
+  console.log('\n── Test 11: center PATCH survives PUT /db without edits ──');
+  const tok = token(TEST_USERS[0]);
+  const centerKey = 'center_test_patch_' + Date.now();
+
+  const patch = await req('PATCH', '/api/centers/' + encodeURIComponent(centerKey), {
+    field: 'status',
+    val: 'فعال',
+    centerName: 'Test Patch Center',
+    oldValue: ''
+  }, tok);
+  assert(patch.status === 200, 'PATCH /api/centers/:key returns 200');
+  assert(patch.body && patch.body.data && patch.body.data.status === 'فعال', 'PATCH persisted status');
+
+  const putDb = await req('PUT', '/api/data/db', { notes: {} }, tok);
+  assert(putDb.status === 200, 'PUT /db without edits returns 200');
+
+  const get = await req('GET', '/api/centers/' + encodeURIComponent(centerKey), null, tok);
+  assert(get.status === 200, 'GET /api/centers/:key returns 200');
+  assert(get.body && get.body.data && get.body.data.status === 'فعال', 'center status survived bulk save');
+
+  await query('DELETE FROM center_edits WHERE center_key = $1', [centerKey]);
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -490,6 +514,7 @@ async function main() {
     await test8_hcpAndAffiliationEndpoints();
     await test9_weekEntriesNotWipedByBulkSave();
     await test10_weekEntriesBulkUpdate();
+    await test11_centerPatchNotWipedByBulkSave();
 
   } catch (err) {
     console.error('\n❌ خطای غیرمنتظره:', err.message);

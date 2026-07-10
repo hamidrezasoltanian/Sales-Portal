@@ -92,6 +92,7 @@ var _sse = null;
 var _sseReconnectTimer = null;
 var _sseReloadTimer = null;
 var _sseWeekEntryTimer = null;
+var _sseCenterTimer = null;
 var _ssePendingBy = null;
 
 function initSSE() {
@@ -104,6 +105,8 @@ function initSSE() {
         _sseReloadDB(data.by);
       } else if (data.type === 'week-entry-changed') {
         _sseWeekEntryChanged(data);
+      } else if (data.type === 'center-changed') {
+        _sseCenterChanged(data);
       } else if (data.type === 'app-reload') {
         if (typeof showToast === 'function') showToast('🔄 نسخه جدید بارگذاری شد. بازنشانی صفحه...', 3500);
         setTimeout(function(){ location.reload(); }, 2500);
@@ -192,6 +195,34 @@ function _sseWeekEntryChanged(data) {
         }
         var name = data.by ? (USERS[data.by] || data.by) : 'کاربر دیگری';
         if (typeof showToast === 'function') showToast('\uD83D\uDD04 ' + name + ' برنامه هفته را به\u200cروز کرد', 2500);
+      })
+      .catch(function() {});
+  }, 400);
+}
+
+function _sseCenterChanged(data) {
+  if (data.by === currentUser) return;
+  if (!data.centerKey) return;
+  clearTimeout(_sseCenterTimer);
+  _sseCenterTimer = setTimeout(function() {
+    fetch('/api/centers/' + encodeURIComponent(data.centerKey))
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(d) {
+        if (!d || !d.centerKey) return;
+        if (!DB.edits) DB.edits = {};
+        DB.edits[d.centerKey] = Object.assign({}, DB.edits[d.centerKey] || {}, d.data || {});
+        if (!_saveDebounceTimer) {
+          if (currentTab === 'provinces') {
+            if (typeof renderDashboard === 'function') renderDashboard();
+            if (typeof renderTable === 'function') renderTable();
+          } else if (currentTab === 'weekplan' && typeof renderWeekPlan === 'function') {
+            renderWeekPlan();
+          } else if (currentTab === 'manager' && typeof renderManagerPanel === 'function') {
+            renderManagerPanel();
+          }
+        }
+        var name = data.by ? (USERS[data.by] || data.by) : 'کاربر دیگری';
+        if (typeof showToast === 'function') showToast('\uD83D\uDD04 ' + name + ' مرکز را به\u200cروز کرد', 2500);
       })
       .catch(function() {});
   }, 400);
@@ -365,6 +396,7 @@ function _buildSavePayload(){
   var payload=JSON.parse(JSON.stringify(DB));
   delete payload.weekEntries;
   delete payload._weDeletedKeys;
+  delete payload.edits;
   if(_dbServerTs)payload._clientTs=_dbServerTs;
   return payload;
 }

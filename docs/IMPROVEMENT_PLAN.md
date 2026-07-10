@@ -382,7 +382,8 @@ scripts/setup_dev_db.sh   ← new
 | 1404/04/19 | ۲α.۳ omit weekEntries از saveDB | #13 | ✅ |
 | 1404/04/19 | ۲α.۴ SSE week-entry-changed | #13 | ✅ |
 | 1404/04/19 | ۲α.۶ tests 9-10 | #13 | ✅ |
-| | ۲β PATCH centers | | ⬜ |
+| 1404/04/19 | ۲β PATCH centers / setE | #13 | ✅ |
+| | ۲γ tasks/notif dual-write | | ⬜ |
 
 ---
 

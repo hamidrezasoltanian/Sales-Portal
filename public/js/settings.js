@@ -802,26 +802,30 @@ function getCenterById(rtype,id){
 }
 function setE(type,id,field,val){var k=recK(type,id);if(!DB.edits[k])DB.edits[k]={};
   if(!_undoSuppressed){var _prevVal=DB.edits[k][field];_undoStack.push({type:type,id:id,field:field,val:_prevVal});if(_undoStack.length>MAX_UNDO)_undoStack.shift();_redoStack=[];}
-  if(!_undoSuppressed){DB.changeLog=DB.changeLog||[];DB.changeLog.push({at:new Date().toISOString(),by:currentUser,rkey:type+'_'+id,field:field,val:val});if(DB.changeLog.length>500)DB.changeLog=DB.changeLog.slice(-500);fetch('/api/changelog',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({at:new Date().toISOString(),by:currentUser,rkey:type+'_'+id,field:field,val:val})}).catch(function(){});}
-  var _auditFields=['status','owner','lead','potential','followupDate','contactName','contactTitle','phones','address'];
-  if(_auditFields.indexOf(field)>=0){
-    var _oldV=DB.edits[k][field]!==undefined?DB.edits[k][field]:'';
-    if(String(_oldV)!==String(val)){
-      var _cName=_getCenterName(type,id);
-      fetch('/api/audit',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({centerKey:k,centerName:_cName,field:field,oldValue:_oldV,newValue:val})
-      }).catch(function(){});
-    }
-  }
+  var _oldV=DB.edits[k][field]!==undefined?DB.edits[k][field]:'';
+  var _cName=_getCenterName(type,id);
   DB.edits[k][field]=val;DB.edits[k]._ts=nowTs();_invalidateEditsCache();
   if(field==='status'&&val==='غیرفعال'&&!_undoSuppressed)setTimeout(function(){_promptLostReason(type,id);},400);
   if(field==='status'||field==='lead'||field==='potential')DB.edits[k]._lastActivity=nowTs();
   if(field==='status')DB.edits[k]._statusChangedTs=nowTs();
-
+  if(!_undoSuppressed){
+    DB.changeLog=DB.changeLog||[];
+    DB.changeLog.push({at:new Date().toISOString(),by:currentUser,rkey:type+'_'+id,field:field,val:val});
+    if(DB.changeLog.length>500)DB.changeLog=DB.changeLog.slice(-500);
+  }
+  fetch('/api/centers/'+encodeURIComponent(k),{
+    method:'PATCH',
+    headers:{'Content-Type':'application/json','X-Cid':typeof _sseClientId!=='undefined'?_sseClientId:''},
+    body:JSON.stringify({field:field,val:val,centerName:_cName,oldValue:_oldV})
+  }).then(function(r){
+    if(!r.ok)throw new Error('patch failed');
+    return r.json();
+  }).then(function(d){
+    if(d&&d.data)DB.edits[k]=Object.assign({},DB.edits[k],d.data);
+  }).catch(function(){showToast('⚠ خطا در ذخیره مرکز — لطفاً دوباره تلاش کنید',4000);});
   if(typeof wpReconcileFollowupDates==='function'){
     wpReconcileFollowupDates();
   }
-  saveDB();
   flashRow(id);
   if(currentTab==='kpi'&&(field==='status'||field==='lead'||field==='owner'))setTimeout(renderKPIPanel,300);
   if(currentTab==='manager'&&(field==='status'||field==='lead'||field==='owner'||field==='followupDate'))setTimeout(renderManagerPanel,300);

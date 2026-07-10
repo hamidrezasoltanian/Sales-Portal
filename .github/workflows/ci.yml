@@ -26,6 +26,7 @@ jobs:
             server/index.js \
             server/routes/data.js \
             server/routes/week-entries.js \
+            server/routes/centers.js \
             tests/behavioral.test.js
           do
             echo "Checking $f"
