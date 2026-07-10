@@ -29,21 +29,11 @@ function buildTypeFilter(){
 // ════════════════════════ SETTINGS MODAL ═════════════════════════════
 function openSettings(){
   var s=DB.settings||{};
-  var members=s.members||_DEFAULT_MEMBERS;
-  var companyName=s.companyName||'آتنا زیست درمان';
+  var companyName=s.companyName||DEFAULT_COMPANY_NAME;
   var companyInfo=s.companyInfo||'';
   var sipDomain=s.sipDomain||'';
   var anthropicKey=s.anthropicKey||'';
   var ckItems=s.ckItems||CK_ITEMS_DEFAULT;
-
-  var membersHtml=members.map(function(m,i){
-    return'<tr id="mrow_'+i+'">'
-      +'<td><input class="ed-inp" style="width:110px" value="'+esc(m.id)+'" id="mid_'+i+'" placeholder="کد کاربری (انگلیسی)"></td>'
-      +'<td><input class="ed-inp" style="width:110px" value="'+esc(m.name)+'" id="mname_'+i+'" placeholder="نام و نام خانوادگی"></td>'
-      +'<td><input class="ed-inp" style="width:90px" value="'+esc(m.role||'')+'" id="mrole_'+i+'" placeholder="سمت"></td>'
-      +'<td><button onclick="removeMemberRow('+i+')" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:4px;padding:2px 7px;cursor:pointer;font-size:11px">✕</button></td>'
-      +'</tr>';
-  }).join('');
 
   var ckHtml=ckItems.map(function(item,i){
     return'<div id="ckrow_'+i+'" style="display:flex;gap:6px;align-items:center;margin-bottom:5px">'
@@ -59,8 +49,6 @@ function openSettings(){
     +'<button onclick="closeModal(\'settingsModal\');openUserMgmt()" style="display:flex;flex-direction:column;align-items:center;gap:3px;background:#fff;border:1px solid #c7d2fe;border-radius:8px;padding:8px;cursor:pointer;font-size:11px;font-family:inherit;color:#4338ca">👥<span>مدیریت کاربران</span></button>'
     +(_isManager()?'<button onclick="switchTab(\'kpi\');closeModal(\'settingsModal\')" style="display:flex;flex-direction:column;align-items:center;gap:3px;background:#fff;border:1px solid #bbf7d0;border-radius:8px;padding:8px;cursor:pointer;font-size:11px;font-family:inherit;color:#16a34a">📊<span>پنل KPI</span></button>':'')
     +'<button onclick="openTkColumnsModal();closeModal(\'settingsModal\')" style="display:flex;flex-direction:column;align-items:center;gap:3px;background:#fff;border:1px solid #fde68a;border-radius:8px;padding:8px;cursor:pointer;font-size:11px;font-family:inherit;color:#92400e">📌<span>ستون‌های وظایف</span></button>'
-    +(_isManager()?'<button onclick="closeModal(\'settingsModal\');openDailyMonitor()" style="display:flex;flex-direction:column;align-items:center;gap:3px;background:#fff;border:1px solid #fbcfe8;border-radius:8px;padding:8px;cursor:pointer;font-size:11px;font-family:inherit;color:#9d174d">📋<span>گزارش روزانه</span></button>':'')
-    +(_isManager()?'<button onclick="closeModal(\'settingsModal\');openOverdueList()" style="display:flex;flex-direction:column;align-items:center;gap:3px;background:#fff;border:1px solid #fca5a5;border-radius:8px;padding:8px;cursor:pointer;font-size:11px;font-family:inherit;color:#991b1b">⚠️<span>معوقات</span></button>':'')
     +'</div></div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px">'
     +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">نام شرکت</label>'
@@ -128,15 +116,6 @@ function openSettings(){
     +'<button style="background:var(--bg-raised);color:var(--text-secondary);border:1px solid #fcd34d;border-radius:5px;padding:6px 12px;cursor:pointer;font-size:12px;font-family:inherit" onclick="cleanupOrphanedEntries(true);renderDashboard()">🧹 پاک‌سازی ورودی‌های منسوخ</button>'
     +'<button style="background:var(--bg-raised);color:var(--text-secondary);border:1px solid #7dd3fc;border-radius:5px;padding:6px 12px;cursor:pointer;font-size:12px;font-family:inherit" onclick="var n=wpDeduplicateEntries();if(n>0){saveDBSync();_debouncedRenderWeekPlan();showToast(\'✅ \'+n+\' ورودی تکراری هفته حذف شد\',3000);}else{showToast(\'✅ هیچ تکراری یافت نشد\');}">📋 حذف تکراری‌های هفته</button>'
     +'<button class="btn-primary" onclick="saveSettings()">💾 ذخیره تنظیمات</button>';
-  // Backup/Restore JSON section
-  body += '<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">'
-    +'<div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:8px">💾 پشتیبان‌گیری داده‌ها</div>'
-    +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
-    +'<button onclick="exportDBJson()" class="btn-secondary" style="font-size:12px">📥 دانلود پشتیبان JSON</button>'
-    +'<label class="btn-secondary" style="font-size:12px;cursor:pointer">📤 بازیابی از فایل<input type="file" accept=".json" onchange="importDBJson(this)" style="display:none"></label>'
-    +'</div>'
-    +'<div style="font-size:10px;color:var(--text-muted);margin-top:6px">پشتیبان شامل همه مراکز، یادداشت‌ها، تنظیمات و مطالبات می‌شود</div>'
-    +'</div>';
   // Data management section
   body += '<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">'
     +'<div style="font-size:12px;font-weight:700;margin-bottom:10px">📂 مدیریت داده‌ها</div>'
@@ -197,42 +176,8 @@ function openSettings(){
       +'<div style="font-size:10px;color:var(--text-muted)">نیاز به تنظیم FARADIS_* در .env سرور — تا آن زمان حالت stub</div></div></label>'
       +'</div>';
   }
-  // ── KPI targets quick-access (manager only)
-  if(_isManager()){
-    var _kpiExperts=(typeof umGetActive==='function'?umGetActive():[]).filter(function(m){return m.id!=='guest'&&m.role!=='مدیر'&&m.role!=='سوپر ادمین';});
-    body+='<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">';
-    body+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">';
-    body+='<div><div style="font-size:12px;font-weight:700;color:var(--text-primary)">🎯 اهداف KPI کارشناسان</div>';
-    body+='<div style="font-size:11px;color:var(--text-muted)">تنظیم اهداف ماهانه تماس، ویزیت و فروش برای هر کارشناس</div></div>';
-    body+='<button onclick="switchTab(\'kpi\');closeModal(\'settingsModal\')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:11px;font-family:inherit">📊 رفتن به KPI</button>';
-    body+='</div>';
-    body+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px">';
-    _kpiExperts.forEach(function(m){
-      var t=(typeof getKPITarget==='function')?getKPITarget(m.id,currentJMonth()):{callsPerDay:10,visitsPerWeek:5};
-      body+='<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:8px 10px">';
-      body+='<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">';
-      body+='<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+(m.color||'#94a3b8')+';flex-shrink:0"></span>';
-      body+='<span style="font-size:11px;font-weight:700;color:var(--text-primary)">'+esc(m.name)+'</span></div>';
-      body+='<div style="font-size:10px;color:var(--text-muted);margin-bottom:6px">📞 '+t.callsPerDay+'/روز  •  🚗 '+t.visitsPerWeek+'/هفته</div>';
-      body+='<button onclick="closeModal(\'settingsModal\');openKPITargets(\''+m.id+'\',\''+currentJMonth()+'\')" style="width:100%;background:var(--brand);color:#fff;border:none;border-radius:5px;padding:4px 8px;cursor:pointer;font-size:10px;font-family:inherit">🎯 تنظیم هدف ماه جاری</button>';
-      body+='</div>';
-    });
-    body+='</div></div>';
-  }
   openModal('settingsModal','⚙ تنظیمات نرم‌افزار',body,foot,{lg:true});
 }
-
-function addMemberRow(){
-  var tbody=document.getElementById('membersTable');if(!tbody)return;
-  var i=tbody.rows.length;
-  var tr=document.createElement('tr');tr.id='mrow_'+i;
-  tr.innerHTML='<td><input class="ed-inp" style="width:110px" id="mid_'+i+'" placeholder="کد کاربری"></td>'
-    +'<td><input class="ed-inp" style="width:110px" id="mname_'+i+'" placeholder="نام"></td>'
-    +'<td><input class="ed-inp" style="width:90px" id="mrole_'+i+'" placeholder="سمت"></td>'
-    +'<td><button onclick="removeMemberRow('+i+')" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:4px;padding:2px 7px;cursor:pointer;font-size:11px">✕</button></td>';
-  tbody.appendChild(tr);
-}
-function removeMemberRow(i){var r=document.getElementById('mrow_'+i);if(r)r.remove();}
 
 function addCKRow(){
   var list=document.getElementById('ckItemsList');if(!list)return;
@@ -247,10 +192,8 @@ function addCKRow(){
 function removeCKRow(i){var r=document.getElementById('ckrow_'+i);if(r)r.remove();}
 
 function saveSettings(){
-  var companyName=(document.getElementById('stgCompanyName').value||'').trim()||'شرکت';
+  var companyName=(document.getElementById('stgCompanyName').value||'').trim()||DEFAULT_COMPANY_NAME;
   var companyInfo=(document.getElementById('stgCompanyInfo').value||'').trim();
-  // Members managed via openUserMgmt — preserve existing
-  var members = umGetMembers();
   // collect ck items
   var ckList=document.getElementById('ckItemsList');
   var ckItems=[];
@@ -267,7 +210,6 @@ function saveSettings(){
   DB.settings.sipDomain=_sipDomRaw.trim().replace(/^\/+|\/+$/g,'');
   var _anthKey=(document.getElementById('stgAnthropicKey')||{}).value||'';
   if(_anthKey.trim())DB.settings.anthropicKey=_anthKey.trim();
-  DB.settings.members=members;
   DB.settings.ckItems=ckItems;
   // ذخیره تنظیمات اعلان‌ها
   var _npE=document.getElementById('stgNotifEnabled');
@@ -303,13 +245,41 @@ function saveSettings(){
   }
   var _mtrSyncEl=document.getElementById('stgMtrSync');
   if(_mtrSyncEl)DB.settings.mtrSyncEnabled=_mtrSyncEl.checked;
-  saveDB();
-  if(typeof _mtrStartSyncPoll==='function')_mtrStartSyncPoll();
-  buildUSERS();
-  closeModal('settingsModal');
-  rebuildFilters();
-  if(currentTab==='checklist')renderChecklist();
-  showToast('✅ تنظیمات ذخیره شد',2500);
+
+  var settingsPatch={
+    companyName:DB.settings.companyName,
+    companyInfo:DB.settings.companyInfo,
+    sipDomain:DB.settings.sipDomain,
+    ckItems:DB.settings.ckItems,
+    notifPrefs:DB.settings.notifPrefs
+  };
+  if(_anthKey.trim())settingsPatch.anthropicKey=_anthKey.trim();
+  if(_isManager()){
+    if(DB.settings.statusList)settingsPatch.statusList=DB.settings.statusList;
+    if(DB.settings.leadList)settingsPatch.leadList=DB.settings.leadList;
+    if(DB.settings.typeList)settingsPatch.typeList=DB.settings.typeList;
+    if(_mtrSyncEl)settingsPatch.mtrSyncEnabled=DB.settings.mtrSyncEnabled;
+  }
+
+  function _finishSave(){
+    saveDB();
+    if(typeof _mtrStartSyncPoll==='function')_mtrStartSyncPoll();
+    buildUSERS();
+    closeModal('settingsModal');
+    rebuildFilters();
+    if(currentTab==='checklist')renderChecklist();
+    var h1=document.getElementById('companyNameH1');
+    if(h1)h1.textContent=DB.settings.companyName||DEFAULT_COMPANY_NAME;
+    showToast('✅ تنظیمات ذخیره شد',2500);
+  }
+
+  fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(settingsPatch)})
+    .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||r.status);return d;});})
+    .then(_finishSave)
+    .catch(function(e){
+      console.warn('[saveSettings] /api/settings failed, falling back to blob save:',e.message);
+      _finishSave();
+    });
 }
 
 function addTagRow(){

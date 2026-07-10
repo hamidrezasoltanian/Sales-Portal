@@ -1,63 +1,6 @@
 'use strict';
 
-const ROLE_DEFAULTS = {
-  'مدیر': {
-    modules: {
-      provinces: 'edit', weekplan: 'edit', calendar: 'edit', checklist: 'edit',
-      activity: 'edit', tasks: 'edit', mtr: 'edit', pricing: 'edit',
-      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'edit',
-      'trade-kpi': 'edit', kpi: 'edit', manager: 'edit', changelog: 'edit', wms: 'edit', letters: 'edit'
-    }
-  },
-  'سوپر ادمین': {
-    modules: {
-      provinces: 'edit', weekplan: 'edit', calendar: 'edit', checklist: 'edit',
-      activity: 'edit', tasks: 'edit', mtr: 'edit', pricing: 'edit',
-      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'edit',
-      'trade-kpi': 'edit', kpi: 'edit', manager: 'edit', changelog: 'edit', wms: 'edit', letters: 'edit'
-    }
-  },
-  'IT': {
-    modules: {
-      provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
-      activity: 'view', tasks: 'view', mtr: 'none', pricing: 'none',
-      proforma: 'none', support: 'view', hcp: 'view', hr: 'none',
-      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'edit', wms: 'none', letters: 'none'
-    }
-  },
-  'بازرگانی': {
-    modules: {
-      provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
-      activity: 'view', tasks: 'view', mtr: 'none', pricing: 'none',
-      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'none',
-      'trade-kpi': 'edit', kpi: 'none', manager: 'none', changelog: 'none', wms: 'edit', letters: 'edit'
-    }
-  },
-  'مالی': {
-    modules: {
-      provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
-      activity: 'view', tasks: 'view', mtr: 'edit', pricing: 'edit',
-      proforma: 'edit', support: 'none', hcp: 'none', hr: 'none',
-      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'view', letters: 'edit'
-    }
-  },
-  'کارشناس فروش': {
-    modules: {
-      provinces: 'view', weekplan: 'edit', calendar: 'edit', checklist: 'edit',
-      activity: 'view', tasks: 'edit', mtr: 'none', pricing: 'view',
-      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'none',
-      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'none', letters: 'edit'
-    }
-  },
-  'مهمان': {
-    modules: {
-      provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
-      activity: 'view', tasks: 'view', mtr: 'none', pricing: 'none',
-      proforma: 'none', support: 'none', hcp: 'none', hr: 'none',
-      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'none', letters: 'none'
-    }
-  }
-};
+const { ROLE_DEFAULTS } = require('./lib/roles');
 
 function requirePermission(module, level = 'view') {
   return function (req, res, next) {

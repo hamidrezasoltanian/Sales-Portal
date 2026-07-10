@@ -1,12 +1,9 @@
 'use strict';
 
-// ── TEMPORARILY DISABLED ─────────────────────────────────────────────────────
-const NOTIF_ENABLED = false;
-// ─────────────────────────────────────────────────────────────────────────────
-
 const express = require('express');
 const { query, pool } = require('../db');
 const { requireAuth } = require('../auth');
+const { isManagerRole } = require('../lib/roles');
 
 // Lazy-load bot to avoid circular deps
 let _tgNotify = null;
@@ -23,6 +20,35 @@ function getBroadcast() {
 }
 
 const router = express.Router();
+
+let _notifPrefsCache = null;
+let _notifPrefsCacheTs = 0;
+
+async function getNotifPrefs() {
+  if (_notifPrefsCache && (Date.now() - _notifPrefsCacheTs) < 60000) {
+    return _notifPrefsCache;
+  }
+  try {
+    const r = await query("SELECT value FROM app_settings WHERE key = 'notifPrefs'");
+    _notifPrefsCache = (r.rows[0] && r.rows[0].value) || {};
+  } catch (e) {
+    _notifPrefsCache = {};
+  }
+  _notifPrefsCacheTs = Date.now();
+  return _notifPrefsCache;
+}
+
+function isNotifAllowed(prefs, type) {
+  if (!prefs || prefs.enabled === false) return false;
+  const t = type || 'general';
+  if (prefs.types && prefs.types[t] === false) return false;
+  return true;
+}
+
+function invalidateNotifPrefsCache() {
+  _notifPrefsCache = null;
+  _notifPrefsCacheTs = 0;
+}
 
 // ── Helper: map DB row → camelCase object ──────────────────────────────────
 function rowToObj(r) {
@@ -47,7 +73,7 @@ router.get('/', requireAuth, async function (req, res) {
     const conditions = [];
     const params = [];
 
-    const isManager = req.user.role === 'مدیر' || req.user.role === 'سوپر ادمین';
+    const isManager = isManagerRole(req.user.role);
     const targetUser = req.query.to || (!isManager ? req.user.username : null);
 
     if (targetUser) {
@@ -72,15 +98,19 @@ router.get('/', requireAuth, async function (req, res) {
 
 // ── POST /api/notifications ────────────────────────────────────────────────
 router.post('/', requireAuth, async function (req, res) {
-  if (!NOTIF_ENABLED) return res.status(201).json({ ok: true, disabled: true });
   try {
     const { id, to, msg, centerKey, centerKeys, at, type, meta, autoSend } = req.body;
     if (!id || !to || !msg) {
       return res.status(400).json({ error: 'فیلدهای id، to و msg الزامی هستند' });
     }
-    // autoSend: true (default) = push to Telegram immediately
-    //           false          = store as pending, no immediate Telegram push
-    const shouldPush = autoSend !== false;
+
+    const prefs = await getNotifPrefs();
+    const notifType = type || 'general';
+    if (!isNotifAllowed(prefs, notifType)) {
+      return res.status(201).json({ ok: true, skipped: true, reason: 'disabled' });
+    }
+
+    const shouldPush = autoSend !== false && prefs.autoSend !== false;
     const result = await query(
       `INSERT INTO notifications (id, to_user, msg, center_key, center_keys, at, type, meta, sent_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -116,7 +146,7 @@ async function _markBlobNotifRead() { return 0; }
 // Lightweight endpoint: returns just the unread count for the current user.
 router.get('/count', requireAuth, async function (req, res) {
   try {
-    const isManager = req.user.role === 'مدیر' || req.user.role === 'سوپر ادمین';
+    const isManager = isManagerRole(req.user.role);
     const targetUser = req.query.to || (!isManager ? req.user.username : null);
 
     // Count from SQL
@@ -160,7 +190,7 @@ router.put('/:id/read', requireAuth, async function (req, res) {
 // A manager with no ?to= sees everyone's notifications, so mark them all.
 router.post('/read-all', requireAuth, async function (req, res) {
   try {
-    const isManager = req.user.role === 'مدیر' || req.user.role === 'سوپر ادمین';
+    const isManager = isManagerRole(req.user.role);
     const markEveryone = isManager && !req.body.to;
     const targetUser = req.body.to || req.user.username;
 
@@ -185,7 +215,7 @@ async function _markBlobReadAll() { return 0; }
 // Manager manually triggers delivery of pending (autoSend=false) notifications.
 router.post('/send-pending', requireAuth, async function (req, res) {
   try {
-    const isManager = req.user.role === 'مدیر' || req.user.role === 'سوپر ادمین';
+    const isManager = isManagerRole(req.user.role);
     if (!isManager) return res.status(403).json({ error: 'فقط مدیر مجاز است' });
 
     // Find all unsent notifications (sent_at IS NULL)

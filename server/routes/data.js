@@ -73,6 +73,8 @@ async function loadDBFromSQL(client) {
       kpiTargets.weights = r.value;
     } else if (r.key === 'provOverrides') {
       provOverrides = r.value || {};
+    } else if (r.key === 'members') {
+      // users are sourced from app_users table via /api/users — ignore legacy blob
     } else {
       settings[r.key] = r.value;
     }
@@ -271,6 +273,7 @@ router.put('/db', async (req, res) => {
     // ── app_settings ──────────────────────────────────────────────────────────
     if (settings && typeof settings === 'object') {
       for (const [key, value] of Object.entries(settings)) {
+        if (key === 'members') continue;
         if (key === 'anthropicKey' && value === '***') continue;
         await client.query(
           `INSERT INTO app_settings (key, value, updated_at, updated_by)
@@ -690,6 +693,7 @@ router.patch('/patch', async (req, res) => {
 
     if (settings && typeof settings === 'object') {
       for (const [key, value] of Object.entries(settings)) {
+        if (key === 'members') continue;
         if (key === 'anthropicKey' && value === '***') continue;
         await client.query(
           `INSERT INTO app_settings (key, value, updated_at, updated_by)
@@ -880,6 +884,7 @@ router.post('/history/:id/restore', requireManager, async (req, res) => {
     await client.query('DELETE FROM app_settings');
     if (Object.keys(settings).length > 0) {
       for (const [key, value] of Object.entries(settings)) {
+        if (key === 'members') continue;
         await client.query(
           `INSERT INTO app_settings (key, value, updated_at, updated_by)
            VALUES ($1, $2, NOW(), $3)`,

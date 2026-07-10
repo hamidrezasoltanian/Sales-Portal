@@ -7,6 +7,7 @@ const { requirePermission } = require('../permissions');
 const { requireAuth } = require('../auth');
 
 const router = express.Router();
+const DEFAULT_LETTERS_PIN = process.env.LETTERS_DEFAULT_PIN || '1234';
 router.use(requireAuth);
 router.use((req, res, next) => {
   const level = req.method === 'GET' ? 'view' : 'edit';
@@ -616,7 +617,7 @@ router.post('/:id/sign', requireAuth, async (req, res) => {
     // بررسی پین‌کد امضا
     const userRes = await query('SELECT signature_pin FROM app_users WHERE username = $1', [username]);
     const pinInDb = userRes.rows[0]?.signature_pin;
-    const activePin = pinInDb || '1234';
+    const activePin = pinInDb || DEFAULT_LETTERS_PIN;
 
     if (String(pin_code) !== String(activePin)) {
       await query('ROLLBACK');
@@ -721,7 +722,7 @@ router.post('/:id/unsign', requireAuth, async (req, res) => {
     // بررسی پین‌کد
     const userRes = await query('SELECT signature_pin FROM app_users WHERE username = $1', [username]);
     const pinInDb = userRes.rows[0]?.signature_pin;
-    const activePin = pinInDb || '1234';
+    const activePin = pinInDb || DEFAULT_LETTERS_PIN;
 
     if (String(pin_code) !== String(activePin)) {
       await query('ROLLBACK');
@@ -768,7 +769,7 @@ router.post('/update-pin', requireAuth, async (req, res) => {
   try {
     const userRes = await query('SELECT signature_pin FROM app_users WHERE username = $1', [username]);
     const pinInDb = userRes.rows[0]?.signature_pin;
-    const activePin = pinInDb || '1234';
+    const activePin = pinInDb || DEFAULT_LETTERS_PIN;
 
     if (String(current_pin) !== String(activePin)) {
       return res.status(400).json({ error: 'پین‌کد فعلی اشتباه است' });

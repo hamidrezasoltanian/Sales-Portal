@@ -30,7 +30,7 @@ function _umUsers(){
     var statusBg=active?'#dcfce7':'var(--bg-raised)';
     var statusTxt=active?'#15803d':'var(--text-muted)';
     var rowOp=active?1:.55;
-    var roles=['مدیر','کارشناس فروش','سوپر ادمین','بازرگانی','مالی','IT','مهمان'];
+    var roles=ALL_ROLES;
     return '<tr style="opacity:'+rowOp+';border-bottom:1px solid var(--border)">'
       +'<td style="padding:9px 8px;width:28px"><div id="umdot_'+m.id+'" style="width:16px;height:16px;border-radius:50%;background:'+color+';cursor:pointer;border:2px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,.15)" onclick="umPickColor(\''+m.id+'\',this)" title="تغییر رنگ"></div></td>'
       +'<td style="padding:9px 6px"><input id="um_name_'+m.id+'" value="'+esc(m.name)+'" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 9px;font-size:12.5px;font-family:inherit;color:var(--text-primary);width:130px"></td>'
@@ -291,7 +291,7 @@ function umClearPermissions(userId){
 }
 
 function umAddUser(){
-  var roles=['کارشناس فروش','مدیر','سوپر ادمین','بازرگانی','مالی','مهمان'];
+  var roles=ALL_ROLES;
   var body='<div style="display:flex;flex-direction:column;gap:12px">'
     +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">نام نمایشی *</label>'
     +'<input id="nu_name" class="ed-inp" style="width:100%;box-sizing:border-box" placeholder="نام کامل کارشناس"></div>'
@@ -624,8 +624,6 @@ function buildUSERS(){
         USERS[m.username]=m.display_name;
         return{id:m.username,name:m.display_name,role:m.role,color:m.color,phone:m.phone||'',active:m.active,commissionPct:m.commission_pct||null};
       });
-      // Also sync to DB.settings.members so legacy code works
-      if(DB.settings)DB.settings.members=_DEFAULT_MEMBERS;
       _buildUSERSUI();
       if(typeof buildOwnerFilter==='function')buildOwnerFilter();
     })
@@ -638,18 +636,10 @@ function buildUSERS(){
     });
 }
 function _buildUSERSUI(){
-  var members=(DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS;
+  var members=typeof umGetMembers==='function'?umGetMembers():(_DEFAULT_MEMBERS||[]);
   var activeMembers=members.filter(function(m){return m.active!==false;});
-  var sel=document.getElementById('uSel');
-  if(sel){
-    var cur=DB._lastUser||currentUser;
-    sel.innerHTML=activeMembers.map(function(m){return'<option value="'+esc(m.id)+'">'+esc(m.name)+(m.role?' — '+m.role:'')+'</option>';}).join('');
-    if(USERS[cur])sel.value=cur;
-    else if(activeMembers.length)sel.value=activeMembers[0].id;
-    currentUser=sel.value;
-    var dot=document.getElementById('uSelDot');
-    if(dot)dot.style.background=umGetColor(currentUser);
-  }
+  var dot=document.getElementById('uSelDot');
+  if(dot)dot.style.background=umGetColor(currentUser);
   // Update currentUserDisplay (server-auth mode)
   var cuDisp=document.getElementById('currentUserDisplay');
   if(cuDisp)cuDisp.textContent=USERS[currentUser]||currentUser;
@@ -665,18 +655,19 @@ function _buildUSERSUI(){
   if(typeof _kpiUser!=='undefined'&&_kpiUser&&!USERS[_kpiUser])
     _kpiUser=Object.keys(USERS)[0]||null;
   var h1=document.getElementById('companyNameH1');
-  var cn=(DB.settings&&DB.settings.companyName)||'پورتال فروش';
+  var cn=(DB.settings&&DB.settings.companyName)||DEFAULT_COMPANY_NAME;
   if(h1)h1.textContent=cn;
 }
 function initSettings(){
-  if(!DB.settings||!DB.settings.members){
+  if(!DB.settings){
     DB.settings={
-      companyName:(DB.settings&&DB.settings.companyName)||'آتنا زیست درمان',
-      members:(DB.settings&&DB.settings.members)||JSON.parse(JSON.stringify(_DEFAULT_MEMBERS)),
-      ckItems:(DB.settings&&DB.settings.ckItems)||null,
-      firstUse:(DB.settings&&DB.settings.firstUse)||{},
-      onboardingDisabled:(DB.settings&&DB.settings.onboardingDisabled)||{}
+      companyName:DEFAULT_COMPANY_NAME,
+      ckItems:null,
+      firstUse:{},
+      onboardingDisabled:{}
     };
+  } else if(!DB.settings.companyName){
+    DB.settings.companyName=DEFAULT_COMPANY_NAME;
   }
   if(!DB.settings.firstUse)DB.settings.firstUse={};
   if(!DB.settings.onboardingDisabled)DB.settings.onboardingDisabled={};

@@ -1,10 +1,7 @@
 'use strict';
 
-const MANAGER_ROLES = new Set(['مدیر', 'سوپر ادمین']);
-
-function isManagerRole(role) {
-  return MANAGER_ROLES.has(role);
-}
+const { MANAGER_ROLES: MANAGER_ROLE_LIST, isManagerRole } = require('./roles');
+const MANAGER_ROLES = new Set(MANAGER_ROLE_LIST);
 
 function isExpertRole(role) {
   return role === 'کارشناس فروش';

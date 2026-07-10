@@ -92,6 +92,7 @@ app.use('/api/proforma', require('./routes/proforma'));
 app.use('/api/tasks', require('./routes/tasks'));
 app.use('/api/week-entries', require('./routes/week-entries'));
 app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/settings', require('./routes/settings'));
 app.use('/api/changelog', require('./routes/changelog'));
 app.use('/api/migrate', require('./routes/migrate'));
 app.use('/api/support', require('./routes/support'));
