@@ -2847,7 +2847,7 @@ function renderPrTabContent(){
   if(!f||!con) return;
   if(prTab==='lists'){ f.innerHTML=''; renderPrLists(); }
   else if(prTab==='matrix'){ renderPrMatrixFilter(); renderPrMatrix(); }
-  else if(prTab==='compare'){ f.innerHTML=''; renderPrCompare(); }
+  else if(prTab==='compare'){ renderPrCompareFilter(); renderPrCompare(); }
   else if(prTab==='purchase'){ renderPrPurchaseFilter(); renderPrPurchase(); }
   else if(prTab==='history'){ f.innerHTML=''; renderPrHistory(); }
 }
@@ -2857,33 +2857,35 @@ function renderPrTabContent(){
 // ════════════════════════════════════════
 function renderPrLists(){
   const con=document.getElementById('prContent');
-  const typeLabel={sale:'فروش ریالی',usd_based:'دلاری',cost_plus:'خرید + مارجین'};
-  const rows=S.priceLists.map(pl=>{
-    const items=S.priceItems.filter(pi=>pi.priceListId===pl.id&&!pi.effectiveTo);
-    const prods=[...new Set(items.map(pi=>pi.productId))].length;
-    return `<tr>
-      <td><strong>${pl.name}</strong><br><span style="font-size:11px;color:var(--text3)">${pl.description||''}</span></td>
-      <td><code>${pl.code||'—'}</code></td>
-      <td><span class="chip">${typeLabel[pl.type]||pl.type}</span></td>
-      <td style="text-align:center">${prods} / ${S.products.filter(p=>p.active).length}</td>
-      <td style="text-align:center">${pl.maxDiscountPct?pl.maxDiscountPct+'٪':'—'}</td>
-      <td><span class="dot ${pl.active?'dot-green':'dot-red'}"></span>${pl.active?'فعال':'غیرفعال'}</td>
-      <td style="white-space:nowrap">
-        <button class="btn btn-link" onclick="openPLModal('${pl.id}')">ویرایش</button>
-        <button class="btn btn-link" onclick="switchPrTabTo('matrix','${pl.id}')">💰 قیمت‌گذاری</button>
-        <button class="btn btn-link" onclick="openBulkModal('${pl.id}')">📊 دسته‌ای</button>
-        <button class="btn btn-link" onclick="printPriceList('${pl.id}')">🖨️</button>
-        <button class="btn btn-link" onclick="copyPL('${pl.id}')">📋 کپی</button>
-      </td>
-    </tr>`;
-  }).join('');
-  con.innerHTML=`<div class="card">
-    <div class="card-title">📋 لیست‌های قیمت فعال</div>
-    <div class="tw"><table>
-      <thead><tr><th>نام لیست</th><th>کد</th><th>نوع</th><th>کالاهای تعریف‌شده</th><th>حداکثر تخفیف</th><th>وضعیت</th><th>عملیات</th></tr></thead>
-      <tbody>${rows||'<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text3)">لیستی تعریف نشده</td></tr>'}</tbody>
-    </table></div>
-  </div>`;
+  if(!con)return;
+  con.innerHTML='<div class="card"><div style="padding:28px;text-align:center;color:var(--text3)">⏳ بارگذاری لیست‌های CRM...</div></div>';
+  fetch('/api/wms/pricing/compare?pay_type=d30',{credentials:'include'})
+    .then(r=>r.json())
+    .then(data=>{
+      const cols=(data.columns||[]).filter(c=>c.list);
+      const total=(data.products||[]).length;
+      const rows=cols.map(c=>{
+        const priced=(data.products||[]).filter(p=>p.prices&&p.prices[c.buyer_type]!=null).length;
+        return `<tr>
+          <td><strong>${c.label}</strong></td>
+          <td><code>${c.buyer_type}</code></td>
+          <td style="text-align:center">v${c.list.version}</td>
+          <td style="text-align:center">${priced} / ${total}</td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-link" onclick="switchPrTabTo('matrix','${c.buyer_type}')">💰 قیمت‌گذاری</button>
+          </td>
+        </tr>`;
+      }).join('');
+      con.innerHTML=`<div class="card">
+        <div class="card-title">📋 لیست‌های قیمت CRM (سرور SQL)</div>
+        <div class="tw"><table>
+          <thead><tr><th>نوع خریدار</th><th>کد</th><th>نسخه</th><th>کالاهای قیمت‌دار</th><th>عملیات</th></tr></thead>
+          <tbody>${rows||'<tr><td colspan="5" style="text-align:center;padding:32px;color:var(--text3)">لیست فعالی در CRM نیست</td></tr>'}</tbody>
+        </table></div>
+        <div style="font-size:10px;color:var(--text3);margin-top:8px">ویرایش قیمت از تب قیمت‌گذاری CRM — import لیست قیمت</div>
+      </div>`;
+    })
+    .catch(()=>{con.innerHTML='<div class="card"><div style="padding:24px;color:var(--danger)">خطا در بارگذاری</div></div>';});
 }
 
 // ════════════════════════════════════════
@@ -2969,36 +2971,46 @@ async function renderPrMatrix(){
 // TAB 3 — COMPARISON MATRIX
 // ════════════════════════════════════════
 function renderPrCompare(){
-  const activeLists=S.priceLists.filter(pl=>pl.active);
   const con=document.getElementById('prContent');
-  const headers=activeLists.map(pl=>`<th style="text-align:center;min-width:110px">${pl.name}<br><span style="font-size:10px;font-weight:400;opacity:.7">${pl.maxDiscountPct?pl.maxDiscountPct+'٪ max':''}</span></th>`).join('');
-  const rows=S.products.filter(p=>p.active).map(p=>{
-    const buyPrice=getPurchasePrice(p.id);
-    const cells=activeLists.map(pl=>{
-      const v=getPriceValue(p.id,pl.id);
-      const m=getMargin(p.id,pl.id);
-      return v?`<td style="text-align:center">
-        <div style="font-weight:700">${fmt(v)}</div>
-        <div style="font-size:10px;margin-top:2px">${marginBadge(m)}</div>
-      </td>`:'<td style="text-align:center;color:var(--text3);font-size:11px">—</td>';
-    }).join('');
-    return `<tr>
-      <td><strong>${p.fullName||p.name}</strong><br><span style="font-size:11px;color:var(--text3)">${p.catalogCode}</span></td>
-      <td style="text-align:center;color:var(--text3);font-size:12px">${fmt(buyPrice)||'—'}</td>
-      ${cells}
-    </tr>`;
-  }).join('');
-  con.innerHTML=`<div class="card">
-    <div class="card-title">🔄 مقایسه همه لیست‌های قیمت</div>
-    <div class="tw"><table>
-      <thead><tr>
-        <th>کالا</th>
-        <th style="text-align:center">قیمت خرید</th>
-        ${headers}
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>
-  </div>`;
+  if(!con)return;
+  const pay=document.getElementById('comparePayType')?.value||'d30';
+  con.innerHTML='<div class="card"><div style="padding:28px;text-align:center;color:var(--text3)">⏳ بارگذاری مقایسه...</div></div>';
+  fetch('/api/wms/pricing/compare?pay_type='+pay,{credentials:'include'})
+    .then(r=>r.json())
+    .then(data=>{
+      const cols=(data.columns||[]).filter(c=>c.list);
+      const payLbl={d30:'۳۰ روزه',d60:'۶۰ روزه',cash:'نقدی'}[data.pay_type]||data.pay_type;
+      const headers=cols.map(c=>`<th style="text-align:center;min-width:100px">${c.label}</th>`).join('');
+      const rows=(data.products||[]).map(entry=>{
+        const p=entry.wmsProduct;
+        const cells=cols.map(c=>{
+          const v=entry.prices&&entry.prices[c.buyer_type];
+          return v?`<td style="text-align:center;font-weight:700">${fmt(v)}</td>`:'<td style="text-align:center;color:var(--text3);font-size:11px">—</td>';
+        }).join('');
+        return `<tr>
+          <td><strong>${p.fullName||p.name}</strong><br><span style="font-size:11px;color:var(--text3)">${p.catalogCode||''}</span></td>
+          ${cells}
+        </tr>`;
+      }).join('');
+      con.innerHTML=`<div class="card">
+        <div class="card-title">🔄 مقایسه نوع خریدار — ${payLbl} (پله ۱)</div>
+        <div class="tw"><table>
+          <thead><tr><th>کالا</th>${headers}</tr></thead>
+          <tbody>${rows||emptyRow(cols.length+1)}</tbody>
+        </table></div>
+      </div>`;
+    })
+    .catch(()=>{con.innerHTML='<div class="card"><div style="padding:24px;color:var(--danger)">خطا در بارگذاری</div></div>';});
+}
+function renderPrCompareFilter(){
+  const f=document.getElementById('prTabFilters');
+  if(!f)return;
+  f.innerHTML=`<div class="card" style="padding:12px"><div class="fg" style="min-width:180px">
+    <label class="fl">نوع پرداخت</label>
+    <select class="fs" id="comparePayType" onchange="renderPrCompare()">
+      <option value="d30">۳۰ روزه</option><option value="d60">۶۰ روزه</option><option value="cash">نقدی</option>
+    </select>
+  </div></div>`;
 }
 
 // ════════════════════════════════════════
@@ -3086,23 +3098,31 @@ function renderPrPurchase(){
 // ════════════════════════════════════════
 function renderPrHistory(){
   const con=document.getElementById('prContent');
-  const items=[...S.priceItems].sort((a,b)=>new Date(b.effectiveFrom)-new Date(a.effectiveFrom));
-  con.innerHTML=`<div class="card">
-    <div class="card-title">📜 تاریخچه کامل قیمت‌های فروش</div>
-    <div class="tw"><table>
-      <thead><tr><th>کالا</th><th>لیست قیمت</th><th>قیمت</th><th>از تاریخ</th><th>تا تاریخ</th><th>یادداشت</th><th>وضعیت</th></tr></thead>
-      <tbody>${items.map(pi=>`<tr style="${!pi.effectiveTo?'background:#f0fdf4':''}">
-        <td>${prod(pi.productId).name}</td>
-        <td><span class="chip">${S.priceLists.find(pl=>pl.id===pi.priceListId)?.name||'?'}</span></td>
-        <td><strong>${pi.usdPrice?`$${pi.usdPrice} (${fmt(Math.round(pi.usdPrice*(pi.usdRate||0)))})`:`${fmt(pi.price)}`}</strong></td>
-        <td>${fmtDate(pi.effectiveFrom)}</td>
-        <td>${pi.effectiveTo?fmtDate(pi.effectiveTo):'<span class="badge bg">جاری</span>'}</td>
-        <td style="font-size:12px;color:var(--text2)">${pi.note||'—'}</td>
-        <td>${!pi.effectiveTo?'<span class="badge bg">فعال</span>':'<span class="badge bgr">منقضی</span>'}</td>
-      </tr>`).join('')||'<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text3)">بدون سابقه</td></tr>'}
-      </tbody>
-    </table></div>
-  </div>`;
+  if(!con)return;
+  con.innerHTML='<div class="card"><div style="padding:28px;text-align:center;color:var(--text3)">⏳ بارگذاری تاریخچه CRM...</div></div>';
+  fetch('/api/pricing/prices/history',{credentials:'include'})
+    .then(r=>r.json())
+    .then(rows=>{
+      const buyerLbl={hospital:'بیمارستان',colleague:'همکار',doctor:'پزشک',patient:'بیمار'};
+      const body=(rows||[]).map(pl=>`<tr style="${pl.active?'background:#f0fdf4':''}">
+        <td><strong>${pl.name||'—'}</strong></td>
+        <td><code>${pl.buyer_type||'—'}</code> <span style="font-size:11px;color:var(--text3)">${buyerLbl[pl.buyer_type]||''}</span></td>
+        <td style="text-align:center">v${pl.version||'—'}</td>
+        <td style="text-align:center">${pl.item_count||0}</td>
+        <td>${pl.effective_from?fmtDate(pl.effective_from):'—'}</td>
+        <td style="font-size:12px;color:var(--text2)">${pl.created_by||'—'}</td>
+        <td>${pl.active?'<span class="badge bg">فعال</span>':'<span class="badge bgr">آرشیو</span>'}</td>
+      </tr>`).join('');
+      con.innerHTML=`<div class="card">
+        <div class="card-title">📜 تاریخچه نسخه‌های لیست قیمت CRM (سرور SQL)</div>
+        <div class="tw"><table>
+          <thead><tr><th>لیست</th><th>نوع خریدار</th><th>نسخه</th><th>آیتم</th><th>از تاریخ</th><th>ثبت‌کننده</th><th>وضعیت</th></tr></thead>
+          <tbody>${body||'<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text3)">بدون سابقه</td></tr>'}</tbody>
+        </table></div>
+        <div style="font-size:10px;color:var(--text3);margin-top:8px">import جدید از تب قیمت‌گذاری CRM — نسخه قبلی آرشیو می‌شود</div>
+      </div>`;
+    })
+    .catch(()=>{con.innerHTML='<div class="card"><div style="padding:24px;color:var(--danger)">خطا در بارگذاری تاریخچه</div></div>';});
 }
 
 // ════════════════════════════════════════

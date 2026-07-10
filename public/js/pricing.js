@@ -75,14 +75,19 @@ var PL_DEFAULT_SETT={
 var PL_CENTER_ICONS={hospital:'🏥',faradis:'🏪',daramazon:'🛒',tamin:'🏛',modd:'🏦',noor:'💙',barakat:'🌟',bahman:'🏢',salajeghe:'🏢',doctor:'👨‍⚕️'};
 var PL_PAY_IDX={d30:0,d60:1,cash:2};
 
-var PL_PAY_IDX={d30:0,d60:1,cash:2};
-
 var CM_BUYER_FA={
   hospital:'بیمارستان',colleague:'همکار',doctor:'پزشک/مرکز درمانی',patient:'بیمار'
 };
 var CM_PAY_FA={d30:'۳۰ روزه',d60:'۶۰ روزه',cash:'نقدی'};
 var CM_TIER_FA=['تا ۲۰ عدد','۲۱–۵۰ عدد','۵۱–۱۰۰ عدد','بیش از ۱۰۰'];
 
+function _inferBuyerTypeFromCenter(e, r) {
+  var t = String((e && e.type) || (r && r.type) || '').toLowerCase();
+  if (/کلینیک|مطب|درمانگاه|پزشک/.test(t)) return 'doctor';
+  if (/داروخانه|همکار|توزیع|نماینده/.test(t)) return 'colleague';
+  if (/بیمار/.test(t)) return 'patient';
+  return 'hospital';
+}
 function openCenterPricingModal(centerKey, centerName) {
   var ck = centerKey || '';
   var cname = centerName || ck;
@@ -154,6 +159,78 @@ function _cmPrReload() {
 
 var _plP,_plCOMM,_plSETT,_plCOMMLabels,_plCOMMNames,_plCENTERS,_plPAYLBL,_plTIERS;
 var _plRepQty=[],_plExpQty=[];
+var _plSql={ready:false,products:[],byBuyer:{},commByProd:{},_promise:null};
+
+function plSqlTierQty(tier){return[1,25,75,101][tier]||1;}
+function plSqlPrice(buyerType,productId,qty,payType){
+  var bt=_plSql.byBuyer[buyerType];if(!bt||!bt.items[productId])return null;
+  var tier=plTierOf(qty||1);
+  var row=bt.items[productId][tier]||bt.items[productId][0];
+  return row?(row[payType]!=null?row[payType]:null):null;
+}
+function plBuildRepTiersFromSql(productId){
+  var tiers=[];
+  for(var t=0;t<4;t++){
+    var q=plSqlTierQty(t);
+    tiers.push([
+      plSqlPrice('colleague',productId,q,'d30')||0,
+      plSqlPrice('colleague',productId,q,'d60')||0,
+      plSqlPrice('colleague',productId,q,'cash')||0
+    ]);
+  }
+  return tiers;
+}
+function plApplySqlProducts(){
+  if(!_plSql.ready||!_plSql.products.length)return false;
+  _plP=_plSql.products.map(function(p){
+    var channels={};
+    Object.keys(CM_BUYER_FA).forEach(function(bt){
+      channels[bt]=plSqlPrice(bt,p.id,1,'d30');
+    });
+    var base=plSqlPrice('colleague',p.id,1,'d30')||0;
+    return{
+      id:p.id,name:p.name,buyPrice:0,commType:'sql',
+      channels:channels,
+      repPrices:{base:base,tiers:plBuildRepTiersFromSql(p.id)}
+    };
+  });
+  _plCENTERS=Object.assign({},CM_BUYER_FA);
+  _plCOMMLabels={1:'سطح ۱',2:'سطح ۲',3:'سطح ۳'};
+  if(_plRepQty.length!==_plP.length)_plRepQty=_plP.map(function(){return 0;});
+  if(_plExpQty.length!==_plP.length)_plExpQty=_plP.map(function(){return 0;});
+  return true;
+}
+function plLoadSqlPricing(){
+  if(_plSql._promise)return _plSql._promise;
+  _plSql._promise=Promise.all([
+    fetch('/api/pricing/products',{credentials:'include'}).then(function(r){return r.ok?r.json():[];}),
+    fetch('/api/pricing/prices',{credentials:'include'}).then(function(r){return r.ok?r.json():[];}),
+    fetch('/api/pricing/commission-rules',{credentials:'include'}).then(function(r){return r.ok?r.json():{products:[]};})
+  ]).then(function(res){
+    var products=res[0]||[];var lists=res[1]||[];var comm=res[2]||{};
+    if(!products.length){_plSql.ready=false;return;}
+    _plSql.products=products;
+    _plSql.byBuyer={};
+    lists.forEach(function(list){
+      var bt=list.buyer_type;
+      _plSql.byBuyer[bt]={listId:list.id,name:list.name,items:{}};
+      (list.items||[]).forEach(function(it){
+        var pid=it.product_id;
+        if(!_plSql.byBuyer[bt].items[pid])_plSql.byBuyer[bt].items[pid]={};
+        var tier=it.qty_tier;
+        if(!_plSql.byBuyer[bt].items[pid][tier])_plSql.byBuyer[bt].items[pid][tier]={};
+        _plSql.byBuyer[bt].items[pid][tier][it.pay_type]=Number(it.price);
+      });
+    });
+    _plSql.commByProd={};
+    (comm.products||[]).forEach(function(p){
+      _plSql.commByProd[p.product_id]={1:p.level1||0,2:p.level2||0,3:p.level3||0};
+    });
+    _plSql.ready=true;
+    plApplySqlProducts();
+  }).catch(function(){_plSql.ready=false;});
+  return _plSql._promise;
+}
 
 function plLoadData(){
   _plSETT=(DB.pricingSettings&&DB.pricingSettings.tiers)?DB.pricingSettings:JSON.parse(JSON.stringify(PL_DEFAULT_SETT));
@@ -192,8 +269,12 @@ function pricingLazyInit(){
   plLoadData();
   _plP.forEach(function(p){if(p.buyPrice==null)p.buyPrice=0;});
   plInitMgmtAccess();
-  plRenderRep();
-  document.getElementById('pl-upd-date').textContent='آخرین آپدیت: '+new Date().toLocaleDateString('fa-IR');
+  plLoadSqlPricing().finally(function(){
+    plLoadCostsFromServer().finally(function(){
+      plRenderRep();
+      document.getElementById('pl-upd-date').textContent='آخرین آپدیت: '+new Date().toLocaleDateString('fa-IR')+(_plSql.ready?' · سرور SQL':' · آفلاین');
+    });
+  });
 }
 
 function plSwitchTab(t){
@@ -523,7 +604,15 @@ function plRenderExpert(){
   var tbody=document.getElementById('pl-expert-tbody');if(!tbody)return;
   tbody.innerHTML=_plP.map(function(prod,i){
     var price=prod.channels[center];
-    var comm=useComm&&_plCOMM[prod.commType]?(_plCOMM[prod.commType][commKey]||0):0;
+    var comm=0;
+    if(useComm){
+      if(_plSql.ready&&_plSql.commByProd[prod.id]){
+        var lvl=parseInt(commKey,10)||1;
+        comm=_plSql.commByProd[prod.id][lvl]||0;
+      }else if(_plCOMM[prod.commType]){
+        comm=_plCOMM[prod.commType][commKey]||0;
+      }
+    }
     var q=_plExpQty[i]||0;
     var totalSell=q>0&&price?price*q:0;
     var totalComm=q>0?comm*q:0;
@@ -562,25 +651,27 @@ function _plCellEdit(i,field,isNum){
      field==='name'?'<span class="pl-pname" style="font-size:12px">'+esc(_plP[i].name)+'</span>':
      (_plP[i].channels[field]?plFmt(_plP[i].channels[field]):'<span style="color:var(--text-muted)">—</span>'))+'</td>';
 }
+function plOverviewChannels(){
+  if(_plSql.ready)return Object.keys(CM_BUYER_FA);
+  return ['hospital','faradis','daramazon','tamin','modd','noor','barakat','bahman','salajeghe','doctor'];
+}
 function plRenderOverview(){
   var tbody=document.getElementById('pl-overview-tbody');if(!tbody)return;
-  var CHANS=['hospital','faradis','daramazon','tamin','modd','noor','barakat','bahman','salajeghe','doctor'];
+  var CHANS=plOverviewChannels();
+  var marginChan=CHANS[0]||'hospital';
   tbody.innerHTML=_plP.map(function(p,i){
+    var chanCells=CHANS.map(function(ch){
+      if(ch===marginChan)return '';
+      return _plCellEdit(i,ch,true);
+    }).join('');
+    var marginVal=p.channels[marginChan];
     return '<tr>'
       +'<td class="pl-rnum">'+plToFa(i+1)+'</td>'
       +_plCellEdit(i,'name',false)
       +_plCellEdit(i,'buyPrice',true)
-      +_plCellEdit(i,'hospital',true)
-      +'<td class="tc"><span class="pl-margin-chip '+plMarginCls(p.buyPrice,p.channels.hospital)+'">'+plMarginPct(p.buyPrice,p.channels.hospital)+'</span></td>'
-      +_plCellEdit(i,'faradis',true)
-      +_plCellEdit(i,'daramazon',true)
-      +_plCellEdit(i,'tamin',true)
-      +_plCellEdit(i,'modd',true)
-      +_plCellEdit(i,'noor',true)
-      +_plCellEdit(i,'barakat',true)
-      +_plCellEdit(i,'bahman',true)
-      +_plCellEdit(i,'salajeghe',true)
-      +_plCellEdit(i,'doctor',true)
+      +_plCellEdit(i,marginChan,true)
+      +'<td class="tc"><span class="pl-margin-chip '+plMarginCls(p.buyPrice,marginVal)+'">'+plMarginPct(p.buyPrice,marginVal)+'</span></td>'
+      +chanCells
       +'</tr>';
   }).join('');
 }
@@ -598,12 +689,32 @@ function plSaveCell(prodIdx,field,val){
   var p=_plP[prodIdx];
   if(field==='name'){
     var nm=val.trim();if(!nm)return plRenderOverview();
+    if(_plSql.ready&&p.id){
+      fetch('/api/pricing/products/'+p.id,{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nm})})
+        .then(function(r){if(!r.ok)throw new Error();p.name=nm;showToast('✅ ذخیره شد',1200);plRenderOverview();plRenderRep();})
+        .catch(function(){showToast('خطا در ذخیره نام');plRenderOverview();});
+      return;
+    }
     p.name=nm;
   } else {
     var n=Math.round(parseFloat(val));
     if(isNaN(n)||n<0)return plRenderOverview();
-    if(field==='buyPrice')p.buyPrice=n;
-    else p.channels[field]=(n||null);
+    if(field==='buyPrice'){
+      if(_plSql.ready&&p.id){
+        fetch('/api/pricing/costs',{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({product_id:p.id,buy_price:n})})
+          .then(function(r){if(!r.ok)throw new Error();p.buyPrice=n;showToast('✅ ذخیره شد',1200);plRenderOverview();plRenderRep();})
+          .catch(function(){showToast('خطا در ذخیره قیمت خرید');plRenderOverview();});
+        return;
+      }
+      p.buyPrice=n;
+    } else if(_plSql.ready&&p.id&&CM_BUYER_FA[field]){
+      fetch('/api/pricing/prices/item',{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({buyer_type:field,product_id:p.id,qty_tier:0,pay_type:'d30',price:n})})
+        .then(function(r){if(!r.ok)throw new Error();p.channels[field]=(n||null);if(_plSql.byBuyer[field]&&_plSql.byBuyer[field].items[p.id]){if(!_plSql.byBuyer[field].items[p.id][0])_plSql.byBuyer[field].items[p.id][0]={};_plSql.byBuyer[field].items[p.id][0].d30=n;}showToast('✅ ذخیره شد',1200);plRenderOverview();plRenderRep();})
+        .catch(function(){showToast('خطا در ذخیره قیمت');plRenderOverview();});
+      return;
+    } else {
+      p.channels[field]=(n||null);
+    }
   }
   plSaveAll();plRenderOverview();plRenderRep();
   showToast('✅ ذخیره شد',1200);
@@ -1508,13 +1619,13 @@ function openCenterModal(rtype,id){
   if(typeof _hcpLoadCenterAffiliations==='function'){setTimeout(function(){_hcpLoadCenterAffiliations(rtype,r.id,id);},20);}
   if(window.umGetColor){setTimeout(function(){document.querySelectorAll('.owner-dot[data-uid]').forEach(function(d){var u=decodeURIComponent(d.dataset.uid);if(u)d.style.background=umGetColor(u);});},0);}
   // ── قیمت‌گذاری ──
-  (function(_rid,_centerKey,_rname,_isMgr){
+  (function(_rid,_centerKey,_rname,_isMgr,_ce,_cr){
     fetch('/api/pricing/center/'+encodeURIComponent(_centerKey))
       .then(function(res){return res.json();})
       .then(function(cfg){
         var el=document.getElementById('cmPricingInfo_'+_rid);
         if(!el)return;
-        var buyerType=(cfg&&cfg.buyer_type)||'hospital';
+        var buyerType=(cfg&&cfg.buyer_type)||_inferBuyerTypeFromCenter(_ce,_cr);
         var parts=[];
         parts.push('🏷 نوع خریدار: <b>'+(CM_BUYER_FA[buyerType]||buyerType)+'</b>');
         if(cfg&&cfg.commission_level)parts.push('💼 سطح پورسانت: <b>'+cfg.commission_level+'</b>');
@@ -1558,7 +1669,7 @@ function openCenterModal(rtype,id){
           +'<button type="button" class="cm-foot-btn" style="background:#ede9fe;color:#6d28d9;border-color:#c4b5fd;padding:4px 12px;font-size:11px;margin-top:6px" '
           +'onclick="openCenterPricingModal(\''+esc(_centerKey).replace(/'/g,"\\'")+'\',\''+esc(_rname).replace(/'/g,"\\'")+'\')">📋 لیست قیمت</button>';
       });
-  })(id, recK(rtype,r.id), displayName, typeof _isManager==='function'&&_isManager());
+  })(id, recK(rtype,r.id), displayName, typeof _isManager==='function'&&_isManager(), e, r);
 }
 
 function _mrgSearch(){

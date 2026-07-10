@@ -1119,6 +1119,44 @@ router.get('/pricing/matrix', requireAuth, async (req, res) => {
   }
 });
 
+router.get('/pricing/compare', requireAuth, async (req, res) => {
+  try {
+    const payType = CRM_PAY_TYPES.includes(req.query.pay_type) ? req.query.pay_type : 'd30';
+    const wmsRes = await query('SELECT * FROM wms_products WHERE active=true ORDER BY name');
+    const columns = [];
+    for (const bt of CRM_BUYER_TYPES) {
+      const list = await getActivePriceList(bt.id, null);
+      columns.push({
+        buyer_type: bt.id,
+        label: bt.label,
+        list: list ? { id: list.id, name: list.name, version: list.version } : null,
+      });
+    }
+    const products = [];
+    for (const row of wmsRes.rows) {
+      const wms = rowToProduct(row);
+      const crm = await resolveCrmProduct(row);
+      const prices = {};
+      for (const bt of CRM_BUYER_TYPES) {
+        const list = await getActivePriceList(bt.id, null);
+        let val = null;
+        if (crm && list) {
+          const pricing = await getProductPricingMatrix(crm.id, list.id);
+          if (pricing.matrix[0] && pricing.matrix[0][payType] != null) {
+            val = pricing.matrix[0][payType];
+          }
+        }
+        prices[bt.id] = val;
+      }
+      products.push({ wmsProduct: wms, crmProduct: crm, prices, linked: !!crm });
+    }
+    res.json({ pay_type: payType, buyer_types: CRM_BUYER_TYPES, columns, products });
+  } catch (e) {
+    console.error('[wms/pricing/compare]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
 router.get('/products/:id/pricing', requireAuth, async (req, res) => {
   try {
     const buyerType = req.query.buyer_type || 'hospital';

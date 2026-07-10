@@ -412,6 +412,83 @@ router.get('/:id/dispatch', requireAuth, async (req, res) => {
   }
 });
 
+// ── POST /api/proforma/:id/restore — restore a saved version ────────────────
+router.post('/:id/restore', requireAuth, async (req, res) => {
+  try {
+    const existing = await query('SELECT * FROM proformas WHERE id = $1', [req.params.id]);
+    if (!existing.rows.length) return res.status(404).json({ error: 'پیشفاکتور یافت نشد' });
+    const row = existing.rows[0];
+    const isSuperAdmin = isSuperAdminRole(req.user.role);
+    if (!canEditProforma(req.user, row) && !isSuperAdmin) {
+      return res.status(403).json({ error: 'دسترسی ویرایش ندارید' });
+    }
+    if (!['draft', 'approved', 'sent'].includes(row.status) && !isSuperAdmin) {
+      return res.status(400).json({ error: 'فقط پیش‌نویس، ارسال‌شده یا تایید شده قابل ویرایش است' });
+    }
+
+    const versionIndex = parseInt(req.body?.versionIndex, 10);
+    const versions = row.versions || [];
+    if (isNaN(versionIndex) || versionIndex < 0 || versionIndex >= versions.length) {
+      return res.status(400).json({ error: 'شماره نسخه نامعتبر است' });
+    }
+    const snap = versions[versionIndex];
+    if (!snap) return res.status(404).json({ error: 'نسخه یافت نشد' });
+
+    const pf = rowToObj(row);
+    const snapshot = buildProformaSnapshot(pf, req.user.username);
+
+    const items = (snap.items || []).map(function (i) {
+      const base = (i.qty || 0) * (i.unitPrice || 0);
+      const disc = Math.round(base * (i.discPct || 0) / 100);
+      return Object.assign({}, i, { lineTotal: i.lineTotal != null ? i.lineTotal : (base - disc) });
+    });
+    const subtotal = snap.subtotal != null ? snap.subtotal : items.reduce(function (s, i) { return s + (i.lineTotal || 0); }, 0);
+    const discPct = snap.discountPct != null ? snap.discountPct : Number(row.discount_pct);
+    const discAmt = snap.discAmt != null ? snap.discAmt : Math.round(subtotal * discPct / 100);
+    const taxPct = snap.taxPct != null ? snap.taxPct : Number(row.tax_pct);
+    const taxAmt = snap.taxAmt != null ? snap.taxAmt : Math.round((subtotal - discAmt) * taxPct / 100);
+    const total = snap.total != null ? snap.total : (subtotal - discAmt + taxAmt);
+
+    const r = await query(
+      `UPDATE proformas SET
+         jalali_date=$1, valid_days=$2, center_key=$3, center_name=$4,
+         items=$5, subtotal=$6, discount_pct=$7, disc_amt=$8,
+         tax_pct=$9, tax_amt=$10, total=$11, note=$12, manager_note=$13,
+         buyer_nat_id=$14, buyer_eco_code=$15, buyer_reg_id=$16, buyer_address=$17,
+         buyer_phone=$18, buyer_postal=$19,
+         has_commission=$20, commission_amt=$21, commission_note=$22,
+         wms_warehouse_id=$23,
+         updated_at=NOW(),
+         versions = versions || $24::jsonb
+       WHERE id=$25 RETURNING *`,
+      [
+        snap.jalaliDate || row.jalali_date, snap.validDays || row.valid_days,
+        snap.centerKey || row.center_key, snap.centerName || row.center_name,
+        JSON.stringify(items), subtotal, discPct, discAmt,
+        taxPct, taxAmt, total,
+        snap.note != null ? snap.note : row.note,
+        snap.managerNote != null ? snap.managerNote : row.manager_note,
+        snap.buyerNatId != null ? snap.buyerNatId : (row.buyer_nat_id || ''),
+        snap.buyerEcoCode != null ? snap.buyerEcoCode : (row.buyer_eco_code || ''),
+        snap.buyerRegId != null ? snap.buyerRegId : (row.buyer_reg_id || ''),
+        snap.buyerAddress != null ? snap.buyerAddress : (row.buyer_address || ''),
+        snap.buyerPhone != null ? snap.buyerPhone : (row.buyer_phone || ''),
+        snap.buyerPostal != null ? snap.buyerPostal : (row.buyer_postal || ''),
+        snap.hasCommission != null ? !!snap.hasCommission : !!row.has_commission,
+        snap.commissionAmt != null ? snap.commissionAmt : Number(row.commission_amt || 0),
+        snap.commissionNote != null ? snap.commissionNote : (row.commission_note || ''),
+        snap.wmsWarehouseId != null ? (snap.wmsWarehouseId || null) : (row.wms_warehouse_id || null),
+        JSON.stringify([snapshot]),
+        req.params.id,
+      ]
+    );
+    res.json(rowToObj(r.rows[0]));
+  } catch (e) {
+    console.error('[proforma restore]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
 // ── PUT /api/proforma/:id — update draft ────────────────────────────────────
 router.put('/:id', requireAuth, async (req, res) => {
   try {

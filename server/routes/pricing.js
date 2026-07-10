@@ -201,6 +201,45 @@ router.get('/prices/history', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── PUT /api/pricing/prices/item — upsert single price cell (manager) ─────────
+router.put('/prices/item', requireManager, async (req, res) => {
+  const { buyer_type, product_id, qty_tier, pay_type, price } = req.body || {};
+  if (!buyer_type || !BUYER_TYPES.includes(buyer_type)) {
+    return res.status(400).json({ error: 'buyer_type invalid' });
+  }
+  if (!product_id) return res.status(400).json({ error: 'product_id required' });
+  const tier = parseInt(qty_tier, 10);
+  const pt = pay_type || 'd30';
+  if (!PAY_TYPES.includes(pt)) return res.status(400).json({ error: 'pay_type invalid' });
+  if (isNaN(tier) || tier < 0 || tier > 3) return res.status(400).json({ error: 'qty_tier invalid' });
+  const priceVal = parseInt(price, 10);
+  if (isNaN(priceVal) || priceVal < 0) return res.status(400).json({ error: 'price invalid' });
+  try {
+    const lr = await query(
+      `SELECT id FROM price_lists WHERE buyer_type=$1 AND active=true ORDER BY version DESC LIMIT 1`,
+      [buyer_type]
+    );
+    if (!lr.rows.length) return res.status(404).json({ error: 'no active price list' });
+    const listId = lr.rows[0].id;
+    if (priceVal === 0) {
+      await query(
+        `DELETE FROM price_list_items
+         WHERE price_list_id=$1 AND product_id=$2 AND qty_tier=$3 AND pay_type=$4`,
+        [listId, product_id, tier, pt]
+      );
+    } else {
+      await query(
+        `INSERT INTO price_list_items (price_list_id, product_id, qty_tier, pay_type, price, base_price)
+         VALUES ($1,$2,$3,$4,$5,$5)
+         ON CONFLICT (price_list_id, product_id, qty_tier, pay_type)
+         DO UPDATE SET price=$5, base_price=$5`,
+        [listId, product_id, tier, pt, priceVal]
+      );
+    }
+    res.json({ ok: true, list_id: listId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── POST /api/pricing/prices/import (manager) ─────────────────────────────────
 // body: { buyer_type, name, notes, items: [{product_id, prices: [[d30,d60,cash]×4tiers]}] }
 router.post('/prices/import', requireManager, async (req, res) => {

@@ -2038,7 +2038,8 @@ table.compact-mode td:nth-child(9) {
 .pf-ver-items td{padding:6px 8px;border-top:1px solid var(--border)}
 .pf-ver-note{font-size:11px;color:var(--text-secondary);margin-top:8px;padding:8px 10px;background:var(--bg-page);border-radius:6px}
 .pf-ver-mgr{background:#faf5ff;border:1px solid #e9d5ff}
-.pf-ver-empty{font-size:11px;color:var(--text-muted);padding:8px}
+.pf-ver-restore-btn{padding:6px 14px;background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;border-radius:8px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer}
+.pf-ver-restore-btn:hover{background:#ddd6fe}
 
 /* ══ Center profile modal ══ */
 .cm-profile{display:flex;flex-direction:column;gap:10px}

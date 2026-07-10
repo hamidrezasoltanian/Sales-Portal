@@ -1692,13 +1692,37 @@ async function pfShowVersions(id) {
         + commBlock
         + (v.note ? '<div class="pf-ver-note">📝 ' + esc(v.note) + '</div>' : '')
         + (v.managerNote ? '<div class="pf-ver-note pf-ver-mgr">👤 مدیر: ' + esc(v.managerNote) + '</div>' : '')
+        + (['draft', 'sent', 'approved'].indexOf(pf.status) >= 0
+          ? '<div style="margin-top:10px;text-align:left"><button type="button" class="pf-ver-restore-btn" onclick="pfRestoreVersion(\'' + esc(id) + '\',' + (versions.length - 1 - i) + ')">↩ بازگردانی این نسخه</button></div>'
+          : '')
       + '</div>';
     }).join('') + '</div>';
 
   openModal('pfVersionsModal', '🕐 تاریخچه نسخه‌ها — ' + esc(pf.no), html,
     '<button onclick="var _el=document.getElementById(\'pfVersionsModal\');if(_el)_el.style.display=\'none\';" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">بستن</button>',
-    {lg:false}
+    {lg:true}
   );
+}
+
+function pfRestoreVersion(pfId, versionIndex) {
+  if (!confirm('آیا از بازگردانی این نسخه مطمئن هستید؟ وضعیت فعلی قبل از بازگردانی ذخیره می‌شود.')) return;
+  fetch('/api/proforma/' + encodeURIComponent(pfId) + '/restore', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ versionIndex: versionIndex })
+  }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+    .then(function (res) {
+      if (!res.ok) { showToast(res.body.error || 'خطا در بازگردانی'); return; }
+      var idx = _pfList.findIndex(function (p) { return p.id === pfId; });
+      if (idx >= 0) _pfList[idx] = res.body;
+      showToast('✅ نسخه بازگردانی شد');
+      var _el = document.getElementById('pfVersionsModal');
+      if (_el) _el.style.display = 'none';
+      if (typeof pfOpenEdit === 'function') pfOpenEdit(pfId);
+      else if (typeof renderProformaList === 'function') renderProformaList();
+    })
+    .catch(function () { showToast('خطا در بازگردانی نسخه'); });
 }
 
 // ── Schedule follow-up in week plan ──────────────────────────────────────

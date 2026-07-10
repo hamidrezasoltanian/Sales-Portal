@@ -235,6 +235,10 @@ async function testProforma() {
   assert(Array.isArray(snap.items) && snap.items.length > 0, 'snapshot has items');
   assert(snap.jalaliDate === '1404/04/01', 'snapshot has jalaliDate');
   assert(snap.validDays === 30, 'snapshot has validDays');
+  const restore = await req('POST', '/api/proforma/' + pfId + '/restore', { versionIndex: 0 });
+  assert(restore.status === 200, 'POST proforma restore → 200 (' + restore.status + ')');
+  assert(restore.body.note === 'تست persistence', 'restore reverted note from snapshot');
+  assert(restore.body.versions && restore.body.versions.length > upd.body.versions.length, 'restore appends current state to versions');
   const mp = multipart({}, 'file', 'test.txt', Buffer.from('persistence test file'), 'text/plain');
   const fileRes = await req('POST', '/api/proforma/' + pfId + '/files', mp.body, {
     'Content-Type': 'multipart/form-data; boundary=' + mp.boundary,
@@ -270,6 +274,12 @@ async function testWms() {
   const matrix = await req('GET', '/api/wms/pricing/matrix?buyer_type=hospital');
   assert(matrix.status === 200, 'GET wms pricing matrix → 200');
   assert(Array.isArray(matrix.body.products), 'pricing matrix has products array');
+  const compare = await req('GET', '/api/wms/pricing/compare?pay_type=d30');
+  assert(compare.status === 200, 'GET wms pricing compare → 200');
+  assert(Array.isArray(compare.body.products), 'pricing compare has products');
+  const hist = await req('GET', '/api/pricing/prices/history');
+  assert(hist.status === 200, 'GET pricing history → 200');
+  assert(Array.isArray(hist.body), 'pricing history is array');
   const entry = await req('POST', '/api/wms/transactions', {
     type: 'entry', txnType: 'purchase', productId: pid, warehouseId: wid,
     qty: 5, note: 'ورود تست persistence', status: 'approved',

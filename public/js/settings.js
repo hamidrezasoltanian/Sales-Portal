@@ -831,7 +831,8 @@ function getCenterById(rtype,id){
 }
 function setE(type,id,field,val){var k=recK(type,id);if(!DB.edits[k])DB.edits[k]={};
   if(!_undoSuppressed){var _prevVal=DB.edits[k][field];_undoStack.push({type:type,id:id,field:field,val:_prevVal});if(_undoStack.length>MAX_UNDO)_undoStack.shift();_redoStack=[];}
-  if(!_undoSuppressed){DB.changeLog=DB.changeLog||[];DB.changeLog.push({at:new Date().toISOString(),by:currentUser,rkey:type+'_'+id,field:field,val:val});if(DB.changeLog.length>500)DB.changeLog=DB.changeLog.slice(-500);}
+  if(!_undoSuppressed){DB.changeLog=DB.changeLog||[];DB.changeLog.push({at:new Date().toISOString(),by:currentUser,rkey:type+'_'+id,field:field,val:val});if(DB.changeLog.length>500)DB.changeLog=DB.changeLog.slice(-500);
+    fetch('/api/changelog',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:JSON.stringify({at:new Date().toISOString(),by:currentUser,rkey:type+'_'+id,field:field,val:val})}).catch(function(){});}
   var _auditFields=['status','owner','lead','potential','followupDate','contactName','contactTitle','phones','address'];
   var _oldV=DB.edits[k][field]!==undefined?DB.edits[k][field]:'';
   if(_auditFields.indexOf(field)>=0){
