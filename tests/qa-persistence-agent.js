@@ -384,6 +384,42 @@ async function flow_mtrFollowerMap(mgrTok) {
   await query("DELETE FROM app_settings WHERE key = 'mtrFollowerMap'");
 }
 
+async function flow_mtrInvoiceMeta(mgrTok) {
+  console.log('\n🔄 Flow: PATCH mtr/meta → GET → empty PUT /db → GET');
+  const inv = 'QA-FLOW-INV-1';
+  const patch = await req('PATCH', '/api/mtr/meta/' + encodeURIComponent(inv), {
+    status: 'promised', nextFU: '1405/02/01', notes: [{ d: '1405/01/01', t: 'flow note', by: 'qa' }], payments: [],
+  }, mgrTok);
+  if (!assert(patch.status === 200, 'PATCH mtr/meta')) return;
+  await req('PUT', '/api/data/db', {}, mgrTok);
+  const meta = await req('GET', '/api/mtr/meta', null, mgrTok);
+  assert(meta.body[inv] && meta.body[inv].status === 'promised', 'mtr meta survived bulk save');
+  await query('DELETE FROM mtr_invoice_meta WHERE invoice_key = $1', [inv]);
+}
+
+async function flow_mtrSync(mgrTok) {
+  console.log('\n🔄 Flow: POST /api/mtr/sync from cache');
+  const companyNum = 9900299001;
+  const factorNum = 9900299002;
+  await query('DELETE FROM faradis_receivables_cache WHERE company_num = $1', [companyNum]).catch(function () {});
+  await query('DELETE FROM faradis_factors_cache WHERE factor_num = $1', [factorNum]).catch(function () {});
+  await query(
+    `INSERT INTO faradis_receivables_cache (company_num, company_name, balance, synced_at) VALUES ($1,'QA Co',3000000,NOW())`,
+    [companyNum]
+  );
+  await query(
+    `INSERT INTO faradis_factors_cache (factor_num, jalali_date, factor_type, company_num, company_name, total_amount, synced_at)
+     VALUES ($1,'1404/11/01',1,$2,'QA Co',3000000,NOW())`,
+    [factorNum, companyNum]
+  );
+  const sync = await req('POST', '/api/mtr/sync', { refresh: false }, mgrTok);
+  if (!assert(sync.status === 200 && sync.body.ok, 'POST mtr/sync')) return;
+  assert(sync.body.count >= 1, 'mtr sync row count');
+  await query('DELETE FROM faradis_receivables_cache WHERE company_num = $1', [companyNum]).catch(function () {});
+  await query('DELETE FROM faradis_factors_cache WHERE factor_num = $1', [factorNum]).catch(function () {});
+  await query("DELETE FROM app_settings WHERE key = 'mtrLastSyncAt'").catch(function () {});
+}
+
 async function runAllFlows() {
   passed = 0;
   failed = 0;
@@ -416,6 +452,8 @@ async function runAllFlows() {
   await flow_centerExtra(tok);
   await flow_pricingSettings(mgrTok);
   await flow_mtrFollowerMap(mgrTok);
+  await flow_mtrInvoiceMeta(mgrTok);
+  await flow_mtrSync(mgrTok);
 
   await query("DELETE FROM app_users WHERE username = '_qa_mgr'").catch(function () {});
 

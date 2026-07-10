@@ -1623,6 +1623,21 @@ async function initSchema() {
   `);
   await query(`CREATE INDEX IF NOT EXISTS idx_fpurch_company ON faradis_purchases_cache(company_num)`);
 
+  // MTR per-invoice meta (notes, status, forecast, payments)
+  await query(`
+    CREATE TABLE IF NOT EXISTS mtr_invoice_meta (
+      invoice_key TEXT PRIMARY KEY,
+      status      TEXT DEFAULT '',
+      next_fu     TEXT DEFAULT '',
+      forecast    JSONB,
+      notes       JSONB NOT NULL DEFAULT '[]',
+      payments    JSONB NOT NULL DEFAULT '[]',
+      updated_at  TIMESTAMPTZ DEFAULT NOW(),
+      updated_by  TEXT
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_mtr_meta_updated ON mtr_invoice_meta(updated_at DESC)`).catch(() => {});
+
   // ════════════════════════════════════════
   // NORMALIZED CRM TABLES — replace 'main' blob
   // ════════════════════════════════════════
@@ -1831,6 +1846,7 @@ async function initSchema() {
 
   await _migrateMainBlobToSQL();
   await _migrateRemainingBlobsToSQL();
+  await _migrateMtrMetaFromKV();
   await _migrateContactsToHCPs();
 
   console.log('[DB] Schema initialized');
@@ -2359,6 +2375,43 @@ async function _migrateRemainingBlobsToSQL() {
 
   } catch (e) {
     console.error('[DB] _migrateRemainingBlobsToSQL error:', e.message);
+  }
+}
+
+async function _migrateMtrMetaFromKV() {
+  try {
+    const existing = await query('SELECT COUNT(*) FROM mtr_invoice_meta');
+    if (parseInt(existing.rows[0].count, 10) > 0) return;
+
+    const kvRes = await query("SELECT value FROM app_data WHERE key = 'mtr-meta'");
+    if (!kvRes.rows.length || !kvRes.rows[0].value) return;
+
+    const meta = kvRes.rows[0].value;
+    if (!meta || typeof meta !== 'object') return;
+
+    let count = 0;
+    for (const [inv, m] of Object.entries(meta)) {
+      if (!m || typeof m !== 'object') continue;
+      await query(
+        `INSERT INTO mtr_invoice_meta (invoice_key, status, next_fu, forecast, notes, payments, updated_at, updated_by)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, NOW(), 'migration')
+         ON CONFLICT (invoice_key) DO NOTHING`,
+        [
+          String(inv),
+          m.status || '',
+          m.nextFU || '',
+          m.forecast ? JSON.stringify(m.forecast) : null,
+          JSON.stringify(m.notes || []),
+          JSON.stringify(m.payments || []),
+        ]
+      );
+      count++;
+    }
+    if (count > 0) {
+      console.log(`[DB] Migrated ${count} MTR invoice meta rows → mtr_invoice_meta`);
+    }
+  } catch (e) {
+    console.error('[DB] _migrateMtrMetaFromKV error:', e.message);
   }
 }
 

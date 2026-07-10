@@ -112,6 +112,7 @@ app.use('/api/prov-history', require('./routes/prov-history'));
 app.use('/api/tags', require('./routes/tags'));
 app.use('/api/manager-followups', require('./routes/manager-followups'));
 app.use('/api/center-extras', require('./routes/center-extras'));
+app.use('/api/mtr', require('./routes/mtr'));
 app.use('/api/migrate', require('./routes/migrate'));
 app.use('/api/support', require('./routes/support'));
 app.use('/api/hr', require('./routes/hr'));

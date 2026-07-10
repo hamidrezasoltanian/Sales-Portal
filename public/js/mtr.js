@@ -401,9 +401,9 @@ var SNAP=null;      // {at, map:{inv:{rem,od,follower,customer,due}}}
 // ── DATA persistence ──────────────────────────────────────────
 function saveData(rows){
   var at=TODAY_STR;
-  try{localStorage.setItem('am_data',JSON.stringify({at:at,rows:rows}));}catch(e){}
-  // sync to server (non-blocking)
-  fetch('/api/data/mtr',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:rows,at:at})}).catch(function(){});
+  var src=_mtrDataSource||'excel';
+  try{localStorage.setItem('am_data',JSON.stringify({at:at,rows:rows,source:src}));}catch(e){}
+  fetch('/api/data/mtr',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:rows,at:at,source:src})}).catch(function(){});
 }
 function loadData(){
   try{var s=localStorage.getItem('am_data');return s?JSON.parse(s):null;}catch(e){return null;}
@@ -413,16 +413,24 @@ var COMP_AT='';     // date label of comparison file
 var MERGE_LOG=[];   // [{name,at,cnt}] — merge history per rep
 
 // ═══════════ STORAGE ═══════════
-function saveMeta(){
+var _mtrMetaBulkTimer=null;
+function saveMeta(inv){
+  if(inv&&META[inv]){
+    try{localStorage.setItem('am4',JSON.stringify(META));}catch(e){}
+    return saveMtrMetaInvApi(inv,META[inv]);
+  }
   try{localStorage.setItem('am4',JSON.stringify(META));}catch(e){}
-  // sync to server (non-blocking)
-  fetch('/api/data/kv/mtr-meta',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(META)}).catch(function(){});
+  clearTimeout(_mtrMetaBulkTimer);
+  _mtrMetaBulkTimer=setTimeout(function(){saveMtrMetaBulkApi(META);},400);
 }
 function loadMeta(){
-  try{var s=localStorage.getItem('am4');if(s){META=JSON.parse(s);return;}}catch(e){}
-  // fallback: try server
-  fetch('/api/data/kv/mtr-meta').then(function(r){return r.ok?r.json():null;}).then(function(d){
-    if(d&&typeof d==='object'){META=d;try{localStorage.setItem('am4',JSON.stringify(META));}catch(e){}}
+  try{var s=localStorage.getItem('am4');if(s){META=JSON.parse(s);}}catch(e){}
+  fetch('/api/mtr/meta').then(function(r){return r.ok?r.json():null;}).then(function(d){
+    if(d&&typeof d==='object'){
+      META=d;
+      try{localStorage.setItem('am4',JSON.stringify(META));}catch(e){}
+      if(typeof render==='function'&&DATA&&DATA.length)render();
+    }
   }).catch(function(){});
 }
 function saveUser(){try{localStorage.setItem('au2',JSON.stringify(USER));}catch(e){}}
@@ -438,10 +446,10 @@ function saveSnap(rows){
 }
 function loadSnap(){try{var s=localStorage.getItem('asnap');return s?JSON.parse(s):null;}catch(e){return null;}}
 function gm(inv){if(!META[inv])META[inv]={status:'',notes:[],nextFU:'',forecast:null};return META[inv];}
-function setStatus(inv,s){gm(inv).status=s;saveMeta();}
+function setStatus(inv,s){gm(inv).status=s;saveMeta(inv);}
 function setNextFU(inv,d){
   gm(inv).nextFU=d;
-  saveMeta();
+  saveMeta(inv);
   // اضافه کردن خودکار به برنامه هفته
   if(d && typeof wpEntryKey==='function' && typeof DB!=='undefined'){
     var row=DATA.find(function(r){return r.inv===inv;});
@@ -480,8 +488,8 @@ function setNextFU(inv,d){
     }
   }
 }
-function mtrAddNote(inv,txt){if(!txt.trim())return;gm(inv).notes.push({d:TODAY_STR,t:txt.trim(),by:USER.name||'—'});saveMeta();}
-function setForecast(inv,date,pct){gm(inv).forecast={date:date,pct:pct,by:USER.name||'—',at:TODAY_STR};saveMeta();}
+function mtrAddNote(inv,txt){if(!txt.trim())return;gm(inv).notes.push({d:TODAY_STR,t:txt.trim(),by:USER.name||'—'});saveMeta(inv);}
+function setForecast(inv,date,pct){gm(inv).forecast={date:date,pct:pct,by:USER.name||'—',at:TODAY_STR};saveMeta(inv);}
 
 // ═══════════ DATE UTILS ═══════════
 var NW=[[2020,2,20,1399],[2021,2,20,1400],[2022,2,21,1401],[2023,2,21,1402],
@@ -917,7 +925,7 @@ function _submitPartial(inv){
   m.payments.push({d:TODAY_STR,amt:amt,by:USER.name||currentUser,note:note.trim()});
   r.rem=Math.max(0,r.rem-amt);
   mtrAddNote(inv,'💳 پرداخت جزئی: '+fF(amt)+' ریال'+(note?' — '+note:''));
-  saveMeta();
+  saveMeta(inv);
   if(r.rem===0){var odx=DATA.indexOf(r);if(odx>=0)DATA.splice(odx,1);}
   closeModal('partialModal');render();updateReminder();
   showToast('✅ پرداخت '+fF(amt)+' ریال ثبت شد',3000);
@@ -943,7 +951,10 @@ function render(){
     +'<div class="kpi" style="border-color:#ea580c"><div class="kpi-l">🚨 ۶۰-۹۰ روز</div><div class="kpi-v" style="color:#ea580c">'+ag90.length+'</div><div class="kpi-ss">'+fM(tot(ag90))+'</div></div>'
     +'<div class="kpi" style="border-color:#dc2626"><div class="kpi-l">⛔ ۹۰+ روز (بحرانی)</div><div class="kpi-v" style="color:#dc2626">'+ag90p.length+'</div><div class="kpi-ss">'+fM(tot(ag90p))+'</div></div>'
     +'</div>'
-    +'<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px">'
+    +'<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px;align-items:center">'
+    +mtrSyncStatusBadge()
+    +'<button onclick="showMtrSmsSettings()" style="font-size:11px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:6px;padding:5px 12px;cursor:pointer;font-weight:600">⚙ تنظیمات</button>'
+    +'<button onclick="mtrFaradisSync()" style="font-size:11px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:6px;padding:5px 12px;cursor:pointer;font-weight:600">🔄 فرادیس</button>'
     +'<button onclick="mtrExportExcel()" style="font-size:11px;background:#f0fdf4;color:#15803d;border:1px solid #86efac;border-radius:6px;padding:5px 12px;cursor:pointer;font-weight:600">📊 خروجی Excel</button>'
     +'<div style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;margin-right:4px">میانگین تأخیر: <strong style="margin-right:4px;color:'+(avgD>45?'#ea580c':avgD>20?'#d97706':'#16a34a')+'">'+avgD+' روز</strong></div>'
     +'</div>';
@@ -1200,27 +1211,108 @@ function _mtrBuildGroups(rows){
 function mtrSaveSmsSettings(){
   var ak=(document.getElementById('farazApiKeyInp')||{}).value||'';
   var sn=(document.getElementById('farazSenderInp')||{}).value||'';
+  var syncOn=!!(document.getElementById('mtrSyncEnabledInp')||{}).checked;
   if(!DB.settings)DB.settings={};
   DB.settings.farazApiKey=ak.trim();
   DB.settings.farazSender=sn.trim();
+  DB.settings.mtrSyncEnabled=syncOn;
   patchCrmSetting('farazApiKey',DB.settings.farazApiKey);
   patchCrmSetting('farazSender',DB.settings.farazSender);
+  patchCrmSetting('mtrSyncEnabled',syncOn);
   closeModal('mtrSmsSettModal');
-  showToast('✅ تنظیمات SMS ذخیره شد');
+  showToast('✅ تنظیمات ذخیره شد');
+  if(syncOn)mtrStartAutoSync(true);
+  else mtrStopAutoSync();
 }
 function showMtrSmsSettings(){
   var ak=(DB.settings&&DB.settings.farazApiKey)||'';
   var sn=(DB.settings&&DB.settings.farazSender)||'';
+  var syncOn=!!(DB.settings&&DB.settings.mtrSyncEnabled);
   var body='<div style="display:flex;flex-direction:column;gap:10px">'
     +'<div><div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">کلید API فراز SMS</div>'
     +'<input id="farazApiKeyInp" value="'+esc(ak)+'" placeholder="API Key" dir="ltr" style="width:100%;background:var(--bg-input);border:1px solid var(--border-input);border-radius:6px;padding:7px 10px;font-size:12px;font-family:monospace;color:var(--text-primary)"></div>'
     +'<div><div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">شماره فرستنده</div>'
     +'<input id="farazSenderInp" value="'+esc(sn)+'" placeholder="+98XXXXXXXXXX" dir="ltr" style="width:100%;background:var(--bg-input);border:1px solid var(--border-input);border-radius:6px;padding:7px 10px;font-size:12px;font-family:monospace;color:var(--text-primary)"></div>'
-    +'<div style="font-size:10px;color:var(--text-muted);background:var(--bg-raised);border-radius:6px;padding:8px">API از پنل فراز SMS → تنظیمات → API دریافت کنید</div>'
+    +'<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-secondary);cursor:pointer;margin-top:4px">'
+    +'<input type="checkbox" id="mtrSyncEnabledInp"'+(syncOn?' checked':'')+' style="width:16px;height:16px">'
+    +'🔌 همگام‌سازی خودکار از فرادیس (هر ۱۵ دقیقه)</label>'
+    +'<div style="font-size:10px;color:var(--text-muted);background:var(--bg-raised);border-radius:6px;padding:8px">API از پنل فراز SMS → تنظیمات → API دریافت کنید. آپلود Excel همچنان در دسترس است.</div>'
     +'</div>';
-  var foot='<button onclick="mtrSaveSmsSettings()" style="background:#0ea5e9;color:white;border:none;border-radius:6px;padding:7px 18px;cursor:pointer;font-size:12px;font-family:inherit">💾 ذخیره</button>'
+  var foot='<button onclick="mtrFaradisSync()" style="background:#6366f1;color:white;border:none;border-radius:6px;padding:7px 14px;cursor:pointer;font-size:12px;font-family:inherit;margin-left:6px">🔄 همگام‌سازی الان</button>'
+    +'<button onclick="mtrSaveSmsSettings()" style="background:#0ea5e9;color:white;border:none;border-radius:6px;padding:7px 18px;cursor:pointer;font-size:12px;font-family:inherit">💾 ذخیره</button>'
     +'<button class="btn-secondary" onclick="closeModal(\'mtrSmsSettModal\')" style="margin-right:8px">انصراف</button>';
-  openModal('mtrSmsSettModal','⚙ تنظیمات SMS فراز',body,foot);
+  openModal('mtrSmsSettModal','⚙ تنظیمات مطالبات',body,foot);
+}
+var _mtrSyncTimer=null;
+var _mtrSyncBusy=false;
+var _mtrDataSource='excel';
+function mtrStopAutoSync(){
+  if(_mtrSyncTimer){clearInterval(_mtrSyncTimer);_mtrSyncTimer=null;}
+}
+function mtrStartAutoSync(runNow){
+  mtrStopAutoSync();
+  if(!(DB.settings&&DB.settings.mtrSyncEnabled))return;
+  var mins=(DB.settings&&DB.settings.mtrSyncIntervalMinutes)||15;
+  _mtrSyncTimer=setInterval(function(){mtrFaradisSync(true);},mins*60*1000);
+  if(runNow)mtrFaradisSync(true);
+}
+function mtrApplySyncedRows(rows,at,source){
+  if(!rows||!rows.length)return;
+  DATA=rows;AI_TXT='';FILTER='همه';MTR_SEARCH='';TAB='priority';_exp={};
+  FC_TARGET=addDJ(TODAY_STR,60);
+  _mtrDataSource=source||'faradis';
+  var _tb2=document.getElementById('mtr-tabsBar');if(_tb2)_tb2.style.display='flex';
+  var _pb=document.getElementById('mtr-printBtn');if(_pb)_pb.style.display='block';
+  var _sb=document.getElementById('mtr-searchBar');if(_sb)_sb.style.display='block';
+  if(!SNAP)SNAP=loadSnap();
+  saveData(DATA);
+  (function(){
+    DB.mtrTrend=DB.mtrTrend||[];
+    var tTotal=DATA.reduce(function(s,r){return s+(r.rem||0);},0);
+    var tDate=todayStr();
+    var last=DB.mtrTrend[DB.mtrTrend.length-1];
+    if(!last||last.d!==tDate){
+      DB.mtrTrend.push({d:tDate,total:tTotal,count:DATA.length});
+      if(DB.mtrTrend.length>12)DB.mtrTrend=DB.mtrTrend.slice(-12);
+      saveMtrTrendApi(DB.mtrTrend);
+    }
+  })();
+  updateReminder();render();mtrCheckFollowupNotifs();
+  if(typeof matchCentersToData==='function')setTimeout(matchCentersToData,200);
+  toast('🔌 '+DATA.length+' فاکتور از فرادیس · '+at);
+}
+function mtrFaradisSync(silent){
+  if(_mtrSyncBusy)return Promise.resolve();
+  _mtrSyncBusy=true;
+  if(!silent)toast('⏳ همگام‌سازی با فرادیس...');
+  return fetch('/api/mtr/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({refresh:true})})
+    .then(function(r){return r.json().then(function(j){return{status:r.status,body:j};});})
+    .then(function(res){
+      _mtrSyncBusy=false;
+      if(res.status===403){if(!silent)showToast('⚠ فقط مدیر می‌تواند همگام‌سازی کند');return;}
+      if(!res.body||!res.body.ok){
+        if(!silent)showToast('⚠ '+(res.body&&res.body.error||'خطا در همگام‌سازی'));
+        return;
+      }
+      if(DATA.length>0&&!silent&&res.body.count>0){
+        if(window.confirm('دیتای فعلی ('+DATA.length+' فاکتور) با '+res.body.count+' فاکتور فرادیس جایگزین شود؟')){
+          mtrApplySyncedRows(res.body.data,res.body.at,'faradis');
+        } else if(!silent)showToast('همگام‌سازی لغو شد');
+        return;
+      }
+      if(res.body.count>0)mtrApplySyncedRows(res.body.data,res.body.at,'faradis');
+      else if(!silent)showToast('ℹ️ مطالبتی در فرادیس یافت نشد');
+    })
+    .catch(function(){
+      _mtrSyncBusy=false;
+      if(!silent)showToast('⚠ خطا در ارتباط با سرور');
+    });
+}
+function mtrSyncStatusBadge(){
+  if(_mtrDataSource==='faradis'){
+    return '<span style="font-size:10px;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:12px;padding:2px 8px;margin-right:6px">🔌 فرادیس</span>';
+  }
+  return '<span style="font-size:10px;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:12px;padding:2px 8px;margin-right:6px">📄 Excel</span>';
 }
 // ── Single center send panel ──────────────────────────────────
 // ── Follow-up date based send list ────────────────────────────
@@ -2022,6 +2114,7 @@ function mtrLazyInit(){
   var saved=loadData();
   if(saved&&saved.rows&&saved.rows.length){
     DATA=saved.rows;
+    _mtrDataSource=(saved.source||'excel');
     if(!SNAP)SNAP=loadSnap();
     var _tb2=document.getElementById('mtr-tabsBar');if(_tb2)_tb2.style.display='flex';
     var _pb=document.getElementById('mtr-printBtn');if(_pb)_pb.style.display='block';
@@ -2029,11 +2122,13 @@ function mtrLazyInit(){
     updateReminder();render();
     if(typeof matchCentersToData==='function')setTimeout(matchCentersToData,200);
     toast('📂 دیتای قبلی بارگذاری شد ('+DATA.length+' فاکتور · '+saved.at+')');
+    if(DB.settings&&DB.settings.mtrSyncEnabled)mtrStartAutoSync(false);
   } else {
     // Try loading from server if localStorage is empty
     fetch('/api/data/mtr').then(function(r){return r.ok?r.json():null;}).then(function(d){
       if(d&&d.data&&d.data.length){
         DATA=d.data;
+        _mtrDataSource=(d.source||'excel');
         if(!SNAP)SNAP=loadSnap();
         var _tb2=document.getElementById('mtr-tabsBar');if(_tb2)_tb2.style.display='flex';
         var _pb=document.getElementById('mtr-printBtn');if(_pb)_pb.style.display='block';
@@ -2041,8 +2136,13 @@ function mtrLazyInit(){
         updateReminder();render();
         if(typeof matchCentersToData==='function')setTimeout(matchCentersToData,200);
         toast('📂 دیتای مطالبات از سرور بارگذاری شد');
+        if(DB.settings&&DB.settings.mtrSyncEnabled)mtrStartAutoSync(false);
+      } else if(DB.settings&&DB.settings.mtrSyncEnabled){
+        mtrStartAutoSync(true);
       }
-    }).catch(function(){});
+    }).catch(function(){
+      if(DB.settings&&DB.settings.mtrSyncEnabled)mtrStartAutoSync(true);
+    });
   }
 }
 

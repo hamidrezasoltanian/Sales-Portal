@@ -567,6 +567,21 @@ function saveMtrFollowerApi(map){
   DB.mtrFollower=map||{};
   return patchCrmSetting('mtrFollower',DB.mtrFollower);
 }
+function saveMtrMetaInvApi(inv,meta){
+  if(!inv)return Promise.resolve();
+  var body=meta||{};
+  return fetch('/api/mtr/meta/'+encodeURIComponent(String(inv)),{
+    method:'PATCH',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)
+  }).catch(function(e){console.warn('[saveMtrMetaInvApi]',inv,e.message);});
+}
+function saveMtrMetaBulkApi(bulk){
+  if(!bulk||typeof bulk!=='object')return Promise.resolve();
+  return fetch('/api/mtr/meta/bulk',{
+    method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(bulk)
+  }).catch(function(e){console.warn('[saveMtrMetaBulkApi]',e.message);});
+}
 function saveCenterExtraApi(center){
   if(!center||!center.id)return Promise.resolve();
   return fetch('/api/center-extras',{

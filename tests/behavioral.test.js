@@ -639,6 +639,51 @@ async function test22_mtrAuxSettingsPersist() {
   await query("DELETE FROM app_settings WHERE key = 'mtrFollowerMap'");
 }
 
+async function test23_mtrInvoiceMetaPersist() {
+  console.log('\n── Test 23: MTR invoice meta PATCH/GET survives empty PUT /db ──');
+  const tok = managerToken(TEST_MANAGER);
+  const inv = 'QA-INV-99001';
+  const meta = { status: 'contacted', nextFU: '1405/01/15', notes: [{ d: '1405/01/01', t: 'QA note', by: 'test' }], payments: [] };
+  const patch = await req('PATCH', '/api/mtr/meta/' + encodeURIComponent(inv), meta, tok);
+  assert(patch.status === 200, 'PATCH mtr meta returns 200');
+  const get = await req('GET', '/api/mtr/meta', null, tok);
+  assert(get.body[inv] && get.body[inv].status === 'contacted', 'GET mtr meta returns invoice');
+  assert(get.body[inv].notes && get.body[inv].notes[0].t === 'QA note', 'notes persisted');
+  const put = await req('PUT', '/api/data/db', {}, tok);
+  assert(put.status === 200, 'PUT /db without meta returns 200');
+  const get2 = await req('GET', '/api/mtr/meta', null, tok);
+  assert(get2.body[inv] && get2.body[inv].status === 'contacted', 'meta survived bulk save');
+  await query('DELETE FROM mtr_invoice_meta WHERE invoice_key = $1', [inv]);
+}
+
+async function test24_mtrSyncFromCache() {
+  console.log('\n── Test 24: MTR sync builds rows from Faradis cache ──');
+  const tok = managerToken(TEST_MANAGER);
+  const companyNum = 9900199001;
+  const factorNum = 9900199002;
+  await query('DELETE FROM faradis_receivables_cache WHERE company_num = $1', [companyNum]);
+  await query('DELETE FROM faradis_factors_cache WHERE factor_num = $1', [factorNum]);
+  await query(
+    `INSERT INTO faradis_receivables_cache (company_num, company_name, balance, synced_at)
+     VALUES ($1, 'QA Hospital', 5000000, NOW())`,
+    [companyNum]
+  );
+  await query(
+    `INSERT INTO faradis_factors_cache (factor_num, jalali_date, factor_type, company_num, company_name, total_amount, synced_at)
+     VALUES ($1, '1404/12/01', 1, $2, 'QA Hospital', 5000000, NOW())`,
+    [factorNum, companyNum]
+  );
+  const sync = await req('POST', '/api/mtr/sync', { refresh: false }, tok);
+  assert(sync.status === 200, 'POST /api/mtr/sync returns 200');
+  assert(sync.body.ok && sync.body.count >= 1, 'sync produced rows');
+  assert(Array.isArray(sync.body.data) && sync.body.data.some(r => String(r.inv) === String(factorNum)), 'sync row matches factor');
+  const mtr = await req('GET', '/api/data/mtr', null, tok);
+  assert(mtr.body.source === 'faradis', 'mtr payload tagged faradis');
+  await query('DELETE FROM faradis_receivables_cache WHERE company_num = $1', [companyNum]);
+  await query('DELETE FROM faradis_factors_cache WHERE factor_num = $1', [factorNum]);
+  await query("DELETE FROM app_settings WHERE key = 'mtrLastSyncAt'");
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -698,6 +743,8 @@ async function main() {
     await test20_centerExtrasApi();
     await test21_pricingSettingsPersist();
     await test22_mtrAuxSettingsPersist();
+    await test23_mtrInvoiceMetaPersist();
+    await test24_mtrSyncFromCache();
 
   } catch (err) {
     console.error('\n❌ خطای غیرمنتظره:', err.message);
