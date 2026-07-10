@@ -360,6 +360,8 @@ The product owner (hamidreza.soltanian@gmail.com) wants to connect the accountin
 
 ## Roadmap / Future Plan
 
+**Active execution plan (data-loss fix + safety net):** see [`docs/IMPROVEMENT_PLAN.md`](docs/IMPROVEMENT_PLAN.md) — phases 1→2α (week plan save path) → 2β (PATCH centers) → observability. Checklist + PR log maintained there.
+
 Priorities expressed by the product owner (hamidreza.soltanian@gmail.com), roughly ordered:
 
 0. **Salesperson workflow polish** — `competitor` field is now tracked; commission view is a placeholder (`cmCommission_` div) — wire it to actual commission_rules table or pricing margins. Pre-call brief and quick-log are live; consider adding "call timer" or "call history" count to the brief.
@@ -367,7 +369,7 @@ Priorities expressed by the product owner (hamidreza.soltanian@gmail.com), rough
 2. **Dashboard & overdue follow-up tracking** — keep making overdue work more actionable; possible next steps: overdue aging buckets, one-click reschedule from overdue list, weekly digest notification to manager.
 3. **Task system maturity** — column reordering (drag), per-column WIP hints, task comments/activity, recurring tasks.
 4. **Week plan** — owner repeatedly emphasized: ALL filtering must be consistent by expert everywhere; any new week-plan widget must respect `#wpOwnerFilter` + `_wpFclFilters` and the canonical owner-resolution chain.
-5. **Data layer evolution (tech debt)** — single-blob `DB` JSON will not scale; eventual move to per-collection endpoints (tasks, notifications, changeLog) and optimistic merge instead of last-write-wins. SSE channel already exists (`/api/events`) — use it for live refresh.
+5. **Data layer evolution (tech debt)** — IN PROGRESS per `docs/IMPROVEMENT_PLAN.md`: week_entries/tasks/notifications already SQL-backed; remaining work = remove dual-write (saveDB + API), PATCH centers, omit entities from bulk PUT. SSE → per-entity events (`week-entry-changed`, etc.).
 6. **app.js modularization (tech debt)** — 12k+ lines in one file; if a build step is ever accepted, split by tab/module. Until then keep the function map above accurate.
 7. **UX polish** — owner cares about "روان بودن" (flow); the app was renamed Flow for this reason. Prefer inline editing over prompt()/alert(), keep the indigo design system (`--brand:#6366f1`) consistent.
 
