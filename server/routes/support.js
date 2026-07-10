@@ -224,6 +224,17 @@ router.put('/:id', requireAuth, async function(req, res) {
       } catch(_) {}
     }
 
+    // Notify new assignee on handoff
+    if (assigned_to !== undefined && assigned_to && assigned_to !== ticket.assigned_to && assigned_to !== user.username) {
+      try {
+        await query(
+          `INSERT INTO notifications (id, to_user, msg, at)
+           VALUES ($1, $2, $3, NOW())`,
+          ['ntf_' + Date.now(), assigned_to, '🎧 تیکت به شما ارجاع شد: ' + ticket.title + (ticket.center_name ? ' — ' + ticket.center_name : '')]
+        );
+      } catch(_) {}
+    }
+
     try { require('../routes/events').broadcast('support-updated', { by: user.username }); } catch(_) {}
     res.json(upd.rows[0]);
   } catch(e) {

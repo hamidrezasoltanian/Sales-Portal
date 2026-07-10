@@ -156,29 +156,39 @@ window._spSetFilter = function(f) {
   loadSupportData(function() { renderSupport(el); });
 };
 
-window._spOpenNew = function() {
+window._spOpenNew = function(prefill) {
   var isMgr = (typeof _isManager === 'function') ? _isManager() : false;
+  prefill = prefill || {};
 
   var usersOpts = '';
-  if (typeof USERS !== 'undefined') {
+  if (typeof umGetActive === 'function') {
+    umGetActive().filter(function(m) { return m.id !== 'guest'; }).forEach(function(m) {
+      usersOpts += '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>';
+    });
+  } else if (typeof USERS !== 'undefined') {
     Object.entries(USERS).forEach(function(e) {
       usersOpts += '<option value="' + esc(e[0]) + '">' + esc(e[1]) + '</option>';
     });
   }
 
   var body = '<div style="display:flex;flex-direction:column;gap:14px">';
-  body += '<div><label style="font-size:13px;color:#64748b">عنوان تیکت *</label><input id="spNewTitle" class="form-input" placeholder="خلاصه مشکل..." style="width:100%;margin-top:4px"></div>';
+  body += '<div><label style="font-size:13px;color:#64748b">عنوان تیکت *</label><input id="spNewTitle" class="form-input" placeholder="خلاصه مشکل..." style="width:100%;margin-top:4px" value="' + esc(prefill.title || '') + '"></div>';
   body += '<div><label style="font-size:13px;color:#64748b">دسته‌بندی</label><select id="spNewCat" class="form-input" style="width:100%;margin-top:4px">';
   Object.entries(CATEGORIES).forEach(function(e) { body += '<option value="' + e[0] + '">' + e[1] + '</option>'; });
   body += '</select></div>';
   body += '<div><label style="font-size:13px;color:#64748b">اولویت</label><select id="spNewPri" class="form-input" style="width:100%;margin-top:4px">';
   Object.entries(PRIORITIES).forEach(function(e) { body += '<option value="' + e[0] + '">' + e[1].icon + ' ' + e[1].label + '</option>'; });
   body += '</select></div>';
-  body += '<div><label style="font-size:13px;color:#64748b">نام مرکز (اختیاری)</label><input id="spNewCenter" class="form-input" placeholder="نام مرکز..." style="width:100%;margin-top:4px"></div>';
+  body += '<div><label style="font-size:13px;color:#64748b">مرکز (اختیاری)</label>';
+  body += '<input id="spNewCenterSearch" class="form-input" placeholder="جستجوی مرکز..." style="width:100%;margin-top:4px" oninput="window._spCenterSearch(this.value)" value="' + esc(prefill.center_name || '') + '">';
+  body += '<input type="hidden" id="spNewCenterKey" value="' + esc(prefill.center_key || '') + '">';
+  body += '<input type="hidden" id="spNewCenterName" value="' + esc(prefill.center_name || '') + '">';
+  body += '<div id="spNewCenterResults" style="max-height:120px;overflow-y:auto;margin-top:4px"></div>';
+  body += '<div id="spNewCenterPicked" style="font-size:12px;color:#64748b;margin-top:4px">' + (prefill.center_name ? '🏥 ' + esc(prefill.center_name) : '') + '</div></div>';
   if (isMgr) {
     body += '<div><label style="font-size:13px;color:#64748b">تخصیص به</label><select id="spNewAssign" class="form-input" style="width:100%;margin-top:4px"><option value="">انتخاب کنید...</option>' + usersOpts + '</select></div>';
   }
-  body += '<div><label style="font-size:13px;color:#64748b">توضیحات</label><textarea id="spNewDesc" class="form-input" rows="4" placeholder="شرح کامل مشکل..." style="width:100%;margin-top:4px;resize:vertical"></textarea></div>';
+  body += '<div><label style="font-size:13px;color:#64748b">توضیحات</label><textarea id="spNewDesc" class="form-input" rows="4" placeholder="شرح کامل مشکل..." style="width:100%;margin-top:4px;resize:vertical">' + esc(prefill.description || '') + '</textarea></div>';
   body += '</div>';
 
   var footer = '<button onclick="window._spSubmitNew()" style="background:#6366f1;color:#fff;border:none;border-radius:8px;padding:8px 20px;cursor:pointer">✅ ثبت تیکت</button>';
@@ -187,11 +197,61 @@ window._spOpenNew = function() {
   if (typeof openModal === 'function') openModal('spNewModal', '🎧 تیکت جدید', body, footer, { lg: true });
 };
 
+window._spOpenNewForCenter = function(centerKey, centerName) {
+  window._spOpenNew({ center_key: centerKey, center_name: centerName || centerKey });
+};
+
+window._spCenterSearch = function(q) {
+  q = (q || '').trim();
+  var el = document.getElementById('spNewCenterResults');
+  if (!el) return;
+  if (q.length < 1) { el.innerHTML = ''; return; }
+  if (typeof fNorm !== 'function' || typeof _buildPCCache !== 'function') return;
+  var qn = fNorm(q);
+  var res = [];
+  _buildPCCache();
+  (typeof CENTERS !== 'undefined' ? CENTERS : []).forEach(function(c) {
+    if (res.length >= 10) return;
+    var name = (typeof _getCenterName === 'function' ? _getCenterName('center', c.id) : c.name) || '';
+    if (fNorm(name).indexOf(qn) !== -1) res.push({ key: 'center_' + c.id, name: name });
+  });
+  Object.keys(typeof _PC_CACHE !== 'undefined' ? _PC_CACHE : {}).forEach(function(pv) {
+    if (pv === 'tehran') return;
+    (_PC_CACHE[pv] || []).forEach(function(c) {
+      if (res.length >= 10) return;
+      var name = (typeof _getCenterName === 'function' ? _getCenterName('pc', c.id) : c.name) || '';
+      if (fNorm(name).indexOf(qn) !== -1) res.push({ key: 'pc_' + c.id, name: name });
+    });
+  });
+  if (!res.length) { el.innerHTML = '<div style="font-size:12px;color:#94a3b8;padding:6px">نتیجه‌ای یافت نشد</div>'; return; }
+  el.innerHTML = res.map(function(r, i) {
+    return '<div style="padding:6px 8px;border-bottom:1px solid #e2e8f0;cursor:pointer;font-size:12px" onclick="window._spPickCenter(' + i + ')">'
+      + '<b>' + esc(r.name) + '</b><div style="font-size:10px;color:#94a3b8">' + esc(r.key) + '</div></div>';
+  }).join('');
+  el._results = res;
+};
+
+window._spPickCenter = function(i) {
+  var el = document.getElementById('spNewCenterResults');
+  if (!el || !el._results || !el._results[i]) return;
+  var r = el._results[i];
+  var keyEl = document.getElementById('spNewCenterKey');
+  var nameEl = document.getElementById('spNewCenterName');
+  var searchEl = document.getElementById('spNewCenterSearch');
+  var picked = document.getElementById('spNewCenterPicked');
+  if (keyEl) keyEl.value = r.key;
+  if (nameEl) nameEl.value = r.name;
+  if (searchEl) searchEl.value = r.name;
+  if (picked) picked.textContent = '🏥 ' + r.name;
+  el.innerHTML = '';
+};
+
 window._spSubmitNew = function() {
   var title   = (document.getElementById('spNewTitle') || {}).value || '';
   var cat     = (document.getElementById('spNewCat') || {}).value || 'other';
   var pri     = (document.getElementById('spNewPri') || {}).value || '2';
-  var center  = (document.getElementById('spNewCenter') || {}).value || '';
+  var centerKey = (document.getElementById('spNewCenterKey') || {}).value || '';
+  var centerName = (document.getElementById('spNewCenterName') || {}).value || (document.getElementById('spNewCenterSearch') || {}).value || '';
   var assign  = (document.getElementById('spNewAssign') || {}).value || '';
   var desc    = (document.getElementById('spNewDesc') || {}).value || '';
 
@@ -200,7 +260,7 @@ window._spSubmitNew = function() {
   fetch('/api/support', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: title.trim(), category: cat, priority: parseInt(pri), center_name: center || null, assigned_to: assign || null, description: desc || null }),
+    body: JSON.stringify({ title: title.trim(), category: cat, priority: parseInt(pri), center_key: centerKey || null, center_name: centerName || null, assigned_to: assign || null, description: desc || null }),
   })
     .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || r.status); return d; }); })
     .then(function() {
@@ -220,6 +280,8 @@ window._spOpenTicket = function(id) {
 
 function _renderTicketModal(t, comments) {
   var isMgr = (typeof _isManager === 'function') ? _isManager() : false;
+  var cu = (typeof currentUser !== 'undefined') ? currentUser : '';
+  var canAssign = isMgr || (t.assigned_to && t.assigned_to === cu);
   var pri   = PRIORITIES[t.priority] || PRIORITIES[2];
   var cat   = CATEGORIES[t.category] || '📋';
 
@@ -232,10 +294,28 @@ function _renderTicketModal(t, comments) {
   body += '<div style="display:flex;gap:12px;flex-wrap:wrap">';
   body += '<span>' + pri.icon + ' ' + pri.label + '</span>';
   body += '<span>' + cat + '</span>';
-  if (t.assigned_to) body += '<span>👤 ' + esc(t.assigned_to) + '</span>';
+  if (t.assigned_to) body += '<span>👤 ' + esc((typeof USERS !== 'undefined' ? USERS[t.assigned_to] : '') || t.assigned_to) + '</span>';
   if (t.center_name) body += '<span>🏥 ' + esc(t.center_name) + '</span>';
   if (t.sla_deadline) body += '<span>⏰ ' + t.sla_deadline + '</span>';
   body += '</div>';
+
+  if (canAssign) {
+    var usersOpts = '<option value="">— بدون تخصیص —</option>';
+    if (typeof umGetActive === 'function') {
+      umGetActive().filter(function(m) { return m.id !== 'guest'; }).forEach(function(m) {
+        usersOpts += '<option value="' + esc(m.id) + '"' + (t.assigned_to === m.id ? ' selected' : '') + '>' + esc(m.name) + '</option>';
+      });
+    } else if (typeof USERS !== 'undefined') {
+      Object.entries(USERS).forEach(function(e) {
+        usersOpts += '<option value="' + esc(e[0]) + '"' + (t.assigned_to === e[0] ? ' selected' : '') + '>' + esc(e[1]) + '</option>';
+      });
+    }
+    body += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
+    body += '<label style="font-size:13px;color:#64748b;white-space:nowrap">تخصیص / ارجاع:</label>';
+    body += '<select id="spAssignSel" class="form-input" style="flex:1;min-width:140px">' + usersOpts + '</select>';
+    body += '<button onclick="window._spReassign(\'' + esc(t.id) + '\')" style="background:#6366f1;color:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-size:13px">ثبت تخصیص</button>';
+    body += '</div>';
+  }
 
   if (t.description) {
     body += '<div style="background:#f8fafc;border-radius:8px;padding:12px;font-size:14px;color:#475569">' + esc(t.description) + '</div>';
@@ -297,6 +377,21 @@ window._spUpdateStatus = function(id, status) {
       if (typeof showToast === 'function') showToast('✅ وضعیت تغییر کرد', 1500);
       window._spSetFilter(_supportFilter);
     });
+};
+
+window._spReassign = function(id) {
+  var assign = (document.getElementById('spAssignSel') || {}).value || '';
+  fetch('/api/support/' + encodeURIComponent(id), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assigned_to: assign || null }),
+  })
+    .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || r.status); return d; }); })
+    .then(function() {
+      if (typeof showToast === 'function') showToast('✅ تخصیص به‌روز شد', 1500);
+      window._spOpenTicket(id);
+    })
+    .catch(function(e) { alert('خطا: ' + (e.message || e)); });
 };
 
 window._spSaveResolution = function(id) {

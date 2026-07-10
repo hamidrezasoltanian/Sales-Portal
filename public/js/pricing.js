@@ -766,7 +766,85 @@ document.addEventListener('click', function(ev) {
   var popup = document.getElementById('centerContactPopup');
   if (popup && popup.classList.contains('show') && !popup.contains(ev.target)) hideContactPopup();
 });
+function _openTaskModalLazy(tid, prefill) {
+  if (typeof openTaskModal === 'function') { openTaskModal(tid, prefill); return; }
+  if (typeof ensureTabScripts !== 'function') { showToast('ماژول وظایف در دسترس نیست'); return; }
+  ensureTabScripts('tasks').then(function() {
+    if (typeof openTaskModal === 'function') openTaskModal(tid, prefill);
+    else showToast('خطا در بارگذاری وظایف');
+  }).catch(function() { showToast('خطا در بارگذاری وظایف'); });
+}
+
+function _openSupportTicketLazy(id) {
+  if (typeof window._spOpenTicket === 'function') { window._spOpenTicket(id); return; }
+  if (typeof ensureTabScripts !== 'function') return;
+  ensureTabScripts('support').then(function() {
+    if (window._spOpenTicket) window._spOpenTicket(id);
+  });
+}
+
+function _openSupportNewForCenterLazy(centerKey, centerName) {
+  if (typeof window._spOpenNewForCenter === 'function') { window._spOpenNewForCenter(centerKey, centerName); return; }
+  if (typeof ensureTabScripts !== 'function') { showToast('ماژول پشتیبانی در دسترس نیست'); return; }
+  ensureTabScripts('support').then(function() {
+    if (window._spOpenNewForCenter) window._spOpenNewForCenter(centerKey, centerName);
+    else showToast('خطا در بارگذاری پشتیبانی');
+  }).catch(function() { showToast('خطا در بارگذاری پشتیبانی'); });
+}
+
+function _loadCenterWorkItems(rtype, id) {
+  var ck = rtype + '_' + id;
+  var el = document.getElementById('cmWorkInner_' + id);
+  if (!el) return;
+  if (typeof _ensureTasks === 'function') _ensureTasks();
+  var openTasks = (DB.tasks || []).filter(function(t) {
+    return t.centerKey === ck && t.status !== 'done' && !t.done;
+  });
+  fetch('/api/support?center_key=' + encodeURIComponent(ck) + '&limit=20')
+    .then(function(r) { return r.ok ? r.json() : { tickets: [] }; })
+    .catch(function() { return { tickets: [] }; })
+    .then(function(d) {
+      var tickets = (d.tickets || []).filter(function(t) {
+        return t.status !== 'resolved' && t.status !== 'closed';
+      });
+      var html = '';
+      if (!openTasks.length && !tickets.length) {
+        html = '<div style="color:var(--text-muted);padding:6px 0">وظیفه یا تیکت بازی نیست</div>';
+      } else {
+        if (openTasks.length) {
+          html += '<div style="margin-bottom:8px"><div style="font-size:10px;font-weight:700;color:#6d28d9;margin-bottom:4px">وظایف (' + openTasks.length + ')</div>';
+          openTasks.forEach(function(t) {
+            html += '<div style="display:flex;align-items:center;gap:6px;padding:4px 6px;background:var(--bg-card);border-radius:5px;margin-bottom:3px;border:1px solid #e9d5ff">'
+              + '<span style="flex:1;cursor:pointer" onclick="_openTaskModalLazy(\'' + esc(String(t.id)) + '\')">' + esc(t.title || '—') + '</span>'
+              + '<span style="font-size:10px;color:var(--text-muted)">' + esc((typeof USERS !== 'undefined' ? USERS[t.owner] : '') || t.owner || '') + '</span>'
+              + (t.dueDate ? '<span style="font-size:10px;color:var(--text-muted)">' + t.dueDate + '</span>' : '')
+              + '</div>';
+          });
+          html += '</div>';
+        }
+        if (tickets.length) {
+          html += '<div><div style="font-size:10px;font-weight:700;color:#0369a1;margin-bottom:4px">تیکت‌ها (' + tickets.length + ')</div>';
+          tickets.forEach(function(t) {
+            html += '<div style="display:flex;align-items:center;gap:6px;padding:4px 6px;background:var(--bg-card);border-radius:5px;margin-bottom:3px;border:1px solid #bae6fd;cursor:pointer" onclick="_openSupportTicketLazy(\'' + esc(t.id) + '\')">'
+              + '<span style="flex:1">' + esc(t.title) + '</span>'
+              + '<span style="font-size:10px;color:var(--text-muted)">' + esc(t.assigned_to || '') + '</span>'
+              + '</div>';
+          });
+          html += '</div>';
+        }
+      }
+      el.innerHTML = html;
+    });
+}
+
 function openCenterAudit(centerKey, centerName) {
+  fetch('/api/support?center_key='+encodeURIComponent(centerKey)+'&limit=50')
+    .then(function(r){return r.ok?r.json():{tickets:[]};})
+    .catch(function(){return {tickets:[]};})
+    .then(function(d){_renderCenterAuditModal(centerKey, centerName, d.tickets||[]);});
+}
+
+function _renderCenterAuditModal(centerKey, centerName, supportTickets) {
   var _ckParts=centerKey.split('_');var rtype=_ckParts[0], rid=_ckParts.slice(1).join('_');
   var events=[];
   // changeLog
@@ -804,6 +882,15 @@ function openCenterAudit(centerKey, centerName) {
       title:(t.done?'وظیفه انجام شد':'وظیفه')+': '+String(t.title||'').substring(0,30),
       detail:t.note||'',by:t.owner||'',at:null,dateStr:t.dueDate||''});
   });
+  // support tickets
+  (supportTickets||[]).forEach(function(tk){
+    var ts=tk.created_at?new Date(tk.created_at).getTime():0;
+    var stLabel={open:'باز',in_progress:'در جریان',waiting:'انتظار',resolved:'حل‌شده',closed:'بسته'}[tk.status]||tk.status;
+    events.push({ts:ts,type:'support',icon:'🎧',color:tk.status==='resolved'||tk.status==='closed'?'#22c55e':'#3b82f6',
+      title:'تیکت: '+String(tk.title||'').substring(0,40),
+      detail:stLabel+(tk.description?' — '+String(tk.description).substring(0,40):''),
+      by:tk.assigned_to||tk.reporter||'',at:tk.created_at?new Date(tk.created_at):null,dateStr:'',ticketId:tk.id});
+  });
 
   events.sort(function(a,b){return b.ts-a.ts;});
 
@@ -826,6 +913,7 @@ function openCenterAudit(centerKey, centerName) {
         +'</div>'
         +(ev.detail?'<div style="font-size:11px;color:var(--text-secondary);line-height:1.5;margin-bottom:3px">'+esc(ev.detail)+'</div>':'')
         +(byName?'<div style="font-size:10px;color:var(--text-muted)">👤 '+esc(byName)+'</div>':'')
+        +(ev.ticketId?'<button onclick="_openSupportTicketLazy(\''+esc(ev.ticketId)+'\')" style="margin-top:4px;font-size:10px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;padding:2px 8px;cursor:pointer;font-family:inherit">مشاهده تیکت</button>':'')
         +'</div></div>';
     });
     body+='</div>';
@@ -1177,6 +1265,18 @@ function openCenterModal(rtype,id){
         +'</div></div>';
     })();
 
+  var _ckWork=recK(rtype,r.id);
+  var _snWork=displayName.replace(/'/g,'&#39;');
+  body+='<div id="cmWorkSec_'+id+'" style="margin-top:10px;padding:10px 12px;background:#f5f3ff;border-radius:8px;border:1px solid #ddd6fe">'
+    +'<div style="font-size:11px;font-weight:700;color:#6d28d9;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">'
+    +'<span>📌 وظایف و تیکت‌های باز</span>'
+    +'<span style="display:flex;gap:4px">'
+    +'<button type="button" onclick="_openTaskModalLazy(null,{centerKey:\''+_ckWork+'\',title:\'وظیفه: '+esc(displayName)+'\'})" style="font-size:10px;padding:3px 10px;background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;border-radius:5px;cursor:pointer;font-family:inherit">+ وظیفه</button>'
+    +'<button type="button" onclick="_openSupportNewForCenterLazy(\''+_ckWork+'\',\''+_snWork+'\')" style="font-size:10px;padding:3px 10px;background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;border-radius:5px;cursor:pointer;font-family:inherit">+ تیکت</button>'
+    +'</span></div>'
+    +'<div id="cmWorkInner_'+id+'" style="font-size:11px;color:#94a3b8">در حال بارگذاری…</div>'
+    +'</div>';
+
   // ── change history section ──
   var rkey=rtype+'_'+r.id;
   var hist=(DB.changeLog||[]).filter(function(h){return h.rkey===rkey;}).slice(-5).reverse();
@@ -1259,6 +1359,7 @@ function openCenterModal(rtype,id){
       }).catch(function(){});
     },150);
   })(recK(rtype,r.id), id, displayName);
+  setTimeout(function(){_loadCenterWorkItems(rtype, id);},30);
   if(typeof _hcpLoadCenterAffiliations==='function'){setTimeout(function(){_hcpLoadCenterAffiliations(rtype,r.id,id);},20);}
   if(window.umGetColor){setTimeout(function(){document.querySelectorAll('.owner-dot[data-uid]').forEach(function(d){var u=decodeURIComponent(d.dataset.uid);if(u)d.style.background=umGetColor(u);});},0);}
   // ── قیمت‌گذاری ──

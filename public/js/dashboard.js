@@ -55,7 +55,7 @@ function _dashCenterItem(it,dateColor,showMgrBtn){
   var rk=it.rtype+'_'+it.id;var sn=(it.name||'').replace(/'/g,'&#39;');
   var mgrBtn='';
   if(showMgrBtn&&_isManager()){
-    var isAssigned=!!(DB.managerTasks&&DB.managerTasks[rk]&&!DB.managerTasks[rk].done);
+    var isAssigned=!!(typeof _mgrFindTaskByCenter==='function'&&_mgrFindTaskByCenter(rk));
     mgrBtn='<button onclick="event.stopPropagation();mgrOpenAssign(\''+rk+'\',\''+it.rtype+'\',\''+it.id+'\',\''+sn+'\')" style="background:'+(isAssigned?'#fef9c3':'var(--bg-card)')+';color:#92400e;border:1px solid '+(isAssigned?'#fde68a':'var(--border)')+';border-radius:4px;font-size:10px;padding:1px 5px;cursor:pointer;font-family:inherit;flex-shrink:0;margin-right:3px">📌</button>';
   }
   return '<div onclick="openCenterModal(\''+it.rtype+'\',\''+it.id+'\')" style="display:flex;justify-content:space-between;align-items:center;padding:5px 7px;background:var(--bg-raised);border-radius:5px;cursor:pointer;font-size:11px;border:1px solid var(--border)">'
@@ -209,13 +209,15 @@ function _renderManagerDash(el){
   // مراکز در خطر: computed in first pass above
   atRisk.sort(function(a,b){return b.pot-a.pot||(!a.fd&&b.fd?-1:a.fd&&!b.fd?1:a.fd<b.fd?-1:1);});
 
-  // وظایف ارجاع‌شده
+  // وظایف ارجاع‌شده (SQL tasks با برچسب mgr_followup)
   var pendingTasks=[];var doneTasks=[];
-  Object.keys(DB.managerTasks||{}).forEach(function(k){
-    var t=DB.managerTasks[k];
-    var item={recKey:k,name:t.name,rtype:t.rtype,id:t.id,assignedTo:t.assignedTo,note:t.note,assignedAt:t.assignedAt,doneAt:t.doneAt||''};
-    if(t.done)doneTasks.push(item);else pendingTasks.push(item);
-  });
+  if(typeof _mgrGetTasks==='function'){
+    _mgrGetTasks(true).forEach(function(t){
+      var parts=(t.centerKey||'').split('_');
+      var item={recKey:t.centerKey,name:(t.title||'').replace(/^پیگیری ویژه:\s*/,''),rtype:parts[0]||'center',id:parts.slice(1).join('_'),assignedTo:t.owner,note:t.note,assignedAt:t.dueDate||'',doneAt:t.doneAt||''};
+      if(t.done||t.status==='done')doneTasks.push(item);else pendingTasks.push(item);
+    });
+  }
   pendingTasks.sort(function(a,b){return a.assignedAt>b.assignedAt?1:-1;});
   doneTasks.sort(function(a,b){return a.doneAt>b.doneAt?-1:1;});
 
@@ -404,11 +406,13 @@ function _renderExpertUserPanel(el){
 
   // ── وظایف از مدیر ──
   var myTasks=[];
-  Object.keys(DB.managerTasks||{}).forEach(function(k){
-    var t=DB.managerTasks[k];
-    if(t.done||t.assignedTo!==currentUser)return;
-    myTasks.push({recKey:k,rtype:t.rtype,id:t.id,name:t.name,note:t.note,assignedAt:t.assignedAt});
-  });
+  if(typeof _mgrGetTasks==='function'){
+    _mgrGetTasks(false).forEach(function(t){
+      if((t.owner||'')!==currentUser)return;
+      var parts=(t.centerKey||'').split('_');
+      myTasks.push({recKey:t.centerKey,rtype:parts[0]||'center',id:parts.slice(1).join('_'),name:(t.title||'').replace(/^پیگیری ویژه:\s*/,''),note:t.note,assignedAt:t.dueDate||''});
+    });
+  }
   myTasks.sort(function(a,b){return a.assignedAt>b.assignedAt?1:-1;});
 
   var html='<div style="background:linear-gradient(135deg,#eff6ff 0%,#f0fdf4 100%);border:1px solid #bfdbfe;border-radius:12px;padding:14px 16px;margin-bottom:14px">';

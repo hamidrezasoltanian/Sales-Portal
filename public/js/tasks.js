@@ -1,7 +1,7 @@
 /* ═══ public/js/tasks.js ═══ */
 // ════════════════════════ TASK MANAGEMENT ════════════════════════
 // ════════════════════════ TASK MANAGEMENT (Monday-style) ════════════════════════
-var _taskFilter='all'; // all | mine | overdue
+var _taskFilter='all'; // all | mine | overdue | created | assigned_by_me
 var _taskView='kanban'; // kanban | list
 var _taskSearch=''; // keyword filter
 var _taskTeamMode=false; // toggle: false=personal, true=department team
@@ -123,6 +123,8 @@ function _tkFilteredTasks(){
   var tasks=DB.tasks.filter(function(t){
     if(_taskFilter==='mine')return t.owner===currentUser;
     if(_taskFilter==='overdue')return t.status!=='done'&&t.dueDate&&t.dueDate<today;
+    if(_taskFilter==='created')return t.createdBy===currentUser;
+    if(_taskFilter==='assigned_by_me')return t.createdBy===currentUser&&t.owner&&t.owner!==currentUser;
     return true;
   });
   if(_taskSearch&&_taskSearch.trim()){
@@ -148,7 +150,7 @@ function renderTasksPanel(){
     +'</span>'
     +'<input type="text" id="tkSearch" value="'+esc(_taskSearch)+'" oninput="_taskSearch=this.value;renderTasksPanel()"'
     +' placeholder="🔍 جستجو..." style="padding:5px 10px;border:1px solid var(--border);border-radius:16px;font-size:11px;background:var(--bg-raised);color:var(--text-primary);font-family:inherit;width:140px">'
-    +[['all','همه'],['mine','وظایف من'],['overdue','سررسید گذشته']].map(function(f){
+    +[['all','همه'],['mine','وظایف من'],['created','ایجادشده توسط من'],['assigned_by_me','واگذارشده توسط من'],['overdue','سررسید گذشته']].map(function(f){
       return'<button class="task-filter-btn'+(_taskFilter===f[0]?' active':'')+'" onclick="_taskFilter=\''+f[0]+'\';renderTasksPanel()">'+f[1]+'</button>';
     }).join('')
     +(window._myDepartment?'<span style="display:inline-flex;gap:2px;background:var(--bg-raised);border-radius:8px;padding:3px;border:1px solid var(--border)">'
@@ -222,7 +224,7 @@ function _tkRenderCard(t,st,isList){
     +'</div>'
     +'<div class="tk-card-meta">'
     +'<span class="task-pri '+priCls+'">'+priLabel+'</span>'
-    +(owner?'<span class="tk-owner"><span class="tk-owner-dot" style="background:'+(window.umGetColor?umGetColor(t.owner):'#94a3b8')+'"></span>'+esc(owner)+'</span>':'')
+    +(owner?'<span class="tk-owner" onclick="event.stopPropagation();tkQuickAssign(\''+t.id+'\')" title="تغییر مسئول"><span class="tk-owner-dot" style="background:'+(window.umGetColor?umGetColor(t.owner):'#94a3b8')+'"></span>'+esc(owner)+'</span>':'<button onclick="event.stopPropagation();tkQuickAssign(\''+t.id+'\')" style="font-size:9px;padding:1px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg-raised);cursor:pointer;font-family:inherit;color:var(--text-muted)">+ مسئول</button>')
     +(t.dueDate?'<span style="color:'+(overdue?'#ef4444':'var(--text-muted)')+';font-size:10px">📅 '+t.dueDate+'</span>':'')
     +subBadge
     +recurBadge
@@ -306,7 +308,7 @@ function openTaskModal(tid, prefill){
   var isNew=!tid;
   var t=isNew?{id:'',title:(prefill&&prefill.title)||'',owner:(prefill&&prefill.owner)||currentUser,dueDate:(prefill&&prefill.dueDate)||'',priority:(prefill&&prefill.priority)||2,status:'todo',centerKey:(prefill&&prefill.centerKey)||'',note:'',subtasks:[]}:_tkFindTask(tid);
   if(!t){showToast('وظیفه یافت نشد');return;}
-  var members=(DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS;
+  var members=(typeof umGetActive==='function'?umGetActive():((DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS));
   var mid='taskDetail';
   var inpS='width:100%;box-sizing:border-box;padding:6px 9px;border:1px solid var(--border-input);border-radius:6px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)';
 
@@ -333,7 +335,12 @@ function openTaskModal(tid, prefill){
     +'<select id="tkd_recurring" style="'+inpS+'">'
     +[['none','بدون تکرار'],['weekly','هفتگی'],['monthly','ماهانه']].map(function(r){return'<option value="'+r[0]+'"'+((t.recurring||'none')===r[0]?' selected':'')+'>'+r[1]+'</option>';}).join('')
     +'</select></div>'
+    +'<div style="grid-column:1/-1"><label style="font-size:11px;display:block;margin-bottom:3px;font-weight:600">مرکز (اختیاری)</label>'
+    +'<div style="display:flex;gap:6px;align-items:center">'
+    +'<input id="tkd_centerDisplay" type="text" readonly value="'+esc(t.centerKey?_getTaskCenterName(t.centerKey):'')+'" placeholder="انتخاب مرکز..." style="'+inpS+';flex:1;cursor:pointer" onclick="openCenterPickPopup(function(p){var k=document.getElementById(\'tkd_centerKey\');var d=document.getElementById(\'tkd_centerDisplay\');if(k)k.value=p.key;if(d)d.value=p.name;})">'
     +'<input type="hidden" id="tkd_centerKey" value="'+esc(t.centerKey||'')+'">'
+    +'<button type="button" onclick="document.getElementById(\'tkd_centerKey\').value=\'\';var d=document.getElementById(\'tkd_centerDisplay\');if(d)d.value=\'\';" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-raised);cursor:pointer;font-size:11px;font-family:inherit" title="حذف مرکز">✕</button>'
+    +'</div></div>'
     +'</div>';
 
   // subtask tree (only for existing tasks)
@@ -411,6 +418,7 @@ function tkSaveTask(tid){
     if(!t)return;
   }
   var _prevStatus=t.status||'todo';
+  var _prevOwner=t.owner||'';
   t.title=title.trim();
   t.owner=(document.getElementById('tkd_owner')||{}).value||'';
   t.dueDate=(document.getElementById('tkd_due')||{}).value||'';
@@ -420,7 +428,7 @@ function tkSaveTask(tid){
   t.doneAt=t.done?(t.doneAt||todayStr()):'';
   t.note=(document.getElementById('tkd_note')||{}).value||'';
   t.recurring=(document.getElementById('tkd_recurring')||{}).value||'none';
-  if(!tid) t.centerKey=(document.getElementById('tkd_centerKey')||{}).value||'';
+  t.centerKey=(document.getElementById('tkd_centerKey')||{}).value||'';
   if(!tid) t.department=window._myDepartment||'';
   if(!t.activity)t.activity=[];
   if(tid&&_prevStatus!==status){
@@ -431,10 +439,9 @@ function tkSaveTask(tid){
   } else if(!tid){
     t.activity.push({type:'created',text:'وظیفه ایجاد شد',by:currentUser,at:new Date().toISOString()});
   }
-  // notify new owner
-  if(t.owner&&t.owner!==currentUser&&typeof sendNotif==='function'&&t._notifiedOwner!==t.owner){
+  // notify on owner change (create or reassignment)
+  if(t.owner&&t.owner!==currentUser&&t.owner!==_prevOwner&&typeof sendNotif==='function'){
     sendNotif(t.owner,'وظیفه «'+t.title+'» به شما واگذار شد',t.centerKey||'',[],'task',{taskId:t.id,taskTitle:t.title});
-    t._notifiedOwner=t.owner;
   }
   var isNew=!tid;
   var payload={
@@ -820,6 +827,92 @@ function _runOverdueAndUndatedReminders(today){
     }
   });
   if(cnt>0) showToast('🔔 یادآوری مراکز معوق برای '+cnt+' کارشناس ارسال شد', 3000);
+}
+
+function tkQuickAssign(tid){
+  var t=_tkFindTask(tid);if(!t)return;
+  var members=(typeof umGetActive==='function'?umGetActive():[]).filter(function(m){return m.id!=='guest';});
+  var opts=members.map(function(m){
+    return '<option value="'+m.id+'"'+(t.owner===m.id?' selected':'')+'>'+esc(m.name)+'</option>';
+  }).join('');
+  var body='<label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px">👤 مسئول جدید</label>'
+    +'<select id="tkQuickOwner" style="width:100%;padding:7px 10px;border:1px solid var(--border-input);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-family:inherit;font-size:12px">'
+    +'<option value="">—</option>'+opts+'</select>';
+  var foot='<button class="btn-secondary" onclick="closeModal(\'tkQuickAssign\')">لغو</button>'
+    +'<button class="btn-primary" onclick="tkQuickAssignSave(\''+tid+'\')">ذخیره</button>';
+  openModal('tkQuickAssign','تغییر مسئول — '+esc(t.title||''),body,foot);
+}
+
+function tkQuickAssignSave(tid){
+  var t=_tkFindTask(tid);if(!t)return;
+  var newOwner=((document.getElementById('tkQuickOwner')||{}).value||'').trim();
+  var prevOwner=t.owner||'';
+  t.owner=newOwner;
+  if(!t.activity)t.activity=[];
+  if(newOwner&&newOwner!==prevOwner){
+    t.activity.push({type:'assign',text:'مسئول → '+(USERS[newOwner]||newOwner),by:currentUser,at:new Date().toISOString()});
+    if(newOwner!==currentUser&&typeof sendNotif==='function'){
+      sendNotif(newOwner,'وظیفه «'+t.title+'» به شما واگذار شد',t.centerKey||'',[],'task',{taskId:t.id,taskTitle:t.title});
+    }
+  }
+  saveDB();
+  fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({owner:t.owner||null,activity:t.activity})}).catch(function(){});
+  closeModal('tkQuickAssign');
+  showToast('✅ مسئول به‌روز شد');
+  renderTasksPanel();
+}
+
+function openCenterPickPopup(cb){
+  window._centerPickCb=cb;
+  var body='<input id="cpSearch" type="text" placeholder="جستجوی نام مرکز..." style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--border-input);border-radius:6px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)" oninput="cpSearchQuery(this.value)">'
+    +'<div id="cpResults" style="margin-top:8px;max-height:240px;overflow-y:auto"></div>';
+  openModal('centerPick','🏥 انتخاب مرکز',body,'<button class="btn-secondary" onclick="closeModal(\'centerPick\')">بستن</button>');
+  setTimeout(function(){var el=document.getElementById('cpSearch');if(el)el.focus();},50);
+}
+
+function cpSearchQuery(q){
+  q=(q||'').trim();
+  var el=document.getElementById('cpResults');
+  if(!el)return;
+  if(q.length<1){el.innerHTML='<div style="font-size:11px;color:var(--text-muted);padding:8px">حداقل ۱ حرف وارد کنید</div>';return;}
+  var qn=fNorm(q);
+  var res=[];
+  _buildPCCache();
+  (CENTERS||[]).forEach(function(c){
+    if(res.length>=15)return;
+    var name=_getCenterName('center',c.id)||c.name||'';
+    if(fNorm(name).indexOf(qn)!==-1)res.push({key:'center_'+c.id,name:name,rtype:'center',id:c.id});
+  });
+  Object.keys(_PC_CACHE||{}).forEach(function(pv){
+    if(pv==='tehran')return;
+    (_PC_CACHE[pv]||[]).forEach(function(c){
+      if(res.length>=15)return;
+      var name=_getCenterName('pc',c.id)||c.name||'';
+      if(fNorm(name).indexOf(qn)!==-1)res.push({key:'pc_'+c.id,name:name,rtype:'pc',id:c.id});
+    });
+  });
+  (DB.extra||[]).forEach(function(c){
+    if(res.length>=15)return;
+    var rt=c.province_id==='tehran'?'center':'pc';
+    var name=_getCenterName(rt,c.id)||c.name||'';
+    if(fNorm(name).indexOf(qn)!==-1)res.push({key:rt+'_'+c.id,name:name,rtype:rt,id:c.id});
+  });
+  if(!res.length){el.innerHTML='<div style="font-size:11px;color:var(--text-muted);padding:8px">نتیجه‌ای یافت نشد</div>';return;}
+  el.innerHTML=res.map(function(r,i){
+    return '<div class="gs-item" style="padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px" onclick="cpPickCenter('+i+')">'
+      +'<div style="font-weight:600">'+esc(r.name)+'</div>'
+      +'<div style="font-size:10px;color:var(--text-muted)">'+esc(r.key)+'</div></div>';
+  }).join('');
+  el._results=res;
+}
+
+function cpPickCenter(i){
+  var el=document.getElementById('cpResults');
+  if(!el||!el._results||!el._results[i])return;
+  var p=el._results[i];
+  if(typeof window._centerPickCb==='function')window._centerPickCb(p);
+  closeModal('centerPick');
 }
 
 // تبدیل پیگیری به وظیفه

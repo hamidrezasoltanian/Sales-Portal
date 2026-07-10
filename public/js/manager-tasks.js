@@ -1,14 +1,73 @@
 /* ═══ public/js/manager-tasks.js ═══ */
-// ════════════════════════ MANAGER TASKS ════════════════════════
+// ════════════════════════ MANAGER TASKS (SQL-backed via Tasks API) ════════════════════════
 var _mgrTasksOpen = true;
+
+function _isMgrFollowupTask(t){
+  return !!(t&&(t.activity||[]).some(function(a){return a.type==='mgr_followup';}));
+}
+
+function _mgrFindTaskByCenter(recKey, includeDone){
+  _ensureTasks();
+  return (DB.tasks||[]).find(function(t){
+    if(t.centerKey!==recKey)return false;
+    if(!_isMgrFollowupTask(t))return false;
+    if(!includeDone&&(t.done||t.status==='done'))return false;
+    return true;
+  })||null;
+}
+
+function _mgrGetTasks(includeDone){
+  _ensureTasks();
+  return (DB.tasks||[]).filter(function(t){
+    if(!_isMgrFollowupTask(t))return false;
+    if(!includeDone&&(t.done||t.status==='done'))return false;
+    return true;
+  });
+}
+
+function _migrateManagerTasksBlob(){
+  if(!DB.managerTasks||!Object.keys(DB.managerTasks).length)return;
+  _ensureTasks();
+  Object.keys(DB.managerTasks).forEach(function(recKey){
+    var mt=DB.managerTasks[recKey];
+    if(!mt||_mgrFindTaskByCenter(recKey,true))return;
+    var parts=recKey.split('_');
+    var rtype=parts[0], id=parts.slice(1).join('_');
+    var task={
+      id:'mgr_'+Date.now()+'_'+Math.random().toString(36).slice(2,5),
+      title:'پیگیری ویژه: '+(mt.name||recKey),
+      owner:mt.assignedTo||'',
+      dueDate:mt.assignedAt||todayStr(),
+      priority:1,
+      status:mt.done?'done':'todo',
+      done:!!mt.done,
+      doneAt:mt.doneAt||'',
+      centerKey:recKey,
+      note:mt.note||'',
+      subtasks:[],
+      activity:[
+        {type:'mgr_followup',text:'ارجاع پیگیری ویژه',by:currentUser,at:new Date().toISOString()},
+        {type:'created',text:'مهاجرت از managerTasks',by:'system',at:new Date().toISOString()}
+      ],
+      createdBy:currentUser,
+      createdAt:new Date().toISOString(),
+      recurring:'none'
+    };
+    DB.tasks.push(task);
+    fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(task)}).catch(function(){});
+  });
+  delete DB.managerTasks;
+  saveDB();
+}
 
 function mgrOpenAssign(recKey, rtype, id, name){
   if(!_isManager()){showToast('فقط مدیران می‌توانند وظیفه ارجاع دهند');return;}
+  _migrateManagerTasksBlob();
   ensureKPIDB();
-  var existing=DB.managerTasks[recKey]||{};
+  var existing=_mgrFindTaskByCenter(recKey)||{};
   var members=(typeof umGetActive==='function'?umGetActive():[]).filter(function(m){return m.id!==currentUser;});
   var expertOpts=members.map(function(m){
-    return '<option value="'+m.id+'"'+(existing.assignedTo===m.id?' selected':'')+'>'+esc(m.name)+'</option>';
+    return '<option value="'+m.id+'"'+(existing.owner===m.id?' selected':'')+'>'+esc(m.name)+'</option>';
   }).join('');
   var sn=name.replace(/\\/g,'\\\\').replace(/'/g,'&#39;');
   var body='<div style="display:flex;flex-direction:column;gap:12px">'
@@ -28,36 +87,73 @@ function mgrSaveTask(recKey, rtype, id, name){
   var assignedTo=((document.getElementById('mgrAssignTo')||{}).value||'').trim();
   var note=((document.getElementById('mgrAssignNote')||{}).value||'').trim();
   if(!assignedTo){showToast('کارشناس را انتخاب کنید');return;}
-  var existing=DB.managerTasks[recKey]||{};
-  DB.managerTasks[recKey]={
-    rtype:rtype,id:id,name:name,
-    assignedTo:assignedTo,note:note,
-    assignedAt:todayStr(),
-    done:false,
-    doneAt:''
-  };
-  saveDB();
+  _ensureTasks();
+  var existing=_mgrFindTaskByCenter(recKey);
+  var title='پیگیری ویژه: '+name;
+  var payload;
+  if(existing){
+    var prevOwner=existing.owner||'';
+    existing.owner=assignedTo;
+    existing.note=note;
+    existing.title=title;
+    existing.priority=1;
+    if(!existing.activity)existing.activity=[];
+    existing.activity.push({type:'mgr_followup',text:'ارجاع مجدد به '+(USERS[assignedTo]||assignedTo),by:currentUser,at:new Date().toISOString()});
+    payload=existing;
+    if(assignedTo!==prevOwner&&assignedTo!==currentUser&&typeof sendNotif==='function'){
+      sendNotif(assignedTo,'📌 '+title+(note?' — '+note:''),recKey,[],'task',{taskId:existing.id,taskTitle:title});
+    }
+    fetch('/api/tasks/'+encodeURIComponent(String(existing.id)),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      owner:existing.owner,dueDate:existing.dueDate||null,priority:existing.priority,status:existing.status||'todo',
+      centerKey:recKey,note:existing.note,title:existing.title,activity:existing.activity
+    })}).then(function(r){return r.ok?r.json():null;}).then(function(saved){
+      if(saved){var idx=DB.tasks.findIndex(function(x){return String(x.id)===String(saved.id);});if(idx>=0)DB.tasks[idx]=saved;}
+      saveDB();
+    }).catch(function(){saveDB();});
+  } else {
+    var task={
+      id:Date.now()+'_'+Math.random().toString(36).slice(2,6),
+      title:title,owner:assignedTo,dueDate:todayStr(),priority:1,status:'todo',done:false,doneAt:'',
+      centerKey:recKey,note:note,subtasks:[],
+      activity:[{type:'mgr_followup',text:'ارجاع پیگیری ویژه',by:currentUser,at:new Date().toISOString()},{type:'created',text:'وظیفه ایجاد شد',by:currentUser,at:new Date().toISOString()}],
+      createdBy:currentUser,createdAt:new Date().toISOString(),recurring:'none'
+    };
+    DB.tasks.push(task);
+    if(assignedTo!==currentUser&&typeof sendNotif==='function'){
+      sendNotif(assignedTo,'📌 '+title+(note?' — '+note:''),recKey,[],'task',{taskId:task.id,taskTitle:title});
+    }
+    fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(task)})
+      .then(function(r){return r.ok?r.json():null;})
+      .then(function(saved){if(saved){var idx=DB.tasks.findIndex(function(x){return String(x.id)===String(saved.id);});if(idx>=0)DB.tasks[idx]=saved;else DB.tasks.push(saved);saveDB();}})
+      .catch(function(){saveDB();});
+  }
   closeModal('mgrAssignModal');
-  showToast('✅ وظیفه پیگیری به '+( USERS[assignedTo]||assignedTo)+' ارجاع داده شد',2500);
+  showToast('✅ وظیفه پیگیری به '+(USERS[assignedTo]||assignedTo)+' ارجاع داده شد',2500);
   if(currentTab==='kpi')renderKPIPanel();
   if(currentTab==='provinces')renderUserDashboard();
 }
 
 function mgrRemoveTask(recKey){
-  ensureKPIDB();
-  delete DB.managerTasks[recKey];
-  saveDB();
+  var t=_mgrFindTaskByCenter(recKey,true);
+  if(t){
+    DB.tasks=DB.tasks.filter(function(x){return String(x.id)!==String(t.id);});
+    saveDB();
+    fetch('/api/tasks/'+encodeURIComponent(String(t.id)),{method:'DELETE'}).catch(function(){});
+  }
   if(currentTab==='kpi')renderKPIPanel();
   if(currentTab==='provinces')renderUserDashboard();
 }
 
 function mgrDoneTask(recKey){
-  ensureKPIDB();
-  if(DB.managerTasks[recKey]){
-    DB.managerTasks[recKey].done=true;
-    DB.managerTasks[recKey].doneAt=todayStr();
+  var t=_mgrFindTaskByCenter(recKey);
+  if(t){
+    t.done=true;t.status='done';t.doneAt=todayStr();
+    if(!t.activity)t.activity=[];
+    t.activity.push({type:'status',text:'انجام شد ✓',by:currentUser,at:new Date().toISOString()});
+    saveDB();
+    fetch('/api/tasks/'+encodeURIComponent(String(t.id)),{method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({status:'done',done:true,doneAt:t.doneAt,activity:t.activity})}).catch(function(){});
   }
-  saveDB();
   showToast('✅ وظیفه انجام شد');
   if(currentTab==='kpi')renderKPIPanel();
   if(currentTab==='provinces')renderDashboard();
@@ -65,18 +161,17 @@ function mgrDoneTask(recKey){
 }
 
 function _renderManagerTasksWidget(){
-  ensureKPIDB();
-  var tasks=DB.managerTasks||{};
-  var allKeys=Object.keys(tasks);
-  var activeTasks=allKeys.filter(function(k){return !tasks[k].done;});
-  var doneTasks=allKeys.filter(function(k){return tasks[k].done;});
+  _migrateManagerTasksBlob();
+  var tasks=_mgrGetTasks(true);
+  var activeTasks=tasks.filter(function(t){return !t.done&&t.status!=='done';});
+  var doneTasks=tasks.filter(function(t){return t.done||t.status==='done';});
 
   var html='<div style="background:var(--bg-card);border-radius:12px;border:1px solid #fde68a;padding:14px 16px;margin-bottom:14px">';
   html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
     +'<div>'
     +'<span style="font-size:13px;font-weight:700;color:var(--text-primary)">📌 وظایف پیگیری ویژه</span>'
     +(activeTasks.length?'<span style="background:#dc2626;color:#fff;font-size:10px;border-radius:10px;padding:1px 7px;margin-right:6px">'+activeTasks.length+'</span>':'')
-    +'<div style="font-size:10px;color:var(--text-muted);margin-top:2px">مراکزی که برای کارشناسان جهت پیگیری ویژه ارجاع داده‌اید</div>'
+    +'<div style="font-size:10px;color:var(--text-muted);margin-top:2px">مراکزی که برای کارشناسان جهت پیگیری ویژه ارجاع داده‌اید (در تب وظایف هم دیده می‌شوند)</div>'
     +'</div>'
     +'<button onclick="_mgrTasksOpen=!_mgrTasksOpen;renderKPIPanel()" style="background:none;border:none;cursor:pointer;font-size:12px;color:var(--text-muted)">'+(_mgrTasksOpen?'▲ جمع':'▼ باز')+'</button>'
     +'</div>';
@@ -85,12 +180,11 @@ function _renderManagerTasksWidget(){
     if(!activeTasks.length&&!doneTasks.length){
       html+='<div style="text-align:center;padding:16px;color:var(--text-muted);font-size:12px">هیچ وظیفه‌ای ارجاع داده نشده. از دکمه 📌 روی مراکز پیشنهادی استفاده کنید.</div>';
     } else {
-      // group active by assignedTo
       var byExpert={};
-      activeTasks.forEach(function(k){
-        var t=tasks[k];
-        if(!byExpert[t.assignedTo])byExpert[t.assignedTo]=[];
-        byExpert[t.assignedTo].push({recKey:k,task:t});
+      activeTasks.forEach(function(t){
+        var uid=t.owner||'';
+        if(!byExpert[uid])byExpert[uid]=[];
+        byExpert[uid].push(t);
       });
       var experts=Object.keys(byExpert);
       if(experts.length){
@@ -103,15 +197,16 @@ function _renderManagerTasksWidget(){
             +'<span style="background:'+ucol+'22;color:'+ucol+';font-size:10px;border-radius:8px;padding:1px 7px;margin-right:4px">'+byExpert[uid].length+' وظیفه</span>'
             +'</div>'
             +'<div style="display:flex;flex-direction:column;gap:4px">';
-          byExpert[uid].forEach(function(item){
-            var t=item.task;
-            var sn=t.name.replace(/\\/g,'\\\\').replace(/'/g,'&#39;');
+          byExpert[uid].forEach(function(t){
+            var parts=(t.centerKey||'').split('_');
+            var rt=parts[0]||'center', rid=parts.slice(1).join('_')||'';
+            var sn=(t.title||'').replace(/^پیگیری ویژه:\s*/,'').replace(/\\/g,'\\\\').replace(/'/g,'&#39;');
             html+='<div style="display:flex;align-items:center;gap:6px;padding:5px 7px;background:var(--bg-card);border-radius:5px;font-size:11px;border:1px solid var(--border)">'
-              +'<span onclick="openCenterModal(\''+t.rtype+'\',\''+t.id+'\')" style="flex:1;cursor:pointer;font-weight:600;color:var(--text-primary)">'+esc(t.name)+'</span>'
+              +'<span onclick="openCenterModal(\''+rt+'\',\''+rid+'\')" style="flex:1;cursor:pointer;font-weight:600;color:var(--text-primary)">'+esc(sn)+'</span>'
               +(t.note?'<span style="font-size:10px;color:var(--text-muted);max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(t.note)+'">📝 '+esc(t.note)+'</span>':'')
-              +'<span style="font-size:10px;color:var(--text-muted);flex-shrink:0">'+t.assignedAt+'</span>'
-              +'<button onclick="mgrOpenAssign(\''+item.recKey+'\',\''+t.rtype+'\',\''+t.id+'\',\''+sn+'\')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;font-size:10px;padding:2px 6px;cursor:pointer;font-family:inherit;flex-shrink:0">✏ ویرایش</button>'
-              +'<button onclick="mgrRemoveTask(\''+item.recKey+'\')" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5;border-radius:4px;font-size:10px;padding:2px 6px;cursor:pointer;font-family:inherit;flex-shrink:0">✕ حذف</button>'
+              +'<span style="font-size:10px;color:var(--text-muted);flex-shrink:0">'+(t.dueDate||'')+'</span>'
+              +'<button onclick="mgrOpenAssign(\''+t.centerKey+'\',\''+rt+'\',\''+rid+'\',\''+sn+'\')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;font-size:10px;padding:2px 6px;cursor:pointer;font-family:inherit;flex-shrink:0">✏ ویرایش</button>'
+              +'<button onclick="mgrRemoveTask(\''+t.centerKey+'\')" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5;border-radius:4px;font-size:10px;padding:2px 6px;cursor:pointer;font-family:inherit;flex-shrink:0">✕ حذف</button>'
               +'</div>';
           });
           html+='</div></div>';
@@ -122,11 +217,10 @@ function _renderManagerTasksWidget(){
         html+='<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px">'
           +'<div style="font-size:10px;color:var(--text-muted);margin-bottom:4px">✅ انجام‌شده اخیر ('+doneTasks.length+')</div>'
           +'<div style="display:flex;flex-wrap:wrap;gap:4px">';
-        doneTasks.slice(0,5).forEach(function(k){
-          var t=tasks[k];
+        doneTasks.slice(0,5).forEach(function(t){
           html+='<div style="display:flex;align-items:center;gap:4px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:4px;padding:2px 6px;font-size:10px">'
-            +'<span style="text-decoration:line-through;color:var(--text-muted)">'+esc(t.name)+'</span>'
-            +'<button onclick="mgrRemoveTask(\''+k+'\')" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:10px;padding:0">✕</button>'
+            +'<span style="text-decoration:line-through;color:var(--text-muted)">'+esc((t.title||'').replace(/^پیگیری ویژه:\s*/,''))+'</span>'
+            +'<button onclick="mgrRemoveTask(\''+t.centerKey+'\')" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:10px;padding:0">✕</button>'
             +'</div>';
         });
         html+='</div></div>';
@@ -481,6 +575,7 @@ function renderKPIPanel(){
   }
 
   // ── log history
+  if(_isManager()) html+=_renderManagerTasksWidget();
   html+=_renderKPIHistory(_kpiUser,_kpiMonth);
 
   var el=document.getElementById('kpiPanel');
