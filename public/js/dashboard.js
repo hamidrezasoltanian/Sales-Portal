@@ -790,7 +790,7 @@ function _saveHomeWidgets(arr){
   if(!DB.settings)DB.settings={};
   if(!DB.settings.homeWidgets)DB.settings.homeWidgets={};
   DB.settings.homeWidgets[currentUser]=arr;
-  saveDB();
+  patchCrmSetting('homeWidgets',DB.settings.homeWidgets);
 }
 
 function _homeRemoveWidget(wid){

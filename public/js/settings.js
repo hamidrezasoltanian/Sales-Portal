@@ -174,9 +174,16 @@ function umSaveUser(userId){
     .then(function(d){
       if(payload.new_username){
         var nu=payload.new_username;
-        Object.keys(DB.edits||{}).forEach(function(k){if(DB.edits[k].owner===userId)DB.edits[k].owner=nu;});
-        getAllProvinces().forEach(function(p){var e=getE(getProvType(p.id),p.id);if(e.owner===userId)setE(getProvType(p.id),p.id,'owner',nu);});
-        saveDB();
+        Object.keys(DB.edits||{}).forEach(function(k){
+          if(DB.edits[k].owner===userId){
+            var pts=k.split('_');
+            setE(pts[0],pts.slice(1).join('_'),'owner',nu);
+          }
+        });
+        getAllProvinces().forEach(function(p){
+          var e=getE(getProvType(p.id),p.id);
+          if(e.owner===userId)setE(getProvType(p.id),p.id,'owner',nu);
+        });
       }
       showToast('✅ «'+newName+'» ذخیره شد');buildUSERS();setTimeout(function(){umTab('users');},300);
     })

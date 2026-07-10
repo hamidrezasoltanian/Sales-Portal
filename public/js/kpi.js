@@ -665,16 +665,17 @@ function _discImport(cid) {
   if(!DB.extra) DB.extra = [];
   var newId = 'disc_' + cid;
   if(!DB.extra.find(function(x){ return x.id===newId; })) {
-    DB.extra.push({
+    var extraEntry={
       id: newId,
       name: c.name,
-      province: c.city || '',
+      province_id: c.city || '',
       type: 'خصوصی',
       potential: 2,
       biopsyScore: c.score,
       biopsyDoctors: (c.doctors||[]).map(function(d){ return d.label+': '+d.name; }).join(', '),
-    });
-    saveDB();
+    };
+    DB.extra.push(extraEntry);
+    saveCenterExtraApi(extraEntry);
   }
   fetch('/api/discovery/' + cid, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'imported'})});
   _discoveredCenters = (_discoveredCenters||[]).map(function(x){ return x.id===cid ? Object.assign({},x,{status:'imported'}) : x; });

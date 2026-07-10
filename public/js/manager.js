@@ -290,7 +290,19 @@ function saveSettings(){
     var _tpTa=document.getElementById('stgTypeList');
     if(_tpTa){var _tl=_tpTa.value.split('\n').map(function(l){return l.trim();}).filter(Boolean);if(_tl.length>=1){DB.settings.typeList=_tl;TYPE_LIST=_tl;}}
   }
-  saveDB();
+  saveGlobalTagsApi(DB.tags);
+  patchCrmSetting('companyName',companyName);
+  patchCrmSetting('companyInfo',companyInfo);
+  patchCrmSetting('sipDomain',DB.settings.sipDomain);
+  if(_anthKey.trim())patchCrmSetting('anthropicKey',_anthKey.trim());
+  patchCrmSetting('members',members);
+  patchCrmSetting('ckItems',ckItems);
+  if(_npE||_npA)patchCrmSetting('notifPrefs',DB.settings.notifPrefs);
+  if(_isManager()){
+    if(_staTa&&DB.settings.statusList)patchCrmSetting('statusList',DB.settings.statusList);
+    if(_ldTa&&DB.settings.leadList)patchCrmSetting('leadList',DB.settings.leadList);
+    if(_tpTa&&DB.settings.typeList)patchCrmSetting('typeList',DB.settings.typeList);
+  }
   buildUSERS();
   closeModal('settingsModal');
   rebuildFilters();
@@ -302,7 +314,7 @@ function addTagRow(){
   if(!DB.tags)DB.tags=[];
   var colors=['#0ea5e9','#8b5cf6','#f59e0b','#22c55e','#ef4444','#06b6d4','#ec4899','#84cc16'];
   var newTag={id:'tag_'+Date.now(),name:'برچسب جدید',color:colors[DB.tags.length%colors.length]};
-  DB.tags.push(newTag);saveDB();
+  DB.tags.push(newTag);saveGlobalTagsApi(DB.tags);
   var list=document.getElementById('tagsSettingsList');
   if(!list)return;
   var div=document.createElement('div');
@@ -318,9 +330,11 @@ function deleteTagFromSettings(tagId){
   if(!confirm('این برچسب از همه مراکز حذف می‌شود. ادامه می‌دهید؟'))return;
   DB.tags=(DB.tags||[]).filter(function(t){return t.id!==tagId;});
   Object.keys(DB.rTags||{}).forEach(function(k){
+    var before=(DB.rTags[k]||[]).length;
     DB.rTags[k]=(DB.rTags[k]||[]).filter(function(id){return id!==tagId;});
+    if(DB.rTags[k].length!==before)saveCenterTagsApi(k,DB.rTags[k]);
   });
-  saveDB();
+  saveGlobalTagsApi(DB.tags);
   var el=document.getElementById('tagcolor_'+tagId);
   if(el&&el.closest('div'))el.closest('div').remove();
 }
@@ -1247,7 +1261,6 @@ function overdueSnooze(rtype,id,days,listMemberId){
   var nj=g2j(d.getFullYear(),d.getMonth()+1,d.getDate());
   var newDate=nj[0]+'/'+p2(nj[1])+'/'+p2(nj[2]);
   setE(rtype,id,'followupDate',newDate);
-  saveDB(); // Save changes to DB & sync to server!
   renderBanner();
   showToast('⏰ تعویق تا '+newDate,2000);
   closeModal('overdueList');
@@ -1262,7 +1275,6 @@ function overduePickDate(rtype,id,listMemberId){
     inp.remove();
     if(!v)return;
     setE(rtype,id,'followupDate',v);
-    saveDB(); // Save changes to DB & sync to server!
     renderBanner();
     showToast('📅 تاریخ جدید: '+v,2000);
     closeModal('overdueList');
@@ -1978,10 +1990,10 @@ function doImportCenters(rows, nameIdx, provIdx, typeIdx, ownerIdx, potIdx) {
       if (matchedOwner) entry.owner = matchedOwner;
     }
     DB.extra.push(entry);
+    saveCenterExtraApi(entry);
     added++;
   });
   
-  saveDB();
   closeModal('importCentersModal');
   renderTable();
   showToast('✅ ' + added + ' مرکز وارد شد', 3000);
@@ -2067,7 +2079,7 @@ function _sendWeeklyDigest(){
   sendNotif(currentUser,msg,'');
   if(!DB.settings)DB.settings={};
   DB.settings.lastWeeklyDigest=today;
-  saveDB();
+  patchCrmSetting('lastWeeklyDigest',today);
 }
 
 async function init(){

@@ -798,7 +798,7 @@ function _updateExtraCenterProv(id,newProvId){
   if(idx<0)return;
   DB.extra[idx].province_id=newProvId;
   clearPCCache();_ALL_PROVS=null;
-  saveDB();showToast('✅ استان به‌روز شد');
+  saveCenterExtraApi(DB.extra[idx]);showToast('✅ استان به‌روز شد');
 }
 
 function _getCompetitorList(){
@@ -1359,7 +1359,7 @@ function _doDeleteCenter(rtype,id){
   _cleanCenterData(rtype,id);
   if(isExtra){
     DB.extra=(DB.extra||[]).filter(function(c){return c.id!==id;});
-    saveDB();closeModal('delCenterModal');
+    deleteCenterExtraApi(id);closeModal('delCenterModal');
     clearPCCache();_ALL_PROVS=null;renderTable();
     showToast('✅ مرکز حذف شد');return;
   }
@@ -1408,9 +1408,7 @@ function _cleanCenterData(rtype,id){
     if(we.recKey===recKey||(we.rtype===rtype&&we.rid===id))
       _weRemove(k);
   });
-  // حذف followupDate از DB.edits (بقیه CRM حفظ می‌شه)
-  if(DB.edits[recKey])delete DB.edits[recKey].followupDate;
-  saveDB();
+  if(DB.edits[recKey]&&DB.edits[recKey].followupDate)setE(rtype,id,'followupDate','');
 }
 
 // Note pending tags: {modalId: [tagId,...]}
@@ -1498,7 +1496,7 @@ function removeCenterTag(ev,rtype,id,tagId){
   ev.stopPropagation();
   var k=recK(rtype,id);
   DB.rTags[k]=(DB.rTags[k]||[]).filter(function(t){return t!==tagId;});
-  saveDB();
+  saveCenterTagsApi(k,DB.rTags[k]);
   // refresh tag area in modal
   var area=document.getElementById('tagArea_'+id);
   if(area){

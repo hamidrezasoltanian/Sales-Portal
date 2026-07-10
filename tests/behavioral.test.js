@@ -585,6 +585,34 @@ async function test18_managerFollowupApi() {
   await req('DELETE', '/api/manager-followups/' + encodeURIComponent(recKey), null, tok);
 }
 
+async function test19_settingsNotWipedByBulkSave() {
+  console.log('\n── Test 19: settings PATCH survives PUT /db without settings ──');
+  const tok = managerToken(TEST_MANAGER);
+  const patch = await req('PATCH', '/api/crm-settings/_test_company', { value: 'QA Company' }, tok);
+  assert(patch.status === 200, 'PATCH crm-settings _test_company returns 200');
+  const put = await req('PUT', '/api/data/db', {}, tok);
+  assert(put.status === 200, 'PUT /db without settings returns 200');
+  const get = await req('GET', '/api/data/db', null, tok);
+  assert(get.body.settings && get.body.settings._test_company === 'QA Company', 'settings survived bulk save');
+  await query("DELETE FROM app_settings WHERE key = '_test_company'");
+}
+
+async function test20_centerExtrasApi() {
+  console.log('\n── Test 20: POST /api/center-extras persists via SQL ──');
+  const tok = token(TEST_USERS[0]);
+  const id = 'qa_extra_' + Date.now();
+  const post = await req('POST', '/api/center-extras', {
+    id: id, name: 'QA Extra Center', province_id: 'tehran', potential: 2, lead: 'سرنخ',
+  }, tok);
+  assert(post.status === 200, 'POST center-extras returns 200');
+  const put = await req('PUT', '/api/data/db', {}, tok);
+  assert(put.status === 200, 'PUT /db without extra returns 200');
+  const get = await req('GET', '/api/data/db', null, tok);
+  assert((get.body.extra || []).some(function (c) { return c.id === id; }), 'extra center in GET /db');
+  const del = await req('DELETE', '/api/center-extras/' + encodeURIComponent(id), null, tok);
+  assert(del.status === 200, 'DELETE center-extras returns 200');
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -640,6 +668,8 @@ async function main() {
     await test16_noteDelete();
     await test17_calendarEventApi();
     await test18_managerFollowupApi();
+    await test19_settingsNotWipedByBulkSave();
+    await test20_centerExtrasApi();
 
   } catch (err) {
     console.error('\n❌ خطای غیرمنتظره:', err.message);

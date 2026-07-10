@@ -436,7 +436,7 @@ function quickAddToToday(rtype,id,name){
   var eKey=weekId+':::'+recKey;
   if(!DB.weekEntries)DB.weekEntries={};
   DB.weekEntries[eKey]={rtype:rtype,rid:id,recKey:recKey,centerName:name,scheduledDate:today,actionType:'call',done:false,addedBy:currentUser,weekId:weekId};
-  saveDB();
+  saveWeekEntryApi(eKey,DB.weekEntries[eKey]);
   showToast('✅ اضافه شد: '+name,1800);
   renderProvTable();
 }
@@ -560,8 +560,9 @@ function _doAddCenter(){
     var id=rtype+'_new_'+Date.now();
 
     if(!DB.extra)DB.extra=[];
-    DB.extra.push({id:id,row:maxRow+1,name:name,potential:pot,type:type,lead:lead,province_id:_currentProvId,owner:owner});
-    saveDB();
+    var newCenter={id:id,row:maxRow+1,name:name,potential:pot,type:type,lead:lead,province_id:_currentProvId,owner:owner};
+    DB.extra.push(newCenter);
+    saveCenterExtraApi(newCenter);
     closeModal('addCenterModal');
     // Clear filters to ensure the new center is visible
     var _fp=document.getElementById('fPot');if(_fp)_fp.value='';

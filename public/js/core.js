@@ -272,10 +272,15 @@ function cleanupOrphanedEntries(showReport){
     if(rk&&!valid.has(rk)){_weRemove(k);removedWP++;}
   });
   Object.keys(DB.edits||{}).forEach(function(k){
-    if(!valid.has(k)&&DB.edits[k].followupDate){delete DB.edits[k].followupDate;removedFU++;}
+    if(!valid.has(k)&&DB.edits[k].followupDate){
+      var pts=k.split('_');
+      var rtype=pts[0];
+      var rid=pts.slice(1).join('_');
+      setE(rtype,rid,'followupDate','');
+      removedFU++;
+    }
   });
   if(removedWP||removedFU){
-    saveDB();
     if(showReport)showToast('🧹 پاک‌سازی: '+removedWP+' ورودی هفته و '+removedFU+' پیگیری منسوخ حذف شد',4000);
   }else if(showReport){showToast('✅ هیچ ورودی منسوخی یافت نشد');}
   return{removedWP:removedWP,removedFU:removedFU};
@@ -388,6 +393,11 @@ async function loadDB(){
   }
 }
 function _weRemove(k){
+  var we=DB.weekEntries&&DB.weekEntries[k];
+  if(we&&(we.sqlId||we.id)){
+    var idOrKey=we.sqlId||we.id;
+    fetch('/api/week-entries/'+encodeURIComponent(idOrKey),{method:'DELETE'}).catch(function(){});
+  }
   delete DB.weekEntries[k];
   if(!DB._weDeletedKeys)DB._weDeletedKeys=[];
   if(DB._weDeletedKeys.indexOf(k)<0)DB._weDeletedKeys.push(k);
@@ -415,7 +425,8 @@ function _buildSavePayload(){
   delete payload.extra;
   delete payload.managerTasks;
   delete payload.provOverrides;
-  // Residual blob: settings (per-key via patchCrmSetting), _mtr (MTR — untouched)
+  delete payload.settings;
+  // Residual blob: _mtr only (MTR — untouched)
   if(_dbServerTs)payload._clientTs=_dbServerTs;
   return payload;
 }
@@ -514,6 +525,42 @@ function saveKpiWeightsApi(weights){
   if(!DB.kpiTargets)DB.kpiTargets={};
   DB.kpiTargets.weights=weights;
   return patchCrmSetting('kpi_weights',weights);
+}
+
+function saveCenterExtraApi(center){
+  if(!center||!center.id)return Promise.resolve();
+  return fetch('/api/center-extras',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(center)
+  }).catch(function(e){console.warn('[saveCenterExtraApi]',center.id,e.message);});
+}
+function deleteCenterExtraApi(id){
+  if(!id)return Promise.resolve();
+  return fetch('/api/center-extras/'+encodeURIComponent(id),{method:'DELETE'})
+    .catch(function(e){console.warn('[deleteCenterExtraApi]',id,e.message);});
+}
+function saveWeekEntryApi(eKey,we){
+  if(!we||!eKey)return Promise.resolve();
+  var pts=eKey.split(':::');
+  var weekId=pts[0]||we.weekId||'';
+  if(!weekId&&typeof getWeekId==='function'&&we.scheduledDate)weekId=getWeekId(we.scheduledDate);
+  var body={
+    id:we.sqlId||('we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5)),
+    weekId:weekId,
+    recKey:we.recKey||(we.rtype+'_'+we.rid),
+    rtype:we.rtype,
+    rid:we.rid,
+    scheduledDate:we.scheduledDate||null,
+    actionType:we.actionType||'call',
+    done:!!we.done,
+    doneDate:we.doneDate||null,
+    addedBy:we.addedBy||(typeof currentUser!=='undefined'?currentUser:'system'),
+    centerName:we.centerName||''
+  };
+  return fetch('/api/week-entries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    .then(function(r){return r.ok?r.json():null;})
+    .then(function(d){if(d&&d.id&&DB.weekEntries[eKey])DB.weekEntries[eKey].sqlId=d.id;return d;})
+    .catch(function(e){console.warn('[saveWeekEntryApi]',e.message);});
 }
 
 /** PATCH a single CRM setting without full blob save (Phase 5). */

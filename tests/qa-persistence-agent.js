@@ -337,6 +337,30 @@ async function flow_seededCenterPatch(tok) {
   assert(get.body && get.body.data && get.body.data.status === 'مذاکره', 'seeded center status persisted');
 }
 
+async function flow_settingsPatch(mgrTok) {
+  console.log('\n🔄 Flow: PATCH crm-settings → empty PUT /db → refresh');
+  const key = '_qa_setting_' + Date.now();
+  const patch = await req('PATCH', '/api/crm-settings/' + encodeURIComponent(key), { value: 'persist-me' }, mgrTok);
+  if (!assert(patch.status === 200, 'PATCH crm-settings')) return;
+  await req('PUT', '/api/data/db', {}, mgrTok);
+  const db = await refreshDb(mgrTok);
+  assert(db.settings && db.settings[key] === 'persist-me', 'settings survived empty bulk save');
+  await query('DELETE FROM app_settings WHERE key = $1', [key]);
+}
+
+async function flow_centerExtra(tok) {
+  console.log('\n🔄 Flow: POST center-extras → empty PUT /db → refresh');
+  const id = 'qa_extra_' + Date.now();
+  const post = await req('POST', '/api/center-extras', {
+    id: id, name: 'QA Flow Center', province_id: 'tehran', potential: 2,
+  }, tok);
+  if (!assert(post.status === 200, 'POST center-extras')) return;
+  await req('PUT', '/api/data/db', {}, tok);
+  const db = await refreshDb(tok);
+  assert((db.extra || []).some(function (c) { return c.id === id; }), 'center extra survived bulk save');
+  await req('DELETE', '/api/center-extras/' + encodeURIComponent(id), null, tok);
+}
+
 async function runAllFlows() {
   passed = 0;
   failed = 0;
@@ -365,6 +389,8 @@ async function runAllFlows() {
   await flow_kpiTarget(tok);
   await flow_managerFollowup(mgrTok);
   await flow_seededCenterPatch(tok);
+  await flow_settingsPatch(mgrTok);
+  await flow_centerExtra(tok);
 
   await query("DELETE FROM app_users WHERE username = '_qa_mgr'").catch(function () {});
 

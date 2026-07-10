@@ -30,7 +30,11 @@ router.get('/', requireManager, async function (req, res) {
   }
 });
 
-const USER_PATCH_KEYS = new Set(['taskColumns', '_lastUser', 'firstUse', 'onboardingDisabled']);
+const USER_PATCH_KEYS = new Set([
+  'taskColumns', '_lastUser', 'firstUse', 'onboardingDisabled',
+  'lastMorningReminder', 'lastAfternoonReminder', 'lastStartupReminder',
+  'homeWidgets',
+]);
 
 function isManagerRole(role) {
   return role === 'مدیر' || role === 'سوپر ادمین';

@@ -313,7 +313,7 @@ router.put('/db', async (req, res) => {
     'weekEntries', 'edits', 'tasks', 'notifications',
     'notes', 'changeLog', 'callLog', 'visitLog', 'salesLog', 'events', 'checklist',
     'tags', 'rTags', 'missionLog', 'provHistory', 'kpiHistory', 'kpiTargets', 'extra',
-    'managerTasks', 'provOverrides',
+    'managerTasks', 'provOverrides', 'settings',
   ];
   const hasKnown = Object.keys(body).some(k => KNOWN_KEYS.includes(k));
   if (!hasKnown && Object.keys(body).length > 0) {
