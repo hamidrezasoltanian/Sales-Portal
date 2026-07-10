@@ -115,6 +115,7 @@ app.use('/api/center-extras', require('./routes/center-extras'));
 app.use('/api/center-deals', require('./routes/center-deals'));
 app.use('/api/center-files', require('./routes/center-files'));
 app.use('/api/manager-reports', require('./routes/manager-reports'));
+app.use('/api/workflows', require('./routes/workflows'));
 app.use('/api/mtr', require('./routes/mtr'));
 app.use('/api/migrate', require('./routes/migrate'));
 app.use('/api/support', require('./routes/support'));

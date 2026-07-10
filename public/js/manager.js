@@ -2195,7 +2195,7 @@ async function init(){
     var _spid=localStorage.getItem('_spid');
     var _svm=localStorage.getItem('_svm');
     if(_svm&&['list','card','pipeline'].indexOf(_svm)>=0)_viewMode=_svm;
-    if(_st&&['home','provinces','weekplan','calendar','checklist','activity','kpi','manager','mtr','pricing','tasks','changelog','proforma','support','hr','trade-kpi'].indexOf(_st)>=0)currentTab=_st;
+    if(_st&&['home','provinces','weekplan','calendar','checklist','activity','kpi','manager','mtr','pricing','tasks','workflows','changelog','proforma','support','hr','trade-kpi'].indexOf(_st)>=0)currentTab=_st;
     if(_spid)_currentProvId=_spid;
   }catch(e){}
   if(!_st) currentTab=_isManager()?'manager':'home';
@@ -2219,7 +2219,7 @@ async function init(){
   })();
   // Apply granular permission hiding (additive — only hides, never shows what role already hides)
   (function(){
-    var _allMods=['provinces','weekplan','calendar','checklist','activity','tasks','mtr','pricing','proforma','support','hr','trade-kpi','kpi','manager','changelog','wms','letters'];
+    var _allMods=['provinces','weekplan','calendar','checklist','activity','tasks','workflows','mtr','pricing','proforma','support','hr','trade-kpi','kpi','manager','changelog','wms','letters'];
     _allMods.forEach(function(mod){
       if(!_hasAccess(mod)){
         var btnId='tab_'+mod.replace('-','_');

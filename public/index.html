@@ -55,6 +55,7 @@
     <button class="tab-btn" id="tab_weekplan" onclick="switchTab('weekplan')" title="برنامه هفته"><span class="sb-icon">📋</span><span class="sb-label">برنامه هفته</span></button>
     <button class="tab-btn" id="tab_calendar" onclick="switchTab('calendar')" title="تقویم"><span class="sb-icon">📅</span><span class="sb-label">تقویم</span></button>
     <button class="tab-btn" id="tab_tasks" onclick="switchTab('tasks')" title="وظایف"><span class="sb-icon">📌</span><span class="sb-label">وظایف</span></button>
+    <button class="tab-btn" id="tab_workflows" onclick="switchTab('workflows')" title="گردش‌کار"><span class="sb-icon">🔄</span><span class="sb-label">گردش‌کار</span></button>
     <button class="tab-btn" id="tab_mtr" onclick="switchTab('mtr')" title="مطالبات"><span class="sb-icon">💰</span><span class="sb-label"><span id="mtrBadge"></span>مطالبات</span></button>
     <button class="tab-btn" id="tab_pricing" onclick="switchTab('pricing')" title="قیمت‌گذاری"><span class="sb-icon">🏷</span><span class="sb-label">قیمت‌گذاری</span></button>
     <button class="tab-btn" id="tab_proforma" onclick="switchTab('proforma')" title="پیشفاکتور"><span class="sb-icon">📄</span><span class="sb-label">پیشفاکتور</span></button>
@@ -295,6 +296,7 @@
   <div id="vue-tasks"></div>
   <div id="tasksVanillaWrap"></div>
 </div>
+<div id="workflowsPanel" style="display:none;max-width:1400px;margin:0 auto;padding:0 12px"></div>
 <div id="lettersPanel" style="display:none;height:calc(100vh - 60px)"><div id="vue-letters" style="height:100%"></div></div>
 <div id="changelogPanel" style="display:none;padding:14px 16px;max-width:1200px;margin:0 auto"></div>
 
@@ -316,6 +318,7 @@
 <script src="/js/pricing.js?v=20260708h"></script>
 <script src="/js/weekplan.js?v=20260708h"></script>
 <script src="/js/tasks.js?v=20260708h"></script>
+<script src="/js/workflows.js?v=20260710b"></script>
 <script src="/js/calendar.js?v=20260708h"></script>
 <script src="/js/checklist.js?v=20260708h"></script>
 <script src="/js/activity-log.js?v=20260708h"></script>

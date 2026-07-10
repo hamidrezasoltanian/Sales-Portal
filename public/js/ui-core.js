@@ -35,7 +35,7 @@ function switchTab(tab){
   currentTab=tab;
   try{localStorage.setItem('_st',tab);}catch(e){}
   _navPush(tab, null);
-  ['home','provinces','weekplan','calendar','checklist','activity','changelog','tasks','manager','kpi','mtr','pricing','proforma','reports','hcp','letters'].forEach(function(t){
+  ['home','provinces','weekplan','calendar','checklist','activity','changelog','tasks','workflows','manager','kpi','mtr','pricing','proforma','reports','hcp','letters'].forEach(function(t){
     var b=document.getElementById('tab_'+t);if(b)b.classList.toggle('active',t===tab);
   });
   document.getElementById('dash').style.display=(tab==='provinces')?'':'none';
@@ -48,6 +48,7 @@ function switchTab(tab){
   document.getElementById('wpPanel').style.display=(tab==='weekplan')?'':'none';
   var _clp=document.getElementById('changelogPanel');if(_clp)_clp.style.display=(tab==='changelog')?'':'none';
   var _tp=document.getElementById('tasksPanel');if(_tp)_tp.style.display=(tab==='tasks')?'':'none';
+  var _wfp=document.getElementById('workflowsPanel');if(_wfp)_wfp.style.display=(tab==='workflows')?'':'none';
   document.getElementById('calPanel').style.display=(tab==='calendar')?'':'none';
   document.getElementById('ckPanel').style.display=(tab==='checklist')?'':'none';
   document.getElementById('actPanel').style.display=(tab==='activity')?'':'none';
@@ -125,6 +126,7 @@ function switchTab(tab){
       _safeRender(renderTasksPanel,'tasks');
     }
   }
+  else if(tab==='workflows')_safeRender(renderWorkflowsPanel,'workflows');
   else if(tab==='manager')_safeRender(renderManagerPanel,'manager');
   else if(tab==='kpi')_safeRender(renderKPIPanel,'kpi');
   else if(tab==='home')_safeRender(renderHome,'home');

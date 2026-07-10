@@ -332,6 +332,7 @@ The receivables AI tab calls `https://api.anthropic.com/v1/messages` directly fr
 | WMS warehouse module: served at /wms, backed by PostgreSQL (9 tables), REST API at /api/wms | public/wms.html + server/routes/wms.js | ✅ |
 | WMS REST endpoints: /api/wms/inventory (aggregate), /api/wms/lots/scan/:code (QR), /api/wms/transactions (paginated) | server/routes/wms.js | ✅ |
 | WMS auto-migration: blob data migrated to SQL tables on first startup | server/db.js _migrateWMSFromBlob() | ✅ |
+| **Workflows module**: user-definable processes (stages/transitions), kanban board, SQL-backed | tab گردش‌کار + /api/workflows | ✅ |
 | Proforma invoice module: draft→sent→approved/rejected→reopen workflow, auto-number PF-YYYY-NNNN | proforma tab + /api/proforma | ✅ |
 | Proforma SQL: zod validation, rowToObj mapper, manager-only approve/reject | server/routes/proforma.js | ✅ |
 | Proforma auto-migration: blob migrated to SQL on first startup | server/db.js _migrateProformasFromBlob() | ✅ |

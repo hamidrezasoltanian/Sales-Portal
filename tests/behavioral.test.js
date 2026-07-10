@@ -724,6 +724,51 @@ async function test25_crmGapsApis() {
   assert(delDeal.status === 200, 'DELETE center-deals returns 200');
 }
 
+async function test26_workflowsApi() {
+  console.log('\n── Test 26: workflows definitions + instances + transitions ──');
+  const tok = token(TEST_USERS[0]);
+  const mgrTok = managerToken(TEST_MANAGER);
+  const defId = 'wf_qa_' + Date.now();
+
+  const postDef = await req('POST', '/api/workflows/definitions', {
+    id: defId,
+    name: 'QA Workflow',
+    stages: [
+      { id: 'a', label: 'A', color: '#6366f1', order: 0 },
+      { id: 'b', label: 'B', color: '#22c55e', order: 1, isFinal: true },
+    ],
+    transitions: [{ from: 'a', to: 'b' }],
+  }, mgrTok);
+  assert(postDef.status === 201, 'POST workflow definition returns 201');
+
+  const getDefs = await req('GET', '/api/workflows/definitions', null, tok);
+  assert(getDefs.status === 200, 'GET definitions returns 200');
+  assert((getDefs.body.definitions || []).some(function (d) { return d.id === defId; }), 'definition in list');
+
+  const instId = 'wfi_qa_' + Date.now();
+  const postInst = await req('POST', '/api/workflows/instances', {
+    id: instId, definitionId: defId, title: 'QA Item', owner: TEST_USERS[0],
+  }, tok);
+  assert(postInst.status === 201, 'POST instance returns 201');
+  assert(postInst.body.currentStage === 'a', 'instance starts at first stage');
+
+  const action = await req('POST', '/api/workflows/instances/' + encodeURIComponent(instId) + '/action', {
+    toStage: 'b', note: 'QA advance',
+  }, tok);
+  assert(action.status === 200, 'POST action returns 200');
+  assert(action.body.currentStage === 'b', 'instance moved to stage b');
+  assert(action.body.status === 'completed', 'final stage marks completed');
+
+  const badAction = await req('POST', '/api/workflows/instances/' + encodeURIComponent(instId) + '/action', {
+    toStage: 'a',
+  }, tok);
+  assert(badAction.status === 400, 'invalid transition rejected');
+
+  await query('DELETE FROM workflow_transitions WHERE instance_id = $1', [instId]);
+  await query('DELETE FROM workflow_instances WHERE id = $1', [instId]);
+  await query('DELETE FROM workflow_definitions WHERE id = $1', [defId]);
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -786,6 +831,7 @@ async function main() {
     await test23_mtrInvoiceMetaPersist();
     await test24_mtrSyncFromCache();
     await test25_crmGapsApis();
+    await test26_workflowsApi();
 
   } catch (err) {
     console.error('\n❌ خطای غیرمنتظره:', err.message);

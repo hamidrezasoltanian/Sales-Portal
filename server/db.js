@@ -1675,6 +1675,90 @@ async function initSchema() {
   `);
   await query(`CREATE INDEX IF NOT EXISTS idx_center_files_key ON center_files(center_key)`).catch(() => {});
 
+  // User-definable workflows (process definitions + running instances)
+  await query(`
+    CREATE TABLE IF NOT EXISTS workflow_definitions (
+      id           TEXT PRIMARY KEY,
+      name         TEXT NOT NULL,
+      description  TEXT DEFAULT '',
+      stages       JSONB NOT NULL DEFAULT '[]',
+      transitions  JSONB NOT NULL DEFAULT '[]',
+      fields       JSONB NOT NULL DEFAULT '[]',
+      active       BOOLEAN DEFAULT TRUE,
+      created_by   TEXT,
+      created_at   TIMESTAMPTZ DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS workflow_instances (
+      id              TEXT PRIMARY KEY,
+      definition_id   TEXT NOT NULL REFERENCES workflow_definitions(id),
+      title           TEXT NOT NULL,
+      current_stage   TEXT NOT NULL,
+      owner           TEXT,
+      center_key      TEXT DEFAULT '',
+      center_name     TEXT DEFAULT '',
+      priority        INT DEFAULT 2,
+      due_date        TEXT DEFAULT '',
+      data            JSONB NOT NULL DEFAULT '{}',
+      status          TEXT DEFAULT 'active',
+      created_by      TEXT,
+      created_at      TIMESTAMPTZ DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ DEFAULT NOW(),
+      completed_at    TIMESTAMPTZ
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_wfi_def ON workflow_instances(definition_id, current_stage)`).catch(() => {});
+  await query(`CREATE INDEX IF NOT EXISTS idx_wfi_owner ON workflow_instances(owner)`).catch(() => {});
+  await query(`
+    CREATE TABLE IF NOT EXISTS workflow_transitions (
+      id           BIGSERIAL PRIMARY KEY,
+      instance_id  TEXT NOT NULL REFERENCES workflow_instances(id) ON DELETE CASCADE,
+      from_stage   TEXT,
+      to_stage     TEXT NOT NULL,
+      action       TEXT DEFAULT 'advance',
+      note         TEXT DEFAULT '',
+      by_user      TEXT NOT NULL,
+      at           TIMESTAMPTZ DEFAULT NOW(),
+      meta         JSONB DEFAULT '{}'
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_wft_inst ON workflow_transitions(instance_id, at DESC)`).catch(() => {});
+
+  // Seed default sales workflow if none exists
+  await query(
+    `INSERT INTO workflow_definitions (id, name, description, stages, transitions, fields, created_by)
+     SELECT $1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, 'system'
+     WHERE NOT EXISTS (SELECT 1 FROM workflow_definitions LIMIT 1)`,
+    [
+      'wf_sales_default',
+      'فرآیند فروش استاندارد',
+      'از دریافت سرنخ تا بستن قرارداد',
+      JSON.stringify([
+        { id: 'intake', label: 'دریافت', color: '#64748b', order: 0 },
+        { id: 'qualify', label: 'ارزیابی', color: '#0ea5e9', order: 1 },
+        { id: 'proposal', label: 'پیشنهاد', color: '#6366f1', order: 2 },
+        { id: 'negotiate', label: 'مذاکره', color: '#f59e0b', order: 3 },
+        { id: 'contract', label: 'قرارداد', color: '#22c55e', order: 4, isFinal: true },
+        { id: 'lost', label: 'از دست رفته', color: '#ef4444', order: 5, isFinal: true },
+      ]),
+      JSON.stringify([
+        { from: 'intake', to: 'qualify' },
+        { from: 'qualify', to: 'proposal' },
+        { from: 'qualify', to: 'lost' },
+        { from: 'proposal', to: 'negotiate' },
+        { from: 'proposal', to: 'lost' },
+        { from: 'negotiate', to: 'contract' },
+        { from: 'negotiate', to: 'lost' },
+      ]),
+      JSON.stringify([
+        { key: 'amount', type: 'number', label: 'ارزش (M ریال)', required: false },
+        { key: 'note', type: 'text', label: 'یادداشت', required: false },
+      ]),
+    ]
+  ).catch(function () {});
+
   // ════════════════════════════════════════
   // NORMALIZED CRM TABLES — replace 'main' blob
   // ════════════════════════════════════════
