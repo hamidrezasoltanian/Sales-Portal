@@ -19,6 +19,7 @@ var _pfSearch    = '';   // live search query
 var _pfOwnerF    = '';   // owner/creator filter
 var _pfExpanded  = {};   // expanded row IDs in list {pfId: true}
 var _pfCenterMap = [];  // center lookup for proforma list clicks
+var _pfStats = null;    // cached stats from /api/proforma/stats
 
 // ── Status labels & colors ───────────────────────────────────────────────
 var PF_STATUS = {
@@ -46,6 +47,39 @@ async function pfLoad() {
   }
 }
 
+async function _pfLoadStats() {
+  try {
+    var r = await fetch('/api/proforma/stats');
+    if (r.ok) _pfStats = await r.json();
+    else _pfStats = null;
+  } catch (e) {
+    _pfStats = null;
+  }
+}
+
+function _pfStatsBarHtml() {
+  if (!_pfStats || !_pfStats.ok) return '';
+  var t = _pfStats.totals || {};
+  var bySt = {};
+  (_pfStats.byStatus || []).forEach(function(s) { bySt[s.status] = s; });
+  var approved = (bySt.approved && bySt.approved.count) || t.approved || 0;
+  var draft = (bySt.draft && bySt.draft.count) || 0;
+  var sent = (bySt.sent && bySt.sent.count) || 0;
+  var invoiced = (bySt.invoiced && bySt.invoiced.count) || 0;
+  var approvedVal = Number(t.approved_value || 0);
+  var cycle = t.avg_cycle_days != null ? Number(t.avg_cycle_days) : null;
+  return '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;padding:12px 14px;background:linear-gradient(135deg,#f5f3ff,#eff6ff);border:1px solid #ddd6fe;border-radius:10px">' +
+    '<div style="width:100%;font-size:11px;font-weight:700;color:#6d28d9;margin-bottom:2px">📊 آمار پیشفاکتور (SQL)</div>' +
+    '<div style="flex:1;min-width:90px;text-align:center;background:white;border-radius:8px;padding:8px;border:1px solid #e2e8f0"><div style="font-size:18px;font-weight:800;color:#6366f1">' + (t.total || _pfList.length) + '</div><div style="font-size:10px;color:#64748b">کل</div></div>' +
+    '<div style="flex:1;min-width:90px;text-align:center;background:white;border-radius:8px;padding:8px;border:1px solid #e2e8f0"><div style="font-size:18px;font-weight:800;color:#15803d">' + approved + '</div><div style="font-size:10px;color:#64748b">تأیید/فاکتور</div></div>' +
+    '<div style="flex:1;min-width:90px;text-align:center;background:white;border-radius:8px;padding:8px;border:1px solid #e2e8f0"><div style="font-size:18px;font-weight:800;color:#0284c7">' + sent + '</div><div style="font-size:10px;color:#64748b">ارسال‌شده</div></div>' +
+    '<div style="flex:1;min-width:90px;text-align:center;background:white;border-radius:8px;padding:8px;border:1px solid #e2e8f0"><div style="font-size:18px;font-weight:800;color:#94a3b8">' + draft + '</div><div style="font-size:10px;color:#64748b">پیش‌نویس</div></div>' +
+    '<div style="flex:1;min-width:90px;text-align:center;background:white;border-radius:8px;padding:8px;border:1px solid #e2e8f0"><div style="font-size:18px;font-weight:800;color:#7c3aed">' + invoiced + '</div><div style="font-size:10px;color:#64748b">فاکتور شده</div></div>' +
+    '<div style="flex:1;min-width:120px;text-align:center;background:white;border-radius:8px;padding:8px;border:1px solid #e2e8f0"><div style="font-size:14px;font-weight:800;color:#0f766e">' + approvedVal.toLocaleString('fa-IR') + '</div><div style="font-size:10px;color:#64748b">ارزش تأیید (ریال)</div></div>' +
+    (cycle != null ? '<div style="flex:1;min-width:90px;text-align:center;background:white;border-radius:8px;padding:8px;border:1px solid #e2e8f0"><div style="font-size:18px;font-weight:800;color:#c2410c">' + cycle + '</div><div style="font-size:10px;color:#64748b">میانگین چرخه (روز)</div></div>' : '') +
+    '</div>';
+}
+
 // ── Render tab panel ─────────────────────────────────────────────────────
 async function renderProformaPanel() {
   var el = document.getElementById('proformaPanel');
@@ -53,6 +87,7 @@ async function renderProformaPanel() {
   try {
     el.innerHTML = '<div style="padding:40px;text-align:center;color:#94a3b8">در حال بارگذاری…</div>';
     await pfLoad();
+    await _pfLoadStats();
     await _pfLoadWmsProds();
     _renderPfPanel(el);
   } catch(e) {
@@ -199,6 +234,7 @@ function _renderPfPanel(el) {
   }).join('') : '<tr><td colspan="8" style="text-align:center;padding:40px;color:#94a3b8">پیشفاکتوری یافت نشد</td></tr>';
 
   el.innerHTML =
+    _pfStatsBarHtml() +
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap">' + filterBtns + '</div>' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +

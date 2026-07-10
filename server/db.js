@@ -540,6 +540,20 @@ async function initSchema() {
   await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS has_commission BOOLEAN DEFAULT FALSE`);
   await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS commission_amt BIGINT DEFAULT 0`);
   await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS commission_note TEXT DEFAULT ''`);
+  // Allow 'invoiced' status after official invoice issued
+  await query(`ALTER TABLE proformas DROP CONSTRAINT IF EXISTS proformas_status_check`).catch(() => {});
+  await query(`ALTER TABLE proformas ADD CONSTRAINT proformas_status_check
+    CHECK(status IN ('draft','sent','approved','rejected','cancelled','invoiced'))`).catch(() => {});
+
+  // Manager weekly summary snapshots
+  await query(`
+    CREATE TABLE IF NOT EXISTS manager_weekly_snapshots (
+      week_key    TEXT PRIMARY KEY,
+      snapshot    JSONB NOT NULL DEFAULT '{}',
+      created_at  TIMESTAMPTZ DEFAULT NOW(),
+      created_by  TEXT
+    )
+  `).catch(() => {});
 
   // Auto-migrate proformas from blob → table (run once)
   await _migrateProformasFromBlob();

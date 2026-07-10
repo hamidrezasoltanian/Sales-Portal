@@ -11,7 +11,8 @@
  *   4. Multi-tab: Tab 2 refreshes after Tab 1 saves, then can save without 409
  *   5. SSE: save with cid-A does NOT deliver db-updated to same cid-A
  *   6. SSE: save with cid-A DOES deliver db-updated to cid-B (same user)
- *   7. SSE: save by user-A DOES deliver db-updated to user-B
+ *   8. HCP & Affiliations CRUD
+ *   9. Reports upgrade APIs (kpi-data, manager-reports, center-reports, proforma stats)
  *
  * Usage:
  *   node tests/behavioral.test.js
@@ -43,6 +44,14 @@ let _originalDB = null; // backup of main DB before tests
 function token(username) {
   return jwt.sign(
     { username, role: 'کارشناس فروش', name: 'Test ' + username },
+    JWT_SECRET,
+    { expiresIn: '1h' }
+  );
+}
+
+function managerToken(username) {
+  return jwt.sign(
+    { username, role: 'مدیر', name: 'Manager ' + username },
     JWT_SECRET,
     { expiresIn: '1h' }
   );
@@ -380,6 +389,53 @@ async function test8_hcpAndAffiliationEndpoints() {
   assert(deleteHcp.status === 200, 'حذف پزشک موفق بود (200)');
 }
 
+async function test9_reportsUpgradeApis() {
+  console.log('\n📋 Test 9: Reports upgrade — KPI, manager-reports, center-reports, proforma stats');
+  const mgrUser = '_tbeh_mgr';
+  await query(
+    `INSERT INTO app_users (username, display_name, role, color, active)
+     VALUES ($1, 'Test Manager', 'مدیر', '#6366f1', true)
+     ON CONFLICT (username) DO UPDATE SET role = 'مدیر', active = true`,
+    [mgrUser]
+  );
+  const tok = managerToken(mgrUser);
+
+  const kpiTargets = await req('GET', '/api/kpi-data/targets', null, tok);
+  assert(kpiTargets.status === 200, 'GET /api/kpi-data/targets → 200');
+  assert(kpiTargets.body.ok === true, 'kpi-data/targets ok:true');
+
+  const kpiHistory = await req('GET', '/api/kpi-data/history', null, tok);
+  assert(kpiHistory.status === 200, 'GET /api/kpi-data/history → 200');
+
+  const activity = await req('GET', '/api/reports/activity-summary?months=3', null, tok);
+  assert(activity.status === 200, 'GET /api/reports/activity-summary → 200');
+  assert(Array.isArray(activity.body.months), 'activity-summary months array');
+
+  const competitor = await req('GET', '/api/reports/competitor', null, tok);
+  assert(competitor.status === 200, 'GET /api/reports/competitor → 200');
+
+  const coverage = await req('GET', '/api/reports/coverage', null, tok);
+  assert(coverage.status === 200, 'GET /api/reports/coverage → 200');
+  assert(typeof coverage.body.totalCenters === 'number', 'coverage totalCenters number');
+
+  const winLoss = await req('GET', '/api/manager-reports/win-loss', null, tok);
+  assert(winLoss.status === 200, 'GET /api/manager-reports/win-loss → 200');
+
+  const daily = await req('GET', '/api/manager-reports/daily?date=1404/01/01', null, tok);
+  assert(daily.status === 200, 'GET /api/manager-reports/daily → 200');
+
+  const timeline = await req('GET', '/api/center-reports/center_test/timeline', null, tok);
+  assert(timeline.status === 200, 'GET /api/center-reports/:key/timeline → 200');
+  assert(timeline.body.ok === true, 'center timeline ok:true');
+  assert(Array.isArray(timeline.body.events), 'center timeline events array');
+
+  const pfStats = await req('GET', '/api/proforma/stats', null, tok);
+  assert(pfStats.status === 200, 'GET /api/proforma/stats → 200');
+  assert(pfStats.body.ok === true, 'proforma stats ok:true');
+
+  await query(`DELETE FROM app_users WHERE username = $1`, [mgrUser]);
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -425,6 +481,7 @@ async function main() {
     await test6_sseDeliversToDifferentCid();
     await test7_sseDeliversToOtherUser();
     await test8_hcpAndAffiliationEndpoints();
+    await test9_reportsUpgradeApis();
 
   } catch (err) {
     console.error('\n❌ خطای غیرمنتظره:', err.message);

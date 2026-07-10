@@ -338,6 +338,11 @@ The receivables AI tab calls `https://api.anthropic.com/v1/messages` directly fr
 | Telegram bot: long-polling, CRM auth, proforma approve/reject inline keyboard, inventory check, QR scan | server/bot/telegram.js | ✅ |
 | Security middleware: helmet (CSP off) + compression (graceful fallback) | server/index.js | ✅ |
 | Vite + TypeScript + Vue 3 scaffold for incremental frontend migration | src/ + vite.config.ts + tsconfig.json | ✅ (placeholder) |
+| Reports upgrade: SQL-backed activity/competitor/coverage tabs + Excel export | reports.js + /api/reports | ✅ |
+| KPI SQL load: GET /api/kpi-data (targets/history/province) in loadDB | core.js + kpi-data.js | ✅ |
+| Manager reports API: expert SQL report, win/loss, daily, weekly snapshot | manager.js + manager-reports.js | ✅ |
+| Center timeline API + گزارش مرکز modal + audit SQL merge | pricing.js + center-reports.js | ✅ |
+| Proforma stats bar + invoiced status on invoice issue | proforma.js + invoices.js | ✅ |
 
 ## Planned Integration: Accounting Software → Receivables (مطالبات)
 
