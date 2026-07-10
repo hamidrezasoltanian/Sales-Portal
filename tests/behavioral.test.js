@@ -34,6 +34,7 @@ const { query, pool } = require('../server/db');
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-to-a-random-secret-string';
 
 const TEST_USERS = ['_tbeh_u1', '_tbeh_u2'];
+const TEST_MANAGER = '_tbeh_mgr';
 let serverProc = null;
 let passed = 0, failed = 0, skipped = 0;
 let _originalDB = null; // backup of main DB before tests
@@ -43,6 +44,14 @@ let _originalDB = null; // backup of main DB before tests
 function token(username) {
   return jwt.sign(
     { username, role: 'کارشناس فروش', name: 'Test ' + username },
+    JWT_SECRET,
+    { expiresIn: '1h' }
+  );
+}
+
+function managerToken(username) {
+  return jwt.sign(
+    { username, role: 'مدیر', name: 'Manager ' + username },
     JWT_SECRET,
     { expiresIn: '1h' }
   );
@@ -146,6 +155,12 @@ async function setup() {
       [u, 'Behavioral Test ' + u]
     );
   }
+  await query(
+    `INSERT INTO app_users (username, display_name, role, color, active)
+     VALUES ($1, $2, 'مدیر', '#6366f1', true)
+     ON CONFLICT (username) DO UPDATE SET role = 'مدیر', active = true`,
+    [TEST_MANAGER, 'Behavioral Test Manager']
+  );
 
   // Backup current main DB data
   const r = await query("SELECT value FROM app_data WHERE key = 'main'");
@@ -164,7 +179,7 @@ async function teardown() {
   }
 
   // Remove test users
-  await query(`DELETE FROM app_users WHERE username = ANY($1)`, [TEST_USERS]);
+  await query(`DELETE FROM app_users WHERE username = ANY($1)`, [TEST_USERS.concat([TEST_MANAGER])]);
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -498,6 +513,22 @@ async function test12_checklistUpsertNotWiped() {
     [date, TEST_USERS[0], TEST_USERS[1]]);
 }
 
+async function test13_mtrSyncStatus() {
+  console.log('\n── Test 13: MTR sync status endpoint ──');
+  const tok = managerToken(TEST_MANAGER);
+  const status = await req('GET', '/api/mtr/sync/status', null, tok);
+  assert(status.status === 200, 'GET /api/mtr/sync/status returns 200');
+  assert(status.body && typeof status.body.faradisConfigured === 'boolean', 'status includes faradisConfigured');
+}
+
+async function test14_crmSettingsPatch() {
+  console.log('\n── Test 14: PATCH /api/crm-settings/:key ──');
+  const tok = managerToken(TEST_MANAGER);
+  const patch = await req('PATCH', '/api/crm-settings/_test_flag', { value: true }, tok);
+  assert(patch.status === 200, 'PATCH crm-settings returns 200');
+  await query("DELETE FROM app_settings WHERE key = '_test_flag'");
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -547,6 +578,10 @@ async function main() {
     await test10_weekEntriesBulkUpdate();
     await test11_centerPatchNotWipedByBulkSave();
     await test12_checklistUpsertNotWiped();
+    await test13_mtrSyncStatus();
+    await test14_crmSettingsPatch();
+
+  } catch (err) {
     console.error('\n❌ خطای غیرمنتظره:', err.message);
     console.error(err.stack);
     failed++;

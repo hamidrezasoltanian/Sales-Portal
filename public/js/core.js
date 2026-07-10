@@ -399,8 +399,19 @@ function _buildSavePayload(){
   delete payload.edits;
   delete payload.tasks;
   delete payload.notifications;
+  // Residual blob fields (notes, tags, settings, logs, events, checklist, …) — migrate to entity APIs over time
   if(_dbServerTs)payload._clientTs=_dbServerTs;
   return payload;
+}
+
+/** PATCH a single CRM setting without full blob save (Phase 5). */
+function patchCrmSetting(key,value){
+  if(!DB.settings)DB.settings={};
+  DB.settings[key]=value;
+  return fetch('/api/crm-settings/'+encodeURIComponent(key),{
+    method:'PATCH',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({value:value})
+  }).catch(function(e){console.warn('[patchCrmSetting]',key,e.message);});
 }
 function _saveDBNow(){
   var payload=_buildSavePayload();

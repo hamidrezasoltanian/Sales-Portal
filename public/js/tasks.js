@@ -146,8 +146,23 @@ function _tkFilteredTasks(){
   return tasks;
 }
 
+function _useVueTasks(){
+  return typeof window._tasksVueLoad==='function'
+    && (!DB.settings||DB.settings.useVueTasks!==false);
+}
+
 function renderTasksPanel(){
-  var el=document.getElementById('tasksPanel');if(!el)return;
+  if(_useVueTasks()){
+    var vw=document.getElementById('vue-tasks');
+    var vn=document.getElementById('tasksVanillaWrap');
+    if(vw)vw.style.display='';
+    if(vn)vn.style.display='none';
+    window._tasksVueLoad();
+    return;
+  }
+  var el=document.getElementById('tasksVanillaWrap');
+  if(!el)el=document.getElementById('tasksPanel');
+  if(!el)return;
   _ensureTasks();
   var tasks=_tkFilteredTasks();
 

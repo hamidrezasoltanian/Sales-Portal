@@ -1994,6 +1994,53 @@ async function runAI(){
 // ═══════════ TOAST ═══════════
 function toast(msg){var t=document.getElementById('mtr-toast');if(!t)return;t.textContent=msg;t.style.opacity='1';setTimeout(function(){t.style.opacity='0';},2500);}
 
+// ═══════════ LIVE SYNC (Faradis / accounting) ═══════════
+var _mtrSyncTimer=null;
+
+function _mtrSyncEnabled(){
+  return !!(DB&&DB.settings&&DB.settings.mtrSyncEnabled);
+}
+
+function _updateMtrSyncUi(){
+  var btn=document.getElementById('mtr-syncBtn');
+  if(btn)btn.style.display=_mtrSyncEnabled()?'inline-flex':'none';
+}
+
+function _setupMtrAutoSync(){
+  if(_mtrSyncTimer){clearInterval(_mtrSyncTimer);_mtrSyncTimer=null;}
+  _updateMtrSyncUi();
+  if(!_mtrSyncEnabled())return;
+  var mins=parseInt((DB.settings&&DB.settings.mtrSyncIntervalMin)||5,10)||5;
+  if(mins<1)mins=5;
+  _mtrSyncTimer=setInterval(function(){mtrRunLiveSync(false);},mins*60000);
+}
+
+function mtrApplySyncRows(rows,at){
+  if(!rows||!rows.length)return;
+  DATA=rows;
+  if(!SNAP)SNAP=loadSnap();
+  var _tb2=document.getElementById('mtr-tabsBar');if(_tb2)_tb2.style.display='flex';
+  var _pb=document.getElementById('mtr-printBtn');if(_pb)_pb.style.display='block';
+  var _sb=document.getElementById('mtr-searchBar');if(_sb)_sb.style.display='block';
+  saveData(DATA);
+  updateReminder();render();
+  if(typeof matchCentersToData==='function')setTimeout(matchCentersToData,200);
+  toast('🔄 مطالبات از فرادیس به‌روز شد ('+DATA.length+' ردیف'+(at?' · '+at:'')+')');
+}
+
+function mtrRunLiveSync(manual){
+  if(!_isManager()){if(manual)toast('فقط مدیر می‌تواند sync کند');return;}
+  fetch('/api/mtr/sync',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({refresh:!!manual})})
+    .then(function(r){return r.ok?r.json():r.json().then(function(e){throw new Error(e.error||'sync failed');});})
+    .then(function(d){
+      if(!d||!d.ok){if(manual)toast('⚠️ sync ناموفق');return;}
+      if(d.rows&&d.rows.length)mtrApplySyncRows(d.rows,d.at);
+      else if(manual)toast(d.message||'داده‌ای برای sync یافت نشد');
+    })
+    .catch(function(e){if(manual)toast('❌ '+((e&&e.message)||'خطای sync'));});
+}
+
 // ═══════════ INIT ═══════════
 var _mtrInited=false;
 function mtrLazyInit(){
@@ -2002,6 +2049,8 @@ function mtrLazyInit(){
   loadUser();loadMeta();loadMergeLog();
   setToday(calcTodayJ());
   if(USER.name)FILTER=USER.name;
+  _setupMtrAutoSync();
+  if(_mtrSyncEnabled())setTimeout(function(){mtrRunLiveSync(false);},3000);
   // Restore persisted data
   var saved=loadData();
   if(saved&&saved.rows&&saved.rows.length){

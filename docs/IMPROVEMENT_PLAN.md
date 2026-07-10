@@ -271,10 +271,12 @@
 
 ## ۱۱. فاز ۵ — Tech Debt (بلندمدت)
 
-- [ ] Vue migration یک tab (week plan یا tasks)
-- [ ] build step اجباری برای bundle (Vite) — حذف edit دستی bundle
-- [ ] حذف کامل `PUT /api/data/db` وقتی همه entities PATCH/API شدند
-- [ ] MTR sync live (`/api/mtr/sync`) — roadmap موجود در CLAUDE.md
+- [x] Vue migration یک tab — تب **وظایف** با `TasksPanel.vue` (پیش‌فرض؛ دکمه «پیشرفته» → کانبان vanilla)
+- [x] build step اجباری برای Vue — `npm run build` در CI + deploy + `scripts/build-frontend.sh`
+- [x] کاهش وابستگی `PUT /api/data/db` — headerهای deprecation + `PATCH /api/crm-settings/:key`
+- [x] MTR sync live — `POST /api/mtr/sync` + toggle در تنظیمات + auto-refresh در `mtr.js`
+- [ ] حذف کامل `PUT /api/data/db` — پس از migrate notes/tags/logs (فاز بعدی)
+- [ ] `app.bundle.js` — deprecated؛ production از split modules استفاده می‌کند
 
 ---
 
@@ -387,6 +389,8 @@ scripts/setup_dev_db.sh   ← new
 | 1404/04/19 | ۲δ events/checklist UPSERT | #13 | ✅ |
 | 1404/04/19 | ۳ observability + runbook | #13 | ✅ |
 | 1404/04/19 | ۴ hardening (AI rate, auth) | #13 | ✅ |
+| 1404/04/19 | ۵ Vue tasks + Vite CI | #14 | ✅ |
+| 1404/04/19 | ۵ MTR sync + crm-settings API | #14 | ✅ |
 
 ---
 

@@ -17,6 +17,9 @@ git pull origin "$(git branch --show-current)"
 echo "[deploy] npm ci..."
 npm ci
 
+echo "[deploy] vue build..."
+npm run build
+
 echo "[deploy] syntax check..."
 node --check public/js/core.js
 node --check public/js/weekplan.js

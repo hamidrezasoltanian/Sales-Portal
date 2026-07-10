@@ -203,9 +203,19 @@ router.put('/db', async (req, res) => {
                       'changeLog','settings','events','checklist','kpiTargets','salesLog',
                       'callLog','visitLog','extra','_clientTs','_serverTs','_weDeletedKeys','_mtr',
                       'missionLog','provHistory','kpiHistory', 'provOverrides'];
+  const DEPRECATED_BLOB_KEYS = ['weekEntries', 'edits', 'tasks', 'notifications'];
   const hasKnown = Object.keys(body).some(k => KNOWN_KEYS.includes(k));
   if (!hasKnown && Object.keys(body).length > 0) {
     return res.status(400).json({ error: 'ساختار داده نامعتبر' });
+  }
+
+  const sentDeprecated = Object.keys(body).filter(function (k) { return DEPRECATED_BLOB_KEYS.indexOf(k) >= 0; });
+  if (sentDeprecated.length) {
+    res.setHeader('X-CRM-Deprecated-Keys', sentDeprecated.join(','));
+    res.setHeader('X-CRM-Save-Mode', 'legacy-blob');
+    console.warn('[data/db PUT] deprecated keys in payload:', sentDeprecated.join(','), 'by', req.user && req.user.username);
+  } else if (Object.keys(body).some(function (k) { return KNOWN_KEYS.indexOf(k) >= 0 && k !== '_clientTs'; })) {
+    res.setHeader('X-CRM-Save-Mode', 'residual-blob');
   }
 
   let client;

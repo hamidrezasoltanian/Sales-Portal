@@ -109,7 +109,13 @@ function switchTab(tab){
   else if(tab==='checklist')_safeRender(renderChecklist,'ck');
   else if(tab==='activity'){_actPage=0;_safeRender(renderActivity,'act');}
   else if(tab==='changelog')_safeRender(renderChangelog,'changelog');
-  else if(tab==='tasks')_safeRender(renderTasksPanel,'tasks');
+  else if(tab==='tasks'){
+    if(typeof window._tasksVueLoad==='function'&&(!DB.settings||DB.settings.useVueTasks!==false)){
+      try{window._tasksVueLoad();}catch(err){console.error('[switchTab] vue tasks:',err);_safeRender(renderTasksPanel,'tasks');}
+    } else {
+      _safeRender(renderTasksPanel,'tasks');
+    }
+  }
   else if(tab==='manager')_safeRender(renderManagerPanel,'manager');
   else if(tab==='kpi')_safeRender(renderKPIPanel,'kpi');
   else if(tab==='home')_safeRender(renderHome,'home');

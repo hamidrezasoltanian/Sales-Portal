@@ -291,7 +291,10 @@
 <div id="actPanel" style="display:none"></div>
 
 <!-- CHANGELOG PANEL -->
-<div id="tasksPanel" style="display:none;max-width:900px;margin:0 auto"><div id="vue-tasks"></div></div>
+<div id="tasksPanel" style="display:none;max-width:1200px;margin:0 auto">
+  <div id="vue-tasks"></div>
+  <div id="tasksVanillaWrap"></div>
+</div>
 <div id="lettersPanel" style="display:none;height:calc(100vh - 60px)"><div id="vue-letters" style="height:100%"></div></div>
 <div id="changelogPanel" style="display:none;padding:14px 16px;max-width:1200px;margin:0 auto"></div>
 
@@ -351,6 +354,7 @@
   </div>
   <div class="hdr-btns" style="display:flex;gap:5px;flex-shrink:0">
     <button class="hbtn hbtn-dark" onclick="document.getElementById('mtr-fi').click()" title="آپلود فایل">📂</button>
+    <button class="hbtn hbtn-dark" id="mtr-syncBtn" onclick="mtrRunLiveSync(true)" title="همگام‌سازی زنده از فرادیس" style="display:none">🔄</button>
     <button class="hbtn hbtn-dark" onclick="printView()" title="پرینت" id="mtr-printBtn" style="display:none">🖨️</button>
   </div>
 </div>

@@ -85,6 +85,8 @@ app.use('/api/proforma', require('./routes/proforma'));
 app.use('/api/tasks', require('./routes/tasks'));
 app.use('/api/week-entries', require('./routes/week-entries'));
 app.use('/api/centers', require('./routes/centers'));
+app.use('/api/crm-settings', require('./routes/crm-settings'));
+app.use('/api/mtr', require('./routes/mtr-sync'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/changelog', require('./routes/changelog'));
 app.use('/api/migrate', require('./routes/migrate'));

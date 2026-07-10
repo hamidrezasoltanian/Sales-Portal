@@ -16,6 +16,8 @@ jobs:
           node-version: '20'
           cache: npm
       - run: npm ci
+      - name: Build Vue frontend (Vite)
+        run: npm run build
       - name: Node syntax check (frontend modules + server)
         run: |
           set -e
@@ -27,6 +29,8 @@ jobs:
             server/routes/data.js \
             server/routes/week-entries.js \
             server/routes/centers.js \
+            server/routes/mtr-sync.js \
+            server/routes/crm-settings.js \
             tests/behavioral.test.js
           do
             echo "Checking $f"
