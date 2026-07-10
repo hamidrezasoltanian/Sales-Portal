@@ -394,25 +394,68 @@ function _flushPatchQueue(){
   }).catch(function(e){console.warn('savePatchDB failed:',e.message);});
 }
 
+function patchCrmSetting(key, value) {
+  if (!DB.settings) DB.settings = {};
+  DB.settings[key] = value;
+  return fetch('/api/settings/' + encodeURIComponent(key), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value: value }),
+  }).catch(function (e) { console.warn('[patchCrmSetting]', key, e.message); });
+}
+
+function patchCenterField(centerKey, field, val, opts) {
+  opts = opts || {};
+  return fetch('/api/centers/' + encodeURIComponent(centerKey), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      field: field,
+      val: val,
+      centerName: opts.centerName || '',
+      oldValue: opts.oldValue,
+    }),
+  }).then(function (r) { return r.ok ? r.json() : r.json().then(function (j) { return Promise.reject(j); }); })
+    .catch(function (e) {
+      console.warn('[patchCenterField]', centerKey, field, e.message || e.error);
+      throw e;
+    });
+}
+
+function postCenterNote(centerKey, text, extra) {
+  return fetch('/api/centers/' + encodeURIComponent(centerKey) + '/notes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(Object.assign({ text: text, date: todayStr() }, extra || {})),
+  }).then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('note save failed')); });
+}
+
+function deleteCenterNoteApi(centerKey, index) {
+  return fetch('/api/centers/' + encodeURIComponent(centerKey) + '/notes/' + index, {
+    method: 'DELETE',
+  }).then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('note delete failed')); });
+}
+
 function _buildSavePayload(fullSync){
   if(fullSync){
     var full=JSON.parse(JSON.stringify(DB));
     full._fullSync=true;
     return full;
   }
-  var slim={
-    edits:DB.edits||{},
-    notes:DB.notes||{},
-    rTags:DB.rTags||DB.tags||{},
-    weekEntries:DB.weekEntries||{},
-    settings:DB.settings||{},
-    tasks:DB.tasks||[],
-    notifications:DB.notifications||[],
-    changeLog:DB.changeLog||[],
-    kpiTargets:DB.kpiTargets,
-    provOverrides:DB.provOverrides,
-    _weDeletedKeys:DB._weDeletedKeys||[]
-  };
+  // Residual blob: collections not yet on dedicated entity APIs (MTR stays here by design)
+  var slim={};
+  if(DB.settings&&Object.keys(DB.settings).length)slim.settings=DB.settings;
+  if(DB.kpiTargets)slim.kpiTargets=DB.kpiTargets;
+  if(DB.provOverrides)slim.provOverrides=DB.provOverrides;
+  if(DB.events&&DB.events.length)slim.events=DB.events;
+  if(DB.checklist&&Object.keys(DB.checklist).length)slim.checklist=DB.checklist;
+  if(DB.salesLog&&DB.salesLog.length)slim.salesLog=DB.salesLog;
+  if(DB.callLog&&DB.callLog.length)slim.callLog=DB.callLog;
+  if(DB.visitLog&&DB.visitLog.length)slim.visitLog=DB.visitLog;
+  if(DB.missionLog&&DB.missionLog.length)slim.missionLog=DB.missionLog;
+  if(DB.provHistory&&DB.provHistory.length)slim.provHistory=DB.provHistory;
+  if(DB.kpiHistory&&Object.keys(DB.kpiHistory).length)slim.kpiHistory=DB.kpiHistory;
+  if(DB.extra&&DB.extra.length)slim.extra=DB.extra;
   if(DB._mtr)slim._mtr=DB._mtr;
   return slim;
 }
@@ -420,6 +463,8 @@ function _buildSavePayload(fullSync){
 function _saveDBNow(fullSync){
   var payload=_buildSavePayload(!!fullSync);
   if(_dbServerTs)payload._clientTs=_dbServerTs;
+  var _payloadKeys=Object.keys(payload).filter(function(k){return k!=='_clientTs'&&k!=='_fullSync';});
+  if(!fullSync&&_payloadKeys.length===0)return Promise.resolve();
   var seq=++_saveSeq; // capture sequence; ignore late-resolving responses
   return fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json','X-Cid':_sseClientId},body:JSON.stringify(payload)})
     .then(function(r){

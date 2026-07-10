@@ -124,7 +124,7 @@ attribute. Always run `node --check` on edited files after changes.
 | IndexedDB `atenaCRM_master` | — | Master center list cache |
 
 **The primary store is PostgreSQL.** `localStorage` is a fallback/cache.
-Routine saves use a **slim PUT** (`saveDB` → `_buildSavePayload`) that omits destructive collections (events, checklist, logs, etc.). Full replace requires `saveDBSync(true)` / `_fullSync: true` (import/backup). Partial center/week changes use `PATCH /api/data/patch` via `savePatchDB()` (used by `setE` and weekplan).
+Routine saves use a **slim PUT** (`saveDB` → `_buildSavePayload`) that omits migrated collections (`edits`, `notes`, `weekEntries`, `tasks`, …). Center fields go through `PATCH /api/centers/:key`; notes through `POST /api/centers/:key/notes`; week plan through `/api/week-entries`; tasks through `/api/tasks`; user settings keys through `PATCH /api/settings/:key`. Residual blob is mainly logs, events, checklist, KPI, and `_mtr`.
 
 The main `DB` object contains:
 ```

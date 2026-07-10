@@ -47,9 +47,10 @@ function openTkColumnsModal(){
   var footer='<button class="btn-primary" onclick="'
     +'if(!DB.settings.taskColumns)DB.settings.taskColumns={};'
     +'DB.settings.taskColumns[currentUser]=JSON.parse(JSON.stringify(window._tkColsPending));'
-    +"saveDB();closeModal('tkColsMgr');showToast('ستون\u200cها ذخیره شد \u2705');renderTasksPanel();"
+    +'if(typeof patchCrmSetting===\'function\'){patchCrmSetting(\'taskColumns\',DB.settings.taskColumns);}else{saveDB();}'
+    +"closeModal('tkColsMgr');showToast('ستون\u200cها ذخیره شد \u2705');renderTasksPanel();"
     +'">ذخیره</button>'
-    +'<button onclick="if(confirm(\'\u0628ازگشت به پیشفرض?\')){'+'delete DB.settings.taskColumns[currentUser];saveDB();closeModal(\'tkColsMgr\');showToast(\'\u0628ازگشت شد\');renderTasksPanel();}" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit">بازگشت پیشفرض</button>'
+    +'<button onclick="if(confirm(\'\u0628ازگشت به پیشفرض?\')){delete DB.settings.taskColumns[currentUser];if(typeof patchCrmSetting===\'function\'){patchCrmSetting(\'taskColumns\',DB.settings.taskColumns);}else{saveDB();}closeModal(\'tkColsMgr\');showToast(\'\u0628ازگشت شد\');renderTasksPanel();}" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit">بازگشت پیشفرض</button>'
     +'<button class="btn-secondary" onclick="closeModal(\'tkColsMgr\')">بستن</button>';
   openModal('tkColsMgr','⚙️ مدیریت ستون‌های وظایف',body,footer,{lg:false});
 }
@@ -81,7 +82,12 @@ function _ensureTasks(){
       note:t.note||'',subtasks:[],activity:[{type:'created',text:'وظیفه تکرارشونده ایجاد شد',by:'system',at:new Date().toISOString()}],
       recurring:t.recurring,recurringParentId:String(t.id),centerKey:t.centerKey||'',createdBy:'system',createdAt:new Date().toISOString()});
   });
-  if(_toAdd.length){_toAdd.forEach(function(t){DB.tasks.push(t);});saveDB();}
+  if(_toAdd.length){
+    _toAdd.forEach(function(t){
+      DB.tasks.push(t);
+      fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(t)}).catch(function(){});
+    });
+  }
 }
 
 function _tkCountSubs(subs){
@@ -258,7 +264,6 @@ function tkDrop(ev,statusId){
   t.status=statusId;
   t.done=(statusId==='done');
   t.doneAt=t.done?todayStr():'';
-  saveDB();
   fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({status:t.status,done:t.done,doneAt:t.doneAt})}).catch(function(){});
   renderTasksPanel();
@@ -283,7 +288,8 @@ function tkColDrop(ev,targetColId){
   if(!DB.settings)DB.settings={};
   if(!DB.settings.taskColumns)DB.settings.taskColumns={};
   DB.settings.taskColumns[currentUser]=cols;
-  saveDB();_tkColDragging=null;renderTasksPanel();
+  if(typeof patchCrmSetting==='function'){patchCrmSetting('taskColumns',DB.settings.taskColumns);}else{saveDB();}
+  _tkColDragging=null;renderTasksPanel();
   showToast('↕ ترتیب ستون‌ها ذخیره شد',1500);
 }
 
@@ -302,7 +308,6 @@ function tkQuickToggle(tid){
     var prevLabel=(statuses.find(function(s){return s.id===prev;})||{label:prev}).label;
     t.activity.push({type:'status',text:'«'+prevLabel+'» → انجام شد ✓',by:currentUser,at:new Date().toISOString()});
   }
-  saveDB();
   fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({status:t.status,done:t.done,doneAt:t.doneAt||null,activity:t.activity})}).catch(function(){});
   renderTasksPanel();
@@ -469,7 +474,6 @@ function tkSaveTask(tid){
   }).then(function(saved){
     var idx=DB.tasks.findIndex(function(x){return String(x.id)===String(saved.id);});
     if(idx>=0)DB.tasks[idx]=saved;else DB.tasks.push(saved);
-    saveDB();
     closeModal('taskDetail');
     showToast(isNew?'✅ وظیفه ایجاد شد':'💾 ذخیره شد');
     renderTasksPanel();
@@ -483,7 +487,6 @@ function tkSaveTask(tid){
 function tkDeleteTask(tid){
   _ensureTasks();
   DB.tasks=DB.tasks.filter(function(x){return String(x.id)!==String(tid);});
-  saveDB();
   fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'DELETE'}).catch(function(){});
   closeModal('taskDetail');
   showToast('🗑 وظیفه حذف شد');
@@ -498,7 +501,6 @@ function tkAddComment(tid){
   if(!t.activity)t.activity=[];
   t.activity.push({type:'comment',text:text,by:currentUser,at:new Date().toISOString()});
   inp.value='';
-  saveDB();
   fetch('/api/tasks/'+encodeURIComponent(String(tid))+'/comment',{
     method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({text:text})
@@ -560,7 +562,8 @@ function tkSubmitNewSub(tid,parentSid,inpId){
   } else {
     t.subtasks.push(node);
   }
-  saveDB();
+  fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({subtasks:t.subtasks})}).catch(function(){});
   var form=document.getElementById('tkAddSubForm');if(form)form.remove();
   var tree=document.getElementById('tkSubTree');
   if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
@@ -570,7 +573,6 @@ function tkToggleSub(tid,sid){
   var t=_tkFindTask(tid);if(!t)return;
   var s=_tkFindSub(t.subtasks,sid);if(!s)return;
   s.done=!s.done;
-  saveDB();
   fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({subtasks:t.subtasks})}).catch(function(){});
   var tree=document.getElementById('tkSubTree');
@@ -587,7 +589,6 @@ function tkEditSubTitle(tid,sid){
     var nv=prompt('ویرایش عنوان:',s.title||'');
     if(nv===null)return;
     s.title=nv.trim()||s.title;
-    saveDB();
     fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({subtasks:t.subtasks})}).catch(function(){});
     var tree=document.getElementById('tkSubTree');if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
@@ -599,7 +600,7 @@ function tkEditSubTitle(tid,sid){
   var saved=false;
   var save=function(){
     if(saved)return;saved=true;
-    s.title=inp.value.trim()||s.title;saveDB();
+    s.title=inp.value.trim()||s.title;
     fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({subtasks:t.subtasks})}).catch(function(){});
     var tree=document.getElementById('tkSubTree');if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
@@ -624,7 +625,6 @@ function _tkDelSubFrom(subs,sid){
 function tkDelSub(tid,sid){
   var t=_tkFindTask(tid);if(!t)return;
   _tkDelSubFrom(t.subtasks,sid);
-  saveDB();
   fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({subtasks:t.subtasks})}).catch(function(){});
   var tree=document.getElementById('tkSubTree');
@@ -638,7 +638,6 @@ function _toggleTask(tid){
   t.status=(t.status==='done')?'todo':'done';
   t.done=(t.status==='done');
   t.doneAt=t.done?todayStr():'';
-  saveDB();
   fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({status:t.status,done:t.done,doneAt:t.doneAt||null})}).catch(function(){});
   renderTasksPanel();
@@ -711,7 +710,7 @@ function _setupAutoReminder(){
     if(!DB.settings) DB.settings = {};
     if((DB.settings.lastMorningReminder||'') === today) return;
     DB.settings.lastMorningReminder = today;
-    saveDB();
+    if(typeof patchCrmSetting==='function')patchCrmSetting('lastMorningReminder',today);else saveDB();
     _runMorningBriefing(today);
   }, 60000);
 
@@ -724,7 +723,7 @@ function _setupAutoReminder(){
     if(!DB.settings) DB.settings = {};
     if((DB.settings.lastAfternoonReminder||'') === today) return;
     DB.settings.lastAfternoonReminder = today;
-    saveDB();
+    if(typeof patchCrmSetting==='function')patchCrmSetting('lastAfternoonReminder',today);else saveDB();
     _runTodayReminders(today);
   }, 60000);
 
@@ -735,7 +734,7 @@ function _setupAutoReminder(){
     if(!DB.settings) DB.settings = {};
     if((DB.settings.lastStartupReminder||'') === today) return;
     DB.settings.lastStartupReminder = today;
-    saveDB();
+    if(typeof patchCrmSetting==='function')patchCrmSetting('lastStartupReminder',today);else saveDB();
     _runOverdueAndUndatedReminders(today);
   }, 8000);
 }
@@ -861,7 +860,6 @@ function tkQuickAssignSave(tid){
       sendNotif(newOwner,'وظیفه «'+t.title+'» به شما واگذار شد',t.centerKey||'',[],'task',{taskId:t.id,taskTitle:t.title});
     }
   }
-  saveDB();
   fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({owner:t.owner||null,activity:t.activity})}).catch(function(){});
   closeModal('tkQuickAssign');

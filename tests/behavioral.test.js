@@ -380,6 +380,34 @@ async function test8_hcpAndAffiliationEndpoints() {
   assert(deleteHcp.status === 200, 'حذف پزشک موفق بود (200)');
 }
 
+async function test9_centersApiAndSettingsPatch() {
+  console.log('\n📋 Test 9: Centers PATCH + notes POST + settings PATCH');
+  const tok = token(TEST_USERS[0]);
+  const key = 'center_test_api_1';
+
+  const patch = await req('PATCH', '/api/centers/' + encodeURIComponent(key), {
+    field: 'status',
+    val: 'تماس اولیه',
+    centerName: 'Test Center',
+    oldValue: '',
+  }, tok);
+  assert(patch.status === 200, 'PATCH /api/centers/:key → 200 (got ' + patch.status + ')');
+  assert(patch.body.ok === true, 'PATCH response ok');
+
+  const note = await req('POST', '/api/centers/' + encodeURIComponent(key) + '/notes', {
+    text: 'یادداشت تست API',
+    date: '1404/01/01',
+  }, tok);
+  assert(note.status === 200, 'POST /api/centers/:key/notes → 200');
+  assert(note.body.notes && note.body.notes.length >= 1, 'note list updated');
+
+  const sett = await req('PATCH', '/api/settings/taskColumns', {
+    value: { _tbeh_u1: [{ id: 'todo', label: 'انجام نشده', color: '#94a3b8' }] },
+  }, tok);
+  assert(sett.status === 200, 'PATCH /api/settings/:key → 200');
+  assert(sett.body.ok === true, 'settings PATCH ok');
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -425,6 +453,7 @@ async function main() {
     await test6_sseDeliversToDifferentCid();
     await test7_sseDeliversToOtherUser();
     await test8_hcpAndAffiliationEndpoints();
+    await test9_centersApiAndSettingsPatch();
 
   } catch (err) {
     console.error('\n❌ خطای غیرمنتظره:', err.message);

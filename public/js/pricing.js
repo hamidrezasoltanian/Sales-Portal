@@ -1692,9 +1692,21 @@ function addNoteFromModal(type,id,name){
   var inp=document.getElementById('mnote_'+id);
   if(!inp||!inp.value.trim())return;
   var tags=(_notePendingTags[id]||[]).slice();
-  // addNote stores text; we post-patch last note with tags
-  addNote(type,id,inp.value.trim(),null);
   var k=recK(type,id);
+  if(typeof postCenterNote==='function'){
+    postCenterNote(k, inp.value.trim(), { date: todayStr(), noteTags: tags.length ? tags : undefined }).then(function(d){
+      if(d&&d.notes)DB.notes[k]=d.notes;
+      inp.value='';inp.style.height='auto';
+      _notePendingTags[id]=[];
+      var row=document.getElementById('mnoteTagRow_'+id);
+      if(row)row.querySelectorAll('.note-tag-chip').forEach(function(c){c.style.background='var(--bg-raised)';c.style.color='var(--text-secondary)';c.style.borderColor='var(--border)';});
+      var nl=document.getElementById('mNotesList_'+id);
+      if(nl)nl.innerHTML=_renderNotesList(DB.notes[k]||[]);
+      showToast('یادداشت ذخیره شد ✅',1500);
+    }).catch(function(){showToast('خطا در ذخیره یادداشت');});
+    return;
+  }
+  addNote(type,id,inp.value.trim(),null);
   if(tags.length){var arr=DB.notes[k];if(arr&&arr.length)arr[arr.length-1].noteTags=tags;}
   // clear
   inp.value='';inp.style.height='auto';

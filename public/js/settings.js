@@ -831,15 +831,13 @@ function getCenterById(rtype,id){
 }
 function setE(type,id,field,val){var k=recK(type,id);if(!DB.edits[k])DB.edits[k]={};
   if(!_undoSuppressed){var _prevVal=DB.edits[k][field];_undoStack.push({type:type,id:id,field:field,val:_prevVal});if(_undoStack.length>MAX_UNDO)_undoStack.shift();_redoStack=[];}
-  if(!_undoSuppressed){DB.changeLog=DB.changeLog||[];DB.changeLog.push({at:new Date().toISOString(),by:currentUser,rkey:type+'_'+id,field:field,val:val});if(DB.changeLog.length>500)DB.changeLog=DB.changeLog.slice(-500);fetch('/api/changelog',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({at:new Date().toISOString(),by:currentUser,rkey:type+'_'+id,field:field,val:val})}).catch(function(){});}
+  if(!_undoSuppressed){DB.changeLog=DB.changeLog||[];DB.changeLog.push({at:new Date().toISOString(),by:currentUser,rkey:type+'_'+id,field:field,val:val});if(DB.changeLog.length>500)DB.changeLog=DB.changeLog.slice(-500);}
   var _auditFields=['status','owner','lead','potential','followupDate','contactName','contactTitle','phones','address'];
+  var _oldV=DB.edits[k][field]!==undefined?DB.edits[k][field]:'';
   if(_auditFields.indexOf(field)>=0){
-    var _oldV=DB.edits[k][field]!==undefined?DB.edits[k][field]:'';
     if(String(_oldV)!==String(val)){
       var _cName=_getCenterName(type,id);
-      fetch('/api/audit',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({centerKey:k,centerName:_cName,field:field,oldValue:_oldV,newValue:val})
-      }).catch(function(){});
+      // audit written server-side in PATCH /api/centers
     }
   }
   DB.edits[k][field]=val;DB.edits[k]._ts=nowTs();_invalidateEditsCache();
@@ -850,7 +848,11 @@ function setE(type,id,field,val){var k=recK(type,id);if(!DB.edits[k])DB.edits[k]
   if(typeof wpReconcileFollowupDates==='function'){
     wpReconcileFollowupDates();
   }
-  if(typeof savePatchDB==='function'){
+  if(typeof patchCenterField==='function'){
+    patchCenterField(k, field, val, { centerName: _getCenterName(type, id), oldValue: _oldV }).catch(function(){
+      showToast('خطا در ذخیره فیلد مرکز');
+    });
+  } else if(typeof savePatchDB==='function'){
     var _patchEdits={};_patchEdits[k]=DB.edits[k];
     savePatchDB({edits:_patchEdits});
   } else {

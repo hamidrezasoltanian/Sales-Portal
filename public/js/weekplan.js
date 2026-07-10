@@ -1,22 +1,26 @@
 /* ═══ public/js/weekplan.js ═══ */
 // ════════════════════════ NOTES ════════════════════════
 function _wpSaveNotes(type,id){
-  var k=recK(type,id);
-  var o={};o[k]=DB.notes[k]||[];
-  savePatchDB({notes:o});
+  /* notes saved via POST /api/centers/:key/notes */
 }
 function _wpSaveWeek(keys){
-  var frag={weekEntries:{}};
-  (keys||[]).forEach(function(k){if(DB.weekEntries[k])frag.weekEntries[k]=DB.weekEntries[k];});
-  if(DB._weDeletedKeys&&DB._weDeletedKeys.length)frag._weDeletedKeys=DB._weDeletedKeys.slice();
-  savePatchDB(frag);
+  /* week entries saved via /api/week-entries — no blob dual-write */
+  if(DB._weDeletedKeys&&DB._weDeletedKeys.length)DB._weDeletedKeys=[];
 }
 
 
 function addNote(type,id,text,inp){
   if(!text||!text.trim())return;
   var k=recK(type,id);if(!DB.notes[k])DB.notes[k]=[];
-  DB.notes[k].push({text:text.trim(),date:todayStr(),user:USERS[currentUser]||currentUser,ts:nowTs()});
+  var noteObj={text:text.trim(),date:todayStr(),user:USERS[currentUser]||currentUser,ts:nowTs()};
+  if(typeof postCenterNote==='function'){
+    postCenterNote(k,text.trim(),{date:todayStr()}).then(function(d){
+      if(d&&d.notes)DB.notes[k]=d.notes;
+      if(inp){inp.value='';showToast('یادداشت ذخیره شد ✅',1500);}
+    }).catch(function(){showToast('خطا در ذخیره یادداشت');});
+    return;
+  }
+  DB.notes[k].push(noteObj);
   _wpSaveNotes(type,id);if(inp){inp.value='';showToast('یادداشت ذخیره شد ✅',1500);}
 }
 
@@ -51,6 +55,13 @@ function saveNoteAndRefresh(type,id,name){
 
 function delNoteAndRefresh(type,id,idx){
   var k=recK(type,id);if(!DB.notes[k])return;
+  if(typeof deleteCenterNoteApi==='function'){
+    deleteCenterNoteApi(k,idx).then(function(d){
+      if(d&&d.notes)DB.notes[k]=d.notes;else DB.notes[k].splice(idx,1);
+      var nl=document.getElementById('nlist_'+id);if(nl)nl.innerHTML=renderNotesList(type,id);
+    }).catch(function(){showToast('خطا در حذف یادداشت');});
+    return;
+  }
   DB.notes[k].splice(idx,1);_wpSaveNotes(type,id);
   var nl=document.getElementById('nlist_'+id);if(nl)nl.innerHTML=renderNotesList(type,id);
 }
@@ -303,10 +314,43 @@ function wpBuildOwnerFilter(){
   }
 }
 
+function _wpMergeApiRows(weekId, rows){
+  if(!weekId||!rows||!Array.isArray(rows))return;
+  if(!DB.weekEntries)DB.weekEntries={};
+  Object.keys(DB.weekEntries).forEach(function(k){
+    if(k.startsWith(weekId+':::'))delete DB.weekEntries[k];
+  });
+  rows.forEach(function(row){
+    if(!row.weekId||!row.rtype||row.rid===undefined)return;
+    var k=row.weekId+':::'+row.rtype+':::'+row.rid;
+    DB.weekEntries[k]={
+      id:row.id,sqlId:row.id,weekId:row.weekId,recKey:row.recKey,rtype:row.rtype,rid:row.rid,
+      scheduledDate:row.scheduledDate,actionType:row.actionType,done:row.done,doneDate:row.doneDate,
+      addedBy:row.addedBy,centerName:row.centerName,weekTagId:row.weekTagId,
+      doneNote:row.doneNote,doneResult:row.doneResult
+    };
+  });
+}
+function _wpLoadWeekFromApi(cb){
+  var sel=document.getElementById('wpSel');
+  var weekId=sel&&sel.value;
+  if(!weekId){if(typeof cb==='function')cb();return;}
+  var owner=(document.getElementById('wpOwnerFilter')||{}).value||'';
+  var url='/api/week-entries?week_id='+encodeURIComponent(weekId);
+  if(owner)url+='&owner='+encodeURIComponent(owner);
+  fetch(url).then(function(r){return r.ok?r.json():null;}).then(function(rows){
+    _wpMergeApiRows(weekId,rows);
+    if(typeof cb==='function')cb();
+  }).catch(function(){if(typeof cb==='function')cb();});
+}
+
 function renderWeekPlan(){
-  _buildPCCache();
-  wpBuildSelect();
-  wpBuildOwnerFilter();
+  _buildPCCache();
+  wpBuildSelect();
+  wpBuildOwnerFilter();
+  _wpLoadWeekFromApi(_renderWeekPlanBody);
+}
+function _renderWeekPlanBody(){
   if(typeof _wpSelected!=='undefined'){_wpSelected.clear();var _bar=document.getElementById('wpBulkBar');if(_bar)_bar.classList.remove('active');}
   var wpSearchQ=(document.getElementById('wpSearch')||{}).value||'';
   var wpOwnerF=(document.getElementById('wpOwnerFilter')||{}).value||'';
@@ -1154,7 +1198,7 @@ function _wpFinishDone(eKey){
 
   closeModal('wpDoneModal');
   (function(){var _we3=DB.weekEntries[eKey];if(_we3&&_we3.sqlId){fetch('/api/week-entries/'+encodeURIComponent(_we3.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({done:_we3.done,doneDate:_we3.doneDate||null,scheduledDate:_we3.scheduledDate||null})}).catch(function(){});}})();
-  saveDBSync();_debouncedRenderWeekPlan();renderDashboard();
+  _debouncedRenderWeekPlan();renderDashboard();
   if(currentTab==='provinces'&&_currentProvId)setTimeout(renderTable,100);
   var msg=outcome==='won'?'🎉 قرارداد ثبت شد! — '+cname
     :outcome==='inactive'?'❌ غیرفعال شد — '+cname
@@ -1211,7 +1255,7 @@ function wpRemoveAllInWeek(weekId,recKey){
     var keyRk=parsed.rtype+'_'+parsed.rid;
     if(rk===recKey||keyRk===recKey)_weRemove(k);
   });
-  saveDBSync();_debouncedRenderWeekPlan();
+  _debouncedRenderWeekPlan();
   if(currentTab==='provinces'&&_currentProvId)setTimeout(renderTable,100);
 }
 
