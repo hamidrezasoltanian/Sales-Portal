@@ -303,6 +303,40 @@ async function flow_kpiTarget(tok) {
   await query('DELETE FROM kpi_user_targets WHERE username = $1 AND month = $2', [TEST_USER, month]);
 }
 
+async function flow_managerFollowup(mgrTok) {
+  console.log('\n🔄 Flow: manager follow-up PUT → partial PUT → refresh');
+  const recKey = 'center_qa_mgr_' + Date.now();
+  const task = {
+    rtype: 'center', id: '1', name: 'QA Mgr Task',
+    assignedTo: TEST_USER, note: 'follow up', assignedAt: '1404/01/01',
+    done: false, doneAt: '',
+  };
+  const put = await req('PUT', '/api/manager-followups/' + encodeURIComponent(recKey), task, mgrTok);
+  if (!assert(put.status === 200, 'PUT manager followup')) return;
+  await req('PUT', '/api/data/db', { settings: {} }, mgrTok);
+  const db = await refreshDb(mgrTok);
+  assert(db.managerTasks && db.managerTasks[recKey] && db.managerTasks[recKey].note === 'follow up',
+    'manager task survived partial bulk save');
+  await req('DELETE', '/api/manager-followups/' + encodeURIComponent(recKey), null, mgrTok);
+}
+
+async function flow_seededCenterPatch(tok) {
+  console.log('\n🔄 Flow: seeded center PATCH → refresh');
+  const key = 'center_qa_seed_1';
+  await query(
+    `INSERT INTO center_edits (center_key, data, updated_at, updated_by)
+     VALUES ($1, $2::jsonb, NOW(), 'qa_test')
+     ON CONFLICT (center_key) DO NOTHING`,
+    [key, JSON.stringify({ status: 'فعال', owner: 'Sarah.hosseini' })]
+  ).catch(function () {});
+  const patch = await req('PATCH', '/api/centers/' + encodeURIComponent(key), {
+    field: 'status', val: 'مذاکره', centerName: 'QA Seed', oldValue: 'فعال',
+  }, tok);
+  if (!assert(patch.status === 200, 'PATCH seeded center')) return;
+  const get = await req('GET', '/api/centers/' + encodeURIComponent(key), null, tok);
+  assert(get.body && get.body.data && get.body.data.status === 'مذاکره', 'seeded center status persisted');
+}
+
 async function runAllFlows() {
   passed = 0;
   failed = 0;
@@ -329,6 +363,8 @@ async function runAllFlows() {
   await flow_missionLog(tok);
   await flow_tags(tok, mgrTok);
   await flow_kpiTarget(tok);
+  await flow_managerFollowup(mgrTok);
+  await flow_seededCenterPatch(tok);
 
   await query("DELETE FROM app_users WHERE username = '_qa_mgr'").catch(function () {});
 

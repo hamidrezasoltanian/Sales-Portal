@@ -31,7 +31,15 @@ Requires PostgreSQL (same env as `npm test`: `PG_*`, `JWT_SECRET`).
 
 ## Residual blob (still via PUT /db)
 
-`settings` (most keys), `provOverrides`, `managerTasks`, `_mtr` — migrate in future phases.
+`settings` (per-key via `patchCrmSetting`), `_mtr` (MTR — untouched)
+
+## Seed for UI/QA
+
+```bash
+PG_DATABASE=atena_crm_test npm run seed:qa
+```
+
+Creates `center_qa_seed_1` with status/owner/note for browser walkthrough.
 
 ## Relationship to behavioral tests
 

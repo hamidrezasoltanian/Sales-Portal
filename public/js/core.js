@@ -413,7 +413,9 @@ function _buildSavePayload(){
   delete payload.kpiHistory;
   delete payload.kpiTargets;
   delete payload.extra;
-  // Residual blob: settings, provOverrides, managerTasks, …
+  delete payload.managerTasks;
+  delete payload.provOverrides;
+  // Residual blob: settings (per-key via patchCrmSetting), _mtr (MTR — untouched)
   if(_dbServerTs)payload._clientTs=_dbServerTs;
   return payload;
 }
@@ -495,6 +497,23 @@ function saveGlobalTagsApi(tags){
 function saveCenterTagsApi(centerKey,tagIds){
   return fetch('/api/tags/centers/'+encodeURIComponent(centerKey),{method:'PATCH',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({tagIds:tagIds||[]})}).catch(function(e){console.warn('[saveCenterTagsApi]',centerKey,e.message);});
+}
+function saveProvOverridesApi(overrides){
+  return patchCrmSetting('provOverrides',overrides||{});
+}
+function saveManagerFollowupApi(recKey,task){
+  return fetch('/api/manager-followups/'+encodeURIComponent(recKey),{
+    method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(task||{})
+  }).catch(function(e){console.warn('[saveManagerFollowupApi]',recKey,e.message);});
+}
+function deleteManagerFollowupApi(recKey){
+  return fetch('/api/manager-followups/'+encodeURIComponent(recKey),{method:'DELETE'})
+    .catch(function(e){console.warn('[deleteManagerFollowupApi]',recKey,e.message);});
+}
+function saveKpiWeightsApi(weights){
+  if(!DB.kpiTargets)DB.kpiTargets={};
+  DB.kpiTargets.weights=weights;
+  return patchCrmSetting('kpi_weights',weights);
 }
 
 /** PATCH a single CRM setting without full blob save (Phase 5). */

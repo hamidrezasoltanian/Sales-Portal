@@ -12,7 +12,8 @@
     "setup": "node server/setup.js",
     "migrate": "node scripts/migrate_blob_to_sql.js",
     "test": "node tests/behavioral.test.js",
-    "test:qa": "node tests/qa-persistence-agent.js --loop 3"
+    "test:qa": "node tests/qa-persistence-agent.js --loop 3",
+    "seed:qa": "node scripts/seed_qa_db.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

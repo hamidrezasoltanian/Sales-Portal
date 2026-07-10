@@ -572,6 +572,19 @@ async function test17_calendarEventApi() {
   await req('DELETE', '/api/calendar-events/' + evId, null, tok);
 }
 
+async function test18_managerFollowupApi() {
+  console.log('\n── Test 18: PUT /api/manager-followups ──');
+  const tok = managerToken(TEST_MANAGER);
+  const recKey = 'mgr_test_' + Date.now();
+  const put = await req('PUT', '/api/manager-followups/' + encodeURIComponent(recKey), {
+    rtype: 'center', id: '1', name: 'Test', assignedTo: TEST_USERS[0], note: 'test', done: false,
+  }, tok);
+  assert(put.status === 200, 'PUT manager-followups returns 200');
+  const get = await req('GET', '/api/data/db', null, tok);
+  assert(get.body.managerTasks && get.body.managerTasks[recKey], 'managerTasks in GET /db');
+  await req('DELETE', '/api/manager-followups/' + encodeURIComponent(recKey), null, tok);
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -626,6 +639,7 @@ async function main() {
     await test15_activityLogUpsert();
     await test16_noteDelete();
     await test17_calendarEventApi();
+    await test18_managerFollowupApi();
 
   } catch (err) {
     console.error('\n❌ خطای غیرمنتظره:', err.message);

@@ -110,6 +110,7 @@ app.use('/api/mission-log', require('./routes/mission-log'));
 app.use('/api/kpi-data', require('./routes/kpi-data'));
 app.use('/api/prov-history', require('./routes/prov-history'));
 app.use('/api/tags', require('./routes/tags'));
+app.use('/api/manager-followups', require('./routes/manager-followups'));
 app.use('/api/migrate', require('./routes/migrate'));
 app.use('/api/support', require('./routes/support'));
 app.use('/api/hr', require('./routes/hr'));

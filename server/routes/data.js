@@ -155,7 +155,7 @@ router.use(requireAuth);
 async function loadDBFromSQL(client) {
   const c = client || pool;
   const [editsR, notesR, tagsR, settingsR, eventsR, checklistR, userKpiR, provKpiR, extraR,
-         salesR, callR, visitR, missionR, provHistR, kpiHistR, weR, metaR, clR, hcpR] = await Promise.all([
+         salesR, callR, visitR, missionR, provHistR, kpiHistR, weR, metaR, clR, hcpR, mgrTasksR] = await Promise.all([
     c.query('SELECT center_key, data FROM center_edits'),
     c.query('SELECT center_key, notes FROM center_notes'),
     c.query('SELECT center_key, tags FROM center_tags'),
@@ -174,7 +174,8 @@ async function loadDBFromSQL(client) {
     c.query('SELECT id, key, value FROM week_entries').catch(() => ({ rows: [] })),
     c.query("SELECT updated_at FROM app_data WHERE key = '_db_meta'"),
     c.query('SELECT at, "by", rkey, field, val FROM change_log ORDER BY at DESC LIMIT 500').catch(() => ({ rows: [] })),
-    c.query('SELECT a.center_key, h.name, h.specialty, a.role as title, h.phones FROM hcp_affiliations a JOIN healthcare_professionals h ON a.hcp_id = h.id').catch(() => ({ rows: [] }))
+    c.query('SELECT a.center_key, h.name, h.specialty, a.role as title, h.phones FROM hcp_affiliations a JOIN healthcare_professionals h ON a.hcp_id = h.id').catch(() => ({ rows: [] })),
+    c.query('SELECT rec_key, data FROM manager_tasks').catch(() => ({ rows: [] }))
   ]);
 
   const edits = {};
@@ -250,6 +251,11 @@ async function loadDBFromSQL(client) {
   const _serverTs = metaR.rows.length && metaR.rows[0].updated_at
     ? metaR.rows[0].updated_at.toISOString() : null;
 
+  const managerTasks = {};
+  (mgrTasksR.rows || []).forEach(function (r) {
+    managerTasks[r.rec_key] = r.data || {};
+  });
+
   return {
     edits,
     notes,
@@ -267,6 +273,7 @@ async function loadDBFromSQL(client) {
     missionLog: missionR.rows,
     provHistory: provHistR.rows.map(function(r) { return { ...r, ts: Number(r.ts) }; }),
     kpiHistory: kpiHistR.rows.map(function(r) { return r.data; }),
+    managerTasks,
     weekEntries,
     changeLog: clR.rows.map(function(r) {
       return { at: r.at instanceof Date ? r.at.toISOString() : r.at, by: r.by, rkey: r.rkey, field: r.field, val: r.val };
@@ -306,6 +313,7 @@ router.put('/db', async (req, res) => {
     'weekEntries', 'edits', 'tasks', 'notifications',
     'notes', 'changeLog', 'callLog', 'visitLog', 'salesLog', 'events', 'checklist',
     'tags', 'rTags', 'missionLog', 'provHistory', 'kpiHistory', 'kpiTargets', 'extra',
+    'managerTasks', 'provOverrides',
   ];
   const hasKnown = Object.keys(body).some(k => KNOWN_KEYS.includes(k));
   if (!hasKnown && Object.keys(body).length > 0) {

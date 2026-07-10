@@ -36,7 +36,7 @@ function mgrSaveTask(recKey, rtype, id, name){
     done:false,
     doneAt:''
   };
-  saveDB();
+  saveManagerFollowupApi(recKey,DB.managerTasks[recKey]);
   closeModal('mgrAssignModal');
   showToast('✅ وظیفه پیگیری به '+( USERS[assignedTo]||assignedTo)+' ارجاع داده شد',2500);
   if(currentTab==='kpi')renderKPIPanel();
@@ -46,7 +46,7 @@ function mgrSaveTask(recKey, rtype, id, name){
 function mgrRemoveTask(recKey){
   ensureKPIDB();
   delete DB.managerTasks[recKey];
-  saveDB();
+  deleteManagerFollowupApi(recKey);
   if(currentTab==='kpi')renderKPIPanel();
   if(currentTab==='provinces')renderUserDashboard();
 }
@@ -56,8 +56,8 @@ function mgrDoneTask(recKey){
   if(DB.managerTasks[recKey]){
     DB.managerTasks[recKey].done=true;
     DB.managerTasks[recKey].doneAt=todayStr();
+    saveManagerFollowupApi(recKey,DB.managerTasks[recKey]);
   }
-  saveDB();
   showToast('✅ وظیفه انجام شد');
   if(currentTab==='kpi')renderKPIPanel();
   if(currentTab==='provinces')renderDashboard();

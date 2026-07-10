@@ -369,7 +369,7 @@ function saveTeamKPITargets(month){
     if(!DB.kpiTargets)DB.kpiTargets={};
     var existing=DB.kpiTargets[u+':'+month]||{};
     DB.kpiTargets[u+':'+month]=Object.assign({},existing,{callsPerDay:calls,visitsPerWeek:visits,salesCount:sales,cashPct:cash});
-    // salesAmount preserved from existing via Object.assign
+    saveKpiTargetApi(u,month,DB.kpiTargets[u+':'+month]);
     saved++;
   });
   // save weights if present
@@ -382,8 +382,8 @@ function saveTeamKPITargets(month){
       weights[k]=el?Math.max(0,parseInt(el.value||0)):0;
     });
     DB.kpiTargets.weights=weights;
+    saveKpiWeightsApi(weights);
   }
-  saveDB();
   closeModal('teamKpiModal');
   showToast('✅ اهداف '+saved+' کارشناس ذخیره شد',2500);
   if(typeof renderKPIPanel==='function')renderKPIPanel();
@@ -405,7 +405,17 @@ function saveProvKPITarget(provId, targets) {
   if (!DB.kpiTargets) DB.kpiTargets = {};
   if (!DB.kpiTargets.provinces) DB.kpiTargets.provinces = {};
   DB.kpiTargets.provinces[provId] = targets;
-  saveDB();
+  fetch('/api/kpi-data/province-target', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      provinceId: provId,
+      calls: targets.calls || 0,
+      visits: targets.visits || 0,
+      sales: targets.contracts || targets.sales || 0,
+      extra: targets.extra || 0,
+    }),
+  }).catch(function () {});
 }
 
 function openProvTargetsModal() {
@@ -1238,7 +1248,7 @@ function _msSave(done) {
   ensureKPIDB();
   DB.missionLog = DB.missionLog.filter(function(l) { return !(l.userId === ms.userId && l.month === _msCurrent.month); });
   DB.missionLog.push(ms);
-  saveDB();
+  saveMissionLogApi(ms);
   showToast(done ? '✅ ماموریت انجام‌شده ثبت شد' : '⏳ ماموریت برنامه‌ریزی شد');
   closeModal('missionDetailModal');
   if (typeof renderKPIPanel === 'function') renderKPIPanel();
@@ -1252,7 +1262,7 @@ function _msDelete() {
   var month  = _msCurrent.month;
   ensureKPIDB();
   DB.missionLog = DB.missionLog.filter(function(l) { return !(l.userId === userId && l.month === month); });
-  saveDB();
+  deleteMissionLogApi(userId, month);
   showToast('ماموریت حذف شد');
   closeModal('missionDetailModal');
   if (typeof renderKPIPanel === 'function') renderKPIPanel();

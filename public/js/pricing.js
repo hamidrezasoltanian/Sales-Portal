@@ -1328,7 +1328,7 @@ function _doChangeProvince(rtype,id){
   if(newProv)DB.provOverrides[rkey]=newProv;
   else delete DB.provOverrides[rkey];
   clearPCCache();
-  saveDB();
+  saveProvOverridesApi(DB.provOverrides);
   closeModal('_cprovModal');
   closeModal('cm_' + id);
   showToast('\u2705 \u0627\u0633\u062a\u0627\u0646 \u062a\u063a\u06cc\u06cc\u0631 \u06a9\u0631\u062f');

@@ -1803,6 +1803,16 @@ async function initSchema() {
     )
   `);
 
+  // 7b. Manager follow-up assignments (ارجاع پیگیری ویژه)
+  await query(`
+    CREATE TABLE IF NOT EXISTS manager_tasks (
+      rec_key    TEXT PRIMARY KEY,
+      data       JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_by TEXT
+    )
+  `);
+
   // 8. Province Ownership History Table (province_history)
   await query(`
     CREATE TABLE IF NOT EXISTS province_history (

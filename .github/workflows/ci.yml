@@ -37,6 +37,8 @@ jobs:
             server/routes/kpi-data.js \
             server/routes/prov-history.js \
             server/routes/tags.js \
+            server/routes/manager-followups.js \
+            scripts/seed_qa_db.js \
             public/js/tasks.js \
             public/js/kpi.js \
             public/js/provinces.js \
