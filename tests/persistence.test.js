@@ -359,6 +359,16 @@ async function testSettingsKv() {
   assert(get2.body.settings && get2.body.settings['_test_' + PREFIX], 'settings key persisted');
 }
 
+// ─── 12. Center pricing modal API ───────────────────────────────────────────
+async function testCenterPricing() {
+  console.log('\n💰 12. Center pricing list (profile modal)');
+  const key = 'center_' + PREFIX;
+  const r = await req('GET', '/api/pricing/center/' + encodeURIComponent(key) + '/prices?pay_type=d30&qty=1');
+  assert(r.status === 200, 'GET center prices → 200');
+  assert(r.body.buyer_type, 'center prices has buyer_type');
+  assert(Array.isArray(r.body.products), 'center prices has products array');
+}
+
 // ─── Runner ────────────────────────────────────────────────────────────────
 async function main() {
   console.log('════════════════════════════════════════════════════════');
@@ -382,6 +392,7 @@ async function main() {
     await testSupport();
     await testChangelog();
     await testSettingsKv();
+    await testCenterPricing();
   } catch (e) {
     console.error('\n❌ Fatal:', e.message);
     failed++;

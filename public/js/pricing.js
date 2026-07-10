@@ -75,6 +75,83 @@ var PL_DEFAULT_SETT={
 var PL_CENTER_ICONS={hospital:'🏥',faradis:'🏪',daramazon:'🛒',tamin:'🏛',modd:'🏦',noor:'💙',barakat:'🌟',bahman:'🏢',salajeghe:'🏢',doctor:'👨‍⚕️'};
 var PL_PAY_IDX={d30:0,d60:1,cash:2};
 
+var PL_PAY_IDX={d30:0,d60:1,cash:2};
+
+var CM_BUYER_FA={
+  hospital:'بیمارستان',colleague:'همکار',doctor:'پزشک/مرکز درمانی',patient:'بیمار'
+};
+var CM_PAY_FA={d30:'۳۰ روزه',d60:'۶۰ روزه',cash:'نقدی'};
+var CM_TIER_FA=['تا ۲۰ عدد','۲۱–۵۰ عدد','۵۱–۱۰۰ عدد','بیش از ۱۰۰'];
+
+function openCenterPricingModal(centerKey, centerName) {
+  var ck = centerKey || '';
+  var cname = centerName || ck;
+  var body = '<div class="cm-pr-modal-tools">'
+    + '<div><label>نوع پرداخت</label><select id="cmPrPay" class="cm-inp" onchange="_cmPrReload()">'
+    + '<option value="d30">۳۰ روزه</option><option value="d60">۶۰ روزه</option><option value="cash">نقدی</option>'
+    + '</select></div>'
+    + '<div><label>تعداد (پله قیمت)</label><input type="number" id="cmPrQty" class="cm-inp" value="1" min="1" oninput="_cmPrReload()"></div>'
+    + '</div>'
+    + '<div id="cmPrMeta" class="cm-pr-meta">⏳ در حال بارگذاری...</div>'
+    + '<div id="cmPrTable" class="cm-pr-table-wrap"><div style="text-align:center;padding:24px;color:var(--text-muted)">⏳</div></div>';
+  var foot = '<button class="btn-secondary" onclick="closeModal(\'cmPricingList\')">بستن</button>';
+  openModal('cmPricingList', '💰 لیست قیمت — ' + esc(cname), body, foot, { lg: true });
+  window._cmPrCenterKey = ck;
+  window._cmPrCenterName = cname;
+  _cmPrReload();
+}
+function _cmPrReload() {
+  var ck = window._cmPrCenterKey;
+  if (!ck) return;
+  var payEl = document.getElementById('cmPrPay');
+  var qtyEl = document.getElementById('cmPrQty');
+  var pay = payEl ? payEl.value : 'd30';
+  var qty = qtyEl ? (parseInt(qtyEl.value, 10) || 1) : 1;
+  var meta = document.getElementById('cmPrMeta');
+  var tbl = document.getElementById('cmPrTable');
+  if (meta) meta.innerHTML = '⏳ در حال بارگذاری...';
+  if (tbl) tbl.innerHTML = '';
+  fetch('/api/pricing/center/' + encodeURIComponent(ck) + '/prices?pay_type=' + encodeURIComponent(pay) + '&qty=' + qty, { credentials: 'include' })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (meta) {
+        var tierIdx = data.tier != null ? data.tier : 0;
+        meta.innerHTML = '<span class="cm-pr-chip">🏷 ' + esc(CM_BUYER_FA[data.buyer_type] || data.buyer_type) + '</span>'
+          + (data.list ? '<span class="cm-pr-chip">📋 ' + esc(data.list.name) + ' (v' + data.list.version + ')</span>' : '')
+          + '<span class="cm-pr-chip">💳 ' + esc(CM_PAY_FA[data.pay_type] || data.pay_type) + '</span>'
+          + '<span class="cm-pr-chip">📦 ' + esc(CM_TIER_FA[tierIdx] || '') + '</span>'
+          + (data.commission_level ? '<span class="cm-pr-chip">💼 سطح پورسانت ' + data.commission_level + '</span>' : '')
+          + (parseFloat(data.discount_pct) > 0 ? '<span class="cm-pr-chip">⬇ تخفیف ' + data.discount_pct + '٪</span>' : '');
+      }
+      if (!tbl) return;
+      var prods = (data.products || []).filter(function (p) { return p.has_price; });
+      if (!data.list) {
+        tbl.innerHTML = '<div class="cm-pr-empty">لیست قیمت فعالی برای این نوع مرکز یافت نشد.</div>';
+        return;
+      }
+      if (!prods.length) {
+        tbl.innerHTML = '<div class="cm-pr-empty">قیمتی برای این پله/نوع پرداخت ثبت نشده است.</div>';
+        return;
+      }
+      var rows = prods.map(function (p, i) {
+        return '<tr>'
+          + '<td class="cm-pr-num">' + (i + 1) + '</td>'
+          + '<td>' + esc(p.name) + (p.code ? '<br><code class="cm-pr-code">' + esc(p.code) + '</code>' : '') + '</td>'
+          + '<td class="cm-pr-money">' + (p.base_price != null ? Number(p.base_price).toLocaleString('fa-IR') : '—') + '</td>'
+          + '<td class="cm-pr-money">' + (p.commission > 0 ? Number(p.commission).toLocaleString('fa-IR') : '—') + '</td>'
+          + '<td class="cm-pr-money cm-pr-final">' + (p.center_price != null ? Number(p.center_price).toLocaleString('fa-IR') : '—') + '</td>'
+          + '</tr>';
+      }).join('');
+      tbl.innerHTML = '<table class="cm-pr-tbl"><thead><tr>'
+        + '<th>#</th><th>محصول</th><th>قیمت پایه</th><th>پورسانت</th><th>قیمت مرکز</th>'
+        + '</tr></thead><tbody>' + rows + '</tbody></table>';
+    })
+    .catch(function () {
+      if (meta) meta.innerHTML = '<span style="color:#dc2626">خطا در بارگذاری قیمت‌ها</span>';
+      if (tbl) tbl.innerHTML = '';
+    });
+}
+
 var _plP,_plCOMM,_plSETT,_plCOMMLabels,_plCOMMNames,_plCENTERS,_plPAYLBL,_plTIERS;
 var _plRepQty=[],_plExpQty=[];
 
@@ -1292,7 +1369,7 @@ function openCenterModal(rtype,id){
         +'<input type="text" value="'+(e.approxOrderTime||'')+'" placeholder="مثلاً: اسفند ۱۴۰۳" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'approxOrderTime\',this.value)" style="width:100%;padding:3px 6px;border:1px solid var(--border-input);border-radius:4px;font-size:10px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)"></div>'
         +'</div></div>';
     })()
-    +'<div id="cmPricingInfo_'+r.id+'" style="background:var(--bg-raised);border-radius:8px;padding:8px 12px;margin-top:6px;border:1px solid var(--border);font-size:11px"><span style="color:var(--text-muted)">در حال بارگذاری قیمت‌گذاری...</span></div>'
+    +'<div id="cmPricingInfo_'+r.id+'" class="cm-profile-section" style="font-size:11px"><span style="color:var(--text-muted)">در حال بارگذاری قیمت‌گذاری...</span></div>'
    // برنامه هفته
     +(wkEntries.length?'<label>برنامه هفته</label><div style="background:var(--bg-raised);border-radius:5px;padding:7px;font-size:11px">'
     +wkEntries.map(function(we){
@@ -1431,20 +1508,34 @@ function openCenterModal(rtype,id){
   if(typeof _hcpLoadCenterAffiliations==='function'){setTimeout(function(){_hcpLoadCenterAffiliations(rtype,r.id,id);},20);}
   if(window.umGetColor){setTimeout(function(){document.querySelectorAll('.owner-dot[data-uid]').forEach(function(d){var u=decodeURIComponent(d.dataset.uid);if(u)d.style.background=umGetColor(u);});},0);}
   // ── قیمت‌گذاری ──
-  (function(_rid,_centerKey,_rname){
+  (function(_rid,_centerKey,_rname,_isMgr){
     fetch('/api/pricing/center/'+encodeURIComponent(_centerKey))
       .then(function(res){return res.json();})
       .then(function(cfg){
         var el=document.getElementById('cmPricingInfo_'+_rid);
         if(!el)return;
-        var BUYER_FA={'public_hospital':'بیمارستان دولتی','private_hospital':'بیمارستان خصوصی','clinic':'کلینیک','lab':'آزمایشگاه','pharmacy':'داروخانه','other':'سایر'};
-        if(!cfg){el.innerHTML='<span style="color:var(--text-muted);font-size:10px">اطلاعات قیمت‌گذاری یافت نشد</span>';return;}
+        var buyerType=(cfg&&cfg.buyer_type)||'hospital';
         var parts=[];
-        if(cfg.buyer_type)parts.push('🏷 نوع خریدار: <b>'+(BUYER_FA[cfg.buyer_type]||cfg.buyer_type)+'</b>');
-        if(cfg.commission_level)parts.push('💼 سطح پورسانت: <b>'+cfg.commission_level+'</b>');
-        if(parseFloat(cfg.discount_ceiling_pct)>0)parts.push('⬇ سقف تخفیف: <b>'+cfg.discount_ceiling_pct+'%</b>');
-        if(cfg.payment_terms)parts.push('📅 شرایط پرداخت: <b>'+cfg.payment_terms+'</b>');
-        el.innerHTML=parts.length?'<div style="font-size:11px;font-weight:700;color:#0369a1;margin-bottom:5px">💰 قیمت‌گذاری</div><div style="display:flex;flex-wrap:wrap;gap:8px">'+parts.map(function(p){return'<span style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:5px;padding:2px 7px;color:var(--text-primary)">'+p+'</span>';}).join('')+'</div>':'<span style="color:var(--text-muted);font-size:10px">قیمت‌گذاری تنظیم نشده</span>';
+        parts.push('🏷 نوع خریدار: <b>'+(CM_BUYER_FA[buyerType]||buyerType)+'</b>');
+        if(cfg&&cfg.commission_level)parts.push('💼 سطح پورسانت: <b>'+cfg.commission_level+'</b>');
+        if(cfg&&parseFloat(cfg.discount_ceiling_pct)>0)parts.push('⬇ سقف تخفیف: <b>'+cfg.discount_ceiling_pct+'%</b>');
+        if(cfg&&parseFloat(cfg.discount_pct)>0)parts.push('⬇ تخفیف فعال: <b>'+cfg.discount_pct+'%</b>');
+        var chips=parts.map(function(p){return'<span class="cm-pr-chip">'+p+'</span>';}).join('');
+        var buyerSel=_isMgr
+          ?'<div style="margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
+            +'<label style="font-size:10px;color:var(--text-muted)">نوع مرکز (قیمت):</label>'
+            +'<select class="cm-inp" style="width:auto;min-width:130px;font-size:11px" onchange="fetch(\'/api/pricing/center/\'+encodeURIComponent(\''+esc(_centerKey)+'\'),{method:\'PUT\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({buyer_type:this.value,center_name:\''+esc(_rname).replace(/'/g,"\\'")+'\'})}).then(function(){showToast(\'نوع خریدار ذخیره شد\');}).catch(function(){showToast(\'خطا در ذخیره\');})">'
+            +Object.keys(CM_BUYER_FA).map(function(k){return'<option value="'+k+'"'+(k===buyerType?' selected':'')+'>'+CM_BUYER_FA[k]+'</option>';}).join('')
+            +'</select></div>'
+          :'';
+        el.innerHTML='<div class="cm-profile-section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">'
+          +'<span>💰 قیمت‌گذاری مرکز</span>'
+          +'<button type="button" data-cm-pr-open="1" class="cm-foot-btn" style="background:#ede9fe;color:#6d28d9;border-color:#c4b5fd;padding:4px 12px;font-size:11px" '
+          +'onclick="openCenterPricingModal(\''+esc(_centerKey).replace(/'/g,"\\'")+'\',\''+esc(_rname).replace(/'/g,"\\'")+'\')">📋 لیست قیمت</button>'
+          +'</div>'
+          +(chips?'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">'+chips+'</div>'
+            :'<div style="font-size:10px;color:var(--text-muted);margin-top:4px">پیش‌فرض: بیمارستان — برای تغییر نوع، مدیر تنظیم کند</div>')
+          +buyerSel;
   var elCom=document.getElementById('cmCommission_'+_rid);
   if(elCom){
     var _curLvl=cfg&&cfg.commission_level?String(cfg.commission_level):'';
@@ -1460,8 +1551,14 @@ function openCenterModal(rtype,id){
       }).catch(function(){});
     }
   }
-      }).catch(function(){var el=document.getElementById('cmPricingInfo_'+_rid);if(el)el.style.display='none';});
-  })(id, recK(rtype,r.id), displayName);
+      }).catch(function(){
+        var el=document.getElementById('cmPricingInfo_'+_rid);
+        if(!el)return;
+        el.innerHTML='<div class="cm-profile-section-title">💰 قیمت‌گذاری مرکز</div>'
+          +'<button type="button" class="cm-foot-btn" style="background:#ede9fe;color:#6d28d9;border-color:#c4b5fd;padding:4px 12px;font-size:11px;margin-top:6px" '
+          +'onclick="openCenterPricingModal(\''+esc(_centerKey).replace(/'/g,"\\'")+'\',\''+esc(_rname).replace(/'/g,"\\'")+'\')">📋 لیست قیمت</button>';
+      });
+  })(id, recK(rtype,r.id), displayName, typeof _isManager==='function'&&_isManager());
 }
 
 function _mrgSearch(){

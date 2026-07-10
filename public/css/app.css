@@ -2084,3 +2084,19 @@ table.compact-mode td:nth-child(9) {
 #mtrPanel .wrap{max-width:960px}
 #mtrPanel .mtr-search-bar{background:linear-gradient(180deg,var(--bg-raised),var(--bg-card));padding:10px 14px}
 #mtrPanel .mtr-search-inp{border-radius:10px;padding:9px 14px 9px 36px;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+
+/* ══ Center pricing list modal ══ */
+.cm-pr-modal-tools{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.cm-pr-modal-tools label{font-size:10px;font-weight:700;color:var(--text-muted);display:block;margin-bottom:4px}
+.cm-pr-meta{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.cm-pr-chip{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:10px;font-weight:600;background:#f0f9ff;border:1px solid #bae6fd;color:var(--text-primary)}
+.cm-pr-table-wrap{max-height:55vh;overflow:auto;border:1px solid var(--border);border-radius:10px}
+.cm-pr-tbl{width:100%;border-collapse:collapse;font-size:12px}
+.cm-pr-tbl th{background:var(--bg-page);padding:8px 10px;text-align:right;font-size:11px;color:var(--text-muted);position:sticky;top:0;z-index:1}
+.cm-pr-tbl td{padding:8px 10px;border-top:1px solid var(--border);vertical-align:top}
+.cm-pr-num{color:var(--text-muted);font-size:11px;width:32px}
+.cm-pr-code{font-size:10px;color:var(--text-muted)}
+.cm-pr-money{text-align:left;direction:ltr;font-family:monospace;font-size:12px}
+.cm-pr-final{font-weight:800;color:#15803d}
+.cm-pr-empty{padding:24px;text-align:center;color:var(--text-muted);font-size:13px}
+@media(max-width:640px){.cm-pr-modal-tools{grid-template-columns:1fr}}

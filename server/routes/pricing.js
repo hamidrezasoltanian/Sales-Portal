@@ -405,6 +405,97 @@ router.put('/commission-rules', requireManager, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── GET /api/pricing/center/:key/prices ──────────────────────────────────────
+// Full product price list for this center's buyer_type (tier × pay_type from query)
+router.get('/center/:key/prices', async (req, res) => {
+  try {
+    const center_key = decodeURIComponent(req.params.key);
+    const pay_type = PAY_TYPES.includes(req.query.pay_type) ? req.query.pay_type : 'd30';
+    const qty = Math.max(1, parseInt(req.query.qty, 10) || 1);
+    const tier = tierOf(qty);
+
+    const cc = await query('SELECT * FROM center_pricing_config WHERE center_key=$1', [center_key]);
+    const cfg = cc.rows[0] || null;
+    const buyer_type = (req.query.buyer_type && BUYER_TYPES.includes(req.query.buyer_type))
+      ? req.query.buyer_type
+      : (cfg?.buyer_type || 'hospital');
+    const commission_level = cfg?.commission_level || null;
+    const discount_pct = cfg ? parseFloat(cfg.discount_pct) || 0 : 0;
+
+    const pl = await query(
+      `SELECT id, name, version, buyer_type FROM price_lists
+       WHERE buyer_type=$1 AND active=true ORDER BY version DESC LIMIT 1`,
+      [buyer_type]
+    );
+    if (!pl.rows.length) {
+      return res.json({
+        center_key,
+        center_name: cfg?.center_name || '',
+        buyer_type,
+        commission_level,
+        discount_pct,
+        pay_type,
+        qty,
+        tier,
+        list: null,
+        products: [],
+      });
+    }
+    const listId = pl.rows[0].id;
+
+    const products = await query(
+      `SELECT p.id, p.name, p.code, p.unit, pli.price, pli.base_price
+       FROM products p
+       LEFT JOIN price_list_items pli
+         ON pli.product_id = p.id AND pli.price_list_id = $1
+        AND pli.qty_tier = $2 AND pli.pay_type = $3
+       WHERE p.active = true
+       ORDER BY p.sort_order, p.id`,
+      [listId, tier, pay_type]
+    );
+
+    const commRules = {};
+    if (commission_level) {
+      const cr = await query(
+        'SELECT product_id, amount FROM commission_rules WHERE price_list_id=$1 AND level=$2',
+        [listId, commission_level]
+      );
+      cr.rows.forEach((r) => { commRules[r.product_id] = Number(r.amount) || 0; });
+    }
+
+    const rows = products.rows.map((p) => {
+      const base_price = p.price != null ? Number(p.price) : null;
+      const commission = base_price != null ? (commRules[p.id] || 0) : 0;
+      const inflated = base_price != null ? base_price + commission : null;
+      const discount_amount = inflated != null ? Math.round(inflated * discount_pct / 100) : 0;
+      const center_price = inflated != null ? inflated - discount_amount : null;
+      return {
+        product_id: p.id,
+        name: p.name,
+        code: p.code || '',
+        unit: p.unit || 'عدد',
+        base_price,
+        commission,
+        center_price,
+        has_price: base_price != null,
+      };
+    });
+
+    res.json({
+      center_key,
+      center_name: cfg?.center_name || '',
+      buyer_type,
+      commission_level,
+      discount_pct,
+      pay_type,
+      qty,
+      tier,
+      list: { id: pl.rows[0].id, name: pl.rows[0].name, version: pl.rows[0].version },
+      products: rows,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── GET /api/pricing/center/:key/commissions ─────────────────────────────────
 router.get('/center/:key/commissions', async (req, res) => {
   try {
