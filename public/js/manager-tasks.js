@@ -935,7 +935,7 @@ function unifiedRestore(ev){
       if(data.mtrMeta) msg += '\nداده‌های مطالبات هم بازیابی می‌شود.'+(data.mtrData&&data.mtrData.rows?' ('+data.mtrData.rows.length+' ردیف اکسل)':'');
       if(!confirm(msg)) return;
       // ── 1. CRM DB ──────────────────────────────────────────────
-      if(data.db){ Object.assign(DB,data.db); saveDB(); }
+      if(data.db){ Object.assign(DB,data.db); saveDBFull(); }
       // ── 2. Centers: convert flat array → {CENTERS, PC_RAW} ────
       var p = Promise.resolve();
       if(data.centersDB&&data.centersDB.centers){
@@ -1078,8 +1078,7 @@ function ubApplyMerge(data){
       if(x&&x.id&&!DB.weekEntries[k].some(function(y){return y.id===x.id;}))DB.weekEntries[k].push(x);
     });
   });
-  saveDB();
-  // MTR merge
+  saveDBFull();
   var bm = data.mtrMeta||data.meta||{};
   Object.keys(bm).forEach(function(inv){
     var be=bm[inv], me=gm(inv);

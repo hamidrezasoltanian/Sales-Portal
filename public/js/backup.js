@@ -376,13 +376,10 @@ function _applyImportMeta(centers,sourceData){
 
     // آدرس
     if(src.address){
-      if(!DB.edits[k])DB.edits[k]={};
-      DB.edits[k].address=src.address;
+      setE(rtype,c.id,'address',src.address);
     }
-    // تلفن
     if(src.phones&&src.phones.length){
-      if(!DB.edits[k])DB.edits[k]={};
-      DB.edits[k].phones=src.phones;
+      setE(rtype,c.id,'phones',src.phones.slice());
     }
     // برچسب‌ها
     if(src.tagsRaw){
@@ -401,7 +398,10 @@ function _applyImportMeta(centers,sourceData){
       DB.rTags[k]=tagIds;
     }
   });
-  saveDB();
+  saveGlobalTagsApi(DB.tags);
+  Object.keys(DB.rTags||{}).forEach(function(k){
+    saveCenterTagsApi(k,DB.rTags[k]||[]);
+  });
 }
 
 function confirmClearMasterDB(){
@@ -655,14 +655,17 @@ function doImport(){
     var type=typeCol>=0?(p.row[typeCol]||'').toString().trim()||'سایر':'سایر';
     var lead=leadCol>=0?(p.row[leadCol]||'').toString().trim()||'سرنخ':'سرنخ';
     var owner=ownerCol>=0?(p.row[ownerCol]||'').toString().trim():'';
-    DB.extra.push({id:id,row:byProv[p.provId].maxRow,name:p.name,potential:pot,type:type,lead:lead,province_id:p.provId,owner:owner||currentUser});
-    if(owner){var ek=rtype+'_'+id;if(!DB.edits[ek])DB.edits[ek]={};DB.edits[ek].owner=owner;}
+    var entry={id:id,row:byProv[p.provId].maxRow,name:p.name,potential:pot,type:type,lead:lead,province_id:p.provId,owner:owner||currentUser};
+    DB.extra.push(entry);
+    saveCenterExtraApi(entry);
+    if(owner)setE(rtype,id,'owner',owner);
     imported++;
   });
   if(replaceHard&&replaceHard.checked){
     Object.keys(byProv).forEach(function(pid){DB.hiddenProvs[pid]=true;});
+    patchCrmSetting('hiddenProvs',DB.hiddenProvs);
   }
-  saveDB();closeModal('importModal');
+  closeModal('importModal');
   var provNames=[...new Set(processed.filter(function(p){return p.provId;}).map(function(p){return p.provName;}))];
   showToast(imported+' مرکز در '+provNames.length+' استان ایمپورت شد'+(skipped?' ('+skipped+' تکراری رد شد)':'')+' ✅',4000);
   if(_currentProvId&&byProv[_currentProvId])renderProvTable();
@@ -828,7 +831,7 @@ function doCleanAll(){
   if(document.getElementById('clearExtra').checked){DB.extra=[];DB.hiddenProvs={};cleared.push('مراکز اضافه‌شده');}
   if(document.getElementById('clearWeeks').checked){DB.weekEntries={};cleared.push('برنامه‌های هفته');}
   if(document.getElementById('clearEvents').checked){DB.events=[];DB.checklist={};cleared.push('رویدادها');}
-  saveDB();
+  saveDBFull();
   closeModal('clearModal');
   _globalOwnerFilter='';_bannerFilterUser='';
   renderDashboard();renderBanner();renderTable();

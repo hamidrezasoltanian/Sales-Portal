@@ -361,6 +361,18 @@ async function flow_centerExtra(tok) {
   await req('DELETE', '/api/center-extras/' + encodeURIComponent(id), null, tok);
 }
 
+async function flow_pricingSettings(mgrTok) {
+  console.log('\n🔄 Flow: PATCH pricingProducts → empty PUT /db → refresh');
+  const sample = [{ id: 99, name: 'QA Pricing Item', buyPrice: 5000 }];
+  const patch = await req('PATCH', '/api/crm-settings/pricingProducts', { value: sample }, mgrTok);
+  if (!assert(patch.status === 200, 'PATCH pricingProducts')) return;
+  await req('PUT', '/api/data/db', {}, mgrTok);
+  const db = await refreshDb(mgrTok);
+  assert(db.pricingProducts && db.pricingProducts[0] && db.pricingProducts[0].name === 'QA Pricing Item',
+    'pricingProducts survived bulk save');
+  await query("DELETE FROM app_settings WHERE key = 'pricingProducts'");
+}
+
 async function runAllFlows() {
   passed = 0;
   failed = 0;
@@ -391,6 +403,7 @@ async function runAllFlows() {
   await flow_seededCenterPatch(tok);
   await flow_settingsPatch(mgrTok);
   await flow_centerExtra(tok);
+  await flow_pricingSettings(mgrTok);
 
   await query("DELETE FROM app_users WHERE username = '_qa_mgr'").catch(function () {});
 

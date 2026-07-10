@@ -203,6 +203,10 @@ async function loadDBFromSQL(client) {
   const kpiTargets = {};
   const settings = {};
   let provOverrides = {};
+  let pricingProducts = null;
+  let pricingComm = null;
+  let pricingSettings = null;
+  let hiddenProvs = null;
   settingsR.rows.forEach(function(r) {
     if (r.key === 'kpi_weights') {
       kpiTargets.weights = r.value;
@@ -210,6 +214,14 @@ async function loadDBFromSQL(client) {
       provOverrides = r.value || {};
     } else if (r.key === 'tagDefinitions') {
       // loaded into tags[] below
+    } else if (r.key === 'pricingProducts') {
+      pricingProducts = r.value;
+    } else if (r.key === 'pricingComm') {
+      pricingComm = r.value;
+    } else if (r.key === 'pricingSettings') {
+      pricingSettings = r.value;
+    } else if (r.key === 'hiddenProvs') {
+      hiddenProvs = r.value;
     } else {
       settings[r.key] = r.value;
     }
@@ -279,6 +291,10 @@ async function loadDBFromSQL(client) {
       return { at: r.at instanceof Date ? r.at.toISOString() : r.at, by: r.by, rkey: r.rkey, field: r.field, val: r.val };
     }).reverse(),
     _serverTs,
+    pricingProducts: pricingProducts || undefined,
+    pricingComm: pricingComm || undefined,
+    pricingSettings: pricingSettings || undefined,
+    hiddenProvs: hiddenProvs || undefined,
   };
 }
 
@@ -314,6 +330,7 @@ router.put('/db', async (req, res) => {
     'notes', 'changeLog', 'callLog', 'visitLog', 'salesLog', 'events', 'checklist',
     'tags', 'rTags', 'missionLog', 'provHistory', 'kpiHistory', 'kpiTargets', 'extra',
     'managerTasks', 'provOverrides', 'settings',
+    'pricingProducts', 'pricingComm', 'pricingSettings', 'hiddenProvs',
   ];
   const hasKnown = Object.keys(body).some(k => KNOWN_KEYS.includes(k));
   if (!hasKnown && Object.keys(body).length > 0) {

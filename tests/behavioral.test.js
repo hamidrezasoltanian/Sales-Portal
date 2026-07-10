@@ -613,6 +613,19 @@ async function test20_centerExtrasApi() {
   assert(del.status === 200, 'DELETE center-extras returns 200');
 }
 
+async function test21_pricingSettingsPersist() {
+  console.log('\n── Test 21: pricing PATCH survives PUT /db without pricing keys ──');
+  const tok = managerToken(TEST_MANAGER);
+  const sample = [{ id: 1, name: 'QA Product', buyPrice: 1000 }];
+  const patch = await req('PATCH', '/api/crm-settings/pricingProducts', { value: sample }, tok);
+  assert(patch.status === 200, 'PATCH pricingProducts returns 200');
+  const put = await req('PUT', '/api/data/db', {}, tok);
+  assert(put.status === 200, 'PUT /db without pricing returns 200');
+  const get = await req('GET', '/api/data/db', null, tok);
+  assert(Array.isArray(get.body.pricingProducts) && get.body.pricingProducts[0].name === 'QA Product', 'pricing persisted');
+  await query("DELETE FROM app_settings WHERE key = 'pricingProducts'");
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -670,6 +683,7 @@ async function main() {
     await test18_managerFollowupApi();
     await test19_settingsNotWipedByBulkSave();
     await test20_centerExtrasApi();
+    await test21_pricingSettingsPersist();
 
   } catch (err) {
     console.error('\n❌ خطای غیرمنتظره:', err.message);

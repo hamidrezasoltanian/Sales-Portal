@@ -98,7 +98,7 @@ function plSaveAll(){
   DB.pricingProducts=_plP;
   DB.pricingComm=_plCOMM;
   DB.pricingSettings=_plSETT;
-  saveDB();
+  savePricingApi(_plP,_plCOMM,_plSETT);
 }
 function plFmt(n){return n>0?n.toLocaleString():'—';}
 function plPct(b,p){var d=(b-p)/b*100;return d>0.01?d.toFixed(1)+'%':null;}

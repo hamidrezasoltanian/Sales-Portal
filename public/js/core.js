@@ -357,7 +357,7 @@ async function loadDB(){
         
         // Trigger a save to sync these merged changes back to the server
         setTimeout(function() {
-          saveDB();
+          saveDBFull();
           showToast('🔄 تغییرات ذخیره نشده محلی بازیابی و همگام‌سازی شدند', 4000);
         }, 1000);
       } catch(err) {
@@ -379,7 +379,17 @@ async function loadDB(){
         _migrated=true;
       }
     });
-    if(_migrated){saveDB();console.log('[migration] legacy contacts migrated');}
+    if(_migrated){
+      Object.keys(DB.edits||{}).forEach(function(k){
+        var e=DB.edits[k];
+        if(!e.contacts||!e.contacts.length)return;
+        fetch('/api/centers/'+encodeURIComponent(k),{
+          method:'PATCH',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({field:'contacts',val:e.contacts,centerName:''})
+        }).catch(function(){});
+      });
+      console.log('[migration] legacy contacts migrated');
+    }
     _serverSynced=true;_invalidateEditsCache();
     _lastSyncedDB = JSON.parse(JSON.stringify(DB));
 
@@ -426,7 +436,16 @@ function _buildSavePayload(){
   delete payload.managerTasks;
   delete payload.provOverrides;
   delete payload.settings;
+  delete payload.pricingProducts;
+  delete payload.pricingComm;
+  delete payload.pricingSettings;
+  delete payload.hiddenProvs;
   // Residual blob: _mtr only (MTR — untouched)
+  if(_dbServerTs)payload._clientTs=_dbServerTs;
+  return payload;
+}
+function _buildSavePayloadFull(){
+  var payload=JSON.parse(JSON.stringify(DB));
   if(_dbServerTs)payload._clientTs=_dbServerTs;
   return payload;
 }
@@ -527,6 +546,11 @@ function saveKpiWeightsApi(weights){
   return patchCrmSetting('kpi_weights',weights);
 }
 
+function savePricingApi(products,comm,settings){
+  if(products!==undefined){DB.pricingProducts=products;patchCrmSetting('pricingProducts',products);}
+  if(comm!==undefined){DB.pricingComm=comm;patchCrmSetting('pricingComm',comm);}
+  if(settings!==undefined){DB.pricingSettings=settings;patchCrmSetting('pricingSettings',settings);}
+}
 function saveCenterExtraApi(center){
   if(!center||!center.id)return Promise.resolve();
   return fetch('/api/center-extras',{
@@ -668,6 +692,22 @@ function _clearLocalBackup() {
     localStorage.removeItem('atena_db_last_synced');
   } catch(e) {}
 }
+function _saveDBNowFull(){
+  var payload=_buildSavePayloadFull();
+  var seq=++_saveSeq;
+  return fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json','X-Cid':_sseClientId},body:JSON.stringify(payload)})
+    .then(function(r){
+      return r.json().then(function(result){
+        if(result&&result._serverTs&&seq===_saveSeq)_dbServerTs=result._serverTs;
+        if(seq===_saveSeq){
+          DB._weDeletedKeys=[];
+          _lastSyncedDB=JSON.parse(JSON.stringify(DB));
+          _clearLocalBackup();
+        }
+      });
+    })
+    .catch(function(e){console.warn('saveDBFull sync failed:',e.message);});
+}
 function saveDB(){
   _backupLocalDB();
   clearTimeout(_saveDebounceTimer);
@@ -677,6 +717,17 @@ function saveDBSync(){
   _backupLocalDB();
   clearTimeout(_saveDebounceTimer);
   return _saveDBNow();
+}
+/** Admin/restore only — sends full DB snapshot (backup restore, bulk clear). */
+function saveDBFull(){
+  _backupLocalDB();
+  clearTimeout(_saveDebounceTimer);
+  _saveDebounceTimer=setTimeout(function(){_saveDBNowFull();},600);
+}
+function saveDBFullSync(){
+  _backupLocalDB();
+  clearTimeout(_saveDebounceTimer);
+  return _saveDBNowFull();
 }
 
 function mergeDatabaseDiff(local, server, lastSynced) {
