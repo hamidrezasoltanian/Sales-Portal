@@ -131,4 +131,36 @@ router.post('/:key/notes', requireAuth, async function (req, res) {
   }
 });
 
+// ── DELETE /api/centers/:key/notes/:index — remove note by array index
+router.delete('/:key/notes/:index', requireAuth, async function (req, res) {
+  try {
+    const centerKey = req.params.key;
+    const idx = parseInt(req.params.index, 10);
+    if (isNaN(idx) || idx < 0) return res.status(400).json({ error: 'index نامعتبر' });
+
+    const existing = await query('SELECT notes FROM center_notes WHERE center_key = $1', [centerKey]);
+    if (!existing.rows.length) return res.status(404).json({ error: 'یادداشتی یافت نشد' });
+
+    let notes = existing.rows[0].notes || [];
+    if (!Array.isArray(notes)) notes = [];
+    if (idx >= notes.length) return res.status(404).json({ error: 'index خارج از محدوده' });
+
+    notes.splice(idx, 1);
+
+    await query(
+      `INSERT INTO center_notes (center_key, notes, updated_at, updated_by)
+       VALUES ($1, $2::jsonb, NOW(), $3)
+       ON CONFLICT (center_key) DO UPDATE
+         SET notes = EXCLUDED.notes, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+      [centerKey, JSON.stringify(notes), req.user.username]
+    );
+
+    notifyCenterChange(req, { centerKey, field: 'notes' });
+    res.json({ ok: true, centerKey, notes });
+  } catch (e) {
+    console.error('[centers DELETE /:key/notes/:index]', e.message);
+    res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
+
 module.exports = router;

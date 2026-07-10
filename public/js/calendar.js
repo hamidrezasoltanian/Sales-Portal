@@ -217,14 +217,15 @@ function saveEv(evId){
   else{var tp=tv.split(':').map(Number);startMs=new Date(g[0],g[1]-1,g[2],tp[0]||0,tp[1]||0).getTime();}
   var color=(document.getElementById('evColor')||{}).value||'#0ea5e9';
   var desc=(document.getElementById('evD')||{}).value||'';
-  if(evId&&evId!=='null'){var ev=(DB.events||[]).find(function(e){return e.id===evId;});if(ev){ev.title=title.trim();ev.desc=desc;ev.startMs=startMs;ev.allDay=allDay;ev.color=color;}}
-  else DB.events.push({id:_nextEvId++,title:title.trim(),desc:desc,startMs:startMs,allDay:allDay,color:color,owner:currentUser});
-  saveDB();closeModal('evModal');renderCalendar();showToast('رویداد ذخیره شد ✅');
+  if(evId&&evId!=='null'){var ev=(DB.events||[]).find(function(e){return e.id===evId;});if(ev){ev.title=title.trim();ev.desc=desc;ev.startMs=startMs;ev.allDay=allDay;ev.color=color;saveCalendarEventApi(ev);}}
+  else{var newEv={id:_nextEvId++,title:title.trim(),desc:desc,startMs:startMs,allDay:allDay,color:color,owner:currentUser};DB.events.push(newEv);saveCalendarEventApi(newEv);}
+  closeModal('evModal');renderCalendar();showToast('رویداد ذخیره شد ✅');
 }
 
 function deleteEv(id){
   if(!confirm('حذف این رویداد؟'))return;
   DB.events=(DB.events||[]).filter(function(e){return e.id!==id;});
-  saveDB();closeModal('evModal');renderCalendar();
+  deleteCalendarEventApi(id);
+  closeModal('evModal');renderCalendar();
 }
 

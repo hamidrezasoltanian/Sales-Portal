@@ -30,7 +30,11 @@ jobs:
             server/routes/week-entries.js \
             server/routes/centers.js \
             server/routes/crm-settings.js \
-            tests/behavioral.test.js
+            server/routes/activity-log.js \
+            server/routes/calendar-events.js \
+            server/routes/checklist-api.js \
+            tests/behavioral.test.js \
+            tests/qa-persistence-agent.js
           do
             echo "Checking $f"
             node --check "$f"
@@ -69,3 +73,5 @@ jobs:
       - run: npm ci
       - name: Run behavioral integration tests
         run: npm test
+      - name: Run QA persistence agent (3 rounds max)
+        run: npm run test:qa

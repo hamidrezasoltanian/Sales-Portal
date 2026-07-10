@@ -41,7 +41,8 @@ function saveNoteAndRefresh(type,id,name){
 
 function delNoteAndRefresh(type,id,idx){
   var k=recK(type,id);if(!DB.notes[k])return;
-  DB.notes[k].splice(idx,1);saveDB();
+  DB.notes[k].splice(idx,1);
+  deleteCenterNoteApi(k,idx);
   var nl=document.getElementById('nlist_'+id);if(nl)nl.innerHTML=renderNotesList(type,id);
 }
 
@@ -1215,8 +1216,8 @@ function _wpFinishDone(eKey){
   // ── Auto-log to KPI callLog / visitLog ───────────────────────────────────
   ensureKPIDB();
   var logEntry={id:Date.now(),date:todayStr(),userId:currentUser||'',centerName:cname,centerKey:rtype+'_'+rid,note:note,count:1,outcome:outcome};
-  if(actionType==='visit'){DB.visitLog.push(logEntry);}
-  else{DB.callLog.push(logEntry);}
+  if(actionType==='visit'){DB.visitLog.push(logEntry);postActivityLog('visit',logEntry);}
+  else{DB.callLog.push(logEntry);postActivityLog('call',logEntry);}
 
   // ── Mirror to DB.changeLog so _getTodayActivities() finds this entry ──────
   DB.changeLog=DB.changeLog||[];
@@ -1246,6 +1247,8 @@ function _wpFinishDone(eKey){
       user: USERS[currentUser]||currentUser,
       ts: Date.now()
     });
+    fetch('/api/centers/'+encodeURIComponent(_dnKey)+'/notes',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text:fullNoteText,date:todayStr()})}).catch(function(){});
   }
 
   var _foundWeekLabel='';
@@ -1254,7 +1257,10 @@ function _wpFinishDone(eKey){
     if(rtype&&rid){setE(rtype,rid,'status','قرارداد بسته شد');}
     if(amount>0){
       ensureKPIDB();
-      DB.salesLog.push({id:Date.now()+1,date:todayStr(),userId:currentUser||'',centerName:cname,centerKey:rtype+'_'+rid,amount:amount,isCash:false});
+      var _saleId=Date.now()+1;
+      var _saleEntry={id:_saleId,date:todayStr(),userId:currentUser||'',centerName:cname,centerKey:rtype+'_'+rid,amount:amount,isCash:false};
+      DB.salesLog.push(_saleEntry);
+      postActivityLog('sales',_saleEntry);
     }
   } else if(outcome==='inactive'){
     if(rtype&&rid){
@@ -1302,7 +1308,7 @@ function _wpFinishDone(eKey){
 
   closeModal('wpDoneModal');
   (function(){var _we3=DB.weekEntries[eKey];if(_we3&&_we3.sqlId){fetch('/api/week-entries/'+encodeURIComponent(_we3.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({done:_we3.done,doneDate:_we3.doneDate||null,scheduledDate:_we3.scheduledDate||null})}).catch(function(){});}})();
-  saveDBSync();_debouncedRenderWeekPlan();renderDashboard();
+  _debouncedRenderWeekPlan();renderDashboard();
   if(currentTab==='provinces'&&_currentProvId)setTimeout(renderTable,100);
   var msg=outcome==='won'?'🎉 قرارداد ثبت شد! — '+cname
     :outcome==='inactive'?'❌ غیرفعال شد — '+cname

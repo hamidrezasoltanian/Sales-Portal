@@ -399,9 +399,62 @@ function _buildSavePayload(){
   delete payload.edits;
   delete payload.tasks;
   delete payload.notifications;
-  // Residual blob fields (notes, tags, settings, logs, events, checklist, …) — migrate to entity APIs over time
+  delete payload.notes;
+  delete payload.changeLog;
+  delete payload.callLog;
+  delete payload.visitLog;
+  delete payload.salesLog;
+  delete payload.events;
+  delete payload.checklist;
+  // Residual blob: tags, settings, missionLog, provHistory, kpiTargets, extra, …
   if(_dbServerTs)payload._clientTs=_dbServerTs;
   return payload;
+}
+
+/** POST one activity log entry without full blob save. */
+function postActivityLog(type, entry){
+  if(!entry||!entry.id)return Promise.resolve();
+  return fetch('/api/activity-log',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({type:type,entry:entry})
+  }).catch(function(e){console.warn('[postActivityLog]',type,e.message);});
+}
+
+/** DELETE one activity log entry. */
+function deleteActivityLog(type,id){
+  return fetch('/api/activity-log/'+encodeURIComponent(type)+'/'+encodeURIComponent(id),{
+    method:'DELETE'
+  }).catch(function(e){console.warn('[deleteActivityLog]',type,id,e.message);});
+}
+
+/** Upsert one calendar event via API. */
+function saveCalendarEventApi(ev){
+  if(!ev||ev.id===undefined||ev.id===null)return Promise.resolve();
+  return fetch('/api/calendar-events',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(ev)
+  }).catch(function(e){console.warn('[saveCalendarEventApi]',e.message);});
+}
+
+/** Delete calendar event via API. */
+function deleteCalendarEventApi(id){
+  return fetch('/api/calendar-events/'+encodeURIComponent(id),{method:'DELETE'})
+    .catch(function(e){console.warn('[deleteCalendarEventApi]',id,e.message);});
+}
+
+/** Upsert one checklist day/user via API. */
+function saveChecklistApi(date,username,data){
+  return fetch('/api/checklist',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({date:date,username:username,items:(data&&data.items)||[],note:(data&&data.note)||''})
+  }).catch(function(e){console.warn('[saveChecklistApi]',e.message);});
+}
+
+/** DELETE center note by index. */
+function deleteCenterNoteApi(centerKey,index){
+  return fetch('/api/centers/'+encodeURIComponent(centerKey)+'/notes/'+encodeURIComponent(index),{
+    method:'DELETE'
+  }).catch(function(e){console.warn('[deleteCenterNoteApi]',centerKey,index,e.message);});
 }
 
 /** PATCH a single CRM setting without full blob save (Phase 5). */

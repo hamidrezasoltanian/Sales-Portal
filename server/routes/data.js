@@ -55,6 +55,55 @@ async function upsertChecklistFromObject(q, checklist, user) {
   }
 }
 
+async function upsertCallLogs(q, callLog, user) {
+  if (callLog === undefined || !Array.isArray(callLog)) return;
+  for (const l of callLog) {
+    if (!l || !l.id) continue;
+    await q(
+      `INSERT INTO call_log (id, date, username, count, note, updated_at, updated_by)
+       VALUES ($1, $2, $3, $4, $5, NOW(), $6)
+       ON CONFLICT (id) DO UPDATE SET
+         date = EXCLUDED.date, username = EXCLUDED.username, count = EXCLUDED.count,
+         note = EXCLUDED.note, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+      [l.id, l.date || '', l.userId || '', l.count || 0, l.note || null, user]
+    );
+  }
+}
+
+async function upsertVisitLogs(q, visitLog, user) {
+  if (visitLog === undefined || !Array.isArray(visitLog)) return;
+  for (const l of visitLog) {
+    if (!l || !l.id) continue;
+    const note = l.centerName
+      ? (l.note ? l.centerName + ' — ' + l.note : l.centerName)
+      : (l.note || null);
+    await q(
+      `INSERT INTO visit_log (id, date, username, count, note, updated_at, updated_by)
+       VALUES ($1, $2, $3, $4, $5, NOW(), $6)
+       ON CONFLICT (id) DO UPDATE SET
+         date = EXCLUDED.date, username = EXCLUDED.username, count = EXCLUDED.count,
+         note = EXCLUDED.note, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+      [l.id, l.date || '', l.userId || '', l.count || 0, note, user]
+    );
+  }
+}
+
+async function upsertSalesLogs(q, salesLog, user) {
+  if (salesLog === undefined || !Array.isArray(salesLog)) return;
+  for (const l of salesLog) {
+    if (!l || !l.id) continue;
+    await q(
+      `INSERT INTO sales_log (id, date, username, center_name, center_key, amount, is_cash, updated_at, updated_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)
+       ON CONFLICT (id) DO UPDATE SET
+         date = EXCLUDED.date, username = EXCLUDED.username, center_name = EXCLUDED.center_name,
+         center_key = EXCLUDED.center_key, amount = EXCLUDED.amount, is_cash = EXCLUDED.is_cash,
+         updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+      [l.id, l.date || '', l.userId || '', l.centerName || '', l.centerKey || null, l.amount || 0, !!l.isCash, user]
+    );
+  }
+}
+
 // All routes require auth
 router.use(requireAuth);
 
@@ -203,7 +252,10 @@ router.put('/db', async (req, res) => {
                       'changeLog','settings','events','checklist','kpiTargets','salesLog',
                       'callLog','visitLog','extra','_clientTs','_serverTs','_weDeletedKeys','_mtr',
                       'missionLog','provHistory','kpiHistory', 'provOverrides'];
-  const DEPRECATED_BLOB_KEYS = ['weekEntries', 'edits', 'tasks', 'notifications'];
+  const DEPRECATED_BLOB_KEYS = [
+    'weekEntries', 'edits', 'tasks', 'notifications',
+    'notes', 'changeLog', 'callLog', 'visitLog', 'salesLog', 'events', 'checklist',
+  ];
   const hasKnown = Object.keys(body).some(k => KNOWN_KEYS.includes(k));
   if (!hasKnown && Object.keys(body).length > 0) {
     return res.status(400).json({ error: 'ساختار داده نامعتبر' });
@@ -363,44 +415,10 @@ router.put('/db', async (req, res) => {
       }
     }
 
-    // 5. callLog
-    if (callLog !== undefined && Array.isArray(callLog)) {
-      await client.query('DELETE FROM call_log');
-      for (const l of callLog) {
-        if (!l || !l.id) continue;
-        await client.query(
-          `INSERT INTO call_log (id, date, username, count, note, updated_at, updated_by)
-           VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
-          [l.id, l.date || '', l.userId || '', l.count || 0, l.note || null, user]
-        );
-      }
-    }
-
-    // 6. visitLog
-    if (visitLog !== undefined && Array.isArray(visitLog)) {
-      await client.query('DELETE FROM visit_log');
-      for (const l of visitLog) {
-        if (!l || !l.id) continue;
-        await client.query(
-          `INSERT INTO visit_log (id, date, username, count, note, updated_at, updated_by)
-           VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
-          [l.id, l.date || '', l.userId || '', l.count || 0, l.note || null, user]
-        );
-      }
-    }
-
-    // 7. salesLog
-    if (salesLog !== undefined && Array.isArray(salesLog)) {
-      await client.query('DELETE FROM sales_log');
-      for (const l of salesLog) {
-        if (!l || !l.id) continue;
-        await client.query(
-          `INSERT INTO sales_log (id, date, username, center_name, center_key, amount, is_cash, updated_at, updated_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)`,
-          [l.id, l.date || '', l.userId || '', l.centerName || '', l.centerKey || null, l.amount || 0, !!l.isCash, user]
-        );
-      }
-    }
+    // 5–7. activity logs — UPSERT per id (no DELETE ALL; partial saves must not wipe others)
+    await upsertCallLogs(client.query.bind(client), callLog, user);
+    await upsertVisitLogs(client.query.bind(client), visitLog, user);
+    await upsertSalesLogs(client.query.bind(client), salesLog, user);
 
     // 8. missionLog
     if (missionLog !== undefined && Array.isArray(missionLog)) {

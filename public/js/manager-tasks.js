@@ -495,7 +495,7 @@ function _renderKPIHistory(userId,month){
   getCallsMonth(userId,month).forEach(function(l){
     entries.push({ts:dateStrToTs(l.date),date:l.date,icon:'📞',
       text:'تماس: '+l.count+' تماس'+(l.note?' — '+esc(l.note):''),
-      del:function(){DB.callLog=DB.callLog.filter(function(x){return x.id!==l.id;});saveDB();renderKPIPanel();}});
+      del:function(){DB.callLog=DB.callLog.filter(function(x){return x.id!==l.id;});deleteActivityLog('call',l.id);renderKPIPanel();}});
   });
   var visitsData=getVisitsMonth(userId,month);
   // ویزیت‌های خودکار از برنامه هفته
@@ -508,12 +508,12 @@ function _renderKPIHistory(userId,month){
   visitsData.manual.forEach(function(l){
     entries.push({ts:dateStrToTs(l.date),date:l.date,icon:'🚗',
       text:'ویزیت (دستی): '+(l.centerName?esc(l.centerName):'حضوری')+(l.note?' — '+esc(l.note):''),
-      del:function(){DB.visitLog=DB.visitLog.filter(function(x){return x.id!==l.id;});saveDB();renderKPIPanel();}});
+      del:function(){DB.visitLog=DB.visitLog.filter(function(x){return x.id!==l.id;});deleteActivityLog('visit',l.id);renderKPIPanel();}});
   });
   getSalesMonth(userId,month).forEach(function(l){
     entries.push({ts:dateStrToTs(l.date),date:l.date,icon:l.isCash?'💵':'💳',
       text:'فروش: '+(l.centerName?esc(l.centerName):'')+(l.amount?' — '+Number(l.amount).toLocaleString('fa-IR')+' ریال':'')+(l.isCash?' (نقدی)':' (اعتباری)'),
-      del:function(){DB.salesLog=DB.salesLog.filter(function(x){return x.id!==l.id;});saveDB();renderKPIPanel();}});
+      del:function(){DB.salesLog=DB.salesLog.filter(function(x){return x.id!==l.id;});deleteActivityLog('sales',l.id);renderKPIPanel();}});
   });
   var ms=getMissionMonth(userId,month);
   if(ms)entries.push({ts:b.startTs,date:month,icon:'✈️',
@@ -553,10 +553,10 @@ function _kpiDelEntry(i){
   getVisitsMonth(userId,month).manual.forEach(function(l){entries.push({id:l.id,type:'visit'});});
   getSalesMonth(userId,month).forEach(function(l){entries.push({id:l.id,type:'sale'});});
   var e=entries[i];if(!e)return;
-  if(e.type==='call')DB.callLog=DB.callLog.filter(function(x){return x.id!==e.id;});
-  else if(e.type==='visit')DB.visitLog=DB.visitLog.filter(function(x){return x.id!==e.id;});
-  else if(e.type==='sale')DB.salesLog=DB.salesLog.filter(function(x){return x.id!==e.id;});
-  saveDB();renderKPIPanel();
+  if(e.type==='call'){DB.callLog=DB.callLog.filter(function(x){return x.id!==e.id;});deleteActivityLog('call',e.id);}
+  else if(e.type==='visit'){DB.visitLog=DB.visitLog.filter(function(x){return x.id!==e.id;});deleteActivityLog('visit',e.id);}
+  else if(e.type==='sale'){DB.salesLog=DB.salesLog.filter(function(x){return x.id!==e.id;});deleteActivityLog('sales',e.id);}
+  renderKPIPanel();
 }
 
 // ── Modal ثبت فعالیت ──────────────────────────────────────────────
@@ -632,8 +632,10 @@ function _saveCallLog(userId){
   var note=(document.getElementById('lc_note').value||'').trim();
   if(!date||count<1){showToast('تاریخ و تعداد تماس را وارد کنید');return;}
   ensureKPIDB();
-  DB.callLog.push({id:Date.now(),date:date,userId:userId,count:count,note:note});
-  saveDB();showToast('✅ '+count+' تماس ثبت شد');closeModal('kpiLogModal');renderKPIPanel();
+  var entry={id:Date.now(),date:date,userId:userId,count:count,note:note};
+  DB.callLog.push(entry);
+  postActivityLog('call',entry);
+  showToast('✅ '+count+' تماس ثبت شد');closeModal('kpiLogModal');renderKPIPanel();
 }
 
 function _setVisitMode(mode){
@@ -663,7 +665,9 @@ function _saveVisitLog(userId){
     var center=(document.getElementById('lv_center').value||'').trim();
     var note=(document.getElementById('lv_note2')||document.getElementById('lv_note')).value.trim();
     if(!date){showToast('تاریخ را وارد کنید');return;}
-    DB.visitLog.push({id:Date.now(),date:date,userId:userId,centerName:center,note:note,count:1});
+    var entry={id:Date.now(),date:date,userId:userId,centerName:center,note:note,count:1};
+    DB.visitLog.push(entry);
+    postActivityLog('visit',entry);
   } else {
     // تعداد کل
     var date=(document.getElementById('lv_date')||{}).value.trim();
@@ -671,9 +675,11 @@ function _saveVisitLog(userId){
     var note=(document.getElementById('lv_note')||{}).value.trim();
     if(!date){showToast('تاریخ را وارد کنید');return;}
     if(countVal<1){showToast('تعداد باید حداقل ۱ باشد');return;}
-    DB.visitLog.push({id:Date.now(),date:date,userId:userId,centerName:'',note:note,count:countVal});
+    var entry2={id:Date.now(),date:date,userId:userId,centerName:'',note:note,count:countVal};
+    DB.visitLog.push(entry2);
+    postActivityLog('visit',entry2);
   }
-  saveDB();showToast('✅ ویزیت ثبت شد');closeModal('kpiLogModal');renderKPIPanel();
+  showToast('✅ ویزیت ثبت شد');closeModal('kpiLogModal');renderKPIPanel();
 }
 function _saveSaleLog(userId){
   var date=((document.getElementById('ls_date')||{}).value||'').trim();
@@ -682,8 +688,10 @@ function _saveSaleLog(userId){
   var isCash=document.getElementById('ls_cash').value==='1';
   if(!date){showToast('تاریخ را وارد کنید');return;}
   ensureKPIDB();
-  DB.salesLog.push({id:Date.now(),date:date,userId:userId,centerName:center,amount:amount,isCash:isCash});
-  saveDB();showToast('✅ فروش ثبت شد — '+(isCash?'نقدی':'اعتباری'));closeModal('kpiLogModal');renderKPIPanel();
+  var entry={id:Date.now(),date:date,userId:userId,centerName:center,amount:amount,isCash:isCash};
+  DB.salesLog.push(entry);
+  postActivityLog('sales',entry);
+  showToast('✅ فروش ثبت شد — '+(isCash?'نقدی':'اعتباری'));closeModal('kpiLogModal');renderKPIPanel();
 }
 function _saveMissionLog(userId,done){
   var month=document.getElementById('lm_month').value;

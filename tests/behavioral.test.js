@@ -532,6 +532,46 @@ async function test14_centerNotePost() {
   await query('DELETE FROM center_notes WHERE center_key = $1', [centerKey]);
 }
 
+async function test15_activityLogUpsert() {
+  console.log('\n── Test 15: activity log POST + partial PUT ──');
+  const tok = token(TEST_USERS[0]);
+  const id = 9900000000100;
+  const post = await req('POST', '/api/activity-log', {
+    type: 'call', entry: { id, date: '1404/02/01', userId: TEST_USERS[0], count: 2, note: 'beh test' },
+  }, tok);
+  assert(post.status === 201, 'POST activity-log returns 201');
+  const put = await req('PUT', '/api/data/db', { tags: [] }, tok);
+  assert(put.status === 200, 'PUT without callLog returns 200');
+  const get = await req('GET', '/api/data/db', null, tok);
+  const found = (get.body.callLog || []).some(function (l) { return l.id === id; });
+  assert(found, 'callLog entry persisted after partial PUT');
+  await req('DELETE', '/api/activity-log/call/' + id, null, tok);
+}
+
+async function test16_noteDelete() {
+  console.log('\n── Test 16: DELETE /api/centers/:key/notes/:index ──');
+  const tok = token(TEST_USERS[0]);
+  const centerKey = 'center_note_del_' + Date.now();
+  await req('POST', '/api/centers/' + encodeURIComponent(centerKey) + '/notes', { text: 'to delete' }, tok);
+  const del = await req('DELETE', '/api/centers/' + encodeURIComponent(centerKey) + '/notes/0', null, tok);
+  assert(del.status === 200, 'DELETE note returns 200');
+  assert(del.body.notes && del.body.notes.length === 0, 'notes array empty');
+  await query('DELETE FROM center_notes WHERE center_key = $1', [centerKey]);
+}
+
+async function test17_calendarEventApi() {
+  console.log('\n── Test 17: POST /api/calendar-events ──');
+  const tok = token(TEST_USERS[0]);
+  const evId = 990000002;
+  const post = await req('POST', '/api/calendar-events', {
+    id: evId, title: 'CI Event', startMs: 1700000000000, allDay: true, owner: TEST_USERS[0],
+  }, tok);
+  assert(post.status === 200, 'POST calendar-events returns 200');
+  const get = await req('GET', '/api/data/db', null, tok);
+  assert((get.body.events || []).some(function (e) { return e.id === evId; }), 'event in GET /db');
+  await req('DELETE', '/api/calendar-events/' + evId, null, tok);
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -583,6 +623,9 @@ async function main() {
     await test12_checklistUpsertNotWiped();
     await test13_crmSettingsPatch();
     await test14_centerNotePost();
+    await test15_activityLogUpsert();
+    await test16_noteDelete();
+    await test17_calendarEventApi();
 
   } catch (err) {
     console.error('\n❌ خطای غیرمنتظره:', err.message);
