@@ -1272,6 +1272,8 @@ function initLetterEditor() {
   tinymce.remove('#letter-body-editor');
   tinymce.init({
     selector: '#letter-body-editor',
+    base_url: 'https://cdn.jsdelivr.net/npm/tinymce@6.8.5',
+    suffix: '.min',
     height: 380,
     min_height: 280,
     resize: true,

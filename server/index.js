@@ -40,7 +40,7 @@ if (helmet) {
         fontSrc: ["'self'", 'cdn.jsdelivr.net', 'data:'],
         imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
         connectSrc: ["'self'", 'https://api.anthropic.com'],
-        frameSrc: ["'self'"],
+        frameSrc: ["'self'", 'blob:'],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
       },
