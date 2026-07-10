@@ -814,7 +814,7 @@ function toggleTag(type,id,tagId){
   var k=recK(type,id);if(!DB.rTags[k])DB.rTags[k]=[];
   var idx=DB.rTags[k].indexOf(tagId);
   if(idx===-1)DB.rTags[k].push(tagId);else DB.rTags[k].splice(idx,1);
-  saveDB();closeTagMenu();
+  saveCenterTagsApi(k,DB.rTags[k]);closeTagMenu();
   if(_currentProvId)renderProvTable();else renderBanner();
 }
 function closeTagMenu(){var m=document.getElementById('tagMenu');if(m)m.remove();document.removeEventListener('click',closeTagMenuOutside);}
@@ -884,6 +884,6 @@ function createTagPrompt(){
   var name=prompt('نام برچسب جدید:');if(!name||!name.trim())return;
   var colors=['#0ea5e9','#22c55e','#f59e0b','#dc2626','#8b5cf6','#ec4899','#06b6d4','#64748b'];
   DB.tags.push({id:_nextTagId++,name:name.trim(),color:colors[Math.floor(Math.random()*colors.length)]});
-  saveDB();rebuildFilters();showToast('برچسب "'+name.trim()+'" ساخته شد ✅');
+  saveGlobalTagsApi(DB.tags);rebuildFilters();showToast('برچسب "'+name.trim()+'" ساخته شد ✅');
 }
 

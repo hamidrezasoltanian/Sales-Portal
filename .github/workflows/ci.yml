@@ -33,6 +33,13 @@ jobs:
             server/routes/activity-log.js \
             server/routes/calendar-events.js \
             server/routes/checklist-api.js \
+            server/routes/mission-log.js \
+            server/routes/kpi-data.js \
+            server/routes/prov-history.js \
+            server/routes/tags.js \
+            public/js/tasks.js \
+            public/js/kpi.js \
+            public/js/provinces.js \
             tests/behavioral.test.js \
             tests/qa-persistence-agent.js
           do

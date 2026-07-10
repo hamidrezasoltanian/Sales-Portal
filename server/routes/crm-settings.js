@@ -30,12 +30,21 @@ router.get('/', requireManager, async function (req, res) {
   }
 });
 
-// PATCH /api/crm-settings/:key — single setting upsert (manager)
-router.patch('/:key', requireManager, async function (req, res) {
+const USER_PATCH_KEYS = new Set(['taskColumns', '_lastUser', 'firstUse', 'onboardingDisabled']);
+
+function isManagerRole(role) {
+  return role === 'مدیر' || role === 'سوپر ادمین';
+}
+
+// PATCH /api/crm-settings/:key — single setting upsert
+router.patch('/:key', requireAuth, async function (req, res) {
   try {
     const key = req.params.key;
     if (!key || key.length > 64) {
       return res.status(400).json({ error: 'کلید نامعتبر' });
+    }
+    if (!USER_PATCH_KEYS.has(key) && !isManagerRole(req.user.role)) {
+      return res.status(403).json({ error: 'دسترسی غیرمجاز' });
     }
     const value = req.body && Object.prototype.hasOwnProperty.call(req.body, 'value')
       ? req.body.value

@@ -19,6 +19,20 @@ function _getTkStatuses(){
   return _TK_STATUSES;
 }
 
+function tkSaveColumns(){
+  if(!DB.settings)DB.settings={};
+  if(!DB.settings.taskColumns)DB.settings.taskColumns={};
+  DB.settings.taskColumns[currentUser]=JSON.parse(JSON.stringify(window._tkColsPending||[]));
+  patchCrmSetting('taskColumns',DB.settings.taskColumns);
+  closeModal('tkColsMgr');showToast('ستون\u200cها ذخیره شد \u2705');renderTasksPanel();
+}
+function tkResetColumns(){
+  if(!DB.settings||!DB.settings.taskColumns)return;
+  delete DB.settings.taskColumns[currentUser];
+  patchCrmSetting('taskColumns',DB.settings.taskColumns);
+  closeModal('tkColsMgr');showToast('\u0628\u0627\u0632\u06af\u0634\u062a \u0634\u062f');renderTasksPanel();
+}
+
 function openTkColumnsModal(){
   if(!DB.settings)DB.settings={};
   if(!DB.settings.taskColumns)DB.settings.taskColumns={};
@@ -44,12 +58,8 @@ function openTkColumnsModal(){
   var body='<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">ستون اول و آخر ثابت هستند. ستون‌های میانی قابل حذف هستند.</div>'
     +'<div id="tkColsRows">'+renderRows()+'</div>'
     +'<button onclick="_tkColsAdd()" style="margin-top:8px;padding:5px 14px;background:var(--bg-raised);border:1px solid var(--border);border-radius:5px;cursor:pointer;font-size:11px;font-family:inherit">+ افزودن ستون</button>';
-  var footer='<button class="btn-primary" onclick="'
-    +'if(!DB.settings.taskColumns)DB.settings.taskColumns={};'
-    +'DB.settings.taskColumns[currentUser]=JSON.parse(JSON.stringify(window._tkColsPending));'
-    +"saveDB();closeModal('tkColsMgr');showToast('ستون\u200cها ذخیره شد \u2705');renderTasksPanel();"
-    +'">ذخیره</button>'
-    +'<button onclick="if(confirm(\'\u0628ازگشت به پیشفرض?\')){'+'delete DB.settings.taskColumns[currentUser];saveDB();closeModal(\'tkColsMgr\');showToast(\'\u0628ازگشت شد\');renderTasksPanel();}" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit">بازگشت پیشفرض</button>'
+  var footer='<button class="btn-primary" onclick="tkSaveColumns()">ذخیره</button>'
+    +'<button onclick="if(confirm(\'\u0628\u0627\u0632\u06af\u0634\u062a \u0628\u0647 \u067e\u06cc\u0634\u0641\u0631\u0636?\'))tkResetColumns()" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit">بازگشت پیشفرض</button>'
     +'<button class="btn-secondary" onclick="closeModal(\'tkColsMgr\')">بستن</button>';
   openModal('tkColsMgr','⚙️ مدیریت ستون‌های وظایف',body,footer,{lg:false});
 }
@@ -301,7 +311,8 @@ function tkColDrop(ev,targetColId){
   if(!DB.settings)DB.settings={};
   if(!DB.settings.taskColumns)DB.settings.taskColumns={};
   DB.settings.taskColumns[currentUser]=cols;
-  saveDB();_tkColDragging=null;renderTasksPanel();
+  patchCrmSetting('taskColumns',DB.settings.taskColumns);
+  _tkColDragging=null;renderTasksPanel();
   showToast('↕ ترتیب ستون‌ها ذخیره شد',1500);
 }
 
@@ -707,7 +718,7 @@ function _setupAutoReminder(){
     if(!DB.settings) DB.settings = {};
     if((DB.settings.lastMorningReminder||'') === today) return;
     DB.settings.lastMorningReminder = today;
-    saveDB();
+    patchCrmSetting('lastMorningReminder', today);
     _runMorningBriefing(today);
   }, 60000);
 
@@ -720,7 +731,7 @@ function _setupAutoReminder(){
     if(!DB.settings) DB.settings = {};
     if((DB.settings.lastAfternoonReminder||'') === today) return;
     DB.settings.lastAfternoonReminder = today;
-    saveDB();
+    patchCrmSetting('lastAfternoonReminder', today);
     _runTodayReminders(today);
   }, 60000);
 
@@ -731,7 +742,7 @@ function _setupAutoReminder(){
     if(!DB.settings) DB.settings = {};
     if((DB.settings.lastStartupReminder||'') === today) return;
     DB.settings.lastStartupReminder = today;
-    saveDB();
+    patchCrmSetting('lastStartupReminder', today);
     _runOverdueAndUndatedReminders(today);
   }, 8000);
 }

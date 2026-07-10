@@ -543,7 +543,7 @@ async function test15_activityLogUpsert() {
   const put = await req('PUT', '/api/data/db', { tags: [] }, tok);
   assert(put.status === 200, 'PUT without callLog returns 200');
   const get = await req('GET', '/api/data/db', null, tok);
-  const found = (get.body.callLog || []).some(function (l) { return l.id === id; });
+  const found = (get.body.callLog || []).some(function (l) { return Number(l.id) === id; });
   assert(found, 'callLog entry persisted after partial PUT');
   await req('DELETE', '/api/activity-log/call/' + id, null, tok);
 }

@@ -437,8 +437,9 @@ function umProvOwnerChanged(provId){
     var fromName=fromOwner?(members.find(function(m){return m.id===fromOwner;})||{name:fromOwner}).name:'بدون مسئول';
     var toName=newOwner?(members.find(function(m){return m.id===newOwner;})||{name:newOwner}).name:'بدون مسئول';
     if(!DB.provHistory)DB.provHistory=[];
-    DB.provHistory.push({provId:provId,provName:prov?prov.name:provId,from:fromOwner,fromName:fromName,to:newOwner,toName:toName,at:todayStr(),ts:Date.now()});
-    saveDB();
+    var _phEntry={provId:provId,provName:prov?prov.name:provId,from:fromOwner,fromName:fromName,to:newOwner,toName:toName,at:todayStr(),ts:Date.now()};
+    DB.provHistory.push(_phEntry);
+    postProvHistoryApi(_phEntry);
   }
   setE(getProvType(provId),provId,'owner',newOwner);
   var dot=document.getElementById('pdot_'+provId);
@@ -499,7 +500,7 @@ function showProvHistory(){
     html+='</div></div>';
   });
   html+='</div>';
-  var foot='<button onclick="if(confirm(\'پاک کردن کل تاریخچه؟\')){DB.provHistory=[];saveDB();closeModal(\'provHistModal\');showToast(\'تاریخچه پاک شد\')}" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5;border-radius:5px;padding:5px 14px;cursor:pointer;font-size:11px;font-family:inherit">🗑 پاک کردن</button>'
+  var foot='<button onclick="if(confirm(\'پاک کردن کل تاریخچه؟\')){DB.provHistory=[];clearProvHistoryApi();closeModal(\'provHistModal\');showToast(\'تاریخچه پاک شد\')}" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5;border-radius:5px;padding:5px 14px;cursor:pointer;font-size:11px;font-family:inherit">🗑 پاک کردن</button>'
     +'<button class="btn-secondary" onclick="closeModal(\'provHistModal\')" style="margin-right:8px">بستن</button>';
   openModal('provHistModal','📋 تاریخچه تغییرات مسئولین استان',html,foot,{lg:true});
 }

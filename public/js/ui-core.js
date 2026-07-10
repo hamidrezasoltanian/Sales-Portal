@@ -14,7 +14,7 @@ function showToast(msg,dur){
 
 // ════════════════════════ USER ═════════════════════════
 function onUserChange(u){
-  currentUser=u;DB._lastUser=u;saveDB();
+  currentUser=u;DB._lastUser=u;patchCrmSetting('_lastUser',u);
   var _dot=document.getElementById('uSelDot');
   if(_dot&&typeof umGetColor!=='undefined')_dot.style.background=umGetColor(u);
   // تغییر کاربر = تغییر هویت، نه فیلتر — داده‌ها محو نمی‌شوند

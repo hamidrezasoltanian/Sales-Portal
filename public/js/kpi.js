@@ -16,7 +16,7 @@ function saveKPISnapshot(userId, month){
   DB.kpiHistory.push(snap);
   // keep max 24 months × N users
   DB.kpiHistory=DB.kpiHistory.slice(-100);
-  saveDB();
+  saveKpiHistoryApi(snap);
   return snap;
 }
 function getKPIHistory(userId,nMonths){
@@ -111,7 +111,8 @@ function getKPITarget(userId,month){
 }
 function saveKPITarget(userId,month,targets){
   ensureKPIDB();
-  DB.kpiTargets[userId+':'+month]=targets;saveDB();
+  DB.kpiTargets[userId+':'+month]=targets;
+  saveKpiTargetApi(userId,month,targets);
 }
 
 // ── داده‌های ماه ──────────────────────────────────────────────────

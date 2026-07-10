@@ -406,7 +406,14 @@ function _buildSavePayload(){
   delete payload.salesLog;
   delete payload.events;
   delete payload.checklist;
-  // Residual blob: tags, settings, missionLog, provHistory, kpiTargets, extra, …
+  delete payload.tags;
+  delete payload.rTags;
+  delete payload.missionLog;
+  delete payload.provHistory;
+  delete payload.kpiHistory;
+  delete payload.kpiTargets;
+  delete payload.extra;
+  // Residual blob: settings, provOverrides, managerTasks, …
   if(_dbServerTs)payload._clientTs=_dbServerTs;
   return payload;
 }
@@ -455,6 +462,39 @@ function deleteCenterNoteApi(centerKey,index){
   return fetch('/api/centers/'+encodeURIComponent(centerKey)+'/notes/'+encodeURIComponent(index),{
     method:'DELETE'
   }).catch(function(e){console.warn('[deleteCenterNoteApi]',centerKey,index,e.message);});
+}
+
+function saveMissionLogApi(entry){
+  return fetch('/api/mission-log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(entry)})
+    .catch(function(e){console.warn('[saveMissionLogApi]',e.message);});
+}
+function deleteMissionLogApi(userId,month){
+  return fetch('/api/mission-log?userId='+encodeURIComponent(userId)+'&month='+encodeURIComponent(month),{method:'DELETE'})
+    .catch(function(e){console.warn('[deleteMissionLogApi]',e.message);});
+}
+function saveKpiTargetApi(username,month,targets){
+  return fetch('/api/kpi-data/user-target',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(Object.assign({username:username,month:month},targets||{}))})
+    .catch(function(e){console.warn('[saveKpiTargetApi]',e.message);});
+}
+function saveKpiHistoryApi(snap){
+  return fetch('/api/kpi-data/history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(snap||{})})
+    .catch(function(e){console.warn('[saveKpiHistoryApi]',e.message);});
+}
+function postProvHistoryApi(entry){
+  return fetch('/api/prov-history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(entry||{})})
+    .catch(function(e){console.warn('[postProvHistoryApi]',e.message);});
+}
+function clearProvHistoryApi(){
+  return fetch('/api/prov-history',{method:'DELETE'}).catch(function(e){console.warn('[clearProvHistoryApi]',e.message);});
+}
+function saveGlobalTagsApi(tags){
+  return fetch('/api/tags',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(tags||[])})
+    .catch(function(e){console.warn('[saveGlobalTagsApi]',e.message);});
+}
+function saveCenterTagsApi(centerKey,tagIds){
+  return fetch('/api/tags/centers/'+encodeURIComponent(centerKey),{method:'PATCH',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({tagIds:tagIds||[]})}).catch(function(e){console.warn('[saveCenterTagsApi]',centerKey,e.message);});
 }
 
 /** PATCH a single CRM setting without full blob save (Phase 5). */

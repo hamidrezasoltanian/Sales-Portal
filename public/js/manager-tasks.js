@@ -698,14 +698,17 @@ function _saveMissionLog(userId,done){
   var note=(document.getElementById('lm_note').value||'').trim();
   ensureKPIDB();
   DB.missionLog=DB.missionLog.filter(function(l){return!(l.userId===userId&&l.month===month);});
-  DB.missionLog.push({id:Date.now(),userId:userId,month:month,done:done,note:note});
-  saveDB();showToast(done?'✅ ماموریت انجام‌شده ثبت شد':'⏳ ماموریت برنامه‌ریزی شد');closeModal('kpiLogModal');renderKPIPanel();
+  var entry={id:Date.now(),userId:userId,month:month,done:done,note:note};
+  DB.missionLog.push(entry);
+  saveMissionLogApi(entry);
+  showToast(done?'✅ ماموریت انجام‌شده ثبت شد':'⏳ ماموریت برنامه‌ریزی شد');closeModal('kpiLogModal');renderKPIPanel();
 }
 function _delMissionLog(userId){
   var month=document.getElementById('lm_month').value;
   ensureKPIDB();
   DB.missionLog=DB.missionLog.filter(function(l){return!(l.userId===userId&&l.month===month);});
-  saveDB();showToast('ماموریت حذف شد');closeModal('kpiLogModal');renderKPIPanel();
+  deleteMissionLogApi(userId,month);
+  showToast('ماموریت حذف شد');closeModal('kpiLogModal');renderKPIPanel();
 }
 
 // ── Modal تنظیم هدف ───────────────────────────────────────────────

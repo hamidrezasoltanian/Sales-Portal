@@ -104,6 +104,50 @@ async function upsertSalesLogs(q, salesLog, user) {
   }
 }
 
+async function upsertMissionLogs(q, missionLog, user) {
+  if (missionLog === undefined || !Array.isArray(missionLog)) return;
+  for (const l of missionLog) {
+    if (!l || !l.id) continue;
+    await q(
+      `INSERT INTO mission_log (id, username, month, done, note, updated_at, updated_by)
+       VALUES ($1, $2, $3, $4, $5, NOW(), $6)
+       ON CONFLICT (id) DO UPDATE SET
+         username = EXCLUDED.username, month = EXCLUDED.month, done = EXCLUDED.done,
+         note = EXCLUDED.note, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+      [l.id, l.userId || '', l.month || '', !!l.done, l.note || null, user]
+    );
+  }
+}
+
+async function upsertKpiHistory(q, kpiHistory, user) {
+  if (kpiHistory === undefined || !Array.isArray(kpiHistory)) return;
+  for (const s of kpiHistory) {
+    if (!s || !s.userId || !s.month) continue;
+    await q(
+      `INSERT INTO kpi_history (username, month, data, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (username, month) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
+      [s.userId, s.month, JSON.stringify(s)]
+    );
+  }
+}
+
+async function upsertCenterExtras(q, extra, user) {
+  if (extra === undefined || !Array.isArray(extra)) return;
+  for (const c of extra) {
+    if (!c || !c.id) continue;
+    await q(
+      `INSERT INTO center_extras (id, row_num, name, potential, type, lead, province_id, owner, updated_at, updated_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)
+       ON CONFLICT (id) DO UPDATE SET
+         row_num = EXCLUDED.row_num, name = EXCLUDED.name, potential = EXCLUDED.potential,
+         type = EXCLUDED.type, lead = EXCLUDED.lead, province_id = EXCLUDED.province_id,
+         owner = EXCLUDED.owner, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+      [c.id, c.row || 0, c.name || '', c.potential || 1, c.type || null, c.lead || 'سرنخ', c.province_id || '', c.owner || null, user]
+    );
+  }
+}
+
 // All routes require auth
 router.use(requireAuth);
 
@@ -163,11 +207,16 @@ async function loadDBFromSQL(client) {
       kpiTargets.weights = r.value;
     } else if (r.key === 'provOverrides') {
       provOverrides = r.value || {};
+    } else if (r.key === 'tagDefinitions') {
+      // loaded into tags[] below
     } else {
       settings[r.key] = r.value;
     }
   });
   if (settings.anthropicKey) settings.anthropicKey = '***';
+
+  const tagDefsR = settingsR.rows.find(function (r) { return r.key === 'tagDefinitions'; });
+  const tags = tagDefsR && Array.isArray(tagDefsR.value) ? tagDefsR.value : [];
 
   const checklist = {};
   checklistR.rows.forEach(function(r) {
@@ -204,6 +253,7 @@ async function loadDBFromSQL(client) {
   return {
     edits,
     notes,
+    tags,
     rTags,
     settings,
     provOverrides,
@@ -255,6 +305,7 @@ router.put('/db', async (req, res) => {
   const DEPRECATED_BLOB_KEYS = [
     'weekEntries', 'edits', 'tasks', 'notifications',
     'notes', 'changeLog', 'callLog', 'visitLog', 'salesLog', 'events', 'checklist',
+    'tags', 'rTags', 'missionLog', 'provHistory', 'kpiHistory', 'kpiTargets', 'extra',
   ];
   const hasKnown = Object.keys(body).some(k => KNOWN_KEYS.includes(k));
   if (!hasKnown && Object.keys(body).length > 0) {
@@ -323,14 +374,21 @@ router.put('/db', async (req, res) => {
     }
 
     // ── center_tags ───────────────────────────────────────────────────────────
-    const tagsData = rTags || tags;
-    if (tagsData && typeof tagsData === 'object' && Object.keys(tagsData).length > 0) {
+    if (tags && Array.isArray(tags)) {
+      await client.query(
+        `INSERT INTO app_settings (key, value, updated_at, updated_by)
+         VALUES ('tagDefinitions', $1, NOW(), $2)
+         ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW(), updated_by = $2`,
+        [JSON.stringify(tags), user]
+      );
+    }
+    if (rTags && typeof rTags === 'object' && !Array.isArray(rTags) && Object.keys(rTags).length > 0) {
       await client.query(
         `INSERT INTO center_tags (center_key, tags, updated_at, updated_by)
          SELECT key, value, NOW(), $2 FROM jsonb_each($1::jsonb)
          ON CONFLICT (center_key) DO UPDATE
            SET tags = EXCLUDED.tags, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
-        [JSON.stringify(tagsData), user]
+        [JSON.stringify(rTags), user]
       );
     }
 
@@ -364,22 +422,11 @@ router.put('/db', async (req, res) => {
     // 2. checklist — UPSERT per (date, username)
     await upsertChecklistFromObject(client.query.bind(client), checklist, user);
 
-    // 3. extra
-    if (extra !== undefined && Array.isArray(extra)) {
-      await client.query('DELETE FROM center_extras');
-      for (const c of extra) {
-        if (!c || !c.id) continue;
-        await client.query(
-          `INSERT INTO center_extras (id, row_num, name, potential, type, lead, province_id, owner, updated_at, updated_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)`,
-          [c.id, c.row || 0, c.name || '', c.potential || 1, c.type || null, c.lead || 'سرنخ', c.province_id || '', c.owner || null, user]
-        );
-      }
-    }
+    // 3. extra — UPSERT per id
+    await upsertCenterExtras(client.query.bind(client), extra, user);
 
     // 4. kpiTargets
     if (kpiTargets !== undefined && typeof kpiTargets === 'object' && kpiTargets !== null) {
-      // 1. Weights
       if (kpiTargets.weights) {
         await client.query(
           `INSERT INTO app_settings (key, value, updated_at, updated_by)
@@ -388,27 +435,30 @@ router.put('/db', async (req, res) => {
           [JSON.stringify(kpiTargets.weights), user]
         );
       }
-      // 2. Provinces
-      await client.query('DELETE FROM kpi_province_targets');
       if (kpiTargets.provinces && typeof kpiTargets.provinces === 'object') {
         for (const [provId, targets] of Object.entries(kpiTargets.provinces)) {
           if (!targets) continue;
           await client.query(
             `INSERT INTO kpi_province_targets (province_id, calls, visits, sales, extra, updated_at, updated_by)
-             VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
+             VALUES ($1, $2, $3, $4, $5, NOW(), $6)
+             ON CONFLICT (province_id) DO UPDATE SET
+               calls = EXCLUDED.calls, visits = EXCLUDED.visits, sales = EXCLUDED.sales,
+               extra = EXCLUDED.extra, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
             [provId, targets.calls || 0, targets.visits || 0, targets.sales || 0, targets.extra || 0, user]
           );
         }
       }
-      // 3. User targets
-      await client.query('DELETE FROM kpi_user_targets');
       for (const [key, value] of Object.entries(kpiTargets)) {
         if (key === 'weights' || key === 'provinces' || !value) continue;
         if (key.includes(':')) {
           const [username, month] = key.split(':');
           await client.query(
             `INSERT INTO kpi_user_targets (username, month, calls_per_day, visits_per_week, sales_count, sales_amount, cash_pct, updated_at, updated_by)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)
+             ON CONFLICT (username, month) DO UPDATE SET
+               calls_per_day = EXCLUDED.calls_per_day, visits_per_week = EXCLUDED.visits_per_week,
+               sales_count = EXCLUDED.sales_count, sales_amount = EXCLUDED.sales_amount,
+               cash_pct = EXCLUDED.cash_pct, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
             [username, month, value.callsPerDay || 10, value.visitsPerWeek || 5, value.salesCount || 5, value.salesAmount || 0, value.cashPct || 50, user]
           );
         }
@@ -420,44 +470,14 @@ router.put('/db', async (req, res) => {
     await upsertVisitLogs(client.query.bind(client), visitLog, user);
     await upsertSalesLogs(client.query.bind(client), salesLog, user);
 
-    // 8. missionLog
-    if (missionLog !== undefined && Array.isArray(missionLog)) {
-      await client.query('DELETE FROM mission_log');
-      for (const l of missionLog) {
-        if (!l || !l.id) continue;
-        await client.query(
-          `INSERT INTO mission_log (id, username, month, done, note, updated_at, updated_by)
-           VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
-          [l.id, l.userId || '', l.month || '', !!l.done, l.note || null, user]
-        );
-      }
-    }
+    // 8. missionLog — UPSERT per id
+    await upsertMissionLogs(client.query.bind(client), missionLog, user);
 
-    // 9. provHistory
-    if (provHistory !== undefined && Array.isArray(provHistory)) {
-      await client.query('DELETE FROM province_history');
-      for (const h of provHistory) {
-        if (!h) continue;
-        await client.query(
-          `INSERT INTO province_history (province_id, province_name, from_owner, from_name, to_owner, to_name, action_date, action_ts, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
-          [h.provId, h.provName || '', h.from || null, h.fromName || null, h.to || null, h.toName || null, h.at || '', h.ts || 0]
-        );
-      }
-    }
+    // 9. provHistory — append only via dedicated API; skip bulk DELETE on PUT
+    // (provHistory in PUT is deprecated — use POST /api/prov-history)
 
-    // 10. kpiHistory
-    if (kpiHistory !== undefined && Array.isArray(kpiHistory)) {
-      await client.query('DELETE FROM kpi_history');
-      for (const s of kpiHistory) {
-        if (!s || !s.userId || !s.month) continue;
-        await client.query(
-          `INSERT INTO kpi_history (username, month, data, updated_at)
-           VALUES ($1, $2, $3, NOW())`,
-          [s.userId, s.month, JSON.stringify(s)]
-        );
-      }
-    }
+    // 10. kpiHistory — UPSERT per user+month
+    await upsertKpiHistory(client.query.bind(client), kpiHistory, user);
 
     // ── week_entries — skip entirely if not in payload (API is source of truth)
     if (weekEntries !== undefined || (Array.isArray(_weDeletedKeys) && _weDeletedKeys.length > 0)) {

@@ -171,7 +171,7 @@ async function flow_activityLogSurvivesPartialSave(tok) {
   assert(put.status === 200, 'PUT without callLog key');
 
   const db = await refreshDb(tok);
-  const found = (db.callLog || []).some(function (l) { return l.id === id && l.count === 3; });
+  const found = (db.callLog || []).some(function (l) { return Number(l.id) === id && l.count === 3; });
   assert(found, 'callLog entry survived partial bulk save');
 
   await req('DELETE', '/api/activity-log/call/' + id, null, tok);
@@ -188,8 +188,8 @@ async function flow_concurrentActivityLogs(tok, tok2) {
   assert(p1.status === 201 && p2.status === 201, 'both concurrent POSTs succeed');
 
   const db = await refreshDb(tok);
-  const has1 = (db.callLog || []).some(function (l) { return l.id === id1; });
-  const has2 = (db.callLog || []).some(function (l) { return l.id === id2; });
+  const has1 = (db.callLog || []).some(function (l) { return Number(l.id) === id1; });
+  const has2 = (db.callLog || []).some(function (l) { return Number(l.id) === id2; });
   assert(has1 && has2, 'both entries present after refresh');
 
   await req('DELETE', '/api/activity-log/call/' + id1, null, tok);
@@ -233,14 +233,15 @@ async function flow_checklist(tok) {
 
 async function flow_weekEntry(tok) {
   console.log('\n🔄 Flow: week entry create → bulk PUT without weekEntries → refresh');
-  const weekId = 'qa_week_' + Date.now();
+  const weekId = '1404/01/05';
   const entryId = 'qa_entry_' + Date.now();
+  const rid = 'qa_' + Date.now();
   const create = await req('POST', '/api/week-entries', {
     id: entryId,
     weekId: weekId,
-    recKey: 'center_1',
+    recKey: 'center_' + rid,
     rtype: 'center',
-    rid: '1',
+    rid: rid,
     scheduledDate: '1404/01/05',
     actionType: 'call',
     centerName: 'QA Week Center',
@@ -257,11 +258,66 @@ async function flow_weekEntry(tok) {
   await req('DELETE', '/api/week-entries/' + encodeURIComponent(entryId), null, tok);
 }
 
+async function flow_missionLog(tok) {
+  console.log('\n🔄 Flow: mission log POST → partial PUT → refresh');
+  const month = '1404/01';
+  const post = await req('POST', '/api/mission-log', {
+    userId: TEST_USER, month: month, done: true, note: 'QA mission', id: 9900000000104,
+  }, tok);
+  if (!assert(post.status === 200, 'POST mission log')) return;
+  await req('PUT', '/api/data/db', { settings: {} }, tok);
+  const db = await refreshDb(tok);
+  const found = (db.missionLog || []).some(function (l) {
+    return l.userId === TEST_USER && l.month === month && l.done === true;
+  });
+  assert(found, 'mission log survived partial bulk save');
+  await req('DELETE', '/api/mission-log?userId=' + encodeURIComponent(TEST_USER) + '&month=' + encodeURIComponent(month), null, tok);
+}
+
+async function flow_tags(tok, mgrTok) {
+  console.log('\n🔄 Flow: global tags PUT → center tag PATCH → refresh');
+  const tags = [{ id: 9901, name: 'QA-VIP', color: '#6366f1' }];
+  const put = await req('PUT', '/api/tags', tags, mgrTok);
+  if (!assert(put.status === 200, 'PUT global tags')) return;
+  const centerKey = 'qa_tag_center_' + Date.now();
+  const patch = await req('PATCH', '/api/tags/centers/' + encodeURIComponent(centerKey), { tagIds: [9901] }, tok);
+  assert(patch.status === 200, 'PATCH center tags');
+  await req('PUT', '/api/data/db', {}, tok);
+  const db = await refreshDb(tok);
+  assert((db.tags || []).some(function (t) { return t.id === 9901; }), 'global tags in refresh');
+  assert(db.rTags && db.rTags[centerKey] && db.rTags[centerKey].indexOf(9901) >= 0, 'center tags in refresh');
+  await query('DELETE FROM center_tags WHERE center_key = $1', [centerKey]);
+  await query("DELETE FROM app_settings WHERE key = 'tagDefinitions'");
+}
+
+async function flow_kpiTarget(tok) {
+  console.log('\n🔄 Flow: KPI user target POST → refresh');
+  const month = '1404/02';
+  const post = await req('POST', '/api/kpi-data/user-target', {
+    username: TEST_USER, month: month, callsPerDay: 12, visitsPerWeek: 6,
+  }, tok);
+  if (!assert(post.status === 200, 'POST kpi user target')) return;
+  const db = await refreshDb(tok);
+  const t = db.kpiTargets && db.kpiTargets[TEST_USER + ':' + month];
+  assert(t && t.callsPerDay === 12, 'KPI target persisted');
+  await query('DELETE FROM kpi_user_targets WHERE username = $1 AND month = $2', [TEST_USER, month]);
+}
+
 async function runAllFlows() {
   passed = 0;
   failed = 0;
   const tok = token(TEST_USER);
   const tok2 = token(TEST_USER2);
+  const mgrTok = jwt.sign(
+    { username: '_qa_mgr', role: 'مدیر', name: 'QA Manager' },
+    JWT_SECRET,
+    { expiresIn: '1h' }
+  );
+  await query(
+    `INSERT INTO app_users (username, display_name, role, color, active)
+     VALUES ('_qa_mgr', 'QA Manager', 'مدیر', '#6366f1', true)
+     ON CONFLICT (username) DO UPDATE SET role = 'مدیر', active = true`
+  ).catch(function () {});
 
   await flow_centerPatchSurvivesBulkSave(tok);
   await flow_noteAddDelete(tok);
@@ -270,6 +326,11 @@ async function runAllFlows() {
   await flow_calendarEvent(tok);
   await flow_checklist(tok);
   await flow_weekEntry(tok);
+  await flow_missionLog(tok);
+  await flow_tags(tok, mgrTok);
+  await flow_kpiTarget(tok);
+
+  await query("DELETE FROM app_users WHERE username = '_qa_mgr'").catch(function () {});
 
   return failed === 0;
 }

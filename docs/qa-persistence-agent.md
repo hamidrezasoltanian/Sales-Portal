@@ -25,6 +25,13 @@ Requires PostgreSQL (same env as `npm test`: `PG_*`, `JWT_SECRET`).
 | Calendar event | POST event → refresh → DELETE cleanup |
 | Checklist | POST checklist row → partial PUT → row survives |
 | Week entry | POST week entry → PUT without `weekEntries` → entry still listed |
+| Mission log | POST mission → partial PUT → survives refresh |
+| Tags | PUT global tags → PATCH center tags → survives partial PUT |
+| KPI target | POST user/month target → refresh confirms values |
+
+## Residual blob (still via PUT /db)
+
+`settings` (most keys), `provOverrides`, `managerTasks`, `_mtr` — migrate in future phases.
 
 ## Relationship to behavioral tests
 
