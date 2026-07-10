@@ -4,7 +4,7 @@ const https = require('https');
 const crypto = require('crypto');
 const router = express.Router();
 const { query } = require('../db');
-const { requireAuth } = require('../auth');
+const { requireAuth, requireManager } = require('../auth');
 
 async function getApiKey() {
   if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY;
@@ -198,7 +198,7 @@ router.post('/import-file', requireAuth, async (req, res) => {
 
 // POST /api/discovery/ai-scan — use Claude + web_search to find biopsy centers
 // body: { query?: string, city?: string }
-router.post('/ai-scan', requireAuth, async (req, res) => {
+router.post('/ai-scan', requireAuth, requireManager, async (req, res) => {
   try {
     const apiKey = await getApiKey();
     if (!apiKey) {

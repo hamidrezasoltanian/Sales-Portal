@@ -2,6 +2,18 @@
 var ALL_ROLES = ['مدیر', 'کارشناس فروش', 'سوپر ادمین', 'بازرگانی', 'مالی', 'IT', 'مهمان'];
 var MANAGER_ROLES = ['مدیر', 'سوپر ادمین', 'admin', 'manager'];
 var DEFAULT_COMPANY_NAME = 'آتنا زیست درمان';
+var DEPARTMENTS = ['فروش', 'بازرگانی', 'مالی', 'مدیریت', 'فنی', 'اداری', 'عمومی'];
+
+var ROLE_ALIASES = {
+  'کارشناس بازرگانی': 'بازرگانی',
+  admin: 'مدیر',
+  manager: 'مدیر'
+};
+
+function crmNormalizeRole(role) {
+  if (!role) return 'کارشناس فروش';
+  return ROLE_ALIASES[role] || role;
+}
 
 var CRM_ROLE_DEFAULTS = {
   'مدیر': {
@@ -63,7 +75,7 @@ var CRM_ROLE_DEFAULTS = {
 };
 
 function crmIsManagerRole(role) {
-  return MANAGER_ROLES.indexOf(role) >= 0;
+  return MANAGER_ROLES.indexOf(crmNormalizeRole(role)) >= 0;
 }
 
 function crmIsSuperAdminRole(role) {

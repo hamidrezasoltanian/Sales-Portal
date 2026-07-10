@@ -38,7 +38,11 @@ function _umUsers(){
         ? '<td style="padding:9px 6px"><input id="um_id_'+m.id+'" value="'+esc(m.id)+'" dir="ltr" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 8px;font-size:11px;font-family:monospace;color:var(--text-primary);width:130px" placeholder="نام کاربری"></td>'
         : '<td style="padding:9px 6px"><span dir="ltr" style="font-size:12px;font-family:monospace;color:var(--text-muted);padding:4px 8px;background:var(--bg-raised);border-radius:4px">'+esc(m.id)+'</span></td>')
       +'<td style="padding:9px 6px"><select id="um_role_'+m.id+'" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 7px;font-size:12px;font-family:inherit;color:var(--text-primary)">'
-        +roles.map(function(r){return'<option'+(m.role===r?' selected':'')+'>'+r+'</option>';}).join('')
+        +roles.map(function(r){return'<option'+(crmNormalizeRole(m.role)===r?' selected':'')+'>'+r+'</option>';}).join('')
+      +'</select></td>'
+      +'<td style="padding:9px 6px"><select id="um_dept_'+m.id+'" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 7px;font-size:11px;font-family:inherit;color:var(--text-primary);max-width:95px">'
+        +'<option value="">—</option>'
+        +DEPARTMENTS.map(function(d){return'<option value="'+d+'"'+(m.department===d?' selected':'')+'>'+d+'</option>';}).join('')
       +'</select></td>'
       +'<td style="padding:9px 6px"><input id="um_phone_'+m.id+'" value="'+esc(m.phone||'')+'" placeholder="09XXXXXXXXX" dir="ltr" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 8px;font-size:11px;font-family:monospace;color:var(--text-primary);width:115px"></td>'
       +'<td style="padding:9px 8px;text-align:center"><span style="font-size:11px;color:var(--text-muted)">🏥'+centers+'</span></td>'
@@ -61,6 +65,7 @@ function _umUsers(){
     +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">نام</th>'
     +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">کد ورود</th>'
     +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">نقش</th>'
+    +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">دپارتمان</th>'
     +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">موبایل</th>'
     +'<th style="padding:8px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600">مراکز</th>'
     +'<th style="padding:8px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600">وضعیت</th>'
@@ -154,19 +159,21 @@ function umCountCenters(userId){
 function umSaveUser(userId){
   var nameEl=document.getElementById('um_name_'+userId);
   var roleEl=document.getElementById('um_role_'+userId);
+  var deptEl=document.getElementById('um_dept_'+userId);
   var phoneEl=document.getElementById('um_phone_'+userId);
   var idEl=document.getElementById('um_id_'+userId);
   var dot=document.getElementById('umdot_'+userId);
   if(!nameEl)return;
   var newName=nameEl.value.trim();
   var newRole=roleEl?roleEl.value:'کارشناس فروش';
+  var newDept=deptEl?deptEl.value:'';
   var newPhone=phoneEl?phoneEl.value.trim():'';
   var newColor=dot?dot.style.background:'';
   var newId=idEl?idEl.value.trim():'';
   if(!newName){showToast('⚠ نام اجباری است');return;}
   if(newId&&newId!==userId&&!/^[a-zA-Z0-9._-]+$/.test(newId)){showToast('⚠ نام کاربری فقط حروف انگلیسی، اعداد و نقطه/خط تیره');return;}
   if(newId&&newId!==userId&&USERS[newId]){showToast('⚠ این نام کاربری قبلاً وجود دارد');return;}
-  var payload={display_name:newName,role:newRole,phone:newPhone};
+  var payload={display_name:newName,role:newRole,phone:newPhone,department:newDept};
   if(newColor)payload.color=newColor;
   if(newId&&newId!==userId)payload.new_username=newId;
   fetch('/api/users/'+encodeURIComponent(userId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
@@ -178,7 +185,9 @@ function umSaveUser(userId){
         getAllProvinces().forEach(function(p){var e=getE(getProvType(p.id),p.id);if(e.owner===userId)setE(getProvType(p.id),p.id,'owner',nu);});
         saveDB();
       }
-      showToast('✅ «'+newName+'» ذخیره شد');buildUSERS();setTimeout(function(){umTab('users');},300);
+      if(d.role_changed)showToast('⚠ نقش تغییر کرد — کاربر باید دوباره وارد شود',4000);
+      else showToast('✅ «'+newName+'» ذخیره شد');
+      buildUSERS();setTimeout(function(){umTab('users');},300);
     })
     .catch(function(e){showToast('❌ خطا: '+e.message);});
 }
@@ -189,21 +198,28 @@ var _UM_MODULES=[
   {key:'weekplan',   label:'برنامه هفته'},
   {key:'calendar',   label:'تقویم'},
   {key:'provinces',  label:'استان‌ها'},
-  {key:'contacts',   label:'مخاطبین'},
+  {key:'hcp',        label:'مخاطبین'},
   {key:'support',    label:'پشتیبانی'},
   {key:'checklist',  label:'چک‌لیست'},
   {key:'tasks',      label:'وظایف'},
-  {key:'activities', label:'فعالیت‌ها'},
+  {key:'activity',   label:'فعالیت‌ها'},
   {key:'wms',        label:'انبار (WMS)'},
   {key:'pricing',    label:'قیمت‌گذاری'},
   {key:'proforma',   label:'پیش‌فاکتور'},
   {key:'letters',    label:'دبیرخانه'},
-  {key:'receivables',label:'مطالبات'},
+  {key:'mtr',        label:'مطالبات'},
   {key:'hr',         label:'منابع انسانی'},
-  {key:'kpi',        label:'KPI / گزارش مدیر'},
-  {key:'settings',   label:'تنظیمات'},
+  {key:'trade-kpi',  label:'بازرگانی'},
+  {key:'kpi',        label:'KPI مدیر'},
+  {key:'manager',    label:'بررسی مدیر'},
   {key:'changelog',  label:'لاگ تغییرات'},
 ];
+function _umPermLevel(perms, role, modKey){
+  if(perms&&perms[modKey]!==undefined)return perms[modKey];
+  var roleDef=CRM_ROLE_DEFAULTS[crmNormalizeRole(role)];
+  if(roleDef&&roleDef.modules)return roleDef.modules[modKey]||'none';
+  return 'none';
+}
 function umOpenPermissionsModal(userId){
   var members=umGetMembers();
   var m=members.find(function(x){return x.id===userId;});
@@ -212,7 +228,7 @@ function umOpenPermissionsModal(userId){
   var existingProvs=(m.permissions&&m.permissions.provinces)||[];
 
   var rows=_UM_MODULES.map(function(mod){
-    var cur=perms[mod.key]||'none';
+    var cur=_umPermLevel(perms,m.role,mod.key);
     var opts=['none','view','edit'];
     var labels=['بدون دسترسی','فقط مشاهده','ویرایش'];
     var radios=opts.map(function(v,i){
@@ -245,7 +261,7 @@ function umOpenPermissionsModal(userId){
   var html='<div style="padding:4px 0">'
     +'<div style="font-size:12.5px;color:var(--text-secondary);margin-bottom:12px">'
     +'کاربر: <strong>'+esc(m.name)+'</strong> — نقش: <strong>'+esc(m.role||'')+'</strong>'
-    +'<br><span style="font-size:11px;color:var(--text-muted)">خالی گذاشتن همه گزینه‌ها → دسترسی پیش‌فرض بر اساس نقش اعمال می‌شود.</span></div>'
+    +'<br><span style="font-size:11px;color:var(--text-muted)">رادیو «بدون دسترسی» = پیش‌فرض نقش. برای override سفارشی، سطح دلخواه را انتخاب کنید.</span></div>'
     +'<div style="overflow-x:auto;max-height:340px;overflow-y:auto">'
     +'<table style="width:100%;border-collapse:collapse"><tbody>'+rows+'</tbody></table></div>'
     +provHtml
@@ -258,10 +274,17 @@ function umOpenPermissionsModal(userId){
   openModal('permModal','🛡 ویرایش دسترسی‌ها — '+esc(m.name),html,_permFoot,{lg:true});
 }
 function umSavePermissions(userId){
+  var m=umGetMembers().find(function(x){return x.id===userId;});
+  if(!m){showToast('کاربر یافت نشد');return;}
   var modules={};
   _UM_MODULES.forEach(function(mod){
     var el=document.querySelector('input[name="perm_'+mod.key+'"]:checked');
-    if(el&&el.value!=='none')modules[mod.key]=el.value;
+    var chosen=el?el.value:'none';
+    var roleDefault=_umPermLevel({},m.role,mod.key);
+    if(chosen!==roleDefault){
+      if(chosen!=='none')modules[mod.key]=chosen;
+      else modules[mod.key]='none';
+    }
   });
   var provEls=document.querySelectorAll('.perm-prov:checked');
   var provinces=Array.from(provEls).map(function(e){return e.value;});
@@ -292,6 +315,7 @@ function umClearPermissions(userId){
 
 function umAddUser(){
   var roles=ALL_ROLES;
+  var deptOpts='<option value="">—</option>'+DEPARTMENTS.map(function(d){return'<option>'+d+'</option>';}).join('');
   var body='<div style="display:flex;flex-direction:column;gap:12px">'
     +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">نام نمایشی *</label>'
     +'<input id="nu_name" class="ed-inp" style="width:100%;box-sizing:border-box" placeholder="نام کامل کارشناس"></div>'
@@ -299,10 +323,12 @@ function umAddUser(){
     +'<input id="nu_id" class="ed-inp" dir="ltr" style="width:100%;box-sizing:border-box" placeholder="مثال: ali.ahmadi"></div>'
     +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">نقش</label>'
     +'<select id="nu_role" class="ed-inp" style="width:100%;box-sizing:border-box">'+roles.map(function(r){return'<option>'+r+'</option>';}).join('')+'</select></div>'
+    +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">دپارتمان</label>'
+    +'<select id="nu_dept" class="ed-inp" style="width:100%;box-sizing:border-box">'+deptOpts+'</select></div>'
     +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">موبایل</label>'
     +'<input id="nu_phone" class="ed-inp" dir="ltr" style="width:100%;box-sizing:border-box" placeholder="09xxxxxxxxx"></div>'
     +'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:8px 12px;font-size:11px;color:#15803d">'
-    +'🔑 رمز اولیه: نام‌کاربری + «123» (مثلاً ali.ahmadi123)</div>'
+    +'🔑 رمز موقت پس از ایجاد نمایش داده می‌شود — یک‌بار قابل مشاهده است</div>'
     +'</div>';
   var foot='<button class="btn-secondary" onclick="closeModal(\'addUserModal\')">لغو</button>'
     +'<button class="btn-primary" onclick="_umDoAddUser()">✅ ایجاد کاربر</button>';
@@ -314,15 +340,16 @@ function _umDoAddUser(){
   var name=(document.getElementById('nu_name')||{}).value||'';
   var id=(document.getElementById('nu_id')||{}).value||'';
   var role=(document.getElementById('nu_role')||{}).value||'کارشناس فروش';
+  var dept=(document.getElementById('nu_dept')||{}).value||'';
   var phone=(document.getElementById('nu_phone')||{}).value||'';
   name=name.trim();id=id.trim().replace(/\s/g,'');
   if(!name||!id){showToast('⚠ نام و نام‌کاربری اجباری‌اند');return;}
   if(!/^[a-zA-Z0-9._\-]+$/.test(id)){showToast('⚠ نام‌کاربری: فقط حروف لاتین، عدد، نقطه، خط‌تیره');return;}
-  fetch('/api/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:id,display_name:name,role:role,phone:phone})})
+  fetch('/api/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:id,display_name:name,role:role,phone:phone,department:dept})})
     .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||r.status);return d;});})
-    .then(function(){
+    .then(function(d){
       closeModal('addUserModal');
-      showToast('✅ کاربر «'+name+'» ایجاد شد · رمز: '+id+'123',4000);
+      showToast('✅ کاربر «'+name+'» ایجاد شد · رمز موقت: '+d.tempPassword,6000);
       buildUSERS();
     })
     .catch(function(e){showToast('❌ '+e.message);});
@@ -622,7 +649,18 @@ function buildUSERS(){
       USERS={};
       _DEFAULT_MEMBERS=list.map(function(m){
         USERS[m.username]=m.display_name;
-        return{id:m.username,name:m.display_name,role:m.role,color:m.color,phone:m.phone||'',active:m.active,commissionPct:m.commission_pct||null};
+        return{
+          id:m.username,
+          name:m.display_name,
+          role:crmNormalizeRole(m.role),
+          color:m.color,
+          phone:m.phone||'',
+          active:m.active,
+          department:m.department||'',
+          direct_manager:m.direct_manager||'',
+          permissions:m.permissions||{},
+          commissionPct:m.commission_pct||null
+        };
       });
       _buildUSERSUI();
       if(typeof buildOwnerFilter==='function')buildOwnerFilter();

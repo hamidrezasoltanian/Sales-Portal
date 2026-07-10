@@ -126,7 +126,7 @@
     var empSel = '';
     if (_tkIsManager() && typeof USERS !== 'undefined') {
       var _tradeMembers = (typeof _DEFAULT_MEMBERS !== 'undefined' && _DEFAULT_MEMBERS.length)
-        ? _DEFAULT_MEMBERS.filter(function(m) { return m.role === 'کارشناس بازرگانی' && m.active !== false; })
+        ? _DEFAULT_MEMBERS.filter(function(m) { return (m.role === 'بازرگانی' || m.role === 'کارشناس بازرگانی') && m.active !== false; })
         : Object.keys(USERS).map(function(uid) { return { id: uid, name: USERS[uid] }; });
       if (_tradeMembers.length) {
         empSel = '<select onchange="window._tkSetEmployee(this.value)" style="' + _tkInputStyle() + '">' +

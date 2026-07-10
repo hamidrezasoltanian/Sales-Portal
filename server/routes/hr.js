@@ -26,7 +26,7 @@ router.get('/employees', requireAuth, async function(req, res) {
       if (ex.rows.length) continue;
       const id = 'emp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5);
       const dept = u.department || (
-        u.role === 'کارشناس بازرگانی' ? 'بازرگانی' :
+        u.role === 'بازرگانی' || u.role === 'کارشناس بازرگانی' ? 'بازرگانی' :
         u.role === 'کارشناس فروش' ? 'فروش' :
         u.role === 'مدیر' ? 'مدیریت' : 'عمومی');
       await query(
@@ -251,7 +251,7 @@ router.post('/import-users', requireAuth, async function(req, res) {
       const existing = await query('SELECT id FROM employees WHERE username = $1', [u.username]);
       if (existing.rows.length) continue;
       const id = 'emp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5);
-      const dept = u.role === 'کارشناس بازرگانی' ? 'بازرگانی' :
+      const dept = u.role === 'بازرگانی' || u.role === 'کارشناس بازرگانی' ? 'بازرگانی' :
                    u.role === 'کارشناس فروش' ? 'فروش' :
                    u.role === 'مدیر' ? 'مدیریت' : 'عمومی';
       await query(

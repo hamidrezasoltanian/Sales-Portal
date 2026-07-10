@@ -2134,25 +2134,23 @@ async function init(){
     document.querySelectorAll('.sb-manager-wrap').forEach(function(el){el.style.display='';});
   }
   (function(){
-    var _ms=(DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS;
-    var _me=_ms.find(function(m){return m.id===currentUser;});
-    var _r=(_me?_me.role:'')||(window._authUserRole||'');
-    if(_r==='مدیر'||_r==='سوپر ادمین'||_r==='کارشناس بازرگانی'){
+    var _r=crmNormalizeRole((window._authUserRole||''));
+    if(_hasAccess('trade-kpi')){
       document.querySelectorAll('.sb-trade-wrap').forEach(function(el){el.style.display='';});
     }
-    if(_r==='مدیر'||_r==='سوپر ادمین'){
-      document.querySelectorAll('.sb-manager-wrap').forEach(function(el){el.style.display='';});
+    if(_hasAccess('hr')){
+      document.querySelectorAll('#tab_hr').forEach(function(el){el.style.display='';});
     }
-    if(_r==='سوپر ادمین'){
+    if(_isSuperAdmin()){
       document.querySelectorAll('.sb-super-wrap').forEach(function(el){el.style.display='';});
     }
   })();
   // Apply granular permission hiding (additive — only hides, never shows what role already hides)
   (function(){
-    var _allMods=['provinces','weekplan','calendar','checklist','activity','tasks','mtr','pricing','proforma','support','hr','trade-kpi','kpi','manager','changelog','wms','letters'];
+    var _allMods=['provinces','weekplan','calendar','checklist','activity','tasks','mtr','pricing','proforma','support','hcp','hr','trade-kpi','kpi','manager','changelog','wms','letters'];
     _allMods.forEach(function(mod){
       if(!_hasAccess(mod)){
-        var btnId='tab_'+mod.replace('-','_');
+        var btnId='tab_'+mod.replace(/-/g,'_');
         var btn=document.getElementById(btnId);
         if(btn)btn.style.display='none';
       }
@@ -2166,7 +2164,7 @@ async function init(){
     rebuildFilters();buildTypeFilter();
     switchTab(currentTab);
     _initOnboarding();
-    var _clbtn=document.getElementById('tab_changelog');if(_clbtn)_clbtn.style.display=_isManager()?'':'none';
+    var _clbtn=document.getElementById('tab_changelog');if(_clbtn)_clbtn.style.display=_hasAccess('changelog')?'':'none';
     var _tbtn=document.getElementById('tab_tasks');if(_tbtn)_tbtn.style.display='';
     // بعد از اتمام init، history navigation فعال می‌شود
     _navReady=true;

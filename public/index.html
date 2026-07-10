@@ -35,7 +35,7 @@
     <button class="top-btn" onclick="openGSearch()" title="جستجو سریع (Ctrl+K)" style="background:rgba(255,255,255,.15);font-size:13px">🔍 <span style="font-size:11px;opacity:.7">Ctrl+K</span></button>
     <button class="top-btn" onclick="doLogout()" style="background:rgba(220,38,38,.2);border-color:rgba(220,38,38,.4)">خروج</button>
     <button class="top-btn" id="themeTglBtn" onclick="toggleTheme()" title="تغییر تم" style="font-size:13px;min-width:72px">🌙 دارک</button>
-    <button class="top-btn" onclick="openUserMgmt()" title="مدیریت کاربران" style="background:rgba(139,92,246,.2);border-color:rgba(139,92,246,.4)">👥 کاربران</button>
+    <button class="top-btn sb-manager-wrap" onclick="openUserMgmt()" title="مدیریت کاربران" style="display:none;background:rgba(139,92,246,.2);border-color:rgba(139,92,246,.4)">👥 کاربران</button>
     <button class="top-btn" onclick="openSettings()" title="تنظیمات" style="background:rgba(255,255,255,.15);font-weight:700">⚙ تنظیمات</button>
     <button class="top-btn" onclick="openUnifiedBackup()" title="Ctrl+B" style="background:rgba(14,165,233,.2);border-color:rgba(14,165,233,.4);font-weight:700">💾 بک‌آپ</button>
     <input type="file" id="restoreInp" accept=".json" style="display:none" onchange="unifiedRestore(event)">
@@ -303,22 +303,22 @@
 <div class="toast" id="toast"></div>
 
 <!-- DATA — core modules; tab-specific scripts load on demand via tab-loader.js -->
-<script src="/js/safe-dom.js?v=20260710b"></script>
-<script src="/js/tab-loader.js?v=20260710b"></script>
-<script src="/js/roles.js?v=20260710b"></script>
-<script src="/js/core.js?v=20260710b"></script>
-<script src="/js/settings.js?v=20260710b"></script>
-<script src="/js/data.js?v=20260710b"></script>
-<script src="/js/ui-core.js?v=20260710b"></script>
-<script src="/js/dashboard.js?v=20260710b"></script>
-<script src="/js/provinces.js?v=20260710b"></script>
-<script src="/js/center-modal.js?v=20260710b"></script>
-<script src="/js/global-search.js?v=20260710b"></script>
-<script src="/js/pricing.js?v=20260710b"></script>
-<script src="/js/weekplan.js?v=20260710b"></script>
-<script src="/js/manager.js?v=20260710b"></script>
-<script src="/js/onboarding.js?v=20260710b"></script>
-<script src="/js/backup.js?v=20260710b"></script>
+<script src="/js/safe-dom.js?v=20260710c"></script>
+<script src="/js/tab-loader.js?v=20260710c"></script>
+<script src="/js/roles.js?v=20260710c"></script>
+<script src="/js/core.js?v=20260710c"></script>
+<script src="/js/settings.js?v=20260710c"></script>
+<script src="/js/data.js?v=20260710c"></script>
+<script src="/js/ui-core.js?v=20260710c"></script>
+<script src="/js/dashboard.js?v=20260710c"></script>
+<script src="/js/provinces.js?v=20260710c"></script>
+<script src="/js/center-modal.js?v=20260710c"></script>
+<script src="/js/global-search.js?v=20260710c"></script>
+<script src="/js/pricing.js?v=20260710c"></script>
+<script src="/js/weekplan.js?v=20260710c"></script>
+<script src="/js/manager.js?v=20260710c"></script>
+<script src="/js/onboarding.js?v=20260710c"></script>
+<script src="/js/backup.js?v=20260710c"></script>
 
 
 <!-- JS -->

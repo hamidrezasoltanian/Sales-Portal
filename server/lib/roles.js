@@ -3,6 +3,23 @@
 const MANAGER_ROLES = ['مدیر', 'سوپر ادمین'];
 const ALL_ROLES = ['مدیر', 'کارشناس فروش', 'سوپر ادمین', 'بازرگانی', 'مالی', 'IT', 'مهمان'];
 const DEFAULT_COMPANY_NAME = 'آتنا زیست درمان';
+const DEPARTMENTS = ['فروش', 'بازرگانی', 'مالی', 'مدیریت', 'فنی', 'اداری', 'عمومی'];
+
+/** Legacy alias — normalize old role strings to canonical ALL_ROLES values */
+const ROLE_ALIASES = {
+  'کارشناس بازرگانی': 'بازرگانی',
+  admin: 'مدیر',
+  manager: 'مدیر',
+};
+
+function normalizeRole(role) {
+  if (!role) return 'کارشناس فروش';
+  return ROLE_ALIASES[role] || role;
+}
+
+function isValidRole(role) {
+  return ALL_ROLES.includes(normalizeRole(role));
+}
 
 const ROLE_DEFAULTS = {
   'مدیر': {
@@ -70,7 +87,11 @@ function isManagerRole(role) {
 module.exports = {
   MANAGER_ROLES,
   ALL_ROLES,
+  DEPARTMENTS,
   DEFAULT_COMPANY_NAME,
   ROLE_DEFAULTS,
+  ROLE_ALIASES,
   isManagerRole,
+  normalizeRole,
+  isValidRole,
 };

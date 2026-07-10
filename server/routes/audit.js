@@ -1,7 +1,10 @@
 'use strict';
 const express = require('express');
 const { query } = require('../db');
-const { requireAuth } = require('../auth');
+const { requireAuth, requireManager } = require('../auth');
+const { isManagerRole } = require('../lib/roles');
+const { userOwnsCenter, buildOwnerMaps } = require('../lib/center-ownership');
+
 const router = express.Router();
 router.use(requireAuth);
 
@@ -22,11 +25,31 @@ router.post('/', async (req, res) => {
   }
 });
 
-// GET /api/audit?key=center_123&limit=20 — get audit history for a center
+// GET /api/audit?key=center_123&limit=20 — managers see all; experts only owned centers
 router.get('/', async (req, res) => {
   const { key, limit } = req.query;
   const lim = Math.min(parseInt(limit) || 50, 200);
+  const isMgr = isManagerRole(req.user.role);
+
   try {
+    if (!key && !isMgr) {
+      return res.status(403).json({ error: 'فقط مدیر می‌تواند کل لاگ را ببیند' });
+    }
+
+    if (key && !isMgr) {
+      const masterR = await query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS', 'PC_RAW')");
+      const extraR = await query('SELECT id, row_num as row, province_id, owner FROM center_extras');
+      const editsR = await query('SELECT center_key, data FROM center_edits');
+      const centersMaster = {};
+      masterR.rows.forEach(function (r) { centersMaster[r.key] = r.data; });
+      const edits = {};
+      editsR.rows.forEach(function (r) { edits[r.center_key] = r.data || {}; });
+      const ownerMaps = buildOwnerMaps(centersMaster, extraR.rows);
+      if (!userOwnsCenter(req.user.username, key, edits, ownerMaps)) {
+        return res.status(403).json({ error: 'دسترسی به این مرکز مجاز نیست' });
+      }
+    }
+
     let result;
     if (key) {
       result = await query(

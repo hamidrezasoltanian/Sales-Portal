@@ -20,7 +20,7 @@ function rowToObj(r) {
 
 // ── GET /api/changelog ─────────────────────────────────────────────────────
 // Query params: ?rkey=, ?by=, ?limit=50
-router.get('/', requireAuth, async function (req, res) {
+router.get('/', requireAuth, requireManager, async function (req, res) {
   try {
     const conditions = [];
     const params = [];

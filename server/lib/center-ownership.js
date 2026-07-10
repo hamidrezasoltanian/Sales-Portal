@@ -81,6 +81,34 @@ function userOwnsCenter(username, centerKey, edits, ownerMaps) {
   return owner === username;
 }
 
+/** Province id from center_key — tehran centers use center_* prefix */
+function getCenterProvinceId(centerKey) {
+  if (!centerKey || typeof centerKey !== 'string') return null;
+  if (centerKey.startsWith('pc_')) {
+    const rest = centerKey.slice(3);
+    const sepIdx = rest.indexOf('||');
+    if (sepIdx > 0) return rest.slice(0, sepIdx);
+    return rest;
+  }
+  if (centerKey.startsWith('center_')) return 'tehran';
+  return null;
+}
+
+function applyProvinceRestriction(allowedKeys, allowedProvinces) {
+  if (!allowedProvinces || !allowedProvinces.length) return allowedKeys;
+  const out = new Set();
+  allowedKeys.forEach(function (key) {
+    const pid = getCenterProvinceId(key);
+    if (pid && allowedProvinces.includes(pid)) out.add(key);
+  });
+  return out;
+}
+
+function getUserProvinceAllowlist(user) {
+  const perms = (user && user.permissions) || {};
+  return Array.isArray(perms.provinces) && perms.provinces.length ? perms.provinces : null;
+}
+
 function filterObjectByCenterKeys(obj, allowedKeys) {
   if (!obj || typeof obj !== 'object') return obj;
   const out = {};
@@ -107,7 +135,7 @@ function filterDbForUser(db, user, ownerMaps) {
   if (!db || isManagerRole(user.role)) return db;
 
   const edits = db.edits || {};
-  const allowed = new Set();
+  let allowed = new Set();
   Object.keys(edits).forEach(function (key) {
     if (userOwnsCenter(user.username, key, edits, ownerMaps)) allowed.add(key);
   });
@@ -119,6 +147,11 @@ function filterDbForUser(db, user, ownerMaps) {
   Object.keys(ownerMaps.extraOwners).forEach(function (key) {
     if (ownerMaps.extraOwners[key] === user.username) allowed.add(key);
   });
+
+  const provAllow = getUserProvinceAllowlist(user);
+  if (provAllow) {
+    allowed = applyProvinceRestriction(allowed, provAllow);
+  }
 
   const filtered = Object.assign({}, db);
   filtered.edits = filterObjectByCenterKeys(edits, allowed);
@@ -192,12 +225,17 @@ function filterPutBodyForUser(body, user, serverEdits, ownerMaps) {
   function checkKeys(collection, label) {
     if (!collection || typeof collection !== 'object') return collection;
     const filtered = {};
+    const provAllow = getUserProvinceAllowlist(user);
     Object.keys(collection).forEach(function (key) {
-      if (userOwnsCenter(user.username, key, serverEdits, ownerMaps)) {
-        filtered[key] = collection[key];
-      } else {
+      if (!userOwnsCenter(user.username, key, serverEdits, ownerMaps)) {
         rejected.push(label + ':' + key);
+        return;
       }
+      if (provAllow && !applyProvinceRestriction(new Set([key]), provAllow).has(key)) {
+        rejected.push(label + ':' + key + ':province');
+        return;
+      }
+      filtered[key] = collection[key];
     });
     return filtered;
   }
@@ -218,9 +256,11 @@ function filterPutBodyForUser(body, user, serverEdits, ownerMaps) {
       const recKey = entry && entry.rtype && entry.rid != null
         ? entry.rtype + '_' + entry.rid
         : (k.split(':::')[1] || '');
-      if (recKey && userOwnsCenter(user.username, recKey, serverEdits, ownerMaps)) {
+      const provAllow = getUserProvinceAllowlist(user);
+      const provOk = !provAllow || !recKey || applyProvinceRestriction(new Set([recKey]), provAllow).has(recKey);
+      if (recKey && userOwnsCenter(user.username, recKey, serverEdits, ownerMaps) && provOk) {
         we[k] = entry;
-      } else if (entry && entry.addedBy === user.username) {
+      } else if (entry && entry.addedBy === user.username && provOk) {
         we[k] = entry;
       } else {
         rejected.push('weekEntries:' + k);
@@ -253,6 +293,9 @@ module.exports = {
   buildOwnerMaps,
   resolveCenterOwner,
   userOwnsCenter,
+  getCenterProvinceId,
+  applyProvinceRestriction,
+  getUserProvinceAllowlist,
   filterDbForUser,
   filterPutBodyForUser,
 };
