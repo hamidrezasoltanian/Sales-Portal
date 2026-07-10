@@ -7,6 +7,19 @@ const { requireAuth } = require('../auth');
 const router = express.Router();
 router.use(requireAuth);
 
+// GET /api/hcps/kol-centers — center keys with KOL affiliation (for list badges)
+router.get('/kol-centers', async function (req, res) {
+  try {
+    const r = await query(
+      `SELECT DISTINCT center_key FROM hcp_affiliations
+       WHERE influence_level ILIKE '%KOL%' OR influence_level ILIKE '%کلیدی%'`
+    );
+    res.json({ keys: r.rows.map(function (row) { return row.center_key; }) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── HCP ENDPOINTS ──────────────────────────────────────────────────────────
 
 // GET /api/hcps - list/search HCPs

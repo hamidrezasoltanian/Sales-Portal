@@ -587,12 +587,10 @@ function _submitQCL(rtype,rid,modalId){
   var actLabel=(ACTION_TYPE_LABELS&&ACTION_TYPE_LABELS[actType])||'📞 تماس';
   var txt=(result?'['+actLabel+'] نتیجه: '+result+(note?'\n'+note:''):'['+actLabel+'] '+note);
   if(txt){
-    if(!DB.notes)DB.notes={};
-    if(!DB.notes[rtype+'_'+rid])DB.notes[rtype+'_'+rid]=[];
-    DB.notes[rtype+'_'+rid].unshift({text:txt,by:currentUser,at:new Date().toISOString(),tags:[]});
+    addNote(rtype,rid,txt,null);
   }
   if(fd)setE(rtype,rid,'followupDate',fd);
-  saveDB();closeModal(modalId);showToast('✓ تماس ثبت شد');
+  closeModal(modalId);showToast('✓ تماس ثبت شد');
   if(typeof renderExpertDashboard==='function')renderExpertDashboard();
 }
 function _renderExpertDash(el){
@@ -796,7 +794,7 @@ function _saveHomeWidgets(arr){
   if(!DB.settings)DB.settings={};
   if(!DB.settings.homeWidgets)DB.settings.homeWidgets={};
   DB.settings.homeWidgets[currentUser]=arr;
-  saveDB();
+  patchCrmSetting('homeWidgets',DB.settings.homeWidgets);
 }
 
 function _homeRemoveWidget(wid){

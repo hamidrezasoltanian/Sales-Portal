@@ -771,7 +771,7 @@ window._pfSaveNoteTexts = function() {
   var int = document.getElementById('mgTplInt').value.split('\n').map(function(s){return s.trim();}).filter(Boolean);
 
   DB.settings.pfNoteTemplates = { pmt: pmt, acc: acc, int: int };
-  if (typeof saveDB === 'function') saveDB();
+  patchCrmSetting('pfNoteTemplates', DB.settings.pfNoteTemplates);
 
   closeModal('pfNoteTplModal');
   showToast('✅ لیست متون با موفقیت ذخیره شد (برای دیدن تغییرات در کشویی‌ها، فرم پیش‌فاکتور را ببندید و دوباره باز کنید)');
@@ -1286,7 +1286,7 @@ function _pfGetTemplates() {
 function _pfSaveTemplates(tpls) {
   if (!DB.settings) DB.settings = {};
   DB.settings.pfPrintTemplates = tpls;
-  saveDB();
+  patchCrmSetting('pfPrintTemplates', tpls);
 }
 function _pfDefaultTplForPrint() {
   return _pfGetTemplates().find(function(t){ return t.isDefault; }) || _pfGetTemplates()[0];
@@ -1761,17 +1761,16 @@ function _pfDoSchedule(rtype, rid, cname) {
   var scheduledDate = dateEl.value;
   var actionType = typeEl ? typeEl.value : 'call';
 
-  // Find week key from date
-  var weekId = scheduledDate; // simplified — same as date for now
+  var weekId = (typeof getWeekId === 'function') ? getWeekId(scheduledDate) : scheduledDate;
   var recKey = rtype + '_' + rid;
-  var entryKey = weekId + ':::' + recKey + '_pf_' + Date.now();
+  var entryKey = weekId + ':::' + recKey;
   if (!DB.weekEntries) DB.weekEntries = {};
   DB.weekEntries[entryKey] = {
-    rtype: rtype, rid: rid, recKey: recKey,
+    rtype: rtype, rid: rid, recKey: recKey, weekId: weekId,
     scheduledDate: scheduledDate, actionType: actionType,
     done: false, doneDate: null, addedBy: currentUser, centerName: cname
   };
-  saveDB();
+  saveWeekEntryApi(entryKey, DB.weekEntries[entryKey]);
   var _pfWM=document.getElementById('pfWpModal'); if(_pfWM) _pfWM.style.display='none';
   showToast('✅ پیگیری در برنامه هفته ثبت شد — ' + scheduledDate);
 }
@@ -2087,7 +2086,7 @@ function pfSaveSellerInfo() {
     postal:  (document.getElementById('mSellerPostal')  || {}).value || '',
     address: (document.getElementById('mSellerAddress') || {}).value || ''
   };
-  saveDB();
+  patchCrmSetting('sellerInfo', DB.settings.sellerInfo);
   if (typeof closeModal === 'function') closeModal('pfSellerModal');
   if (typeof showToast === 'function') showToast('✅ مشخصات فروشنده ذخیره شد');
 }

@@ -381,6 +381,7 @@ function renderProvTable(){
         +(isStalled(crtype,r.id)&&rowCls!=='row-contracted'?'<span class="risk-badge" title="۳۰+ روز بدون فعالیت">🔴</span>':'')
         +(isOverdue(crtype,r.id)&&rowCls!=='row-stalled'?'<span class="risk-badge" title="پیگیری معوق">🟠</span>':'')
         +(e.biopsyScore?'<span class="biopsy-badge" title="پتانسیل بیوپسی (امتیاز ۶-۱۰+) — '+(e.biopsyReasons||[]).join(' • ')+'">🔬 '+e.biopsyScore+'</span>':'')
+        +(typeof centerHasKol==='function'&&centerHasKol(crtype,r.id)?'<span title="مرکز دارای KOL / پزشک کلیدی" style="display:inline-block;background:#fdf4ff;color:#7e22ce;border:1px solid #e9d5ff;border-radius:9px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:3px">👨‍⚕️ KOL</span>':'')
         +(e.competitor?'<span title="رقیب: '+esc(e.competitor)+'" style="display:inline-block;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:9px;padding:1px 7px;font-size:10px;font-weight:700;cursor:help;margin-right:3px">🤖 '+esc(e.competitor)+'</span>':'')
         +(function(){var _mi=typeof MTR_BY_CENTER!=='undefined'?MTR_BY_CENTER[r.id]:null;if(!_mi||!_mi.length)return '';var _ov=_mi.filter(function(x){return x.od>45;});var _warn=_mi.filter(function(x){return x.od>20&&x.od<=45;});var _col=_ov.length?'#dc2626':_warn.length?'#d97706':'#0ea5e9';return '<span title="مطالبات باز" style="background:'+_col+';color:var(--text-primary);border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:5px;cursor:default">💰 '+_mi.length+'</span>';})()
         +'<button class="ctr-link" onclick="openCenterModal(\''+crtype+'\',\''+r.id+'\')">'+esc(displayName)+'</button>'
@@ -435,7 +436,7 @@ function quickAddToToday(rtype,id,name){
   var eKey=weekId+':::'+recKey;
   if(!DB.weekEntries)DB.weekEntries={};
   DB.weekEntries[eKey]={rtype:rtype,rid:id,recKey:recKey,centerName:name,scheduledDate:today,actionType:'call',done:false,addedBy:currentUser,weekId:weekId};
-  saveDB();
+  saveWeekEntryApi(eKey,DB.weekEntries[eKey]);
   showToast('✅ اضافه شد: '+name,1800);
   renderProvTable();
 }
@@ -559,8 +560,9 @@ function _doAddCenter(){
     var id=rtype+'_new_'+Date.now();
 
     if(!DB.extra)DB.extra=[];
-    DB.extra.push({id:id,row:maxRow+1,name:name,potential:pot,type:type,lead:lead,province_id:_currentProvId,owner:owner});
-    saveDB();
+    var newCenter={id:id,row:maxRow+1,name:name,potential:pot,type:type,lead:lead,province_id:_currentProvId,owner:owner};
+    DB.extra.push(newCenter);
+    saveCenterExtraApi(newCenter);
     closeModal('addCenterModal');
     // Clear filters to ensure the new center is visible
     var _fp=document.getElementById('fPot');if(_fp)_fp.value='';
@@ -628,6 +630,7 @@ function renderKanban(){
           +'<div class="kanban-card-meta">'
           +'<span class="pot-badge pot-'+(e.potential||r.potential)+'">'+(e.potential||r.potential)+'</span>'
           +(e.biopsyScore?'<span class="biopsy-badge" title="پتانسیل بیوپسی (امتیاز: اینترونشنال=۱۰، رادیولوژی=۷، اورولوژی=۶) — '+(e.biopsyReasons||[]).join(' • ')+'">🔬 '+e.biopsyScore+'</span>':'')
+          +(typeof centerHasKol==='function'&&centerHasKol(crtype,r.id)?'<span title="KOL" style="background:#fdf4ff;color:#7e22ce;border:1px solid #e9d5ff;border-radius:9px;padding:1px 5px;font-size:10px;font-weight:700">👨‍⚕️</span>':'')
           +((e.type||r.type)?'<span class="cm-lead" style="font-size:10px">'+(e.type||r.type)+'</span>':'')
           +(fd?'<span class="kc-date">📅 '+fd+'</span>':'')
           +'</div></div>';
@@ -676,6 +679,7 @@ function renderCards(){
       +'<div class="card-head"><span class="card-title">'+esc(displayName)+'</span>'
       +'<span class="pot-badge pot-'+(e.potential||r.potential)+'">'+(e.potential||r.potential)+'</span>'
       +(e.biopsyScore?'<span class="biopsy-badge" title="'+(e.biopsyReasons||[]).join(' • ')+ '">🔬 '+e.biopsyScore+'</span>':'')
+      +(typeof centerHasKol==='function'&&centerHasKol(crtype,r.id)?'<span title="KOL" style="background:#fdf4ff;color:#7e22ce;border:1px solid #e9d5ff;border-radius:9px;padding:1px 5px;font-size:10px;font-weight:700">👨‍⚕️</span>':'')
       +'</div>'
       +'<div class="card-st '+sc+'">'+st+'</div>'
       +'<div class="card-meta">'
@@ -813,7 +817,7 @@ function toggleTag(type,id,tagId){
   var k=recK(type,id);if(!DB.rTags[k])DB.rTags[k]=[];
   var idx=DB.rTags[k].indexOf(tagId);
   if(idx===-1)DB.rTags[k].push(tagId);else DB.rTags[k].splice(idx,1);
-  saveDB();closeTagMenu();
+  saveCenterTagsApi(k,DB.rTags[k]);closeTagMenu();
   if(_currentProvId)renderProvTable();else renderBanner();
 }
 function closeTagMenu(){var m=document.getElementById('tagMenu');if(m)m.remove();document.removeEventListener('click',closeTagMenuOutside);}
@@ -883,6 +887,6 @@ function createTagPrompt(){
   var name=prompt('نام برچسب جدید:');if(!name||!name.trim())return;
   var colors=['#0ea5e9','#22c55e','#f59e0b','#dc2626','#8b5cf6','#ec4899','#06b6d4','#64748b'];
   DB.tags.push({id:_nextTagId++,name:name.trim(),color:colors[Math.floor(Math.random()*colors.length)]});
-  saveDB();rebuildFilters();showToast('برچسب "'+name.trim()+'" ساخته شد ✅');
+  saveGlobalTagsApi(DB.tags);rebuildFilters();showToast('برچسب "'+name.trim()+'" ساخته شد ✅');
 }
 

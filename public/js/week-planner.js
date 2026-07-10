@@ -788,7 +788,6 @@
       if (i >= entries.length) {
         if (typeof showToast==='function') showToast('✅ '+done+' مرکز به هفته جدید منتقل شد');
         _wpState.selected = {};
-        if (typeof saveDB==='function') saveDB();
         if (typeof loadDB==='function') loadDB().then(function(){ window._wpLoadCenters(); });
         else window._wpLoadCenters();
         return;

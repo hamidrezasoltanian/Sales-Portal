@@ -10,6 +10,7 @@
         >{{ f.label }}</button>
       </div>
       <button class="tk-new-btn" @click="openNew">+ وظیفه جدید</button>
+      <button v-if="hasVanillaModal" class="tk-adv-btn" @click="openVanillaBoard" title="نمای کانبان کامل">▦ پیشرفته</button>
     </div>
 
     <div v-if="loading" class="tk-loading">در حال بارگذاری...</div>
@@ -26,14 +27,15 @@
             v-for="t in colTasks(col.id)"
             :key="t.id"
             :class="['tk-card', { 'tk-overdue': isOverdue(t) }]"
+            @click="openTaskDetail(t)"
           >
             <div class="tk-card-top">
               <span :class="['tk-priority', 'p' + t.priority]">
                 {{ t.priority === 1 ? 'بحرانی' : t.priority === 2 ? 'مهم' : 'عادی' }}
               </span>
               <div class="tk-card-actions">
-                <button v-if="!t.done" class="tk-btn-done" @click="markDone(t)" title="انجام شد">✓</button>
-                <button v-if="isManager || t.createdBy === username" class="tk-btn-del" @click="deleteTask(t)" title="حذف">✕</button>
+                <button v-if="!t.done" class="tk-btn-done" @click.stop="markDone(t)" title="انجام شد">✓</button>
+                <button v-if="isManager || t.createdBy === username" class="tk-btn-del" @click.stop="deleteTask(t)" title="حذف">✕</button>
               </div>
             </div>
             <div class="tk-card-title">{{ t.title }}</div>
@@ -110,6 +112,22 @@ const tasks = ref<Task[]>([]);
 const activeFilter = ref('all');
 const showModal = ref(false);
 const form = reactive({ title: '', dueDate: '', priority: 2, note: '' });
+
+const hasVanillaModal = computed(() => typeof (window as any).openTaskModal === 'function');
+
+function openTaskDetail(t: Task) {
+  const w = window as any;
+  if (typeof w.openTaskModal === 'function') w.openTaskModal(t.id);
+}
+
+function openVanillaBoard() {
+  const w = window as any;
+  if (w.DB) {
+    if (!w.DB.settings) w.DB.settings = {};
+    w.DB.settings.useVueTasks = false;
+  }
+  if (typeof w.renderTasksPanel === 'function') w.renderTasksPanel();
+}
 
 const todayJalali = computed(() => {
   // Simple date string for comparison — works with YYYY/MM/DD format
@@ -201,6 +219,7 @@ defineExpose({ load });
 .tk-filter { padding: 5px 12px; border-radius: 20px; border: 1px solid #e5e7eb; background: #fff; cursor: pointer; font-family: inherit; font-size: 13px; }
 .tk-filter.active { background: #6366f1; color: #fff; border-color: #6366f1; }
 .tk-new-btn { padding: 7px 16px; background: #6366f1; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-family: inherit; font-size: 13px; }
+.tk-adv-btn { padding: 7px 12px; background: #fff; color: #6366f1; border: 1px solid #c7d2fe; border-radius: 8px; cursor: pointer; font-family: inherit; font-size: 12px; }
 .tk-loading { text-align: center; padding: 40px; color: #9ca3af; }
 .tk-board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; flex: 1; min-height: 0; }
 @media (max-width: 900px) { .tk-board { grid-template-columns: repeat(2, 1fr); } }

@@ -1752,6 +1752,142 @@ async function initSchema() {
   `);
   await query(`CREATE INDEX IF NOT EXISTS idx_fpurch_company ON faradis_purchases_cache(company_num)`);
 
+  // MTR per-invoice meta (notes, status, forecast, payments)
+  await query(`
+    CREATE TABLE IF NOT EXISTS mtr_invoice_meta (
+      invoice_key TEXT PRIMARY KEY,
+      status      TEXT DEFAULT '',
+      next_fu     TEXT DEFAULT '',
+      forecast    JSONB,
+      notes       JSONB NOT NULL DEFAULT '[]',
+      payments    JSONB NOT NULL DEFAULT '[]',
+      updated_at  TIMESTAMPTZ DEFAULT NOW(),
+      updated_by  TEXT
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_mtr_meta_updated ON mtr_invoice_meta(updated_at DESC)`).catch(() => {});
+
+  // Center deals (multi-opportunity per center)
+  await query(`
+    CREATE TABLE IF NOT EXISTS center_deals (
+      id              TEXT PRIMARY KEY,
+      center_key      TEXT NOT NULL,
+      title           TEXT NOT NULL DEFAULT '',
+      stage           TEXT DEFAULT 'فرصت',
+      value_million   DECIMAL(12,2) DEFAULT 0,
+      probability     TEXT DEFAULT 'medium',
+      grade           TEXT DEFAULT 'B',
+      expected_close  TEXT DEFAULT '',
+      owner           TEXT,
+      status          TEXT DEFAULT 'open',
+      notes           TEXT DEFAULT '',
+      created_at      TIMESTAMPTZ DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ DEFAULT NOW(),
+      updated_by      TEXT
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_center_deals_center ON center_deals(center_key)`).catch(() => {});
+  await query(`CREATE INDEX IF NOT EXISTS idx_center_deals_owner ON center_deals(owner)`).catch(() => {});
+
+  // Center document attachments
+  await query(`
+    CREATE TABLE IF NOT EXISTS center_files (
+      id           SERIAL PRIMARY KEY,
+      center_key   TEXT NOT NULL,
+      filename     TEXT NOT NULL,
+      mime_type    TEXT DEFAULT 'application/octet-stream',
+      file_size    INT DEFAULT 0,
+      data         BYTEA NOT NULL,
+      uploaded_by  TEXT,
+      created_at   TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_center_files_key ON center_files(center_key)`).catch(() => {});
+
+  // User-definable workflows (process definitions + running instances)
+  await query(`
+    CREATE TABLE IF NOT EXISTS workflow_definitions (
+      id           TEXT PRIMARY KEY,
+      name         TEXT NOT NULL,
+      description  TEXT DEFAULT '',
+      stages       JSONB NOT NULL DEFAULT '[]',
+      transitions  JSONB NOT NULL DEFAULT '[]',
+      fields       JSONB NOT NULL DEFAULT '[]',
+      active       BOOLEAN DEFAULT TRUE,
+      created_by   TEXT,
+      created_at   TIMESTAMPTZ DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS workflow_instances (
+      id              TEXT PRIMARY KEY,
+      definition_id   TEXT NOT NULL REFERENCES workflow_definitions(id),
+      title           TEXT NOT NULL,
+      current_stage   TEXT NOT NULL,
+      owner           TEXT,
+      center_key      TEXT DEFAULT '',
+      center_name     TEXT DEFAULT '',
+      priority        INT DEFAULT 2,
+      due_date        TEXT DEFAULT '',
+      data            JSONB NOT NULL DEFAULT '{}',
+      status          TEXT DEFAULT 'active',
+      created_by      TEXT,
+      created_at      TIMESTAMPTZ DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ DEFAULT NOW(),
+      completed_at    TIMESTAMPTZ
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_wfi_def ON workflow_instances(definition_id, current_stage)`).catch(() => {});
+  await query(`CREATE INDEX IF NOT EXISTS idx_wfi_owner ON workflow_instances(owner)`).catch(() => {});
+  await query(`
+    CREATE TABLE IF NOT EXISTS workflow_transitions (
+      id           BIGSERIAL PRIMARY KEY,
+      instance_id  TEXT NOT NULL REFERENCES workflow_instances(id) ON DELETE CASCADE,
+      from_stage   TEXT,
+      to_stage     TEXT NOT NULL,
+      action       TEXT DEFAULT 'advance',
+      note         TEXT DEFAULT '',
+      by_user      TEXT NOT NULL,
+      at           TIMESTAMPTZ DEFAULT NOW(),
+      meta         JSONB DEFAULT '{}'
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_wft_inst ON workflow_transitions(instance_id, at DESC)`).catch(() => {});
+
+  // Seed default sales workflow if none exists
+  await query(
+    `INSERT INTO workflow_definitions (id, name, description, stages, transitions, fields, created_by)
+     SELECT $1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, 'system'
+     WHERE NOT EXISTS (SELECT 1 FROM workflow_definitions LIMIT 1)`,
+    [
+      'wf_sales_default',
+      'فرآیند فروش استاندارد',
+      'از دریافت سرنخ تا بستن قرارداد',
+      JSON.stringify([
+        { id: 'intake', label: 'دریافت', color: '#64748b', order: 0 },
+        { id: 'qualify', label: 'ارزیابی', color: '#0ea5e9', order: 1 },
+        { id: 'proposal', label: 'پیشنهاد', color: '#6366f1', order: 2 },
+        { id: 'negotiate', label: 'مذاکره', color: '#f59e0b', order: 3 },
+        { id: 'contract', label: 'قرارداد', color: '#22c55e', order: 4, isFinal: true },
+        { id: 'lost', label: 'از دست رفته', color: '#ef4444', order: 5, isFinal: true },
+      ]),
+      JSON.stringify([
+        { from: 'intake', to: 'qualify' },
+        { from: 'qualify', to: 'proposal' },
+        { from: 'qualify', to: 'lost' },
+        { from: 'proposal', to: 'negotiate' },
+        { from: 'proposal', to: 'lost' },
+        { from: 'negotiate', to: 'contract' },
+        { from: 'negotiate', to: 'lost' },
+      ]),
+      JSON.stringify([
+        { key: 'amount', type: 'number', label: 'ارزش (M ریال)', required: false },
+        { key: 'note', type: 'text', label: 'یادداشت', required: false },
+      ]),
+    ]
+  ).catch(function () {});
+
   // ════════════════════════════════════════
   // NORMALIZED CRM TABLES — replace 'main' blob
   // ════════════════════════════════════════
@@ -1932,6 +2068,16 @@ async function initSchema() {
     )
   `);
 
+  // 7b. Manager follow-up assignments (ارجاع پیگیری ویژه)
+  await query(`
+    CREATE TABLE IF NOT EXISTS manager_tasks (
+      rec_key    TEXT PRIMARY KEY,
+      data       JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_by TEXT
+    )
+  `);
+
   // 8. Province Ownership History Table (province_history)
   await query(`
     CREATE TABLE IF NOT EXISTS province_history (
@@ -1950,6 +2096,7 @@ async function initSchema() {
 
   await _migrateMainBlobToSQL();
   await _migrateRemainingBlobsToSQL();
+  await _migrateMtrMetaFromKV();
   await _migrateContactsToHCPs();
 
   const { runMigrations } = require('./migrations/runner');
@@ -2481,6 +2628,43 @@ async function _migrateRemainingBlobsToSQL() {
 
   } catch (e) {
     console.error('[DB] _migrateRemainingBlobsToSQL error:', e.message);
+  }
+}
+
+async function _migrateMtrMetaFromKV() {
+  try {
+    const existing = await query('SELECT COUNT(*) FROM mtr_invoice_meta');
+    if (parseInt(existing.rows[0].count, 10) > 0) return;
+
+    const kvRes = await query("SELECT value FROM app_data WHERE key = 'mtr-meta'");
+    if (!kvRes.rows.length || !kvRes.rows[0].value) return;
+
+    const meta = kvRes.rows[0].value;
+    if (!meta || typeof meta !== 'object') return;
+
+    let count = 0;
+    for (const [inv, m] of Object.entries(meta)) {
+      if (!m || typeof m !== 'object') continue;
+      await query(
+        `INSERT INTO mtr_invoice_meta (invoice_key, status, next_fu, forecast, notes, payments, updated_at, updated_by)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, NOW(), 'migration')
+         ON CONFLICT (invoice_key) DO NOTHING`,
+        [
+          String(inv),
+          m.status || '',
+          m.nextFU || '',
+          m.forecast ? JSON.stringify(m.forecast) : null,
+          JSON.stringify(m.notes || []),
+          JSON.stringify(m.payments || []),
+        ]
+      );
+      count++;
+    }
+    if (count > 0) {
+      console.log(`[DB] Migrated ${count} MTR invoice meta rows → mtr_invoice_meta`);
+    }
+  } catch (e) {
+    console.error('[DB] _migrateMtrMetaFromKV error:', e.message);
   }
 }
 

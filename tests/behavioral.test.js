@@ -34,15 +34,24 @@ const { query, pool } = require('../server/db');
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-to-a-random-secret-string';
 
 const TEST_USERS = ['_tbeh_u1', '_tbeh_u2'];
+const TEST_MANAGER = '_tbeh_mgr';
 let serverProc = null;
 let passed = 0, failed = 0, skipped = 0;
 let _originalDB = null; // backup of main DB before tests
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
-function token(username, role, tv) {
+function token(username) {
   return jwt.sign(
-    { username, role: role || 'مدیر', name: 'Test ' + username, tv: tv != null ? tv : 0 },
+    { username, role: 'کارشناس فروش', name: 'Test ' + username },
+    JWT_SECRET,
+    { expiresIn: '1h' }
+  );
+}
+
+function managerToken(username) {
+  return jwt.sign(
+    { username, role: 'مدیر', name: 'Manager ' + username },
     JWT_SECRET,
     { expiresIn: '1h' }
   );
@@ -146,6 +155,12 @@ async function setup() {
       [u, 'Behavioral Test ' + u]
     );
   }
+  await query(
+    `INSERT INTO app_users (username, display_name, role, color, active)
+     VALUES ($1, $2, 'مدیر', '#6366f1', true)
+     ON CONFLICT (username) DO UPDATE SET role = 'مدیر', active = true`,
+    [TEST_MANAGER, 'Behavioral Test Manager']
+  );
 
   // Backup current main DB data
   const r = await query("SELECT value FROM app_data WHERE key = 'main'");
@@ -164,7 +179,7 @@ async function teardown() {
   }
 
   // Remove test users
-  await query(`DELETE FROM app_users WHERE username = ANY($1)`, [TEST_USERS]);
+  await query(`DELETE FROM app_users WHERE username = ANY($1)`, [TEST_USERS.concat([TEST_MANAGER])]);
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -380,32 +395,378 @@ async function test8_hcpAndAffiliationEndpoints() {
   assert(deleteHcp.status === 200, 'حذف پزشک موفق بود (200)');
 }
 
-async function test9_centersApiAndSettingsPatch() {
-  console.log('\n📋 Test 9: Centers PATCH + notes POST + settings PATCH');
+async function test9_weekEntriesNotWipedByBulkSave() {
+  console.log('\n── Test 9: week-entries survive PUT /db without weekEntries in body ──');
   const tok = token(TEST_USERS[0]);
-  const key = 'center_test_api_1';
+  const weekId = '1404/01/01';
+  const entryId = 'we_test_' + Date.now();
+  const dbKey = weekId + ':::center:::test_wp_1';
 
-  const patch = await req('PATCH', '/api/centers/' + encodeURIComponent(key), {
+  const create = await req('POST', '/api/week-entries', {
+    id: entryId,
+    weekId: weekId,
+    recKey: 'center_test_wp_1',
+    rtype: 'center',
+    rid: 'test_wp_1',
+    scheduledDate: '1404/01/05',
+    actionType: 'call',
+    addedBy: TEST_USERS[0],
+    centerName: 'Test Center WP'
+  }, tok);
+  assert(create.status === 201, 'POST week-entry created (201)');
+
+  const putDb = await req('PUT', '/api/data/db', { edits: {} }, tok);
+  assert(putDb.status === 200, 'PUT /db without weekEntries returns 200');
+
+  const list = await req('GET', '/api/week-entries?week_id=' + encodeURIComponent(weekId), null, tok);
+  assert(list.status === 200, 'GET week-entries returns 200');
+  const found = (list.body || []).some(function (r) { return r.id === entryId; });
+  assert(found, 'week-entry still exists after bulk save without weekEntries');
+
+  await req('DELETE', '/api/week-entries/' + encodeURIComponent(entryId), null, tok);
+}
+
+async function test10_weekEntriesBulkUpdate() {
+  console.log('\n── Test 10: bulk-update marks entries done ──');
+  const tok = token(TEST_USERS[0]);
+  const weekId = '1404/01/02';
+  const entryId = 'we_bulk_' + Date.now();
+
+  const create = await req('POST', '/api/week-entries', {
+    id: entryId,
+    weekId: weekId,
+    recKey: 'center_test_wp_2',
+    rtype: 'center',
+    rid: 'test_wp_2',
+    actionType: 'call',
+    addedBy: TEST_USERS[0]
+  }, tok);
+  assert(create.status === 201, 'POST week-entry for bulk test (201)');
+
+  const bulk = await req('POST', '/api/week-entries/bulk-update', {
+    ids: [entryId],
+    done: true,
+    doneDate: '1404/01/10'
+  }, tok);
+  assert(bulk.status === 200, 'bulk-update returns 200');
+  assert(bulk.body && bulk.body.updated === 1, 'bulk-update updated 1 row');
+
+  const getOne = await req('GET', '/api/week-entries?week_id=' + encodeURIComponent(weekId), null, tok);
+  const row = (getOne.body || []).find(function (r) { return r.id === entryId; });
+  assert(row && row.done === true, 'entry marked done after bulk-update');
+
+  await req('DELETE', '/api/week-entries/' + encodeURIComponent(entryId), null, tok);
+}
+
+async function test11_centerPatchNotWipedByBulkSave() {
+  console.log('\n── Test 11: center PATCH survives PUT /db without edits ──');
+  const tok = token(TEST_USERS[0]);
+  const centerKey = 'center_test_patch_' + Date.now();
+
+  const patch = await req('PATCH', '/api/centers/' + encodeURIComponent(centerKey), {
     field: 'status',
-    val: 'تماس اولیه',
-    centerName: 'Test Center',
-    oldValue: '',
+    val: 'فعال',
+    centerName: 'Test Patch Center',
+    oldValue: ''
   }, tok);
-  assert(patch.status === 200, 'PATCH /api/centers/:key → 200 (got ' + patch.status + ')');
-  assert(patch.body.ok === true, 'PATCH response ok');
+  assert(patch.status === 200, 'PATCH /api/centers/:key returns 200');
+  assert(patch.body && patch.body.data && patch.body.data.status === 'فعال', 'PATCH persisted status');
 
-  const note = await req('POST', '/api/centers/' + encodeURIComponent(key) + '/notes', {
-    text: 'یادداشت تست API',
-    date: '1404/01/01',
-  }, tok);
-  assert(note.status === 200, 'POST /api/centers/:key/notes → 200');
-  assert(note.body.notes && note.body.notes.length >= 1, 'note list updated');
+  const putDb = await req('PUT', '/api/data/db', { notes: {} }, tok);
+  assert(putDb.status === 200, 'PUT /db without edits returns 200');
 
-  const sett = await req('PATCH', '/api/settings/taskColumns', {
-    value: { _tbeh_u1: [{ id: 'todo', label: 'انجام نشده', color: '#94a3b8' }] },
+  const get = await req('GET', '/api/centers/' + encodeURIComponent(centerKey), null, tok);
+  assert(get.status === 200, 'GET /api/centers/:key returns 200');
+  assert(get.body && get.body.data && get.body.data.status === 'فعال', 'center status survived bulk save');
+
+  await query('DELETE FROM center_edits WHERE center_key = $1', [centerKey]);
+}
+
+async function test12_checklistUpsertNotWiped() {
+  console.log('\n── Test 12: checklist UPSERT — partial saves do not wipe other rows ──');
+  const tok = token(TEST_USERS[0]);
+  const date = '1404/01/15';
+  const key1 = date + '_' + TEST_USERS[0];
+  const key2 = date + '_' + TEST_USERS[1];
+
+  const put1 = await req('PUT', '/api/data/db', {
+    checklist: {
+      [key1]: { items: [{ id: 1, text: 'item A', done: true }], note: 'note A' }
+    }
   }, tok);
-  assert(sett.status === 200, 'PATCH /api/settings/:key → 200');
-  assert(sett.body.ok === true, 'settings PATCH ok');
+  assert(put1.status === 200, 'PUT checklist key1 returns 200');
+
+  const put2 = await req('PUT', '/api/data/db', {
+    checklist: {
+      [key2]: { items: [{ id: 2, text: 'item B', done: false }], note: 'note B' }
+    }
+  }, tok);
+  assert(put2.status === 200, 'PUT checklist key2 returns 200');
+
+  const getDb = await req('GET', '/api/data/db', null, tok);
+  assert(getDb.status === 200, 'GET /db returns 200');
+  const cl = getDb.body && getDb.body.checklist;
+  assert(cl && cl[key1] && cl[key1].note === 'note A', 'checklist key1 survived second save');
+  assert(cl && cl[key2] && cl[key2].note === 'note B', 'checklist key2 persisted');
+
+  await query('DELETE FROM daily_checklists WHERE date = $1 AND username IN ($2, $3)',
+    [date, TEST_USERS[0], TEST_USERS[1]]);
+}
+
+async function test13_crmSettingsPatch() {
+  console.log('\n── Test 13: PATCH /api/crm-settings/:key ──');
+  const tok = managerToken(TEST_MANAGER);
+  const patch = await req('PATCH', '/api/crm-settings/_test_flag', { value: true }, tok);
+  assert(patch.status === 200, 'PATCH crm-settings returns 200');
+  await query("DELETE FROM app_settings WHERE key = '_test_flag'");
+}
+
+async function test14_centerNotePost() {
+  console.log('\n── Test 14: POST /api/centers/:key/notes ──');
+  const tok = token(TEST_USERS[0]);
+  const centerKey = 'center_note_test_' + Date.now();
+  const post = await req('POST', '/api/centers/' + encodeURIComponent(centerKey) + '/notes',
+    { text: 'test note from behavioral test' }, tok);
+  assert(post.status === 200, 'POST notes returns 200');
+  assert(post.body && post.body.note && post.body.note.text, 'note returned');
+  await query('DELETE FROM center_notes WHERE center_key = $1', [centerKey]);
+}
+
+async function test15_activityLogUpsert() {
+  console.log('\n── Test 15: activity log POST + partial PUT ──');
+  const tok = token(TEST_USERS[0]);
+  const id = 9900000000100;
+  const post = await req('POST', '/api/activity-log', {
+    type: 'call', entry: { id, date: '1404/02/01', userId: TEST_USERS[0], count: 2, note: 'beh test' },
+  }, tok);
+  assert(post.status === 201, 'POST activity-log returns 201');
+  const put = await req('PUT', '/api/data/db', { tags: [] }, tok);
+  assert(put.status === 200, 'PUT without callLog returns 200');
+  const get = await req('GET', '/api/data/db', null, tok);
+  const found = (get.body.callLog || []).some(function (l) { return Number(l.id) === id; });
+  assert(found, 'callLog entry persisted after partial PUT');
+  await req('DELETE', '/api/activity-log/call/' + id, null, tok);
+}
+
+async function test16_noteDelete() {
+  console.log('\n── Test 16: DELETE /api/centers/:key/notes/:index ──');
+  const tok = token(TEST_USERS[0]);
+  const centerKey = 'center_note_del_' + Date.now();
+  await req('POST', '/api/centers/' + encodeURIComponent(centerKey) + '/notes', { text: 'to delete' }, tok);
+  const del = await req('DELETE', '/api/centers/' + encodeURIComponent(centerKey) + '/notes/0', null, tok);
+  assert(del.status === 200, 'DELETE note returns 200');
+  assert(del.body.notes && del.body.notes.length === 0, 'notes array empty');
+  await query('DELETE FROM center_notes WHERE center_key = $1', [centerKey]);
+}
+
+async function test17_calendarEventApi() {
+  console.log('\n── Test 17: POST /api/calendar-events ──');
+  const tok = token(TEST_USERS[0]);
+  const evId = 990000002;
+  const post = await req('POST', '/api/calendar-events', {
+    id: evId, title: 'CI Event', startMs: 1700000000000, allDay: true, owner: TEST_USERS[0],
+  }, tok);
+  assert(post.status === 200, 'POST calendar-events returns 200');
+  const get = await req('GET', '/api/data/db', null, tok);
+  assert((get.body.events || []).some(function (e) { return e.id === evId; }), 'event in GET /db');
+  await req('DELETE', '/api/calendar-events/' + evId, null, tok);
+}
+
+async function test18_managerFollowupApi() {
+  console.log('\n── Test 18: PUT /api/manager-followups ──');
+  const tok = managerToken(TEST_MANAGER);
+  const recKey = 'mgr_test_' + Date.now();
+  const put = await req('PUT', '/api/manager-followups/' + encodeURIComponent(recKey), {
+    rtype: 'center', id: '1', name: 'Test', assignedTo: TEST_USERS[0], note: 'test', done: false,
+  }, tok);
+  assert(put.status === 200, 'PUT manager-followups returns 200');
+  const get = await req('GET', '/api/data/db', null, tok);
+  assert(get.body.managerTasks && get.body.managerTasks[recKey], 'managerTasks in GET /db');
+  await req('DELETE', '/api/manager-followups/' + encodeURIComponent(recKey), null, tok);
+}
+
+async function test19_settingsNotWipedByBulkSave() {
+  console.log('\n── Test 19: settings PATCH survives PUT /db without settings ──');
+  const tok = managerToken(TEST_MANAGER);
+  const patch = await req('PATCH', '/api/crm-settings/_test_company', { value: 'QA Company' }, tok);
+  assert(patch.status === 200, 'PATCH crm-settings _test_company returns 200');
+  const put = await req('PUT', '/api/data/db', {}, tok);
+  assert(put.status === 200, 'PUT /db without settings returns 200');
+  const get = await req('GET', '/api/data/db', null, tok);
+  assert(get.body.settings && get.body.settings._test_company === 'QA Company', 'settings survived bulk save');
+  await query("DELETE FROM app_settings WHERE key = '_test_company'");
+}
+
+async function test20_centerExtrasApi() {
+  console.log('\n── Test 20: POST /api/center-extras persists via SQL ──');
+  const tok = token(TEST_USERS[0]);
+  const id = 'qa_extra_' + Date.now();
+  const post = await req('POST', '/api/center-extras', {
+    id: id, name: 'QA Extra Center', province_id: 'tehran', potential: 2, lead: 'سرنخ',
+  }, tok);
+  assert(post.status === 200, 'POST center-extras returns 200');
+  const put = await req('PUT', '/api/data/db', {}, tok);
+  assert(put.status === 200, 'PUT /db without extra returns 200');
+  const get = await req('GET', '/api/data/db', null, tok);
+  assert((get.body.extra || []).some(function (c) { return c.id === id; }), 'extra center in GET /db');
+  const del = await req('DELETE', '/api/center-extras/' + encodeURIComponent(id), null, tok);
+  assert(del.status === 200, 'DELETE center-extras returns 200');
+}
+
+async function test21_pricingSettingsPersist() {
+  console.log('\n── Test 21: pricing PATCH survives PUT /db without pricing keys ──');
+  const tok = managerToken(TEST_MANAGER);
+  const sample = [{ id: 1, name: 'QA Product', buyPrice: 1000 }];
+  const patch = await req('PATCH', '/api/crm-settings/pricingProducts', { value: sample }, tok);
+  assert(patch.status === 200, 'PATCH pricingProducts returns 200');
+  const put = await req('PUT', '/api/data/db', {}, tok);
+  assert(put.status === 200, 'PUT /db without pricing returns 200');
+  const get = await req('GET', '/api/data/db', null, tok);
+  assert(Array.isArray(get.body.pricingProducts) && get.body.pricingProducts[0].name === 'QA Product', 'pricing persisted');
+  await query("DELETE FROM app_settings WHERE key = 'pricingProducts'");
+}
+
+async function test22_mtrAuxSettingsPersist() {
+  console.log('\n── Test 22: MTR follower map PATCH survives empty PUT /db ──');
+  const tok = managerToken(TEST_MANAGER);
+  const map = { 'کارشناس تست': 'Sarah.hosseini' };
+  const patch = await req('PATCH', '/api/crm-settings/mtrFollowerMap', { value: map }, tok);
+  assert(patch.status === 200, 'PATCH mtrFollowerMap returns 200');
+  const put = await req('PUT', '/api/data/db', {}, tok);
+  assert(put.status === 200, 'PUT /db without MTR keys returns 200');
+  const get = await req('GET', '/api/data/db', null, tok);
+  assert(get.body.mtrFollowerMap && get.body.mtrFollowerMap['کارشناس تست'] === 'Sarah.hosseini', 'mtrFollowerMap persisted');
+  await query("DELETE FROM app_settings WHERE key = 'mtrFollowerMap'");
+}
+
+async function test23_mtrInvoiceMetaPersist() {
+  console.log('\n── Test 23: MTR invoice meta PATCH/GET survives empty PUT /db ──');
+  const tok = managerToken(TEST_MANAGER);
+  const inv = 'QA-INV-99001';
+  const meta = { status: 'contacted', nextFU: '1405/01/15', notes: [{ d: '1405/01/01', t: 'QA note', by: 'test' }], payments: [] };
+  const patch = await req('PATCH', '/api/mtr/meta/' + encodeURIComponent(inv), meta, tok);
+  assert(patch.status === 200, 'PATCH mtr meta returns 200');
+  const get = await req('GET', '/api/mtr/meta', null, tok);
+  assert(get.body[inv] && get.body[inv].status === 'contacted', 'GET mtr meta returns invoice');
+  assert(get.body[inv].notes && get.body[inv].notes[0].t === 'QA note', 'notes persisted');
+  const put = await req('PUT', '/api/data/db', {}, tok);
+  assert(put.status === 200, 'PUT /db without meta returns 200');
+  const get2 = await req('GET', '/api/mtr/meta', null, tok);
+  assert(get2.body[inv] && get2.body[inv].status === 'contacted', 'meta survived bulk save');
+  await query('DELETE FROM mtr_invoice_meta WHERE invoice_key = $1', [inv]);
+}
+
+async function test24_mtrSyncFromCache() {
+  console.log('\n── Test 24: MTR sync builds rows from Faradis cache ──');
+  const tok = managerToken(TEST_MANAGER);
+  const companyNum = 9900199001;
+  const factorNum = 9900199002;
+  await query('DELETE FROM faradis_receivables_cache WHERE company_num = $1', [companyNum]);
+  await query('DELETE FROM faradis_factors_cache WHERE factor_num = $1', [factorNum]);
+  await query(
+    `INSERT INTO faradis_receivables_cache (company_num, company_name, balance, synced_at)
+     VALUES ($1, 'QA Hospital', 5000000, NOW())`,
+    [companyNum]
+  );
+  await query(
+    `INSERT INTO faradis_factors_cache (factor_num, jalali_date, factor_type, company_num, company_name, total_amount, synced_at)
+     VALUES ($1, '1404/12/01', 1, $2, 'QA Hospital', 5000000, NOW())`,
+    [factorNum, companyNum]
+  );
+  const sync = await req('POST', '/api/mtr/sync', { refresh: false }, tok);
+  assert(sync.status === 200, 'POST /api/mtr/sync returns 200');
+  assert(sync.body.ok && sync.body.count >= 1, 'sync produced rows');
+  assert(Array.isArray(sync.body.data) && sync.body.data.some(r => String(r.inv) === String(factorNum)), 'sync row matches factor');
+  const mtr = await req('GET', '/api/data/mtr', null, tok);
+  assert(mtr.body.source === 'faradis', 'mtr payload tagged faradis');
+  await query('DELETE FROM faradis_receivables_cache WHERE company_num = $1', [companyNum]);
+  await query('DELETE FROM faradis_factors_cache WHERE factor_num = $1', [factorNum]);
+  await query("DELETE FROM app_settings WHERE key = 'mtrLastSyncAt'");
+}
+
+async function test25_crmGapsApis() {
+  console.log('\n── Test 25: center-deals, center-files, manager-reports, kol-centers ──');
+  const tok = token(TEST_USERS[0]);
+  const mgrTok = managerToken(TEST_MANAGER);
+  const ck = 'center_qa_deal_' + Date.now();
+  const dealId = 'deal_qa_' + Date.now();
+
+  const postDeal = await req('POST', '/api/center-deals', {
+    id: dealId, centerKey: ck, title: 'QA Deal', owner: TEST_USERS[0], valueMillion: 12.5,
+  }, tok);
+  assert(postDeal.status === 201, 'POST center-deals returns 201');
+  assert(postDeal.body.title === 'QA Deal', 'deal title returned');
+
+  const getDeals = await req('GET', '/api/center-deals?center_key=' + encodeURIComponent(ck), null, tok);
+  assert(getDeals.status === 200, 'GET center-deals returns 200');
+  assert((getDeals.body.deals || []).some(d => d.id === dealId), 'deal in list');
+
+  const putDeal = await req('PUT', '/api/center-deals/' + encodeURIComponent(dealId), { stage: 'مشتری' }, tok);
+  assert(putDeal.status === 200 && putDeal.body.stage === 'مشتری', 'PUT center-deals updates stage');
+
+  const listFiles = await req('GET', '/api/center-files/list/' + encodeURIComponent(ck), null, tok);
+  assert(listFiles.status === 200, 'GET center-files list returns 200');
+  assert(Array.isArray(listFiles.body.files), 'files array present');
+
+  const winLoss = await req('GET', '/api/manager-reports/win-loss', null, mgrTok);
+  assert(winLoss.status === 200 && winLoss.body.ok, 'GET manager-reports/win-loss returns ok');
+  assert(winLoss.body.wonCenters !== undefined, 'wonCenters present');
+
+  const expertRpt = await req('GET', '/api/manager-reports/expert/' + encodeURIComponent(TEST_USERS[0]) + '?from=1400/01/01&to=1410/12/29', null, mgrTok);
+  assert(expertRpt.status === 200 && expertRpt.body.ok, 'GET manager-reports/expert returns ok');
+  assert(expertRpt.body.summary !== undefined, 'expert summary present');
+
+  const kolCenters = await req('GET', '/api/hcps/kol-centers', null, tok);
+  assert(kolCenters.status === 200, 'GET hcps/kol-centers returns 200');
+  assert(Array.isArray(kolCenters.body.keys), 'kol-centers keys array');
+
+  const delDeal = await req('DELETE', '/api/center-deals/' + encodeURIComponent(dealId), null, tok);
+  assert(delDeal.status === 200, 'DELETE center-deals returns 200');
+}
+
+async function test26_workflowsApi() {
+  console.log('\n── Test 26: workflows definitions + instances + transitions ──');
+  const tok = token(TEST_USERS[0]);
+  const mgrTok = managerToken(TEST_MANAGER);
+  const defId = 'wf_qa_' + Date.now();
+
+  const postDef = await req('POST', '/api/workflows/definitions', {
+    id: defId,
+    name: 'QA Workflow',
+    stages: [
+      { id: 'a', label: 'A', color: '#6366f1', order: 0 },
+      { id: 'b', label: 'B', color: '#22c55e', order: 1, isFinal: true },
+    ],
+    transitions: [{ from: 'a', to: 'b' }],
+  }, mgrTok);
+  assert(postDef.status === 201, 'POST workflow definition returns 201');
+
+  const getDefs = await req('GET', '/api/workflows/definitions', null, tok);
+  assert(getDefs.status === 200, 'GET definitions returns 200');
+  assert((getDefs.body.definitions || []).some(function (d) { return d.id === defId; }), 'definition in list');
+
+  const instId = 'wfi_qa_' + Date.now();
+  const postInst = await req('POST', '/api/workflows/instances', {
+    id: instId, definitionId: defId, title: 'QA Item', owner: TEST_USERS[0],
+  }, tok);
+  assert(postInst.status === 201, 'POST instance returns 201');
+  assert(postInst.body.currentStage === 'a', 'instance starts at first stage');
+
+  const action = await req('POST', '/api/workflows/instances/' + encodeURIComponent(instId) + '/action', {
+    toStage: 'b', note: 'QA advance',
+  }, tok);
+  assert(action.status === 200, 'POST action returns 200');
+  assert(action.body.currentStage === 'b', 'instance moved to stage b');
+  assert(action.body.status === 'completed', 'final stage marks completed');
+
+  const badAction = await req('POST', '/api/workflows/instances/' + encodeURIComponent(instId) + '/action', {
+    toStage: 'a',
+  }, tok);
+  assert(badAction.status === 400, 'invalid transition rejected');
+
+  await query('DELETE FROM workflow_transitions WHERE instance_id = $1', [instId]);
+  await query('DELETE FROM workflow_instances WHERE id = $1', [instId]);
+  await query('DELETE FROM workflow_definitions WHERE id = $1', [defId]);
 }
 
 // ─── Runner ───────────────────────────────────────────────────────────────────
@@ -453,7 +814,24 @@ async function main() {
     await test6_sseDeliversToDifferentCid();
     await test7_sseDeliversToOtherUser();
     await test8_hcpAndAffiliationEndpoints();
-    await test9_centersApiAndSettingsPatch();
+    await test9_weekEntriesNotWipedByBulkSave();
+    await test10_weekEntriesBulkUpdate();
+    await test11_centerPatchNotWipedByBulkSave();
+    await test12_checklistUpsertNotWiped();
+    await test13_crmSettingsPatch();
+    await test14_centerNotePost();
+    await test15_activityLogUpsert();
+    await test16_noteDelete();
+    await test17_calendarEventApi();
+    await test18_managerFollowupApi();
+    await test19_settingsNotWipedByBulkSave();
+    await test20_centerExtrasApi();
+    await test21_pricingSettingsPersist();
+    await test22_mtrAuxSettingsPersist();
+    await test23_mtrInvoiceMetaPersist();
+    await test24_mtrSyncFromCache();
+    await test25_crmGapsApis();
+    await test26_workflowsApi();
 
   } catch (err) {
     console.error('\n❌ خطای غیرمنتظره:', err.message);

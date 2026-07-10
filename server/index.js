@@ -20,6 +20,8 @@ const fs = require('fs');
 const { initSchema } = require('./db');
 const { checkDevDatabaseGuard } = require('./lib/dev-guard');
 const { checkProductionGuard } = require('./lib/prod-guard');
+const { log, logRequest } = require('./lib/log');
+const { JWT_SECRET, _DEFAULT_SECRET } = require('./auth');
 
 let helmet, compression;
 try { helmet = require('helmet'); } catch(e) {}
@@ -34,7 +36,6 @@ if (helmet) {
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", "'unsafe-inline'", 'cdn.jsdelivr.net', 'cdnjs.cloudflare.com'],
-        // Vanilla CRM uses onclick/oninput on HTML strings — helmet v4+ defaults script-src-attr to 'none'
         scriptSrcAttr: ["'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'", 'cdn.jsdelivr.net'],
         fontSrc: ["'self'", 'cdn.jsdelivr.net', 'data:'],
@@ -54,16 +55,24 @@ app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: false, limit: '50mb' }));
 
-// CORS — same origin (no cross-origin needed since frontend is served from same server)
 app.use(function (req, res, next) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   next();
 });
 
-// Static — serve public/ directory
+app.use(function (req, res, next) {
+  if (!req.path.startsWith('/api/')) return next();
+  const start = Date.now();
+  res.on('finish', function () {
+    if (res.statusCode >= 500) {
+      logRequest(req, Date.now() - start, new Error('HTTP ' + res.statusCode));
+    }
+  });
+  next();
+});
+
 const publicDir = path.join(__dirname, '..', 'public');
 if (fs.existsSync(publicDir)) {
-  // Prevent stale JS/CSS after server updates — browser always revalidates
   app.use(function(req, res, next) {
     if (/\.(js|css|html)$/.test(req.path) || req.path === '/') res.setHeader('Cache-Control', 'no-cache');
     next();
@@ -75,7 +84,7 @@ if (fs.existsSync(publicDir)) {
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/data', require('./routes/data'));
 app.use('/api/centers', require('./routes/centers'));
-app.use('/api/mtr', require('./routes/mtr-sync'));
+app.use('/api/mtr-sync', require('./routes/mtr-sync'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/distribution', require('./routes/distribution'));
 app.use('/api/ai', require('./routes/ai'));
@@ -92,9 +101,24 @@ app.use('/api/wms', require('./routes/wms'));
 app.use('/api/proforma', require('./routes/proforma'));
 app.use('/api/tasks', require('./routes/tasks'));
 app.use('/api/week-entries', require('./routes/week-entries'));
+app.use('/api/crm-settings', require('./routes/crm-settings'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/settings', require('./routes/settings'));
 app.use('/api/changelog', require('./routes/changelog'));
+app.use('/api/activity-log', require('./routes/activity-log'));
+app.use('/api/calendar-events', require('./routes/calendar-events'));
+app.use('/api/checklist', require('./routes/checklist-api'));
+app.use('/api/mission-log', require('./routes/mission-log'));
+app.use('/api/kpi-data', require('./routes/kpi-data'));
+app.use('/api/prov-history', require('./routes/prov-history'));
+app.use('/api/tags', require('./routes/tags'));
+app.use('/api/manager-followups', require('./routes/manager-followups'));
+app.use('/api/center-extras', require('./routes/center-extras'));
+app.use('/api/center-deals', require('./routes/center-deals'));
+app.use('/api/center-files', require('./routes/center-files'));
+app.use('/api/manager-reports', require('./routes/manager-reports'));
+app.use('/api/workflows', require('./routes/workflows'));
+app.use('/api/mtr', require('./routes/mtr'));
 app.use('/api/migrate', require('./routes/migrate'));
 app.use('/api/support', require('./routes/support'));
 app.use('/api/hr', require('./routes/hr'));
@@ -109,7 +133,6 @@ const faradisData = require('./routes/faradis-data');
 app.use('/api/faradis-data', faradisData);
 app.use('/api/letters', require('./routes/letters'));
 
-// Health check — بدون auth، قابل دسترس از هر جا
 app.get('/api/health', async function (req, res) {
   const start = Date.now();
   const result = {
@@ -119,10 +142,9 @@ app.get('/api/health', async function (req, res) {
     checks: {}
   };
 
-  // ── PostgreSQL ────────────────────────────────────────────────────────
   try {
     const { query } = require('./db');
-    const r = await Promise.race([
+    await Promise.race([
       query('SELECT 1 AS ok'),
       new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000))
     ]);
@@ -132,7 +154,6 @@ app.get('/api/health', async function (req, res) {
     result.ok = false;
   }
 
-  // ── Faradis (اتصال به SQL Server) ────────────────────────────────────
   try {
     const faradis = require('./integrations/faradis');
     if (!faradis.isConfigured()) {
@@ -146,10 +167,8 @@ app.get('/api/health', async function (req, res) {
     }
   } catch (e) {
     result.checks.faradis = { ok: false, error: e.message };
-    // فرادیس down بودنش OK رو خراب نمی‌کنه (optional dependency)
   }
 
-  // ── آخرین sync فرادیس ────────────────────────────────────────────────
   try {
     const { query } = require('./db');
     const r = await query(`
@@ -168,7 +187,6 @@ app.get('/api/health', async function (req, res) {
   res.status(result.ok ? 200 : 503).json(result);
 });
 
-// WMS page — serve wms.html (auth handled client-side via /api/auth/me check)
 app.get('/wms', function (req, res) {
   const wmsPath = path.join(publicDir, 'wms.html');
   if (fs.existsSync(wmsPath)) {
@@ -178,7 +196,6 @@ app.get('/wms', function (req, res) {
   }
 });
 
-// Catch-all: serve public/index.html for non-API routes
 app.get('*', function (req, res) {
   const indexPath = path.join(publicDir, 'index.html');
   if (fs.existsSync(indexPath)) {
@@ -188,23 +205,50 @@ app.get('*', function (req, res) {
   }
 });
 
-// Error handler
 app.use(function (err, req, res, next) {
-  console.error('[server error]', err.message);
+  log('error', {
+    route: req.method + ' ' + (req.originalUrl || req.url),
+    user: req.user && req.user.username ? req.user.username : null,
+    err: err.message || String(err),
+  });
+  if (process.env.SENTRY_DSN) {
+    try {
+      const Sentry = require('@sentry/node');
+      Sentry.captureException(err);
+    } catch (_) {}
+  }
   res.status(500).json({ error: 'خطای داخلی سرور' });
 });
 
 const PORT = parseInt(process.env.PORT || '3000');
 
 async function start() {
+  if (process.env.NODE_ENV === 'production' && JWT_SECRET === _DEFAULT_SECRET) {
+    console.error('[FATAL] JWT_SECRET must be set in production. Refusing to start.');
+    process.exit(1);
+  }
+  if (process.env.SENTRY_DSN) {
+    try {
+      const Sentry = require('@sentry/node');
+      Sentry.init({ dsn: process.env.SENTRY_DSN, environment: process.env.NODE_ENV || 'development' });
+      console.log('[Sentry] initialized');
+    } catch (e) {
+      console.warn('[Sentry] SENTRY_DSN set but @sentry/node not installed — skipping');
+    }
+  }
   try {
     checkDevDatabaseGuard();
     checkProductionGuard();
     await initSchema();
+    const pgDb = process.env.PG_DATABASE || 'atena_crm';
+    const port = parseInt(process.env.PORT || '3000', 10);
+    if (port === 4000 && pgDb === 'atena_crm') {
+      console.warn('[WARNING] Dev port 4000 connected to PRODUCTION database "' + pgDb + '"');
+      console.warn('[WARNING] Use PG_DATABASE=atena_crm_dev — see .env.dev.example and scripts/setup_dev_db.sh');
+    }
     app.listen(PORT, function () {
       console.log('[Atena CRM] Server running on http://localhost:' + PORT);
     });
-    // Start Telegram bot (non-blocking)
     if (process.env.TELEGRAM_BOT_TOKEN) {
       const bot = require('./bot/telegram');
       bot.poll().catch(function(e){ console.error('[bot] fatal:', e.message); });
