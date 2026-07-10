@@ -513,20 +513,23 @@ async function test12_checklistUpsertNotWiped() {
     [date, TEST_USERS[0], TEST_USERS[1]]);
 }
 
-async function test13_mtrSyncStatus() {
-  console.log('\n── Test 13: MTR sync status endpoint ──');
-  const tok = managerToken(TEST_MANAGER);
-  const status = await req('GET', '/api/mtr/sync/status', null, tok);
-  assert(status.status === 200, 'GET /api/mtr/sync/status returns 200');
-  assert(status.body && typeof status.body.faradisConfigured === 'boolean', 'status includes faradisConfigured');
-}
-
-async function test14_crmSettingsPatch() {
-  console.log('\n── Test 14: PATCH /api/crm-settings/:key ──');
+async function test13_crmSettingsPatch() {
+  console.log('\n── Test 13: PATCH /api/crm-settings/:key ──');
   const tok = managerToken(TEST_MANAGER);
   const patch = await req('PATCH', '/api/crm-settings/_test_flag', { value: true }, tok);
   assert(patch.status === 200, 'PATCH crm-settings returns 200');
   await query("DELETE FROM app_settings WHERE key = '_test_flag'");
+}
+
+async function test14_centerNotePost() {
+  console.log('\n── Test 14: POST /api/centers/:key/notes ──');
+  const tok = token(TEST_USERS[0]);
+  const centerKey = 'center_note_test_' + Date.now();
+  const post = await req('POST', '/api/centers/' + encodeURIComponent(centerKey) + '/notes',
+    { text: 'test note from behavioral test' }, tok);
+  assert(post.status === 200, 'POST notes returns 200');
+  assert(post.body && post.body.note && post.body.note.text, 'note returned');
+  await query('DELETE FROM center_notes WHERE center_key = $1', [centerKey]);
 }
 
 // ─── Runner ───────────────────────────────────────────────────────────────────
@@ -578,8 +581,8 @@ async function main() {
     await test10_weekEntriesBulkUpdate();
     await test11_centerPatchNotWipedByBulkSave();
     await test12_checklistUpsertNotWiped();
-    await test13_mtrSyncStatus();
-    await test14_crmSettingsPatch();
+    await test13_crmSettingsPatch();
+    await test14_centerNotePost();
 
   } catch (err) {
     console.error('\n❌ خطای غیرمنتظره:', err.message);

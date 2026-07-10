@@ -3,8 +3,11 @@
 function addNote(type,id,text,inp){
   if(!text||!text.trim())return;
   var k=recK(type,id);if(!DB.notes[k])DB.notes[k]=[];
-  DB.notes[k].push({text:text.trim(),date:todayStr(),user:USERS[currentUser]||currentUser,ts:nowTs()});
-  saveDB();if(inp){inp.value='';showToast('یادداشت ذخیره شد ✅',1500);}
+  var note={text:text.trim(),date:todayStr(),user:USERS[currentUser]||currentUser,ts:nowTs()};
+  DB.notes[k].push(note);
+  fetch('/api/centers/'+encodeURIComponent(k)+'/notes',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({text:note.text,date:note.date})}).catch(function(){});
+  if(inp){inp.value='';showToast('یادداشت ذخیره شد ✅',1500);}
 }
 
 function openNotes(type,id,name){
@@ -387,6 +390,37 @@ function wpBuildOwnerFilter(){
     if(filterRow)filterRow.style.display='';
     if(_wpFclFilters.owner&&USERS[_wpFclFilters.owner])sel.value=_wpFclFilters.owner;
   }
+}
+
+
+// ── Week plan: load current week from API (Phase 2α.5) ──
+function _wpMergeApiRows(weekId, rows){
+  if(!weekId||!rows||!Array.isArray(rows))return;
+  if(!DB.weekEntries)DB.weekEntries={};
+  Object.keys(DB.weekEntries).forEach(function(k){
+    if(k.startsWith(weekId+':::'))delete DB.weekEntries[k];
+  });
+  rows.forEach(function(row){
+    if(!row.weekId||!row.rtype||row.rid===undefined)return;
+    var k=row.weekId+':::'+row.rtype+':::'+row.rid;
+    DB.weekEntries[k]={
+      id:row.id,sqlId:row.id,weekId:row.weekId,recKey:row.recKey,rtype:row.rtype,rid:row.rid,
+      scheduledDate:row.scheduledDate,actionType:row.actionType,done:row.done,doneDate:row.doneDate,
+      addedBy:row.addedBy,centerName:row.centerName,weekTagId:row.weekTagId
+    };
+  });
+}
+function _wpLoadWeekFromApi(cb){
+  var sel=document.getElementById('wpSel');
+  var weekId=sel&&sel.value;
+  if(!weekId){if(typeof cb==='function')cb();return;}
+  var owner=(document.getElementById('wpOwnerFilter')||{}).value||'';
+  var url='/api/week-entries?week_id='+encodeURIComponent(weekId);
+  if(owner)url+='&owner='+encodeURIComponent(owner);
+  fetch(url).then(function(r){return r.ok?r.json():null;}).then(function(rows){
+    _wpMergeApiRows(weekId,rows);
+    if(typeof cb==='function')cb();
+  }).catch(function(){if(typeof cb==='function')cb();});
 }
 
 function renderWeekPlan(){

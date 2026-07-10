@@ -271,12 +271,12 @@
 
 ## ۱۱. فاز ۵ — Tech Debt (بلندمدت)
 
-- [x] Vue migration یک tab — تب **وظایف** با `TasksPanel.vue` (پیش‌فرض؛ دکمه «پیشرفته» → کانبان vanilla)
-- [x] build step اجباری برای Vue — `npm run build` در CI + deploy + `scripts/build-frontend.sh`
-- [x] کاهش وابستگی `PUT /api/data/db` — headerهای deprecation + `PATCH /api/crm-settings/:key`
-- [x] MTR sync live — `POST /api/mtr/sync` + toggle در تنظیمات + auto-refresh در `mtr.js`
-- [ ] حذف کامل `PUT /api/data/db` — پس از migrate notes/tags/logs (فاز بعدی)
-- [ ] `app.bundle.js` — deprecated؛ production از split modules استفاده می‌کند
+- [x] Vue migration یک tab — تب **وظایف** با `TasksPanel.vue`
+- [x] build step اجباری برای Vue — CI + deploy + `scripts/build-frontend.sh`
+- [x] کاهش وابستگی blob — deprecation headers + `PATCH /api/crm-settings/:key` + `POST /api/centers/:key/notes`
+- [ ] MTR sync live — **عمداً postpone** (آپلود Excel فعلاً)
+- [ ] حذف کامل `PUT /api/data/db` — notes/tags/logs هنوز residual
+- [x] `app.bundle.js` — deprecated (production = split modules)
 
 ---
 
@@ -389,8 +389,9 @@ scripts/setup_dev_db.sh   ← new
 | 1404/04/19 | ۲δ events/checklist UPSERT | #13 | ✅ |
 | 1404/04/19 | ۳ observability + runbook | #13 | ✅ |
 | 1404/04/19 | ۴ hardening (AI rate, auth) | #13 | ✅ |
-| 1404/04/19 | ۵ Vue tasks + Vite CI | #14 | ✅ |
-| 1404/04/19 | ۵ MTR sync + crm-settings API | #14 | ✅ |
+| 1404/04/19 | ۵ Vue tasks + Vite CI | #16 | ✅ |
+| 1404/04/19 | ۵ crm-settings + notes API + dev scripts | #16 | ✅ |
+| | MTR sync live | | ⏸ postpone |
 
 ---
 

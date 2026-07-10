@@ -28,7 +28,22 @@ try { compression = require('compression'); } catch(e) {}
 const app = express();
 
 // Security & perf middleware
-if (helmet) app.use(helmet({ contentSecurityPolicy: false }));
+if (helmet) {
+  const cspReportOnly = process.env.CSP_REPORT_ONLY === 'true';
+  app.use(helmet({
+    contentSecurityPolicy: cspReportOnly ? {
+      reportOnly: true,
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", 'cdn.jsdelivr.net', 'cdnjs.cloudflare.com'],
+        styleSrc: ["'self'", "'unsafe-inline'", 'cdn.jsdelivr.net'],
+        imgSrc: ["'self'", 'data:', 'https:'],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'", 'cdn.jsdelivr.net', 'data:'],
+      },
+    } : false,
+  }));
+}
 if (compression) app.use(compression());
 
 // Middleware
@@ -86,7 +101,6 @@ app.use('/api/tasks', require('./routes/tasks'));
 app.use('/api/week-entries', require('./routes/week-entries'));
 app.use('/api/centers', require('./routes/centers'));
 app.use('/api/crm-settings', require('./routes/crm-settings'));
-app.use('/api/mtr', require('./routes/mtr-sync'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/changelog', require('./routes/changelog'));
 app.use('/api/migrate', require('./routes/migrate'));
@@ -216,6 +230,12 @@ async function start() {
   }
   try {
     await initSchema();
+    const pgDb = process.env.PG_DATABASE || 'atena_crm';
+    const port = parseInt(process.env.PORT || '3000', 10);
+    if (port === 4000 && pgDb === 'atena_crm') {
+      console.warn('[WARNING] Dev port 4000 connected to PRODUCTION database "' + pgDb + '"');
+      console.warn('[WARNING] Use PG_DATABASE=atena_crm_dev — see .env.dev.example and scripts/setup_dev_db.sh');
+    }
     app.listen(PORT, function () {
       console.log('[Atena CRM] Server running on http://localhost:' + PORT);
     });

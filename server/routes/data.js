@@ -441,7 +441,8 @@ router.put('/db', async (req, res) => {
       }
     }
 
-    // ── week_entries ──────────────────────────────────────────────────────────
+    // ── week_entries — skip entirely if not in payload (API is source of truth)
+    if (weekEntries !== undefined || (Array.isArray(_weDeletedKeys) && _weDeletedKeys.length > 0)) {
     const incomingWE = weekEntries || {};
     const deletedKeys = (Array.isArray(_weDeletedKeys) ? _weDeletedKeys : [])
       .filter(function(k) { return !incomingWE[k]; });
@@ -457,6 +458,7 @@ router.put('/db', async (req, res) => {
            SET value = EXCLUDED.value, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
         [JSON.stringify(incomingWE), user]
       ).catch(function(e) { console.error('[week_entries upsert FAILED]', e.message); throw e; });
+    }
     }
 
     // ── _mtr ──────────────────────────────────────────────────────────────────
@@ -484,7 +486,8 @@ router.put('/db', async (req, res) => {
     try {
       const dbSnap = {
         edits, notes, rTags, tags, settings, provOverrides, events, checklist, kpiTargets,
-        extra, salesLog, callLog, visitLog, weekEntries: incomingWE
+        extra, salesLog, callLog, visitLog,
+        weekEntries: weekEntries !== undefined ? (weekEntries || {}) : undefined
       };
       await client.query(
         `INSERT INTO app_data_history (key, value, saved_by)

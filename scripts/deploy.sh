@@ -6,6 +6,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
 
+DEPLOY_LOG="${HOME}/db_backups/deploy.log"
+mkdir -p "$(dirname "$DEPLOY_LOG")"
+exec > >(tee -a "$DEPLOY_LOG") 2>&1
+echo ""
+echo "========== deploy $(date -Iseconds) =========="
+
 echo "[deploy] pre-backup (appdata)..."
 if [ -x "$SCRIPT_DIR/backup_db.sh" ]; then
   "$SCRIPT_DIR/backup_db.sh" appdata || echo "[deploy] warning: appdata backup failed"

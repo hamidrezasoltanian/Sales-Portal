@@ -76,18 +76,6 @@ function openSettings(){
     +'<input id="stgAnthropicKey" class="ed-inp" style="width:100%" type="password" value="'+esc(anthropicKey)+'" placeholder="sk-ant-api03-...">'
     +'<div style="font-size:10px;color:var(--text-muted);margin-top:3px">برای جستجوی هوشمند مراکز (KPI ← مراکز کشف‌شده)</div>'
     +'</div>'
-    +(_isManager()?'<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">'
-    +'<div style="font-size:12px;font-weight:700;margin-bottom:8px">💰 همگام‌سازی مطالبات (فرادیس)</div>'
-    +'<label style="display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:8px;cursor:pointer">'
-    +'<input type="checkbox" id="stgMtrSyncEnabled"'+(s.mtrSyncEnabled?' checked':'')+'>'
-    +'<span>فعال‌سازی sync خودکار از نرم‌افزار حسابداری</span></label>'
-    +'<div style="display:flex;align-items:center;gap:8px;font-size:12px">'
-    +'<span>فاصله refresh (دقیقه):</span>'
-    +'<input type="number" id="stgMtrSyncInterval" min="1" max="120" value="'+(parseInt(s.mtrSyncIntervalMin)||5)+'" style="width:60px;padding:4px 8px;border:1px solid var(--border-input);border-radius:6px;font-family:inherit">'
-    +'<button type="button" onclick="mtrRunLiveSync(true)" style="padding:5px 12px;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:11px;font-family:inherit">🔄 sync الان</button>'
-    +'</div>'
-    +'<div style="font-size:10px;color:var(--text-muted);margin-top:6px">نیاز به اتصال Faradis — در صورت خطا از آپلود Excel استفاده کنید</div>'
-    +'</div>':'')
     +'<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between">'
     +'<div>'
     +'<div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:3px">👥 مدیریت کاربران</div>'
@@ -284,17 +272,6 @@ function saveSettings(){
       owner_change:!!(document.getElementById('stgNtOwner')||{checked:true}).checked,
       general:!!(document.getElementById('stgNtGeneral')||{checked:true}).checked
     };
-  }
-  var _mtrSync=document.getElementById('stgMtrSyncEnabled');
-  var _mtrInt=document.getElementById('stgMtrSyncInterval');
-  if(_mtrSync){
-    DB.settings.mtrSyncEnabled=!!_mtrSync.checked;
-    DB.settings.mtrSyncIntervalMin=Math.min(120,Math.max(1,parseInt((_mtrInt&&_mtrInt.value)||5,10)||5));
-    fetch('/api/crm-settings/mtrSyncEnabled',{method:'PATCH',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({value:DB.settings.mtrSyncEnabled})}).catch(function(){});
-    fetch('/api/crm-settings/mtrSyncIntervalMin',{method:'PATCH',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({value:DB.settings.mtrSyncIntervalMin})}).catch(function(){});
-    if(typeof _setupMtrAutoSync==='function')_setupMtrAutoSync();
   }
   // ذخیره برچسب‌های ویرایش‌شده
   if(!DB.tags)DB.tags=[];

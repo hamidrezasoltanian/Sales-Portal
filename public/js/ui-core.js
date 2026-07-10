@@ -104,7 +104,16 @@ function switchTab(tab){
     }
     _safeRender(renderTable,'provinces');
   }
-  else if(tab==='weekplan'){var _dmb=document.getElementById('wpDailyMonBtn');if(_dmb)_dmb.style.display=_isManager()?'':'none';_safeRender(renderWeekPlan,'weekplan');}
+  else if(tab==='weekplan'){
+    var _dmb=document.getElementById('wpDailyMonBtn');if(_dmb)_dmb.style.display=_isManager()?'':'none';
+    _safeRender(function(){
+      if(typeof _wpLoadWeekFromApi==='function'){
+        _wpLoadWeekFromApi(function(){renderWeekPlan();});
+      } else {
+        renderWeekPlan();
+      }
+    },'weekplan');
+  }
   else if(tab==='calendar')_safeRender(renderCalendar,'cal');
   else if(tab==='checklist')_safeRender(renderChecklist,'ck');
   else if(tab==='activity'){_actPage=0;_safeRender(renderActivity,'act');}

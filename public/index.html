@@ -305,7 +305,7 @@
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
-<!-- DATA — split from app.bundle.js into modules -->
+<!-- DATA — split modules (production). app.bundle.js is legacy — do not edit for new features -->
 <script src="/js/core.js?v=20260708h"></script>
 <script src="/js/settings.js?v=20260708h"></script>
 <script src="/js/data.js?v=20260708h"></script>
@@ -354,7 +354,6 @@
   </div>
   <div class="hdr-btns" style="display:flex;gap:5px;flex-shrink:0">
     <button class="hbtn hbtn-dark" onclick="document.getElementById('mtr-fi').click()" title="آپلود فایل">📂</button>
-    <button class="hbtn hbtn-dark" id="mtr-syncBtn" onclick="mtrRunLiveSync(true)" title="همگام‌سازی زنده از فرادیس" style="display:none">🔄</button>
     <button class="hbtn hbtn-dark" onclick="printView()" title="پرینت" id="mtr-printBtn" style="display:none">🖨️</button>
   </div>
 </div>

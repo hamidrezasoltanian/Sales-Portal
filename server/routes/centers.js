@@ -95,4 +95,40 @@ router.patch('/:key', requireAuth, async function (req, res) {
   }
 });
 
+// ── POST /api/centers/:key/notes — append one note (no full blob save)
+router.post('/:key/notes', requireAuth, async function (req, res) {
+  try {
+    const centerKey = req.params.key;
+    const text = ((req.body && req.body.text) || '').trim();
+    if (!text) return res.status(400).json({ error: 'متن یادداشت الزامی است' });
+
+    const note = {
+      text: text,
+      date: (req.body && req.body.date) || null,
+      user: req.user.name || req.user.username,
+      by: req.user.username,
+      ts: new Date().toISOString(),
+    };
+
+    const existing = await query('SELECT notes FROM center_notes WHERE center_key = $1', [centerKey]);
+    let notes = existing.rows.length ? (existing.rows[0].notes || []) : [];
+    if (!Array.isArray(notes)) notes = [];
+    notes.push(note);
+
+    await query(
+      `INSERT INTO center_notes (center_key, notes, updated_at, updated_by)
+       VALUES ($1, $2::jsonb, NOW(), $3)
+       ON CONFLICT (center_key) DO UPDATE
+         SET notes = EXCLUDED.notes, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+      [centerKey, JSON.stringify(notes), req.user.username]
+    );
+
+    notifyCenterChange(req, { centerKey, field: 'notes' });
+    res.json({ ok: true, centerKey, note, notes });
+  } catch (e) {
+    console.error('[centers POST /:key/notes]', e.message);
+    res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
+
 module.exports = router;
