@@ -187,7 +187,10 @@ function _sseWeekEntryChanged(data) {
             doneDate: row.doneDate,
             addedBy: row.addedBy,
             centerName: row.centerName,
-            weekTagId: row.weekTagId
+            weekTagId: row.weekTagId,
+            doneResult: row.doneResult,
+            doneNote: row.doneNote,
+            doneAmount: row.doneAmount
           };
         });
         if (!_saveDebounceTimer && currentTab === 'weekplan' && typeof renderWeekPlan === 'function') {

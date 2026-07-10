@@ -684,6 +684,46 @@ async function test24_mtrSyncFromCache() {
   await query("DELETE FROM app_settings WHERE key = 'mtrLastSyncAt'");
 }
 
+async function test25_crmGapsApis() {
+  console.log('\n── Test 25: center-deals, center-files, manager-reports, kol-centers ──');
+  const tok = token(TEST_USERS[0]);
+  const mgrTok = managerToken(TEST_MANAGER);
+  const ck = 'center_qa_deal_' + Date.now();
+  const dealId = 'deal_qa_' + Date.now();
+
+  const postDeal = await req('POST', '/api/center-deals', {
+    id: dealId, centerKey: ck, title: 'QA Deal', owner: TEST_USERS[0], valueMillion: 12.5,
+  }, tok);
+  assert(postDeal.status === 201, 'POST center-deals returns 201');
+  assert(postDeal.body.title === 'QA Deal', 'deal title returned');
+
+  const getDeals = await req('GET', '/api/center-deals?center_key=' + encodeURIComponent(ck), null, tok);
+  assert(getDeals.status === 200, 'GET center-deals returns 200');
+  assert((getDeals.body.deals || []).some(d => d.id === dealId), 'deal in list');
+
+  const putDeal = await req('PUT', '/api/center-deals/' + encodeURIComponent(dealId), { stage: 'مشتری' }, tok);
+  assert(putDeal.status === 200 && putDeal.body.stage === 'مشتری', 'PUT center-deals updates stage');
+
+  const listFiles = await req('GET', '/api/center-files/list/' + encodeURIComponent(ck), null, tok);
+  assert(listFiles.status === 200, 'GET center-files list returns 200');
+  assert(Array.isArray(listFiles.body.files), 'files array present');
+
+  const winLoss = await req('GET', '/api/manager-reports/win-loss', null, mgrTok);
+  assert(winLoss.status === 200 && winLoss.body.ok, 'GET manager-reports/win-loss returns ok');
+  assert(winLoss.body.wonCenters !== undefined, 'wonCenters present');
+
+  const expertRpt = await req('GET', '/api/manager-reports/expert/' + encodeURIComponent(TEST_USERS[0]) + '?from=1400/01/01&to=1410/12/29', null, mgrTok);
+  assert(expertRpt.status === 200 && expertRpt.body.ok, 'GET manager-reports/expert returns ok');
+  assert(expertRpt.body.summary !== undefined, 'expert summary present');
+
+  const kolCenters = await req('GET', '/api/hcps/kol-centers', null, tok);
+  assert(kolCenters.status === 200, 'GET hcps/kol-centers returns 200');
+  assert(Array.isArray(kolCenters.body.keys), 'kol-centers keys array');
+
+  const delDeal = await req('DELETE', '/api/center-deals/' + encodeURIComponent(dealId), null, tok);
+  assert(delDeal.status === 200, 'DELETE center-deals returns 200');
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -745,6 +785,7 @@ async function main() {
     await test22_mtrAuxSettingsPersist();
     await test23_mtrInvoiceMetaPersist();
     await test24_mtrSyncFromCache();
+    await test25_crmGapsApis();
 
   } catch (err) {
     console.error('\n❌ خطای غیرمنتظره:', err.message);

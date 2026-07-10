@@ -1307,7 +1307,7 @@ function _wpFinishDone(eKey){
   }
 
   closeModal('wpDoneModal');
-  (function(){var _we3=DB.weekEntries[eKey];if(_we3&&_we3.sqlId){fetch('/api/week-entries/'+encodeURIComponent(_we3.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({done:_we3.done,doneDate:_we3.doneDate||null,scheduledDate:_we3.scheduledDate||null})}).catch(function(){});}})();
+  (function(){var _we3=DB.weekEntries[eKey];if(_we3&&_we3.sqlId){fetch('/api/week-entries/'+encodeURIComponent(_we3.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({done:_we3.done,doneDate:_we3.doneDate||null,scheduledDate:_we3.scheduledDate||null,doneResult:_we3.doneResult||null,doneNote:_we3.doneNote||null,doneAmount:_we3.doneAmount||null})}).catch(function(){});}})();
   _debouncedRenderWeekPlan();renderDashboard();
   if(currentTab==='provinces'&&_currentProvId)setTimeout(renderTable,100);
   var msg=outcome==='won'?'🎉 قرارداد ثبت شد! — '+cname

@@ -128,6 +128,16 @@ function openSettings(){
     +'<button style="background:var(--bg-raised);color:var(--text-secondary);border:1px solid #fcd34d;border-radius:5px;padding:6px 12px;cursor:pointer;font-size:12px;font-family:inherit" onclick="cleanupOrphanedEntries(true);renderDashboard()">🧹 پاک‌سازی ورودی‌های منسوخ</button>'
     +'<button style="background:var(--bg-raised);color:var(--text-secondary);border:1px solid #7dd3fc;border-radius:5px;padding:6px 12px;cursor:pointer;font-size:12px;font-family:inherit" onclick="var n=wpDeduplicateEntries();if(n>0){saveDBSync();_debouncedRenderWeekPlan();showToast(\'✅ \'+n+\' ورودی تکراری هفته حذف شد\',3000);}else{showToast(\'✅ هیچ تکراری یافت نشد\');}">📋 حذف تکراری‌های هفته</button>'
     +'<button class="btn-primary" onclick="saveSettings()">💾 ذخیره تنظیمات</button>';
+  if(_isManager()){
+    var syncOn=!!s.mtrSyncEnabled;
+    body+='<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">'
+      +'<label style="font-size:12px;font-weight:700;display:block;margin-bottom:6px">💰 همگام‌سازی مطالبات (فرادیس)</label>'
+      +'<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-secondary);cursor:pointer">'
+      +'<input type="checkbox" id="stgMtrSyncEnabled"'+(syncOn?' checked':'')+' style="width:16px;height:16px">'
+      +'🔌 همگام‌سازی خودکار هر ۱۵ دقیقه از کش فرادیس</label>'
+      +'<div style="font-size:10px;color:var(--text-muted);margin-top:4px">تنظیمات کامل (API فراز SMS و همگام‌سازی دستی) در تب مطالبات → ⚙</div>'
+      +'</div>';
+  }
   // Backup/Restore JSON section
   body += '<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">'
     +'<div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:8px">💾 پشتیبان‌گیری داده‌ها</div>'
@@ -302,6 +312,15 @@ function saveSettings(){
     if(_staTa&&DB.settings.statusList)patchCrmSetting('statusList',DB.settings.statusList);
     if(_ldTa&&DB.settings.leadList)patchCrmSetting('leadList',DB.settings.leadList);
     if(_tpTa&&DB.settings.typeList)patchCrmSetting('typeList',DB.settings.typeList);
+  }
+  var _mtrSync=document.getElementById('stgMtrSyncEnabled');
+  if(_mtrSync){
+    DB.settings.mtrSyncEnabled=!!_mtrSync.checked;
+    patchCrmSetting('mtrSyncEnabled',DB.settings.mtrSyncEnabled);
+    if(typeof mtrStartAutoSync==='function'&&typeof mtrStopAutoSync==='function'){
+      if(_mtrSync.checked)mtrStartAutoSync(false);
+      else mtrStopAutoSync();
+    }
   }
   buildUSERS();
   closeModal('settingsModal');
@@ -1102,12 +1121,51 @@ function renderManagerPanel(){
     html+='</div></div>';
   })();
 
+  html+='<div id="mgrWinLossCard" style="background:var(--bg-card);border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden;margin-bottom:12px">'
+    +'<div style="padding:10px 14px;font-weight:700;font-size:13px;border-bottom:1px solid var(--border)">🏆 برد / باخت — دلایل از دست دادن</div>'
+    +'<div id="mgrWinLossBody" style="padding:12px;color:var(--text-muted);font-size:11px">⏳ بارگذاری...</div>'
+    +'</div>';
+
   // Refresh button
   html+='<div style="text-align:center;margin-top:10px">'
     +'<button onclick="renderManagerPanel()" style="background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 16px;cursor:pointer;font-size:12px;font-family:inherit">🔄 بروزرسانی</button>'
     +'</div></div>';
 
   el.innerHTML=html;
+  _loadMgrWinLossCard();
+}
+
+function _loadMgrWinLossCard(){
+  var bodyEl=document.getElementById('mgrWinLossBody');
+  if(!bodyEl)return;
+  fetch('/api/manager-reports/win-loss')
+    .then(function(r){return r.ok?r.json():null;})
+    .then(function(d){
+      if(!d||!d.ok){bodyEl.textContent='خطا در بارگذاری';return;}
+      var won=d.wonCenters||{cnt:0,total_value:0};
+      var rows=(d.lostBreakdown||[]).filter(function(x){return x.reason||x.lost_reason;}).slice(0,12);
+      var html='<div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
+        +'<div style="flex:1;min-width:120px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px;text-align:center">'
+        +'<div style="font-size:18px;font-weight:700;color:#16a34a">'+(won.cnt||0)+'</div>'
+        +'<div style="font-size:10px;color:#16a34a">مشتری / قرارداد ✓</div>'
+        +'<div style="font-size:10px;color:var(--text-muted);margin-top:2px">ارزش: '+Math.round(Number(won.total_value||0)).toLocaleString('fa-IR')+' M</div>'
+        +'</div>'
+        +'<div style="flex:2;min-width:200px;background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:8px">'
+        +'<div style="font-size:10px;font-weight:700;color:var(--text-secondary);margin-bottom:6px">دلایل باخت (Top)</div>';
+      if(!rows.length){
+        html+='<div style="font-size:10px;color:var(--text-muted)">دلیل بسته‌شدن ثبت نشده</div>';
+      }else{
+        rows.forEach(function(x){
+          var lbl=esc(x.reason||x.lost_reason||'—');
+          html+='<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border);font-size:10px">'
+            +'<span>'+lbl+(x.lead?' <span style="color:var(--text-muted)">('+esc(x.lead)+')</span>':'')+'</span>'
+            +'<span style="font-weight:700;color:#dc2626">'+x.cnt+'</span></div>';
+        });
+      }
+      html+='</div></div>';
+      bodyEl.innerHTML=html;
+    })
+    .catch(function(){bodyEl.textContent='خطا در بارگذاری';});
 }
 
 // ════════════════════════ MANAGER DRILLDOWN ════════════════════
@@ -1506,12 +1564,12 @@ function openExpertReport(memberId){
   var m=allMem.find(function(x){return x.id===memberId;});
   if(!m)return;
   var mon=currentJMonth();
-  // Compute default date range: first and last day of current month
   var monParts=mon.split('/');
   var fromDefault=monParts[0]+'/'+monParts[1]+'/01';
   var lastDay=jDIM(parseInt(monParts[0]),parseInt(monParts[1]));
   var toDefault=monParts[0]+'/'+monParts[1]+'/'+p2(lastDay);
-  function buildReport(fromDate,toDate){
+  function buildReport(fromDate,toDate,apiData){
+    window._rptApiCache=apiData||null;
     var allPlanned=Object.keys(DB.weekEntries||{}).map(function(k){
       var we = DB.weekEntries[k];
       we._key = k;
@@ -1521,10 +1579,16 @@ function openExpertReport(memberId){
       return we.addedBy === memberId && entryDate >= fromDate && entryDate <= toDate;
     });
 
-    var totalPlanned = allPlanned.length;
-    var totalDone = allPlanned.filter(function(we){ return we.done; }).length;
+    var totalPlanned = apiData&&apiData.summary?apiData.summary.planned:allPlanned.length;
+    var totalDone = apiData&&apiData.summary?apiData.summary.done:allPlanned.filter(function(we){ return we.done; }).length;
     var totalNotDone = totalPlanned - totalDone;
     var donePct = totalPlanned > 0 ? Math.round(totalDone / totalPlanned * 100) : 0;
+    var salesHtml='';
+    if(apiData&&apiData.summary&&apiData.summary.salesCount>0){
+      salesHtml='<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px;text-align:center;margin-top:8px">'
+        +'<div style="font-size:11px;color:#c2410c;font-weight:700">💰 فروش ثبت‌شده: '+apiData.summary.salesCount+' مورد — '+Math.round(apiData.summary.salesTotal||0).toLocaleString('fa-IR')+' ریال</div>'
+        +'</div>';
+    }
 
     var _rptAllMem=typeof umGetActive==='function'?umGetActive():(((DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS).filter(function(x){return x.active!==false;}));
     var _rptMemOpts=_rptAllMem.map(function(x){return'<option value="'+esc(x.id)+'"'+(x.id===memberId?' selected':'')+'>'+esc(x.name||x.id)+'</option>';}).join('');
@@ -1544,6 +1608,7 @@ function openExpertReport(memberId){
     body+='<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#dc2626">'+totalNotDone+'</div><div style="font-size:11px;color:#dc2626">باقی‌مانده (اختلاف)</div></div>';
     body+='<div style="background:#faf5ff;border:1px solid #d8b4fe;border-radius:8px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#7c3aed">'+donePct+'٪</div><div style="font-size:11px;color:#7c3aed">نرخ تحقق</div></div>';
     body+='</div>';
+    body+=salesHtml;
     // قیف فروش برای این کارشناس
     body+='<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:12px">';
     body+='<div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:6px">📊 قیف فروش (وضعیت فعلی مراکز)</div>';
@@ -1587,7 +1652,10 @@ function openExpertReport(memberId){
       var ti=document.getElementById('rptTo');if(ti)openJDP(ti,function(v){ti.value=v;});
     },100);
   }
-  buildReport(fromDefault,toDefault);
+  fetch('/api/manager-reports/expert/'+encodeURIComponent(memberId)+'?from='+encodeURIComponent(fromDefault)+'&to='+encodeURIComponent(toDefault))
+    .then(function(r){return r.ok?r.json():null;})
+    .then(function(apiData){buildReport(fromDefault,toDefault,apiData);})
+    .catch(function(){buildReport(fromDefault,toDefault,null);});
 }
 function _sendReportNotif(memberId,memberName){
   var body='<div style="font-size:12px">'
@@ -1760,9 +1828,25 @@ function buildChangesOnExpertCentersHtml(memberId, fromDate, toDate) {
 }
 
 function buildReportEntriesHtml(memberId,fromDate,toDate){
+  var apiMap={};
+  if(window._rptApiCache&&window._rptApiCache.weekEntries){
+    window._rptApiCache.weekEntries.forEach(function(w){
+      var k=(w.scheduledDate||'')+':::'+(w.rtype||'')+'_'+(w.rid||'');
+      apiMap[k]=w;
+      if(w.id)apiMap['id_'+w.id]=w;
+    });
+  }
   var entries=Object.keys(DB.weekEntries||{}).map(function(k){
     var we = DB.weekEntries[k];
     we._key = k;
+    var api=apiMap[k]||apiMap['id_'+we.id];
+    if(api){
+      if(api.doneResult!==undefined&&api.doneResult!==null)we.doneResult=api.doneResult;
+      if(api.doneNote!==undefined&&api.doneNote!==null)we.doneNote=api.doneNote;
+      if(api.doneAmount!==undefined&&api.doneAmount!==null)we.doneAmount=api.doneAmount;
+      if(api.doneDate)we.doneDate=api.doneDate;
+      if(api.done!==undefined)we.done=api.done;
+    }
     return we;
   }).filter(function(we){
     var entryDate = we.scheduledDate || we._key.split(':::')[0] || '';
@@ -2098,6 +2182,7 @@ async function init(){
     showLoginOverlay();return;
   }
   await loadDB();
+  if(typeof loadKolCenterKeys==='function')loadKolCenterKeys();
   initSettings();initTags();initWeekTags();initEvents();_initNotif();
   _initBrowserNotif();
   setTimeout(_sendWeeklyDigest,3000);

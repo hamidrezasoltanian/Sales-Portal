@@ -22,7 +22,16 @@ const { query, pool } = require('../server/db');
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-to-a-random-secret-string';
 const TEST_USER = '_qa_agent_user';
 const TEST_USER2 = '_qa_agent_user2';
-const loopMax = parseInt((process.argv.find(function (a) { return a.startsWith('--loop'); }) || '').split('=')[1] || process.argv[process.argv.indexOf('--loop') + 1] || '1', 10);
+const loopMax = (function () {
+  const idx = process.argv.indexOf('--loop');
+  if (idx >= 0) {
+    const a = process.argv[idx];
+    if (a.includes('=')) return Math.max(1, parseInt(a.split('=')[1], 10) || 1);
+    const n = parseInt(process.argv[idx + 1], 10);
+    if (!isNaN(n)) return Math.max(1, n);
+  }
+  return 1;
+})();
 
 let serverProc = null;
 let passed = 0;

@@ -1638,6 +1638,43 @@ async function initSchema() {
   `);
   await query(`CREATE INDEX IF NOT EXISTS idx_mtr_meta_updated ON mtr_invoice_meta(updated_at DESC)`).catch(() => {});
 
+  // Center deals (multi-opportunity per center)
+  await query(`
+    CREATE TABLE IF NOT EXISTS center_deals (
+      id              TEXT PRIMARY KEY,
+      center_key      TEXT NOT NULL,
+      title           TEXT NOT NULL DEFAULT '',
+      stage           TEXT DEFAULT 'فرصت',
+      value_million   DECIMAL(12,2) DEFAULT 0,
+      probability     TEXT DEFAULT 'medium',
+      grade           TEXT DEFAULT 'B',
+      expected_close  TEXT DEFAULT '',
+      owner           TEXT,
+      status          TEXT DEFAULT 'open',
+      notes           TEXT DEFAULT '',
+      created_at      TIMESTAMPTZ DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ DEFAULT NOW(),
+      updated_by      TEXT
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_center_deals_center ON center_deals(center_key)`).catch(() => {});
+  await query(`CREATE INDEX IF NOT EXISTS idx_center_deals_owner ON center_deals(owner)`).catch(() => {});
+
+  // Center document attachments
+  await query(`
+    CREATE TABLE IF NOT EXISTS center_files (
+      id           SERIAL PRIMARY KEY,
+      center_key   TEXT NOT NULL,
+      filename     TEXT NOT NULL,
+      mime_type    TEXT DEFAULT 'application/octet-stream',
+      file_size    INT DEFAULT 0,
+      data         BYTEA NOT NULL,
+      uploaded_by  TEXT,
+      created_at   TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_center_files_key ON center_files(center_key)`).catch(() => {});
+
   // ════════════════════════════════════════
   // NORMALIZED CRM TABLES — replace 'main' blob
   // ════════════════════════════════════════

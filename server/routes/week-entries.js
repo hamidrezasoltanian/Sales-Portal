@@ -30,6 +30,7 @@ async function resolveEntryIds(ids, keys) {
 
 // ── Helper: map DB row → camelCase object ──────────────────────────────────
 function rowToObj(r) {
+  const v = (r.value && typeof r.value === 'object') ? r.value : {};
   return {
     id:            r.id,
     weekId:        r.week_id,
@@ -45,6 +46,9 @@ function rowToObj(r) {
     weekTagId:     r.week_tag_id,
     createdAt:     r.created_at,
     updatedAt:     r.updated_at,
+    doneResult:    v.doneResult || null,
+    doneNote:      v.doneNote || null,
+    doneAmount:    v.doneAmount != null ? v.doneAmount : null,
   };
 }
 
@@ -143,7 +147,8 @@ router.post('/', requireAuth, async function (req, res) {
 // ── PUT /api/week-entries/:id ──────────────────────────────────────────────
 router.put('/:id', requireAuth, async function (req, res) {
   try {
-    const { weekId, scheduledDate, done, doneDate, actionType, weekTagId, centerName } = req.body;
+    const { weekId, scheduledDate, done, doneDate, actionType, weekTagId, centerName,
+            doneResult, doneNote, doneAmount } = req.body;
     const rowRes = await query('SELECT key, value FROM week_entries WHERE id = $1', [req.params.id]);
     if (!rowRes.rows.length) {
       return res.status(404).json({ error: 'ورودی برنامه هفته یافت نشد' });
@@ -158,6 +163,9 @@ router.put('/:id', requireAuth, async function (req, res) {
       ...(actionType !== undefined ? { actionType } : {}),
       ...(weekTagId !== undefined ? { weekTagId } : {}),
       ...(centerName !== undefined ? { centerName } : {}),
+      ...(doneResult !== undefined ? { doneResult } : {}),
+      ...(doneNote !== undefined ? { doneNote } : {}),
+      ...(doneAmount !== undefined ? { doneAmount } : {}),
     };
     const result = await query(
       `UPDATE week_entries

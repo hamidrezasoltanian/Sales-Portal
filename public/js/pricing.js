@@ -1020,6 +1020,10 @@ function openCenterModal(rtype,id){
     +'<label style="font-size:10px;display:block;margin-bottom:3px">💰 ارزش فرصت (میلیون ریال)</label>'
     +'<input type="number" min="0" step="1" value="'+(e.oppValue||'')+'" placeholder="مثلاً: 150" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'oppValue\',parseFloat(this.value)||0)" style="width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)">'
     +'</div>'
+    // ── فرصت‌های متعدد (Deal) ──
+    +'<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 12px;margin-top:6px">'
+    +'<div style="font-size:11px;font-weight:700;color:#1d4ed8;margin-bottom:6px">📋 فرصت‌های فعال (Deal)</div>'
+    +'<div id="cmDeals_'+id+'">⏳ بارگذاری...</div></div>'
     // ── بخش مشتری (فقط وقتی lead=مشتری) ──
     +'<div id="cmCustSection_'+id+'" style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px 12px;margin-top:6px;'+(lead==='مشتری'?'':'display:none')+'">'
     +'<div style="font-size:11px;font-weight:700;color:#15803d;margin-bottom:8px">🏆 اطلاعات مشتری</div>'
@@ -1096,6 +1100,10 @@ function openCenterModal(rtype,id){
         +'<input type="text" value="'+(e.approxOrderTime||'')+'" placeholder="مثلاً: اسفند ۱۴۰۳" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'approxOrderTime\',this.value)" style="width:100%;padding:3px 6px;border:1px solid var(--border-input);border-radius:4px;font-size:10px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)"></div>'
         +'</div></div>';
     })()
+    // ── پیوست‌ها ──
+    +'<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin-top:6px">'
+    +'<div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:6px">📎 پیوست‌ها</div>'
+    +'<div id="cmFiles_'+id+'">⏳ بارگذاری...</div></div>'
     +'<div id="cmPricingInfo_'+r.id+'" style="background:var(--bg-raised);border-radius:8px;padding:8px 12px;margin-top:6px;border:1px solid var(--border);font-size:11px"><span style="color:var(--text-muted)">در حال بارگذاری قیمت‌گذاری...</span></div>'
    // برنامه هفته
     +(wkEntries.length?'<label>برنامه هفته</label><div style="background:var(--bg-raised);border-radius:5px;padding:7px;font-size:11px">'
@@ -1238,6 +1246,8 @@ function openCenterModal(rtype,id){
   var elCom=document.getElementById('cmCommission_'+_rid);if(elCom){var _curLvl=cfg&&cfg.commission_level?String(cfg.commission_level):'';elCom.innerHTML='<div style="display:flex;align-items:center;gap:5px"><label style="font-size:10px;color:var(--text-muted);flex-shrink:0">💼 پورسانت:</label><select onchange="(function(sel,nm){fetch(\'/api/pricing/center/\'+encodeURIComponent(nm),{method:\'PUT\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({commission_level:sel.value||null})}).then(function(){showToast(sel.value?\'💼 سطح پورسانت ذخیره شد\':\'💼 پورسانت حذف شد\');}).catch(function(){showToast(\'خطا در ذخیره پورسانت\');});})(this,\''+esc(_rname)+'\')" style="font-size:10px;padding:2px 5px;border:1px solid var(--border-input);border-radius:4px;background:var(--bg-input);font-family:inherit;color:var(--text-primary)"><option value="">---</option><option value="1"'+(_curLvl==='1'?' selected':'')+'>سطح ۱</option><option value="2"'+(_curLvl==='2'?' selected':'')+'>سطح ۲</option><option value="3"'+(_curLvl==='3'?' selected':'')+'>سطح ۳</option></select>'+(function(){var _owId=e.owner||r.owner||'';var _owM=_DEFAULT_MEMBERS&&_DEFAULT_MEMBERS.find(function(mm){return mm.id===_owId;});return(_owM&&_owM.commissionPct)?'<span style="font-size:10px;color:#7c3aed;background:#f5f3ff;border:1px solid #e9d5ff;border-radius:4px;padding:1px 6px;margin-right:4px"> 👤 نرخ: '+_owM.commissionPct+'٪</span>':'';})()+' </div>';}
       }).catch(function(){var el=document.getElementById('cmPricingInfo_'+_rid);if(el)el.style.display='none';});
   })(r.id, r.name);
+  setTimeout(function(){if(typeof _dealLoadSection==='function')_dealLoadSection(rtype,r.id,r.id);},100);
+  setTimeout(function(){if(typeof _cfLoadSection==='function')_cfLoadSection(rtype,r.id,r.id);},100);
 }
 
 function _mrgSearch(){
