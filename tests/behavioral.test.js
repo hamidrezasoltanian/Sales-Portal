@@ -467,6 +467,37 @@ async function test11_centerPatchNotWipedByBulkSave() {
   await query('DELETE FROM center_edits WHERE center_key = $1', [centerKey]);
 }
 
+async function test12_checklistUpsertNotWiped() {
+  console.log('\n── Test 12: checklist UPSERT — partial saves do not wipe other rows ──');
+  const tok = token(TEST_USERS[0]);
+  const date = '1404/01/15';
+  const key1 = date + '_' + TEST_USERS[0];
+  const key2 = date + '_' + TEST_USERS[1];
+
+  const put1 = await req('PUT', '/api/data/db', {
+    checklist: {
+      [key1]: { items: [{ id: 1, text: 'item A', done: true }], note: 'note A' }
+    }
+  }, tok);
+  assert(put1.status === 200, 'PUT checklist key1 returns 200');
+
+  const put2 = await req('PUT', '/api/data/db', {
+    checklist: {
+      [key2]: { items: [{ id: 2, text: 'item B', done: false }], note: 'note B' }
+    }
+  }, tok);
+  assert(put2.status === 200, 'PUT checklist key2 returns 200');
+
+  const getDb = await req('GET', '/api/data/db', null, tok);
+  assert(getDb.status === 200, 'GET /db returns 200');
+  const cl = getDb.body && getDb.body.checklist;
+  assert(cl && cl[key1] && cl[key1].note === 'note A', 'checklist key1 survived second save');
+  assert(cl && cl[key2] && cl[key2].note === 'note B', 'checklist key2 persisted');
+
+  await query('DELETE FROM daily_checklists WHERE date = $1 AND username IN ($2, $3)',
+    [date, TEST_USERS[0], TEST_USERS[1]]);
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -515,8 +546,7 @@ async function main() {
     await test9_weekEntriesNotWipedByBulkSave();
     await test10_weekEntriesBulkUpdate();
     await test11_centerPatchNotWipedByBulkSave();
-
-  } catch (err) {
+    await test12_checklistUpsertNotWiped();
     console.error('\n❌ خطای غیرمنتظره:', err.message);
     console.error(err.stack);
     failed++;

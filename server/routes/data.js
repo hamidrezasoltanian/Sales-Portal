@@ -9,6 +9,52 @@ try { _broadcast = require('./events').broadcast; } catch(e) {}
 
 const router = express.Router();
 
+const _EVENT_UPSERT = `INSERT INTO app_events (id, title, description, start_ms, all_day, color, owner, updated_at, updated_by)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)
+  ON CONFLICT (id) DO UPDATE SET
+    title = EXCLUDED.title,
+    description = EXCLUDED.description,
+    start_ms = EXCLUDED.start_ms,
+    all_day = EXCLUDED.all_day,
+    color = EXCLUDED.color,
+    owner = EXCLUDED.owner,
+    updated_at = NOW(),
+    updated_by = EXCLUDED.updated_by`;
+
+const _CHECKLIST_UPSERT = `INSERT INTO daily_checklists (date, username, items, note, updated_at, updated_by)
+  VALUES ($1, $2, $3, $4, NOW(), $5)
+  ON CONFLICT (date, username) DO UPDATE SET
+    items = EXCLUDED.items,
+    note = EXCLUDED.note,
+    updated_at = NOW(),
+    updated_by = EXCLUDED.updated_by`;
+
+async function upsertEventsFromArray(q, events, user) {
+  if (events === undefined || !Array.isArray(events)) return;
+  for (const ev of events) {
+    if (!ev || ev.id === undefined) continue;
+    await q(_EVENT_UPSERT, [
+      ev.id, ev.title || '', ev.desc || '', ev.startMs || 0,
+      !!ev.allDay, ev.color || null, ev.owner || null, user,
+    ]);
+  }
+}
+
+async function upsertChecklistFromObject(q, checklist, user) {
+  if (checklist === undefined || typeof checklist !== 'object' || checklist === null) return;
+  for (const [key, value] of Object.entries(checklist)) {
+    if (!value) continue;
+    const parts = key.split('_');
+    if (parts.length >= 2) {
+      const date = parts[0];
+      const username = parts.slice(1).join('_');
+      const items = value.items || [];
+      const note = value.note || '';
+      await q(_CHECKLIST_UPSERT, [date, username, JSON.stringify(items), note, user]);
+    }
+  }
+}
+
 // All routes require auth
 router.use(requireAuth);
 
@@ -250,38 +296,11 @@ router.put('/db', async (req, res) => {
     }
 
     // ── structured SQL tables saving ─────────────────────────────────────────
-    // 1. events
-    if (events !== undefined && Array.isArray(events)) {
-      await client.query('DELETE FROM app_events');
-      for (const ev of events) {
-        if (!ev || ev.id === undefined) continue;
-        await client.query(
-          `INSERT INTO app_events (id, title, description, start_ms, all_day, color, owner, updated_at, updated_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)`,
-          [ev.id, ev.title || '', ev.desc || '', ev.startMs || 0, !!ev.allDay, ev.color || null, ev.owner || null, user]
-        );
-      }
-    }
+    // 1. events — UPSERT per id (no DELETE ALL; partial saves must not wipe others)
+    await upsertEventsFromArray(client.query.bind(client), events, user);
 
-    // 2. checklist
-    if (checklist !== undefined && typeof checklist === 'object' && checklist !== null) {
-      await client.query('DELETE FROM daily_checklists');
-      for (const [key, value] of Object.entries(checklist)) {
-        if (!value) continue;
-        const parts = key.split('_');
-        if (parts.length >= 2) {
-          const date = parts[0];
-          const username = parts.slice(1).join('_');
-          const items = value.items || [];
-          const note = value.note || '';
-          await client.query(
-            `INSERT INTO daily_checklists (date, username, items, note, updated_at, updated_by)
-             VALUES ($1, $2, $3, $4, NOW(), $5)`,
-            [date, username, JSON.stringify(items), note, user]
-          );
-        }
-      }
-    }
+    // 2. checklist — UPSERT per (date, username)
+    await upsertChecklistFromObject(client.query.bind(client), checklist, user);
 
     // 3. extra
     if (extra !== undefined && Array.isArray(extra)) {

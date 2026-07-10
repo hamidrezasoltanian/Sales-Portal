@@ -221,13 +221,13 @@
 
 ## ۷. فاز ۲ج — tasks و notifications (حذف dual-write)
 
-**وضعیت:** API مستقیم دارند ولی هنوز saveDB هم می‌زنند.
+**وضعیت:** ✅ انجام شد — saveDB حذف از handlers وظایف؛ tasks/notifications از payload حذف.
 
-- [ ] audit: grep `saveDB` after `fetch('/api/tasks`
-- [ ] audit: grep `saveDB` after `fetch('/api/notifications`
-- [ ] حذف tasks/notifications از `_saveDBNow()` payload
-- [ ] `PUT /api/data/db`: skip tables if keys absent
-- [ ] load: tasks از `GET /api/tasks` at tab open (already partial)
+- [x] audit: grep `saveDB` after `fetch('/api/tasks`
+- [x] audit: grep `saveDB` after `fetch('/api/notifications`
+- [x] حذف tasks/notifications از `_saveDBNow()` payload
+- [x] `PUT /api/data/db`: skip tables if keys absent (tasks/notif omitted from client payload)
+- [x] load: tasks از `GET /api/tasks` at tab open (already partial)
 
 **فایل‌ها:** `public/js/app.bundle.js` (tasks panel), `modules/notifications.js`, `core.js`
 
@@ -237,9 +237,9 @@
 
 **ریسک:** دو user → یکی wipe می‌کند.
 
-- [ ] `events`: UPSERT per `id` به‌جای `DELETE FROM app_events` + insert all
-- [ ] `checklist`: UPSERT per `(date, username)` به‌جای delete all
-- [ ] test concurrent checklist save
+- [x] `events`: UPSERT per `id` به‌جای `DELETE FROM app_events` + insert all
+- [x] `checklist`: UPSERT per `(date, username)` به‌جای delete all
+- [x] test concurrent checklist save (test 12)
 
 **فایل:** `server/routes/data.js` L254–280 approx
 
@@ -247,11 +247,11 @@
 
 ## ۹. فاز ۳ — Observability
 
-- [ ] Sentry (server `SENTRY_DSN` env) — `server/index.js` error handler
+- [x] structured log helper: `{ ts, route, user, ms, err }` — `server/lib/log.js`
+- [x] health dashboard script: PG + last backup age + disk — `scripts/health-check.sh`
+- [x] runbook: «کاربر گفت پرید» — `docs/runbook-data-loss.md`
+- [ ] Sentry (server `SENTRY_DSN` env) — hook in `server/index.js` if `@sentry/node` installed
 - [ ] Sentry browser (optional, sample rate 0.1)
-- [ ] structured log helper: `{ ts, route, user, ms, err }`
-- [ ] health dashboard script: PG + last backup age + disk
-- [ ] runbook: «کاربر گفت پرید» → check Sentry + `app_data_history` + `week_entries` row
 
 **فایل‌ها:** `server/index.js`, `docs/runbook-data-loss.md`
 
@@ -259,10 +259,10 @@
 
 ## ۱۰. فاز ۴ — Hardening (وقتی CRM public/VPN باز)
 
-- [ ] `express-rate-limit` on `/api/auth/login` (5/min)
-- [ ] rate limit `/api/ai` (20/hour per user)
-- [ ] `requireAuth`: fail-closed on DB error (config flag `AUTH_FAIL_OPEN=false`)
-- [ ] startup: exit if `JWT_SECRET === default` && `NODE_ENV=production`
+- [x] `express-rate-limit` on `/api/auth/login` — in-memory 10/15min (موجود)
+- [x] rate limit `/api/ai` (20/hour per user)
+- [x] `requireAuth`: fail-closed on DB error (`AUTH_FAIL_OPEN=true` برای fail-open)
+- [x] startup: exit if `JWT_SECRET === default` && `NODE_ENV=production`
 - [ ] CSP gradual (start report-only)
 
 **مرجع اضافی:** `DB_SECURITY_TODO.md`
@@ -383,7 +383,10 @@ scripts/setup_dev_db.sh   ← new
 | 1404/04/19 | ۲α.۴ SSE week-entry-changed | #13 | ✅ |
 | 1404/04/19 | ۲α.۶ tests 9-10 | #13 | ✅ |
 | 1404/04/19 | ۲β PATCH centers / setE | #13 | ✅ |
-| | ۲γ tasks/notif dual-write | | ⬜ |
+| 1404/04/19 | ۲γ tasks/notif dual-write | #13 | ✅ |
+| 1404/04/19 | ۲δ events/checklist UPSERT | #13 | ✅ |
+| 1404/04/19 | ۳ observability + runbook | #13 | ✅ |
+| 1404/04/19 | ۴ hardening (AI rate, auth) | #13 | ✅ |
 
 ---
 

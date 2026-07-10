@@ -397,6 +397,8 @@ function _buildSavePayload(){
   delete payload.weekEntries;
   delete payload._weDeletedKeys;
   delete payload.edits;
+  delete payload.tasks;
+  delete payload.notifications;
   if(_dbServerTs)payload._clientTs=_dbServerTs;
   return payload;
 }

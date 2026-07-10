@@ -18,6 +18,8 @@ const cookieParser = require('cookie-parser');
 const path = require('path');
 const fs = require('fs');
 const { initSchema } = require('./db');
+const { log, logRequest } = require('./lib/log');
+const { JWT_SECRET, _DEFAULT_SECRET } = require('./auth');
 
 let helmet, compression;
 try { helmet = require('helmet'); } catch(e) {}
@@ -37,6 +39,18 @@ app.use(express.urlencoded({ extended: false, limit: '50mb' }));
 // CORS — same origin (no cross-origin needed since frontend is served from same server)
 app.use(function (req, res, next) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
+  next();
+});
+
+// Request timing + structured log (API routes only)
+app.use(function (req, res, next) {
+  if (!req.path.startsWith('/api/')) return next();
+  const start = Date.now();
+  res.on('finish', function () {
+    if (res.statusCode >= 500) {
+      logRequest(req, Date.now() - start, new Error('HTTP ' + res.statusCode));
+    }
+  });
   next();
 });
 
@@ -168,13 +182,36 @@ app.get('*', function (req, res) {
 
 // Error handler
 app.use(function (err, req, res, next) {
-  console.error('[server error]', err.message);
+  log('error', {
+    route: req.method + ' ' + (req.originalUrl || req.url),
+    user: req.user && req.user.username ? req.user.username : null,
+    err: err.message || String(err),
+  });
+  if (process.env.SENTRY_DSN) {
+    try {
+      const Sentry = require('@sentry/node');
+      Sentry.captureException(err);
+    } catch (_) { /* @sentry/node not installed */ }
+  }
   res.status(500).json({ error: 'خطای داخلی سرور' });
 });
 
 const PORT = parseInt(process.env.PORT || '3000');
 
 async function start() {
+  if (process.env.NODE_ENV === 'production' && JWT_SECRET === _DEFAULT_SECRET) {
+    console.error('[FATAL] JWT_SECRET must be set in production. Refusing to start.');
+    process.exit(1);
+  }
+  if (process.env.SENTRY_DSN) {
+    try {
+      const Sentry = require('@sentry/node');
+      Sentry.init({ dsn: process.env.SENTRY_DSN, environment: process.env.NODE_ENV || 'development' });
+      console.log('[Sentry] initialized');
+    } catch (e) {
+      console.warn('[Sentry] SENTRY_DSN set but @sentry/node not installed — skipping');
+    }
+  }
   try {
     await initSchema();
     app.listen(PORT, function () {

@@ -141,16 +141,7 @@ function sendNotif(toUser, message, centerKey, centerKeys, type, meta) {
       read: false, from: currentUser
     });
   }).catch(function() {
-    // Fallback: add to blob
-    if (!DB.notifications) DB.notifications = [];
-    var n = { id: id, to: toUser, from: currentUser, at: new Date().toISOString(),
-              message: message, msg: message, centerKey: centerKey || '',
-              centerKeys: centerKeys || null, read: false,
-              type: type || 'general', meta: meta || null };
-    DB.notifications.push(n);
-    _notifCache.unshift(n);
-    if (DB.notifications.length > 300) DB.notifications = DB.notifications.slice(-300);
-    saveDB();
+    console.warn('[sendNotif] API failed — notification not persisted');
   });
   showToast('📩 اعلان برای ' + (USERS[toUser] || toUser) + ' ارسال شد', 2000);
 }

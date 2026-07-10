@@ -81,7 +81,19 @@ function _ensureTasks(){
       note:t.note||'',subtasks:[],activity:[{type:'created',text:'وظیفه تکرارشونده ایجاد شد',by:'system',at:new Date().toISOString()}],
       recurring:t.recurring,recurringParentId:String(t.id),centerKey:t.centerKey||'',createdBy:'system',createdAt:new Date().toISOString()});
   });
-  if(_toAdd.length){_toAdd.forEach(function(t){DB.tasks.push(t);});saveDB();}
+  if(_toAdd.length){
+    _toAdd.forEach(function(t){
+      DB.tasks.push(t);
+      fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          id:t.id,title:t.title,owner:t.owner||null,dueDate:t.dueDate||null,
+          priority:t.priority||2,status:t.status||'todo',centerKey:t.centerKey||null,
+          note:t.note||'',subtasks:t.subtasks||[],done:!!t.done,recurring:t.recurring||'none',
+          activity:t.activity||[],createdBy:t.createdBy||'system',department:t.department||''
+        })
+      }).catch(function(){});
+    });
+  }
 }
 
 function _tkCountSubs(subs){
@@ -250,7 +262,6 @@ function tkDrop(ev,statusId){
   t.status=statusId;
   t.done=(statusId==='done');
   t.doneAt=t.done?todayStr():'';
-  saveDB();
   fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({status:t.status,done:t.done,doneAt:t.doneAt})}).catch(function(){});
   renderTasksPanel();
@@ -294,7 +305,6 @@ function tkQuickToggle(tid){
     var prevLabel=(statuses.find(function(s){return s.id===prev;})||{label:prev}).label;
     t.activity.push({type:'status',text:'«'+prevLabel+'» → انجام شد ✓',by:currentUser,at:new Date().toISOString()});
   }
-  saveDB();
   fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({status:t.status,done:t.done,doneAt:t.doneAt||null,activity:t.activity})}).catch(function(){});
   renderTasksPanel();
@@ -436,8 +446,6 @@ function tkSaveTask(tid){
     sendNotif(t.owner,'وظیفه «'+t.title+'» به شما واگذار شد',t.centerKey||'',[],'task',{taskId:t.id,taskTitle:t.title});
     t._notifiedOwner=t.owner;
   }
-  saveDB();
-  // SQL dual-write (fire-and-forget)
   (function(task,isNew){
     fetch('/api/tasks'+(isNew?'':'/'+encodeURIComponent(String(task.id))),{
       method:isNew?'POST':'PUT',
@@ -461,7 +469,6 @@ function tkSaveTask(tid){
 function tkDeleteTask(tid){
   _ensureTasks();
   DB.tasks=DB.tasks.filter(function(x){return String(x.id)!==String(tid);});
-  saveDB();
   fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'DELETE'}).catch(function(){});
   closeModal('taskDetail');
   showToast('🗑 وظیفه حذف شد');
@@ -476,7 +483,6 @@ function tkAddComment(tid){
   if(!t.activity)t.activity=[];
   t.activity.push({type:'comment',text:text,by:currentUser,at:new Date().toISOString()});
   inp.value='';
-  saveDB();
   fetch('/api/tasks/'+encodeURIComponent(String(tid))+'/comment',{
     method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({text:text})
@@ -538,7 +544,8 @@ function tkSubmitNewSub(tid,parentSid,inpId){
   } else {
     t.subtasks.push(node);
   }
-  saveDB();
+  fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({subtasks:t.subtasks})}).catch(function(){});
   var form=document.getElementById('tkAddSubForm');if(form)form.remove();
   var tree=document.getElementById('tkSubTree');
   if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
@@ -548,7 +555,6 @@ function tkToggleSub(tid,sid){
   var t=_tkFindTask(tid);if(!t)return;
   var s=_tkFindSub(t.subtasks,sid);if(!s)return;
   s.done=!s.done;
-  saveDB();
   fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({subtasks:t.subtasks})}).catch(function(){});
   var tree=document.getElementById('tkSubTree');
@@ -565,7 +571,6 @@ function tkEditSubTitle(tid,sid){
     var nv=prompt('ویرایش عنوان:',s.title||'');
     if(nv===null)return;
     s.title=nv.trim()||s.title;
-    saveDB();
     fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({subtasks:t.subtasks})}).catch(function(){});
     var tree=document.getElementById('tkSubTree');if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
@@ -577,7 +582,7 @@ function tkEditSubTitle(tid,sid){
   var saved=false;
   var save=function(){
     if(saved)return;saved=true;
-    s.title=inp.value.trim()||s.title;saveDB();
+    s.title=inp.value.trim()||s.title;
     fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({subtasks:t.subtasks})}).catch(function(){});
     var tree=document.getElementById('tkSubTree');if(tree)tree.innerHTML=_tkRenderSubTree(tid,t.subtasks,0);
@@ -602,7 +607,6 @@ function _tkDelSubFrom(subs,sid){
 function tkDelSub(tid,sid){
   var t=_tkFindTask(tid);if(!t)return;
   _tkDelSubFrom(t.subtasks,sid);
-  saveDB();
   fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({subtasks:t.subtasks})}).catch(function(){});
   var tree=document.getElementById('tkSubTree');
@@ -616,7 +620,6 @@ function _toggleTask(tid){
   t.status=(t.status==='done')?'todo':'done';
   t.done=(t.status==='done');
   t.doneAt=t.done?todayStr():'';
-  saveDB();
   fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'PUT',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({status:t.status,done:t.done,doneAt:t.doneAt||null})}).catch(function(){});
   renderTasksPanel();

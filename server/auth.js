@@ -5,6 +5,7 @@ const { query } = require('./db');
 
 const _DEFAULT_SECRET = 'change-this-to-a-random-secret-string';
 const JWT_SECRET = process.env.JWT_SECRET || _DEFAULT_SECRET;
+const AUTH_FAIL_OPEN = process.env.AUTH_FAIL_OPEN === 'true';
 
 if (JWT_SECRET === _DEFAULT_SECRET) {
   console.warn('[SECURITY WARNING] JWT_SECRET is using the default insecure value.');
@@ -69,8 +70,10 @@ async function requireAuth(req, res, next) {
       return res.status(401).json({ error: 'حساب کاربری غیرفعال است' });
     }
   } catch (e) {
-    // If DB check fails, allow through to avoid blocking all requests on DB error
     console.error('[requireAuth] DB check error:', e.message);
+    if (!AUTH_FAIL_OPEN) {
+      return res.status(503).json({ error: 'سرویس موقتاً در دسترس نیست — خطای پایگاه داده' });
+    }
   }
 
   req.user = { username: decoded.username, role: decoded.role, name: decoded.name, permissions: userPerms, department: userDept };
@@ -90,4 +93,4 @@ function invalidateAuthCache(username) {
   if (username) _activeCache.delete(username);
 }
 
-module.exports = { requireAuth, requireManager, JWT_SECRET, invalidateAuthCache };
+module.exports = { requireAuth, requireManager, JWT_SECRET, invalidateAuthCache, AUTH_FAIL_OPEN, _DEFAULT_SECRET };

@@ -8,8 +8,40 @@ const { query: dbQuery } = require('../db');
 
 const router = express.Router();
 
+// In-memory rate limit: 20 AI requests per user per hour
+const _aiUsage = new Map(); // username -> { count, windowStart }
+const AI_RATE_LIMIT = 20;
+const AI_RATE_WINDOW = 60 * 60 * 1000;
+
+function _checkAiRateLimit(username) {
+  const now = Date.now();
+  const entry = _aiUsage.get(username);
+  if (!entry || now - entry.windowStart > AI_RATE_WINDOW) {
+    _aiUsage.set(username, { count: 1, windowStart: now });
+    return { allowed: true, remaining: AI_RATE_LIMIT - 1 };
+  }
+  if (entry.count >= AI_RATE_LIMIT) {
+    const retryMin = Math.ceil((AI_RATE_WINDOW - (now - entry.windowStart)) / 60000);
+    return { allowed: false, retryMin };
+  }
+  entry.count++;
+  return { allowed: true, remaining: AI_RATE_LIMIT - entry.count };
+}
+
 // All AI routes require auth
 router.use(requireAuth);
+
+router.use(function (req, res, next) {
+  const user = req.user && req.user.username;
+  if (!user) return next();
+  const rl = _checkAiRateLimit(user);
+  if (!rl.allowed) {
+    return res.status(429).json({
+      error: 'محدودیت درخواست هوش مصنوعی — حداکثر ' + AI_RATE_LIMIT + ' در ساعت. ' + rl.retryMin + ' دقیقه صبر کنید.',
+    });
+  }
+  next();
+});
 
 async function getApiKey() {
   // 1. environment variable takes priority
