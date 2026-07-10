@@ -67,7 +67,8 @@ const ROLE_DEFAULTS = {
       provinces: 'view', weekplan: 'edit', calendar: 'edit', checklist: 'edit',
       activity: 'view', tasks: 'edit', mtr: 'none', pricing: 'view',
       proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'none',
-      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'none', letters: 'edit'
+      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'none', letters: 'edit',
+      workflows: 'edit'
     }
   },
   'مهمان': {

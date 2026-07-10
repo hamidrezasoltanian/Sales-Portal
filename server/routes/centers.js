@@ -5,7 +5,7 @@ const { query } = require('../db');
 const { requireAuth } = require('../auth');
 const {
   buildOwnerMaps,
-  userOwnsCenter,
+  resolveCenterOwner,
   isManagerRole,
   getUserProvinceAllowlist,
   applyProvinceRestriction,
@@ -47,7 +47,9 @@ async function assertCenterAccess(req, centerKey) {
   if (provAllow && !applyProvinceRestriction(new Set([centerKey]), provAllow).has(centerKey)) {
     return false;
   }
-  return userOwnsCenter(req.user.username, centerKey, ctx.edits, ctx.ownerMaps);
+  const owner = resolveCenterOwner(centerKey, ctx.edits, ctx.ownerMaps);
+  if (owner === null) return true;
+  return owner === req.user.username;
 }
 
 router.get('/:key', async function (req, res) {

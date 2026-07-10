@@ -18,7 +18,7 @@ router.use(requireAuth);
 async function loadDBFromSQL(client) {
   const c = client || pool;
   const [editsR, notesR, tagsR, settingsR, eventsR, checklistR, userKpiR, provKpiR, extraR,
-         salesR, callR, visitR, missionR, provHistR, kpiHistR, weR, metaR, clR, hcpR, tasksR] = await Promise.all([
+         salesR, callR, visitR, missionR, provHistR, kpiHistR, weR, metaR, clR, hcpR, tasksR, mgrTasksR] = await Promise.all([
     c.query('SELECT center_key, data FROM center_edits'),
     c.query('SELECT center_key, notes FROM center_notes'),
     c.query('SELECT center_key, tags FROM center_tags'),
@@ -40,7 +40,8 @@ async function loadDBFromSQL(client) {
     c.query('SELECT a.center_key, h.name, h.specialty, a.role as title, h.phones FROM hcp_affiliations a JOIN healthcare_professionals h ON a.hcp_id = h.id').catch(() => ({ rows: [] })),
     c.query(`SELECT id, title, owner, due_date AS "dueDate", priority, status, center_key AS "centerKey",
       note, subtasks, done, done_at AS "doneAt", created_by AS "createdBy", created_at AS "createdAt",
-      updated_at AS "updatedAt", recurring, activity, department FROM tasks ORDER BY created_at DESC`).catch(() => ({ rows: [] }))
+      updated_at AS "updatedAt", recurring, activity, department FROM tasks ORDER BY created_at DESC`).catch(() => ({ rows: [] })),
+    c.query('SELECT rec_key, data FROM manager_tasks').catch(() => ({ rows: [] }))
   ]);
 
   const edits = {};
@@ -68,6 +69,8 @@ async function loadDBFromSQL(client) {
   const kpiTargets = {};
   const settings = {};
   let provOverrides = {};
+  let pricingProducts = null;
+  let mtrFollowerMap = null;
   settingsR.rows.forEach(function(r) {
     if (r.key === 'kpi_weights') {
       kpiTargets.weights = r.value;
@@ -75,6 +78,10 @@ async function loadDBFromSQL(client) {
       provOverrides = r.value || {};
     } else if (r.key === 'members') {
       // users are sourced from app_users table via /api/users — ignore legacy blob
+    } else if (r.key === 'pricingProducts') {
+      pricingProducts = r.value;
+    } else if (r.key === 'mtrFollowerMap') {
+      mtrFollowerMap = r.value;
     } else {
       settings[r.key] = r.value;
     }
@@ -113,6 +120,11 @@ async function loadDBFromSQL(client) {
   const _serverTs = metaR.rows.length && metaR.rows[0].updated_at
     ? metaR.rows[0].updated_at.toISOString() : null;
 
+  const managerTasks = {};
+  (mgrTasksR.rows || []).forEach(function (r) {
+    managerTasks[r.rec_key] = r.data || {};
+  });
+
   return {
     edits,
     notes,
@@ -134,7 +146,10 @@ async function loadDBFromSQL(client) {
       return { at: r.at instanceof Date ? r.at.toISOString() : r.at, by: r.by, rkey: r.rkey, field: r.field, val: r.val };
     }).reverse(),
     tasks: tasksR.rows,
+    managerTasks,
     _serverTs,
+    pricingProducts: pricingProducts || undefined,
+    mtrFollowerMap: mtrFollowerMap || undefined,
   };
 }
 
@@ -455,6 +470,26 @@ router.put('/db', async (req, res) => {
       }
     }
     } // end fullSync
+
+    // ── checklist UPSERT (partial save — do not wipe other rows) ─────────────
+    if (!fullSync && checklist && typeof checklist === 'object') {
+      for (const [key, value] of Object.entries(checklist)) {
+        if (!value) continue;
+        const parts = key.split('_');
+        if (parts.length >= 2) {
+          const date = parts[0];
+          const username = parts.slice(1).join('_');
+          await client.query(
+            `INSERT INTO daily_checklists (date, username, items, note, updated_at, updated_by)
+             VALUES ($1, $2, $3, $4, NOW(), $5)
+             ON CONFLICT (date, username) DO UPDATE SET
+               items = EXCLUDED.items, note = EXCLUDED.note,
+               updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+            [date, username, JSON.stringify(value.items || []), value.note || '', user]
+          );
+        }
+      }
+    }
 
     // ── kpiTargets upsert (slim save — no table wipe) ─────────────────────────
     if (!fullSync && kpiTargets !== undefined && typeof kpiTargets === 'object' && kpiTargets !== null) {
