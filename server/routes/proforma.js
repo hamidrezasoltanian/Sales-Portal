@@ -201,6 +201,42 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/proforma/stats — dashboard counts (before /:id)
+router.get('/stats', requireAuth, async (req, res) => {
+  try {
+    const isManager = ['مدیر', 'سوپر ادمین'].includes(req.user.role);
+    const params = [];
+    let where = '';
+    if (!isManager) { where = ' WHERE created_by = $1'; params.push(req.user.username); }
+    const dateWhere = where
+      ? where + " AND jalali_date IS NOT NULL AND jalali_date != ''"
+      : " WHERE jalali_date IS NOT NULL AND jalali_date != ''";
+
+    const [byStatus, byMonth, totals] = await Promise.all([
+      query(`SELECT status, COUNT(*)::int AS cnt, COALESCE(SUM(total),0) AS total_value FROM proformas${where} GROUP BY status`, params),
+      query(`SELECT LEFT(jalali_date, 7) AS month, COUNT(*)::int AS cnt,
+                    COALESCE(SUM(CASE WHEN status IN ('approved','invoiced') THEN total ELSE 0 END),0) AS approved_total
+             FROM proformas${dateWhere}
+             GROUP BY 1 ORDER BY month DESC LIMIT 12`, params),
+      query(`SELECT COUNT(*)::int AS total,
+                    COUNT(*) FILTER (WHERE status IN ('approved','invoiced'))::int AS approved,
+                    COALESCE(SUM(CASE WHEN status IN ('approved','invoiced') THEN total ELSE 0 END),0) AS approved_value,
+                    ROUND(AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) / 86400) FILTER (WHERE status IN ('approved','invoiced'))::numeric, 1) AS avg_cycle_days
+             FROM proformas${where}`, params),
+    ]);
+
+    res.json({
+      ok: true,
+      byStatus: byStatus.rows.map(r => ({ status: r.status, count: r.cnt, totalValue: Number(r.total_value) })),
+      byMonth: byMonth.rows.map(r => ({ month: r.month, count: r.cnt, approvedTotal: Number(r.approved_total) })),
+      totals: totals.rows[0] || {},
+    });
+  } catch (e) {
+    console.error('[proforma stats]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── POST /api/proforma — create ─────────────────────────────────────────────
 router.post('/', requireAuth, async (req, res) => {
   try {

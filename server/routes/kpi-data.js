@@ -7,7 +7,72 @@ const { requireAuth, requireManager } = require('../auth');
 const router = express.Router();
 router.use(requireAuth);
 
-// POST /api/kpi-data/user-target — upsert one user/month target
+// GET /api/kpi-data/targets?month=1404/04
+router.get('/targets', async function (req, res) {
+  try {
+    const month = req.query.month;
+    let sql = 'SELECT * FROM kpi_user_targets';
+    const params = [];
+    if (month) { params.push(month); sql += ' WHERE month = $1'; }
+    sql += ' ORDER BY month DESC, username';
+    const r = await query(sql, params);
+    const map = {};
+    r.rows.forEach(function (row) {
+      if (!map[row.username]) map[row.username] = {};
+      map[row.username][row.month] = {
+        callsPerDay: row.calls_per_day,
+        visitsPerWeek: row.visits_per_week,
+        salesCount: row.sales_count,
+        salesAmount: Number(row.sales_amount) || 0,
+        cashPct: row.cash_pct,
+      };
+    });
+    res.json({ ok: true, targets: map, rows: r.rows });
+  } catch (e) {
+    console.error('[kpi-data GET targets]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/kpi-data/history?user=&month=
+router.get('/history', async function (req, res) {
+  try {
+    const user = req.query.user || req.query.username;
+    const month = req.query.month;
+    let sql = 'SELECT username, month, data, updated_at FROM kpi_history WHERE 1=1';
+    const params = [];
+    if (user) { params.push(user); sql += ' AND username = $' + params.length; }
+    if (month) { params.push(month); sql += ' AND month = $' + params.length; }
+    sql += ' ORDER BY month DESC LIMIT 500';
+    const r = await query(sql, params);
+    const list = r.rows.map(function (row) {
+      const d = row.data || {};
+      return { userId: row.username, month: row.month, snap: d, updatedAt: row.updated_at };
+    });
+    res.json({ ok: true, history: list });
+  } catch (e) {
+    console.error('[kpi-data GET history]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/kpi-data/province-targets
+router.get('/province-targets', async function (req, res) {
+  try {
+    const r = await query('SELECT * FROM kpi_province_targets ORDER BY province_id');
+    const map = {};
+    r.rows.forEach(function (row) {
+      map[row.province_id] = {
+        calls: row.calls, visits: row.visits, sales: row.sales, extra: row.extra,
+      };
+    });
+    res.json({ ok: true, targets: map });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/kpi-data/user-target
 router.post('/user-target', async function (req, res) {
   try {
     const { username, month, callsPerDay, visitsPerWeek, salesCount, salesAmount, cashPct } = req.body || {};
@@ -37,7 +102,7 @@ router.post('/user-target', async function (req, res) {
   }
 });
 
-// POST /api/kpi-data/history — upsert KPI snapshot
+// POST /api/kpi-data/history
 router.post('/history', async function (req, res) {
   try {
     const snap = req.body || {};
@@ -55,7 +120,7 @@ router.post('/history', async function (req, res) {
   }
 });
 
-// POST /api/kpi-data/province-target — upsert one province target (manager)
+// POST /api/kpi-data/province-target
 router.post('/province-target', requireManager, async function (req, res) {
   try {
     const { provinceId, calls, visits, sales, extra } = req.body || {};

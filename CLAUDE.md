@@ -330,6 +330,19 @@ The receivables AI tab calls `https://api.anthropic.com/v1/messages` directly fr
 | Per-collection GET APIs | `/api/data/collections/events`, `checklist` | ✅ |
 | MTR accounting sync stub | `/api/mtr/sync` + settings toggle | ✅ |
 | Secret rotation checklist | `scripts/rotate-secrets-checklist.js` | ✅ |
+| Reports upgrade: SQL-backed activity/competitor/coverage tabs + Excel export | reports.js + /api/reports | ✅ |
+| KPI SQL load: GET /api/kpi-data (targets/history/province) in loadDB | core.js + kpi-data.js | ✅ |
+| Manager reports API: expert SQL report, win/loss, daily, weekly snapshot | manager.js + manager-reports.js | ✅ |
+| Center timeline API + گزارش مرکز modal + audit SQL merge | pricing.js + center-reports.js | ✅ |
+| Proforma stats bar + invoiced status on invoice issue | proforma.js + invoices.js | ✅ |
+| Workflows module: user-definable processes + kanban | workflows.js + /api/workflows | ✅ |
+| CRM gaps: deals, files, KOL badges | center-deals.js + center-files.js | ✅ |
+
+## Canonical development branch
+
+**`cursor/curser-edition-bd8e`** — unified integration branch (all features merged).  
+**`main`** — stable production baseline; do not merge experimental work directly.
+
 
 ## Planned Integration: Accounting Software → Receivables (مطالبات)
 

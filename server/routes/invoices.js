@@ -103,11 +103,10 @@ router.post('/from-proforma/:id', requireAuth, async (req, res) => {
       [id, invoiceNo, pf.id, jalaliDate, pf.center_key, pf.center_name,
        JSON.stringify(items), subtotal, taxPct, taxAmt, total, req.user.username]
     );
-
     await query(
       `UPDATE proformas SET status = 'invoiced', updated_at = NOW() WHERE id = $1`,
       [pf.id]
-    );
+    ).catch(function () {});
 
     res.status(201).json(r.rows[0]);
   } catch (e) {

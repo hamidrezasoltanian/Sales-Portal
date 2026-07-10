@@ -21,6 +21,17 @@
     return n.toLocaleString('fa-IR');
   }
 
+
+  function exportTableToXlsx(tableId, filename) {
+    if (typeof XLSX === 'undefined') { showToast('⚠ کتابخانه Excel در دسترس نیست'); return; }
+    var tbl = document.getElementById(tableId);
+    if (!tbl) { showToast('⚠ جدول یافت نشد'); return; }
+    var wb = XLSX.utils.table_to_book(tbl, { sheet: 'Report' });
+    XLSX.writeFile(wb, (filename || 'report') + '.xlsx');
+    showToast('✅ فایل Excel دانلود شد', 2000);
+  }
+  window.exportTableToXlsx = exportTableToXlsx;
+
   function _fmtNum(n) {
     return (parseFloat(n) || 0).toLocaleString('fa-IR');
   }
@@ -297,214 +308,111 @@
   // ── 3. فعالیت‌ها ───────────────────────────────────────────────────────────
 
   function _rActivity(cont) {
-    if (typeof DB === 'undefined' || !DB) {
-      cont.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:40px">داده‌ای بارگذاری نشده</p>';
-      return;
-    }
-
-    var callLog    = DB.callLog    || [];
-    var visitLog   = DB.visitLog   || [];
-    var salesLog   = DB.salesLog   || [];
-    var changeLog  = DB.changeLog  || [];
-
-    // Get last 6 months
-    var now = typeof todayStr === 'function' ? todayStr() : '';
-    var nowParts = now ? now.split('/').map(Number) : [1403, 1, 1];
-    var months6 = [];
-    for (var i = 0; i < 6; i++) {
-      var m = nowParts[1] - i;
-      var y = nowParts[0];
-      while (m <= 0) { m += 12; y--; }
-      months6.push(y + '/' + (m < 10 ? '0' + m : String(m)));
-    }
-    var months6Set = new Set(months6);
-
-    function getMonth(dateStr) {
-      if (!dateStr) return null;
-      var parts = String(dateStr).split('/');
-      if (parts.length >= 2) return parts[0] + '/' + (parts[1].length < 2 ? '0' + parts[1] : parts[1]);
-      return null;
-    }
-
-    // Aggregate by user+month
-    var byUser = {}; // {user: {month: {calls, visits, sales, edits}}}
-
-    function inc(user, month, key) {
-      if (!user || !month || !months6Set.has(month)) return;
-      if (!byUser[user]) byUser[user] = {};
-      if (!byUser[user][month]) byUser[user][month] = { calls: 0, visits: 0, sales: 0, edits: 0 };
-      byUser[user][month][key]++;
-    }
-
-    callLog.forEach(function (e) { inc(e.by || e.user, getMonth(e.date || e.at), 'calls'); });
-    visitLog.forEach(function (e) { inc(e.by || e.user, getMonth(e.date || e.at), 'visits'); });
-    salesLog.forEach(function (e) { inc(e.by || e.user, getMonth(e.date || e.at), 'sales'); });
-    changeLog.forEach(function (e) {
-      var m = getMonth(e.date || (e.at ? e.at.slice(0, 10) : null));
-      if (m) {
-        // Convert Gregorian at to Jalali month approx
-        var user = e.by || e.user;
-        if (!user || !m) return;
-        if (!byUser[user]) byUser[user] = {};
-        if (!byUser[user][m]) byUser[user][m] = { calls: 0, visits: 0, sales: 0, edits: 0 };
-        byUser[user][m].edits++;
-      }
-    });
-
-    var USERS_map = typeof USERS !== 'undefined' ? USERS : {};
-    var users = Object.keys(byUser);
-    if (!users.length) {
-      cont.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:40px">داده فعالیتی وجود ندارد</p>';
-      return;
-    }
-
-    // Summary totals
-    var totals = { calls: 0, visits: 0, sales: 0, edits: 0 };
-    users.forEach(function (u) {
-      months6.forEach(function (m) {
-        var d = (byUser[u] && byUser[u][m]) || {};
-        totals.calls  += d.calls  || 0;
-        totals.visits += d.visits || 0;
-        totals.sales  += d.sales  || 0;
-        totals.edits  += d.edits  || 0;
+    cont.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:40px">⏳ بارگذاری از SQL...</p>';
+    fetch('/api/reports/activity-summary?months=6')
+      .then(function(res) { return res.ok ? res.json() : Promise.reject(new Error('API error')); })
+      .then(function(data) {
+        var months6 = data.months || [];
+        var byUser = data.byUser || {};
+        var USERS_map = data.nameMap || (typeof USERS !== 'undefined' ? USERS : {});
+        var users = Object.keys(byUser);
+        if (!users.length) {
+          cont.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:40px">داده فعالیتی در SQL نیست</p>';
+          return;
+        }
+        var totals = { calls: 0, visits: 0, sales: 0, edits: 0 };
+        users.forEach(function(u) {
+          months6.forEach(function(m) {
+            var d = (byUser[u] && byUser[u][m]) || {};
+            totals.calls += d.calls || 0; totals.visits += d.visits || 0;
+            totals.sales += d.sales || 0; totals.edits += d.edits || 0;
+          });
+        });
+        var html = '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">' +
+          _card('تماس‌ها', _fmtNum(totals.calls), 'SQL — ۶ ماه', '#3b82f6') +
+          _card('ویزیت‌ها', _fmtNum(totals.visits), 'SQL — ۶ ماه', '#10b981') +
+          _card('ثبت فروش', _fmtNum(totals.sales), 'SQL — ۶ ماه', '#f59e0b') +
+          _card('ویرایش‌ها', _fmtNum(totals.edits), 'SQL — ۶ ماه', '#8b5cf6') +
+          '</div>';
+        var thMonths = months6.map(function(m) {
+          return '<th style="padding:6px 8px;font-size:.78rem;text-align:center;background:#f8fafc">' + m + '</th>';
+        }).join('');
+        var tbody = users.map(function(u) {
+          var name = USERS_map[u] || u;
+          var rowTotals = { calls: 0, visits: 0 };
+          var cells = months6.map(function(m) {
+            var d = (byUser[u] && byUser[u][m]) || {};
+            rowTotals.calls += d.calls || 0; rowTotals.visits += d.visits || 0;
+            var has = d.calls || d.visits || d.sales;
+            return '<td style="padding:6px 8px;text-align:center;font-size:.8rem">' +
+              (has ? '<span style="color:#3b82f6">📞' + (d.calls||0) + '</span> <span style="color:#10b981">🚗' + (d.visits||0) + '</span>' : '—') + '</td>';
+          }).join('');
+          return '<tr><td style="padding:8px;font-weight:600">' + name + '</td>' + cells +
+            '<td style="text-align:center">📞' + rowTotals.calls + ' 🚗' + rowTotals.visits + '</td></tr>';
+        }).join('');
+        html += _section('فعالیت ماهانه (منبع: SQL)',
+          '<div style="overflow-x:auto"><table id="rptActivityTbl" style="width:100%;border-collapse:collapse">' +
+          '<thead><tr><th>کارشناس</th>' + thMonths + '<th>جمع</th></tr></thead><tbody>' + tbody + '</tbody></table></div>' +
+          '<button onclick="exportTableToXlsx(\'rptActivityTbl\',\'activity-report\')" style="margin-top:10px;padding:6px 14px;background:#ecfdf5;color:#15803d;border:1px solid #86efac;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px">📥 خروجی Excel</button>');
+        cont.innerHTML = html;
+      })
+      .catch(function(e) {
+        cont.innerHTML = '<p style="color:#ef4444;text-align:center;padding:30px">خطا: ' + e.message + '</p>';
       });
-    });
-
-    var html = '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">' +
-      _card('تماس‌ها', _fmtNum(totals.calls), '۶ ماه گذشته', '#3b82f6') +
-      _card('ویزیت‌ها', _fmtNum(totals.visits), '۶ ماه گذشته', '#10b981') +
-      _card('ثبت فروش', _fmtNum(totals.sales), '۶ ماه گذشته', '#f59e0b') +
-      _card('ویرایش‌ها', _fmtNum(totals.edits), '۶ ماه گذشته', '#8b5cf6') +
-      '</div>';
-
-    // Table
-    var thMonths = months6.map(function (m) {
-      return '<th style="padding:6px 8px;font-size:.78rem;text-align:center;background:#f8fafc;white-space:nowrap">' + m + '</th>';
-    }).join('');
-
-    var tbody = users.map(function (u) {
-      var name = USERS_map[u] || u;
-      var rowTotals = { calls: 0, visits: 0, sales: 0 };
-      var cells = months6.map(function (m) {
-        var d = (byUser[u] && byUser[u][m]) || {};
-        rowTotals.calls  += d.calls  || 0;
-        rowTotals.visits += d.visits || 0;
-        rowTotals.sales  += d.sales  || 0;
-        var hasData = d.calls || d.visits || d.sales;
-        return '<td style="padding:6px 8px;text-align:center;font-size:.8rem">' +
-          (hasData ? '<span style="color:#3b82f6">📞' + (d.calls||0) + '</span> ' +
-                     '<span style="color:#10b981">🚗' + (d.visits||0) + '</span>' : '<span style="color:#d1d5db">—</span>') +
-          '</td>';
-      }).join('');
-      return '<tr style="border-bottom:1px solid #f1f5f9">' +
-        '<td style="padding:8px 12px;font-weight:600;white-space:nowrap">' + name + '</td>' +
-        cells +
-        '<td style="padding:8px 12px;text-align:center;font-size:.8rem">' +
-          '<span style="color:#3b82f6">📞' + rowTotals.calls + '</span> ' +
-          '<span style="color:#10b981">🚗' + rowTotals.visits + '</span>' +
-        '</td></tr>';
-    }).join('');
-
-    html += _section('فعالیت ماهانه به تفکیک کارشناس (📞 تماس | 🚗 ویزیت)',
-      '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">' +
-      '<thead><tr><th style="padding:6px 12px;text-align:right;background:#f8fafc;font-size:.8rem">کارشناس</th>' +
-      thMonths + '<th style="padding:6px 8px;background:#f8fafc;font-size:.78rem">جمع</th></tr></thead>' +
-      '<tbody>' + tbody + '</tbody></table></div>');
-
-    cont.innerHTML = html;
   }
 
   // ── 4. رقبا ────────────────────────────────────────────────────────────────
 
   function _rCompetitor(cont) {
-    if (typeof DB === 'undefined' || !DB || !DB.edits) {
-      cont.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:40px">داده بارگذاری نشده</p>';
-      return;
-    }
-
-    var compMap = {}; // {name: {count, provinces: Set}}
-    var provCompMap = {}; // {province: {comp: count}}
-
-    Object.keys(DB.edits || {}).forEach(function (key) {
-      var e = DB.edits[key];
-      if (!e || !e.competitor || !e.competitor.trim()) return;
-      var comps = e.competitor.split(/[،,\/\n]+/).map(function (c) { return c.trim(); }).filter(Boolean);
-      var provId = null;
-      if (key.indexOf('||') > -1) provId = key.split('||')[0];
-      else if (key.startsWith('c_') || key.startsWith('mz_')) provId = 'tehran';
-
-      comps.forEach(function (comp) {
-        if (!compMap[comp]) compMap[comp] = { count: 0, provinces: new Set() };
-        compMap[comp].count++;
-        if (provId) compMap[comp].provinces.add(provId);
-
-        if (provId) {
-          if (!provCompMap[provId]) provCompMap[provId] = {};
-          provCompMap[provId][comp] = (provCompMap[provId][comp] || 0) + 1;
+    cont.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:40px">⏳ بارگذاری از SQL...</p>';
+    fetch('/api/reports/competitor')
+      .then(function(res) { return res.ok ? res.json() : Promise.reject(new Error('API error')); })
+      .then(function(data) {
+        var rows = data.rows || [];
+        if (!rows.length) {
+          cont.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:40px">هنوز رقیبی ثبت نشده</p>';
+          return;
         }
+        var totalCenters = rows.reduce(function(s, r) { return s + (parseInt(r.cnt) || 0); }, 0);
+        var maxCount = parseInt(rows[0].cnt) || 1;
+        var colors = ['#ef4444','#f97316','#f59e0b','#84cc16','#06b6d4','#6366f1','#8b5cf6','#ec4899'];
+        var html = '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">' +
+          _card('رقبای شناسایی‌شده', _fmtNum(rows.length), 'منبع: SQL', '#ef4444') +
+          _card('مراکز با رقیب', _fmtNum(totalCenters), 'از center_edits', '#f97316') +
+          _card('پرتکرارترین', rows[0].competitor || '—', (rows[0].cnt || 0) + ' مرکز', '#8b5cf6') +
+          '</div>';
+        html += _section('رتبه‌بندی رقبا (SQL)',
+          rows.slice(0, 15).map(function(row, i) {
+            var cnt = parseInt(row.cnt) || 0;
+            var pct = Math.round((cnt / maxCount) * 100);
+            return _barRow(row.competitor || '—', pct, colors[i % colors.length], cnt + ' مرکز');
+          }).join(''));
+        html += '<button onclick="exportTableToXlsx(\'rptCompTbl\',\'competitor-report\')" style="margin-top:10px;padding:6px 14px;background:#ecfdf5;color:#15803d;border:1px solid #86efac;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px">📥 خروجی Excel</button>';
+        html += '<table id="rptCompTbl" style="display:none"><thead><tr><th>رقیب</th><th>تعداد</th></tr></thead><tbody>' +
+          rows.map(function(r) { return '<tr><td>' + (r.competitor || '') + '</td><td>' + (r.cnt || 0) + '</td></tr>'; }).join('') +
+          '</tbody></table>';
+        cont.innerHTML = html;
+      })
+      .catch(function(e) {
+        cont.innerHTML = '<p style="color:#ef4444;text-align:center;padding:30px">خطا: ' + e.message + '</p>';
       });
-    });
-
-    var comps = Object.keys(compMap).sort(function (a, b) { return compMap[b].count - compMap[a].count; });
-    if (!comps.length) {
-      cont.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:40px">هنوز رقیبی ثبت نشده</p>';
-      return;
-    }
-
-    var maxCount = compMap[comps[0]].count;
-    var colors = ['#ef4444','#f97316','#f59e0b','#84cc16','#06b6d4','#6366f1','#8b5cf6','#ec4899'];
-
-    var html = '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">' +
-      _card('رقبای شناسایی‌شده', _fmtNum(comps.length), 'در پایگاه داده', '#ef4444') +
-      _card('مراکزی با رقیب', _fmtNum(Object.keys(DB.edits||{}).filter(function(k){return (DB.edits[k]||{}).competitor;}).length), 'از کل مراکز', '#f97316') +
-      _card('پرتکرارترین', comps[0] || '—', compMap[comps[0]] ? compMap[comps[0]].count + ' مرکز' : '', '#8b5cf6') +
-      '</div>';
-
-    html += _section('رتبه‌بندی رقبا',
-      comps.slice(0, 15).map(function (comp, i) {
-        var pct = Math.round((compMap[comp].count / maxCount) * 100);
-        var provs = compMap[comp].provinces.size;
-        return _barRow(comp, pct, colors[i % colors.length],
-          compMap[comp].count + ' مرکز' + (provs > 0 ? ' / ' + provs + ' استان' : ''));
-      }).join(''));
-
-    // Top provinces by competitor presence
-    var provSorted = Object.keys(provCompMap).sort(function (a, b) {
-      var aTotal = Object.values(provCompMap[a]).reduce(function (s, v) { return s + v; }, 0);
-      var bTotal = Object.values(provCompMap[b]).reduce(function (s, v) { return s + v; }, 0);
-      return bTotal - aTotal;
-    }).slice(0, 8);
-
-    if (provSorted.length) {
-      var provGetName = typeof _getProvName === 'function' ? _getProvName :
-        (typeof getAllProvinces === 'function' ? function (id) {
-          var provs = getAllProvinces();
-          var p = provs.find(function (pp) { return pp.id === id; });
-          return p ? p.name : id;
-        } : function (id) { return id; });
-
-      html += _section('استان‌های با بیشترین حضور رقبا',
-        provSorted.map(function (pId) {
-          var topComps = Object.keys(provCompMap[pId])
-            .sort(function (a, b) { return provCompMap[pId][b] - provCompMap[pId][a]; })
-            .slice(0, 3)
-            .map(function (c) { return c + '(' + provCompMap[pId][c] + ')'; })
-            .join('، ');
-          var total = Object.values(provCompMap[pId]).reduce(function (s, v) { return s + v; }, 0);
-          return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f1f5f9;font-size:.85rem">' +
-            '<div style="font-weight:600">' + provGetName(pId) + '</div>' +
-            '<div style="color:#6b7280">' + topComps + '</div>' +
-            '<div style="font-weight:600;color:#ef4444;min-width:40px;text-align:left">' + total + '</div>' +
-            '</div>';
-        }).join(''));
-    }
-
-    cont.innerHTML = html;
   }
 
   // ── 5. پوشش استان‌ها ───────────────────────────────────────────────────────
 
   function _rCoverage(cont) {
+    cont.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:40px">⏳ بارگذاری...</p>';
+    fetch('/api/reports/coverage')
+      .then(function(res) { return res.ok ? res.json() : Promise.reject(new Error('API error')); })
+      .then(function(sqlData) {
+        _rCoverageRender(cont, sqlData);
+      })
+      .catch(function(e) {
+        cont.innerHTML = '<p style="color:#ef4444;text-align:center;padding:30px">خطا: ' + e.message + '</p>';
+      });
+  }
+
+  function _rCoverageRender(cont, sqlData) {
     if (typeof DB === 'undefined' || !DB || typeof getAllProvinces !== 'function') {
       cont.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:40px">داده بارگذاری نشده</p>';
       return;
@@ -583,7 +491,17 @@
     var totalP1P2Unsched = provData.reduce(function (s, p) { return s + p.p1p2Unscheduled; }, 0);
     var totalActive     = provData.reduce(function (s, p) { return s + p.scheduled; }, 0);
 
-    var html = '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">' +
+    var html = '';
+    if (sqlData && sqlData.ok) {
+      html += '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px;padding:10px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px">' +
+        '<div style="width:100%;font-size:11px;font-weight:700;color:#0369a1;margin-bottom:4px">📊 خلاصه SQL (center_edits + week_entries)</div>' +
+        _card('مراکز SQL', _fmtNum(sqlData.totalCenters || 0), 'center_edits', '#0284c7') +
+        _card('با مسئول', _fmtNum(sqlData.withOwner || 0), 'owner ثبت‌شده', '#10b981') +
+        _card('در برنامه هفته', _fmtNum(sqlData.scheduledInWeekPlan || 0), 'week_entries', '#6366f1') +
+        _card('بدون مسئول', _fmtNum(sqlData.unowned || 0), 'نیاز به تخصیص', '#ef4444') +
+        '</div>';
+    }
+    html += '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">' +
       _card('کل مراکز', _fmtNum(totalCenters), 'در همه استان‌ها', '#6366f1') +
       _card('فعال (۳۰ روز)', _fmtNum(totalActive), 'برنامه‌ریزی شده', '#10b981') +
       _card('هرگز برنامه‌ریزی نشده', _fmtNum(totalNever), 'مرکز', '#ef4444') +

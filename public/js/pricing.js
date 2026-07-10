@@ -1083,17 +1083,9 @@ function _loadCenterWorkItems(rtype, id) {
     });
 }
 
-function openCenterAudit(centerKey, centerName) {
-  fetch('/api/support?center_key='+encodeURIComponent(centerKey)+'&limit=50')
-    .then(function(r){return r.ok?r.json():{tickets:[]};})
-    .catch(function(){return {tickets:[]};})
-    .then(function(d){_renderCenterAuditModal(centerKey, centerName, d.tickets||[]);});
-}
-
-function _renderCenterAuditModal(centerKey, centerName, supportTickets) {
+function _buildLocalAuditEvents(centerKey, supportTickets){
   var _ckParts=centerKey.split('_');var rtype=_ckParts[0], rid=_ckParts.slice(1).join('_');
   var events=[];
-  // changeLog
   (DB.changeLog||[]).filter(function(h){return h.rkey===centerKey;}).forEach(function(h){
     var d=new Date(h.at);
     var fmap={status:'وضعیت',owner:'مسئول',lead:'سرنخ',potential:'پتانسیل',followupDate:'تاریخ پیگیری',nameOverride:'نام',address:'آدرس','type':'نوع'};
@@ -1102,7 +1094,6 @@ function _renderCenterAuditModal(centerKey, centerName, supportTickets) {
       detail:'مقدار: '+String(h.val||'—').substring(0,40),
       by:h.by,at:d,dateStr:''});
   });
-  // notes
   (DB.notes[rtype+'_'+rid]||[]).forEach(function(n){
     var dp=n.date?n.date.split('/').map(Number):(n.at?(function(){var _nd=new Date(n.at);return g2j(_nd.getFullYear(),_nd.getMonth()+1,_nd.getDate());}()):null);
     var g=dp?j2g(dp[0],dp[1],dp[2]):[2000,1,1];
@@ -1110,7 +1101,6 @@ function _renderCenterAuditModal(centerKey, centerName, supportTickets) {
     events.push({ts:ts,type:'note',icon:'📝',color:'#0ea5e9',
       title:'یادداشت',detail:String(n.text||'').substring(0,60),by:n.by||n.user,at:null,dateStr:n.date||(n.at?msToJ(n.at):'')||''});
   });
-  // weekEntries done
   Object.values(DB.weekEntries||{}).filter(function(we){return we.recKey===centerKey&&we.done;}).forEach(function(we){
     var dp=we.doneDate?we.doneDate.split('/').map(Number):null;
     var ts=dp?jMs(dp[0],dp[1],dp[2]):0;
@@ -1120,7 +1110,6 @@ function _renderCenterAuditModal(centerKey, centerName, supportTickets) {
       detail:(we.doneResult?'نتیجه: '+we.doneResult+' ':'')+(we.doneNote||''),
       by:we.addedBy||'',at:null,dateStr:we.doneDate||''});
   });
-  // tasks
   (DB.tasks||[]).filter(function(t){return t.centerKey===centerKey;}).forEach(function(t){
     var dp=t.dueDate?t.dueDate.split('/').map(Number):null;
     var ts=dp?jMs(dp[0],dp[1],dp[2]):0;
@@ -1128,7 +1117,6 @@ function _renderCenterAuditModal(centerKey, centerName, supportTickets) {
       title:(t.done?'وظیفه انجام شد':'وظیفه')+': '+String(t.title||'').substring(0,30),
       detail:t.note||'',by:t.owner||'',at:null,dateStr:t.dueDate||''});
   });
-  // support tickets
   (supportTickets||[]).forEach(function(tk){
     var ts=tk.created_at?new Date(tk.created_at).getTime():0;
     var stLabel={open:'باز',in_progress:'در جریان',waiting:'انتظار',resolved:'حل‌شده',closed:'بسته'}[tk.status]||tk.status;
@@ -1137,13 +1125,34 @@ function _renderCenterAuditModal(centerKey, centerName, supportTickets) {
       detail:stLabel+(tk.description?' — '+String(tk.description).substring(0,40):''),
       by:tk.assigned_to||tk.reporter||'',at:tk.created_at?new Date(tk.created_at):null,dateStr:'',ticketId:tk.id});
   });
+  return events;
+}
 
+function _apiEventToAudit(ev){
+  var type=ev.type||'';
+  if(type==='note')return{ts:0,type:'note',icon:'📝',color:'#0ea5e9',title:'یادداشت',detail:String(ev.text||'').substring(0,80),by:ev.by||'',at:null,dateStr:String(ev.at||'')};
+  if(type==='change'){
+    var fmap={status:'وضعیت',owner:'مسئول',lead:'سرنخ',potential:'پتانسیل',followupDate:'تاریخ پیگیری'};
+    var d=ev.at?new Date(ev.at):null;
+    return{ts:d?d.getTime():0,type:'change',icon:'✏️',color:'#8b5cf6',title:(fmap[ev.field]||ev.field||'تغییر')+' (SQL)',detail:'مقدار: '+String(ev.val||'—').substring(0,40),by:ev.by||'',at:d,dateStr:''};
+  }
+  if(type==='week_entry'){
+    var icon=ev.actionType==='visit'?'🤝':'📞';
+    var dp=ev.at?String(ev.at).split('/').map(Number):null;
+    var ts=dp&&dp.length===3?jMs(dp[0],dp[1],dp[2]):0;
+    return{ts:ts,type:'done',icon:icon,color:'#22c55e',title:(ev.done?'انجام شد: ':'برنامه: ')+(ev.actionType==='visit'?'ویزیت':'تماس'),detail:(ev.doneResult?'['+ev.doneResult+'] ':'')+(ev.doneNote||''),by:ev.by||'',at:null,dateStr:String(ev.at||ev.scheduledDate||'')};
+  }
+  if(type==='proforma')return{ts:0,type:'proforma',icon:'📄',color:'#7c3aed',title:'پیشفاکتور '+String(ev.no||''),detail:(ev.status||'')+' — '+Number(ev.total||0).toLocaleString('fa-IR')+' ریال',by:ev.by||'',at:null,dateStr:String(ev.at||'')};
+  if(type==='sale')return{ts:0,type:'sale',icon:'💰',color:'#15803d',title:'فروش',detail:Number(ev.amount||0).toLocaleString('fa-IR')+' ریال'+(ev.isCash?' (نقد)':''),by:ev.by||'',at:null,dateStr:String(ev.at||'')};
+  return null;
+}
+
+function _renderAuditTimelineBody(events, centerName){
   events.sort(function(a,b){return b.ts-a.ts;});
-
-    var body='<div style="max-height:70vh;overflow-y:auto;padding:8px 4px">';
+  var body='<div style="max-height:70vh;overflow-y:auto;padding:8px 4px">';
   if(!events.length){
     body+='<div style="text-align:center;padding:30px;color:var(--text-muted)">هیچ رویدادی ثبت نشده</div>';
-  } else {
+  }else{
     body+='<div style="position:relative;padding-right:32px">'
       +'<div style="position:absolute;right:14px;top:8px;bottom:8px;width:2px;background:var(--border)"></div>';
     events.forEach(function(ev){
@@ -1165,7 +1174,70 @@ function _renderCenterAuditModal(centerKey, centerName, supportTickets) {
     body+='</div>';
   }
   body+='</div>';
-  openModal('auditModal','📅 تاریخچه — '+esc(centerName),body,'<button class="btn-secondary" onclick="closeModal(\'auditModal\')">\u0628\u0633\u062a\u0646</button>',{lg:true});
+  return body;
+}
+
+function openCenterAudit(centerKey, centerName) {
+  fetch('/api/support?center_key='+encodeURIComponent(centerKey)+'&limit=50')
+    .then(function(r){return r.ok?r.json():{tickets:[]};})
+    .catch(function(){return {tickets:[]};})
+    .then(function(supportData){
+      var localEvents=_buildLocalAuditEvents(centerKey, supportData.tickets||[]);
+      var body=_renderAuditTimelineBody(localEvents.slice(), centerName);
+      openModal('auditModal','📅 تاریخچه — '+esc(centerName),body+'<div id="auditLoadHint" style="text-align:center;font-size:10px;color:#94a3b8;padding:4px">⏳ بارگذاری SQL...</div>','<button class="btn-secondary" onclick="closeModal(\'auditModal\')">\u0628\u0633\u062a\u0646</button>',{lg:true});
+      fetch('/api/center-reports/'+encodeURIComponent(centerKey)+'/timeline')
+        .then(function(r){return r.ok?r.json():null;})
+        .then(function(data){
+          var hint=document.getElementById('auditLoadHint');if(hint)hint.remove();
+          if(!data||!data.events||!data.events.length)return;
+          var merged=localEvents.slice();
+          data.events.forEach(function(ev){
+            var a=_apiEventToAudit(ev);
+            if(a)merged.push(a);
+          });
+          var modal=document.getElementById('auditModal');
+          if(!modal)return;
+          var mb=modal.querySelector('.modal-body');
+          if(mb)mb.innerHTML=_renderAuditTimelineBody(merged, centerName);
+        })
+        .catch(function(){
+          var hint=document.getElementById('auditLoadHint');if(hint)hint.textContent='SQL در دسترس نیست — فقط داده محلی';
+        });
+    });
+}
+
+function openCenterReport(centerKey, centerName){
+  openModal('centerReportModal','📊 گزارش مرکز — '+esc(centerName),'<div style="padding:30px;text-align:center;color:#94a3b8">⏳ بارگذاری...</div>','<button class="btn-secondary" onclick="closeModal(\'centerReportModal\')">بستن</button>',{lg:true});
+  fetch('/api/center-reports/'+encodeURIComponent(centerKey)+'/timeline')
+    .then(function(r){return r.ok?r.json():Promise.reject(new Error('API'));})
+    .then(function(data){
+      var evs=data.events||[];
+      var counts={note:0,change:0,week_entry:0,proforma:0,sale:0};
+      var salesTotal=0,pfTotal=0,pfApproved=0;
+      evs.forEach(function(ev){
+        counts[ev.type]=(counts[ev.type]||0)+1;
+        if(ev.type==='sale')salesTotal+=Number(ev.amount||0);
+        if(ev.type==='proforma'){pfTotal+=Number(ev.total||0);if(ev.status==='approved'||ev.status==='invoiced')pfApproved++;}
+      });
+      var body='<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px">';
+      body+='<div style="flex:1;min-width:100px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:800;color:#0284c7">'+(counts.note||0)+'</div><div style="font-size:10px">یادداشت</div></div>';
+      body+='<div style="flex:1;min-width:100px;background:#faf5ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:800;color:#7c3aed">'+(counts.change||0)+'</div><div style="font-size:10px">تغییر فیلد</div></div>';
+      body+='<div style="flex:1;min-width:100px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:800;color:#16a34a">'+(counts.week_entry||0)+'</div><div style="font-size:10px">برنامه/تماس</div></div>';
+      body+='<div style="flex:1;min-width:100px;background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:800;color:#b45309">'+(counts.proforma||0)+'</div><div style="font-size:10px">پیشفاکتور</div></div>';
+      body+='<div style="flex:1;min-width:100px;background:#ecfdf5;border:1px solid #86efac;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:800;color:#15803d">'+(counts.sale||0)+'</div><div style="font-size:10px">فروش</div></div>';
+      body+='</div>';
+      body+='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;font-size:12px">';
+      body+='<div style="flex:1;background:var(--bg-raised);padding:10px;border-radius:8px;border:1px solid var(--border)"><strong>جمع فروش:</strong> '+salesTotal.toLocaleString('fa-IR')+' ریال</div>';
+      body+='<div style="flex:1;background:var(--bg-raised);padding:10px;border-radius:8px;border:1px solid var(--border)"><strong>پیشفاکتور:</strong> '+pfTotal.toLocaleString('fa-IR')+' ریال ('+pfApproved+' تأیید)</div>';
+      body+='</div>';
+      body+='<button onclick="openCenterAudit(\''+centerKey.replace(/'/g,"\\'")+'\',\''+String(centerName).replace(/'/g,"\\'")+'\');closeModal(\'centerReportModal\')" style="padding:6px 14px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px">📅 مشاهده تاریخچه کامل</button>';
+      var modal=document.getElementById('centerReportModal');
+      if(modal){var mb=modal.querySelector('.modal-body');if(mb)mb.innerHTML=body;}
+    })
+    .catch(function(e){
+      var modal=document.getElementById('centerReportModal');
+      if(modal){var mb=modal.querySelector('.modal-body');if(mb)mb.innerHTML='<p style="color:#ef4444;text-align:center">خطا: '+esc(e.message)+'</p>';}
+    });
 }
 
 function _updateExtraCenterProv(id,newProvId){
@@ -1552,6 +1624,7 @@ function openCenterModal(rtype,id){
   var foot=(canDelete ? '<button style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="closeModal(\'cm_'+id+'\');confirmDeleteCenter(\''+rtype+'\',\''+id+'\',\''+esc(displayName)+'\')">🗑 حذف</button>' : '')
     +'<button style="background:#faf5ff;color:#7c3aed;border:1px solid #d8b4fe;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openPreCallBrief(\''+rtype+'\',' +'\''+r.id+'\')">🎯 خلاصه</button>'
     +'<button style="background:#f0f9ff;color:#0369a1;border:1px solid #7dd3fc;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openCenterAudit(\''+recK(rtype,r.id)+'\',\''+esc(displayName)+'\')">📋 تاریخچه</button>'
+    +'<button style="background:#ecfdf5;color:#15803d;border:1px solid #86efac;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openCenterReport(\''+recK(rtype,r.id)+'\',\''+esc(displayName)+'\')">📊 گزارش مرکز</button>'
     +(_canEdit('provinces') ? '<button style="background:#f0fdf4;color:#15803d;border:1px solid #86efac;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openMergeCenterModal(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">🔀 ادغام</button>' : '')
     +(_isManager()?'<button style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openChangeProvinceModal(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">🗺 تغییر استان</button>':'')
     +'<button style="background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" id="pfBtn_'+id+'">📄 پیشفاکتورها</button>'

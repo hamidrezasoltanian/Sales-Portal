@@ -164,22 +164,34 @@ router.get('/support-stats', requireAuth, requireManager, async (req, res) => {
 router.get('/payroll-history', requireAuth, requireManager, async (req, res) => {
   const months = Math.min(36, parseInt(req.query.months) || 12);
   try {
-    const r = await query(`
-      SELECT p.employee, COALESCE(u.display_name, p.employee) AS display_name,
-             p.month, p.base_salary, p.kpi_bonus, p.sales_total,
-             p.commission_pct, p.commission_amount, p.total_pay, p.finalized
-      FROM payroll_records p
-      LEFT JOIN app_users u ON u.username = p.employee
-      ORDER BY p.month DESC, p.employee
-      LIMIT $1
-    `, [months * 20]);
-
-    // Monthly totals
     const monthTotals = await query(`
       SELECT month, SUM(total_pay) AS total, SUM(commission_amount) AS commission, COUNT(*) AS headcount
       FROM payroll_records
       GROUP BY month ORDER BY month DESC LIMIT $1
     `, [months]);
+
+    const cutoff = monthTotals.rows.length ? monthTotals.rows[monthTotals.rows.length - 1].month : null;
+    let r;
+    if (cutoff) {
+      r = await query(`
+        SELECT p.employee, COALESCE(u.display_name, p.employee) AS display_name,
+               p.month, p.base_salary, p.kpi_bonus, p.sales_total,
+               p.commission_pct, p.commission_amount, p.total_pay, p.finalized
+        FROM payroll_records p
+        LEFT JOIN app_users u ON u.username = p.employee
+        WHERE p.month >= $1
+        ORDER BY p.month DESC, p.employee
+      `, [cutoff]);
+    } else {
+      r = await query(`
+        SELECT p.employee, COALESCE(u.display_name, p.employee) AS display_name,
+               p.month, p.base_salary, p.kpi_bonus, p.sales_total,
+               p.commission_pct, p.commission_amount, p.total_pay, p.finalized
+        FROM payroll_records p
+        LEFT JOIN app_users u ON u.username = p.employee
+        ORDER BY p.month DESC, p.employee LIMIT 500
+      `);
+    }
 
     res.json({
       rows: r.rows.map(row => ({
@@ -201,6 +213,115 @@ router.get('/payroll-history', requireAuth, requireManager, async (req, res) => 
   } catch (e) {
     console.error('[reports/payroll-history]', e.message);
     res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+// GET /api/reports/activity-summary?months=6
+router.get('/activity-summary', requireAuth, requireManager, async (req, res) => {
+  const months = Math.min(24, parseInt(req.query.months) || 6);
+  try {
+    const users = await query(`SELECT username, display_name FROM app_users`);
+    const nameMap = {};
+    users.rows.forEach(u => { nameMap[u.username] = u.display_name || u.username; });
+
+    const [calls, visits, sales, edits] = await Promise.all([
+      query(`SELECT username, LEFT(date, 7) AS month, SUM(count)::int AS cnt
+             FROM call_log WHERE date IS NOT NULL AND date != ''
+             GROUP BY username, LEFT(date, 7)`).catch(() => ({ rows: [] })),
+      query(`SELECT username, LEFT(date, 7) AS month, SUM(count)::int AS cnt
+             FROM visit_log WHERE date IS NOT NULL AND date != ''
+             GROUP BY username, LEFT(date, 7)`).catch(() => ({ rows: [] })),
+      query(`SELECT username, LEFT(date, 7) AS month, COUNT(*)::int AS cnt
+             FROM sales_log WHERE date IS NOT NULL AND date != ''
+             GROUP BY username, LEFT(date, 7)`).catch(() => ({ rows: [] })),
+      query(`SELECT "by" AS username, to_char(at, 'YYYY') || '/' ||
+             LPAD(to_char(at, 'MM'), 2, '0') AS month, COUNT(*)::int AS cnt
+             FROM change_log GROUP BY "by", 2`).catch(() => ({ rows: [] })),
+    ]);
+
+    const allMonths = new Set();
+    [calls, visits, sales, edits].forEach(function (src) {
+      src.rows.forEach(function (r) { if (r.month) allMonths.add(r.month); });
+    });
+    const monthList = [...allMonths].sort().reverse().slice(0, months);
+
+    const byUser = {};
+    function inc(src, key) {
+      src.rows.forEach(function (r) {
+        if (!r.username || !r.month || !monthList.includes(r.month)) return;
+        if (!byUser[r.username]) byUser[r.username] = {};
+        if (!byUser[r.username][r.month]) byUser[r.username][r.month] = { calls: 0, visits: 0, sales: 0, edits: 0 };
+        byUser[r.username][r.month][key] = (byUser[r.username][r.month][key] || 0) + (parseInt(r.cnt) || 0);
+      });
+    }
+    inc(calls, 'calls');
+    inc(visits, 'visits');
+    inc(sales, 'sales');
+    inc(edits, 'edits');
+
+    res.json({ ok: true, months: monthList, byUser, nameMap });
+  } catch (e) {
+    console.error('[reports/activity-summary]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/reports/competitor
+router.get('/competitor', requireAuth, requireManager, async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT data->>'competitor' AS competitor, COUNT(*)::int AS cnt
+       FROM center_edits
+       WHERE COALESCE(data->>'competitor','') != ''
+       GROUP BY 1 ORDER BY cnt DESC LIMIT 30`
+    ).catch(() => ({ rows: [] }));
+    res.json({ ok: true, rows: r.rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/reports/coverage
+router.get('/coverage', requireAuth, requireManager, async (req, res) => {
+  try {
+    const edits = await query(
+      `SELECT center_key, data->>'owner' AS owner FROM center_edits`
+    ).catch(() => ({ rows: [] }));
+    const scheduled = await query(
+      `SELECT DISTINCT rtype || '_' || rid AS center_key FROM week_entries WHERE done = FALSE`
+    ).catch(() => ({ rows: [] }));
+    const schedSet = new Set(scheduled.rows.map(r => r.center_key));
+    let withOwner = 0, scheduledCount = 0;
+    edits.rows.forEach(function (e) {
+      if (e.owner) withOwner++;
+      if (schedSet.has(e.center_key)) scheduledCount++;
+    });
+    res.json({
+      ok: true,
+      totalCenters: edits.rows.length,
+      withOwner,
+      scheduledInWeekPlan: scheduledCount,
+      unowned: edits.rows.length - withOwner,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/reports/pipeline-value — center oppValue by lead/status
+router.get('/pipeline-value', requireAuth, requireManager, async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT data->>'lead' AS lead, data->>'status' AS status,
+              COUNT(*)::int AS cnt,
+              COALESCE(SUM((NULLIF(data->>'oppValue',''))::numeric),0) AS total_value
+       FROM center_edits
+       WHERE data->>'lead' IS NOT NULL
+       GROUP BY 1, 2 ORDER BY total_value DESC`
+    ).catch(() => ({ rows: [] }));
+    res.json({ ok: true, rows: r.rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

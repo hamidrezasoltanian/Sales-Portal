@@ -1114,13 +1114,19 @@ function renderManagerPanel(){
     html+='</div></div>';
   })();
 
-  // Refresh button
+  html+='<div id="mgrWinLossCard" style="background:var(--bg-card);border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden;margin-bottom:12px">'
+    +'<div style="padding:10px 14px;font-weight:700;font-size:13px;border-bottom:1px solid var(--border)">🏆 برد / باخت — دلایل از دست دادن</div>'
+    +'<div id="mgrWinLossBody" style="padding:12px;color:var(--text-muted);font-size:11px">⏳ بارگذاری...</div>'
+    +'</div>';
+
   html+='<div style="text-align:center;margin-top:10px">'
     +'<button onclick="renderManagerPanel()" style="background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 16px;cursor:pointer;font-size:12px;font-family:inherit">🔄 بروزرسانی</button>'
     +'</div></div>';
 
   el.innerHTML=html;
   _mgrLoadPendingProformas();
+  _loadMgrWinLossCard();
+  _maybeSaveWeeklySnapshot();
 }
 
 // ════════════════════════ MANAGER DRILLDOWN ════════════════════
@@ -1549,7 +1555,8 @@ function openExpertReport(memberId){
   var fromDefault=monParts[0]+'/'+monParts[1]+'/01';
   var lastDay=jDIM(parseInt(monParts[0]),parseInt(monParts[1]));
   var toDefault=monParts[0]+'/'+monParts[1]+'/'+p2(lastDay);
-  function buildReport(fromDate,toDate){
+  function buildReport(fromDate,toDate,apiData){
+    window._rptApiCache=apiData||null;
     var allPlanned=Object.keys(DB.weekEntries||{}).map(function(k){
       var we = DB.weekEntries[k];
       we._key = k;
@@ -1559,8 +1566,8 @@ function openExpertReport(memberId){
       return we.addedBy === memberId && entryDate >= fromDate && entryDate <= toDate;
     });
 
-    var totalPlanned = allPlanned.length;
-    var totalDone = allPlanned.filter(function(we){ return we.done; }).length;
+    var totalPlanned = apiData&&apiData.summary?apiData.summary.planned:allPlanned.length;
+    var totalDone = apiData&&apiData.summary?apiData.summary.done:allPlanned.filter(function(we){ return we.done; }).length;
     var totalNotDone = totalPlanned - totalDone;
     var donePct = totalPlanned > 0 ? Math.round(totalDone / totalPlanned * 100) : 0;
 
@@ -1625,7 +1632,10 @@ function openExpertReport(memberId){
       var ti=document.getElementById('rptTo');if(ti)openJDP(ti,function(v){ti.value=v;});
     },100);
   }
-  buildReport(fromDefault,toDefault);
+  fetch('/api/manager-reports/expert/'+encodeURIComponent(memberId)+'?from='+encodeURIComponent(fromDefault)+'&to='+encodeURIComponent(toDefault))
+    .then(function(r){return r.ok?r.json():null;})
+    .then(function(apiData){buildReport(fromDefault,toDefault,apiData);})
+    .catch(function(){buildReport(fromDefault,toDefault,null);});
 }
 function _sendReportNotif(memberId,memberName){
   var body='<div style="font-size:12px">'
@@ -1642,6 +1652,8 @@ function buildExpertReportHtml(memberId,fromDate,toDate){
   var tab0Html = buildReportEntriesHtml(memberId, fromDate, toDate);
   var tab1Html = buildChangesByExpertHtml(memberId, fromDate, toDate);
   var tab2Html = buildChangesOnExpertCentersHtml(memberId, fromDate, toDate);
+  var tab3Html = _buildRptActivityHtml(window._rptApiCache);
+  var tab4Html = _buildRptSalesHtml(window._rptApiCache);
 
   var btnStyle = "padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-family:inherit;font-size:11px;font-weight:700;transition:all 0.2s;";
   
@@ -1649,11 +1661,15 @@ function buildExpertReportHtml(memberId,fromDate,toDate){
     + '<button class="report-tab-btn active" onclick="switchReportTab(0)" style="' + btnStyle + 'background:var(--brand,#6366f1);color:#fff">📋 تماس‌ها و ملاقات‌ها</button>'
     + '<button class="report-tab-btn" onclick="switchReportTab(1)" style="' + btnStyle + 'background:transparent;color:var(--text-secondary)">🔄 لاگ تغییرات کارشناس</button>'
     + '<button class="report-tab-btn" onclick="switchReportTab(2)" style="' + btnStyle + 'background:transparent;color:var(--text-secondary)">🏢 عملیات دیگران روی مراکز</button>'
+    + '<button class="report-tab-btn" onclick="switchReportTab(3)" style="' + btnStyle + 'background:transparent;color:var(--text-secondary)">📞 فعالیت SQL</button>'
+    + '<button class="report-tab-btn" onclick="switchReportTab(4)" style="' + btnStyle + 'background:transparent;color:var(--text-secondary)">💰 فروش / پیشفاکتور</button>'
     + '</div>';
     
   html += '<div id="rptTabContent_0" class="report-tab-content" style="display:block">' + tab0Html + '</div>';
   html += '<div id="rptTabContent_1" class="report-tab-content" style="display:none">' + tab1Html + '</div>';
   html += '<div id="rptTabContent_2" class="report-tab-content" style="display:none">' + tab2Html + '</div>';
+  html += '<div id="rptTabContent_3" class="report-tab-content" style="display:none">' + tab3Html + '</div>';
+  html += '<div id="rptTabContent_4" class="report-tab-content" style="display:none">' + tab4Html + '</div>';
   
   return html;
 }
@@ -1798,16 +1814,25 @@ function buildChangesOnExpertCentersHtml(memberId, fromDate, toDate) {
 }
 
 function buildReportEntriesHtml(memberId,fromDate,toDate){
-  var entries=Object.keys(DB.weekEntries||{}).map(function(k){
-    var we = DB.weekEntries[k];
-    we._key = k;
-    return we;
-  }).filter(function(we){
-    var entryDate = we.scheduledDate || we._key.split(':::')[0] || '';
-    return we.addedBy === memberId && entryDate >= fromDate && entryDate <= toDate;
-  }).sort(function(a,b){
-    var da = a.scheduledDate || a._key.split(':::')[0] || '';
-    var db = b.scheduledDate || b._key.split(':::')[0] || '';
+  var entries=[];
+  if(window._rptApiCache&&window._rptApiCache.weekEntries&&window._rptApiCache.weekEntries.length){
+    entries=window._rptApiCache.weekEntries.map(function(we){
+      return {
+        scheduledDate:we.scheduledDate, centerName:we.centerName, actionType:we.actionType,
+        done:we.done, doneDate:we.doneDate, doneResult:we.doneResult, doneNote:we.doneNote,
+        doneObstacle:we.doneObstacle, doneAmount:we.doneAmount, rtype:we.rtype, rid:we.rid, addedBy:we.addedBy
+      };
+    });
+  } else {
+    entries=Object.keys(DB.weekEntries||{}).map(function(k){
+      var we = DB.weekEntries[k]; we._key = k; return we;
+    }).filter(function(we){
+      var entryDate = we.scheduledDate || we._key.split(':::')[0] || '';
+      return we.addedBy === memberId && entryDate >= fromDate && entryDate <= toDate;
+    });
+  }
+  entries.sort(function(a,b){
+    var da = a.scheduledDate || ''; var db = b.scheduledDate || '';
     return da < db ? 1 : -1;
   });
 
@@ -1868,6 +1893,102 @@ function buildReportEntriesHtml(memberId,fromDate,toDate){
     html+='</tr>';
   });
   html+='</tbody></table></div>';
+  return html;
+}
+
+function _loadMgrWinLossCard(){
+  var el=document.getElementById('mgrWinLossBody');
+  if(!el)return;
+  fetch('/api/manager-reports/win-loss')
+    .then(function(r){return r.ok?r.json():Promise.reject(new Error('API'));})
+    .then(function(d){
+      var won=d.wonCenters||{cnt:0,total_value:0};
+      var lost=d.lostBreakdown||[];
+      var html='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">';
+      html+='<div style="flex:1;min-width:120px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px;text-align:center"><div style="font-size:18px;font-weight:800;color:#16a34a">'+(won.cnt||0)+'</div><div style="font-size:10px;color:#166534">برد (مشتری/قرارداد)</div></div>';
+      html+='<div style="flex:1;min-width:120px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px;text-align:center"><div style="font-size:16px;font-weight:800;color:#1d4ed8">'+Number(won.total_value||0).toLocaleString('fa-IR')+'</div><div style="font-size:10px;color:#1e40af">ارزش برد (M)</div></div>';
+      html+='</div>';
+      if(!lost.length){
+        html+='<div style="color:var(--text-muted);font-size:11px">داده باخت ثبت نشده</div>';
+      }else{
+        var max=Math.max.apply(null,lost.map(function(x){return x.cnt||0;}).concat([1]));
+        html+=lost.slice(0,12).map(function(row){
+          var pct=Math.round((row.cnt||0)/max*100);
+          return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:11px">'
+            +'<span style="min-width:120px;font-weight:600">'+esc(row.reason||'—')+'</span>'
+            +'<div style="flex:1;background:#e2e8f0;border-radius:4px;height:8px;overflow:hidden"><div style="width:'+pct+'%;height:100%;background:#ef4444"></div></div>'
+            +'<span style="min-width:36px;text-align:left;color:#ef4444;font-weight:700">'+(row.cnt||0)+'</span></div>';
+        }).join('');
+      }
+      el.innerHTML=html;
+    })
+    .catch(function(){if(el)el.innerHTML='<span style="color:#94a3b8">خطا در بارگذاری win/loss</span>';});
+}
+
+function _maybeSaveWeeklySnapshot(){
+  if(typeof _isManager!=='function'||!_isManager())return;
+  try{
+    var today=typeof todayStr==='function'?todayStr():'';
+    if(!today)return;
+    var parts=today.split('/').map(Number);
+    var g=typeof j2g==='function'?j2g(parts[0],parts[1],parts[2]):null;
+    if(!g)return;
+    var dow=new Date(g[0],g[1]-1,g[2]).getDay();
+    if(dow!==6)return;
+    var weekKey=typeof wpCurrentWeekId==='function'?wpCurrentWeekId():today.substring(0,7);
+    if(sessionStorage.getItem('mgrSnap_'+weekKey))return;
+    var weVals=Object.values(DB.weekEntries||{});
+    var snapshot={
+      date:today,
+      planned:weVals.length,
+      done:weVals.filter(function(w){return w.done;}).length,
+      experts:(typeof umGetActive==='function'?umGetActive():[]).filter(function(m){return m.role!=='مدیر'&&m.role!=='سوپر ادمین';}).length
+    };
+    fetch('/api/manager-reports/weekly-snapshot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({weekKey:weekKey,snapshot:snapshot})})
+      .then(function(r){if(r.ok)sessionStorage.setItem('mgrSnap_'+weekKey,'1');})
+      .catch(function(){});
+  }catch(e){}
+}
+
+function _buildRptActivityHtml(cache){
+  if(!cache||!cache.activity||!cache.activity.length){
+    return '<div style="text-align:center;padding:20px;color:var(--text-muted)">فعالیت SQL در این بازه نیست</div>';
+  }
+  var html='<div style="max-height:45vh;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:11px">';
+  html+='<thead><tr style="background:var(--bg-raised)"><th style="padding:6px 8px;text-align:right">تاریخ</th><th style="padding:6px 8px">نوع</th><th style="padding:6px 8px;text-align:center">تعداد</th><th style="padding:6px 8px;text-align:right">یادداشت</th></tr></thead><tbody>';
+  cache.activity.forEach(function(a,i){
+    var bg=i%2===0?'var(--bg-card)':'var(--bg-raised)';
+    var kind=a.kind==='visit'?'🚗 ویزیت':'📞 تماس';
+    html+='<tr style="background:'+bg+'"><td style="padding:5px 8px">'+esc(a.date||'')+'</td><td style="padding:5px 8px;text-align:center">'+kind+'</td><td style="padding:5px 8px;text-align:center">'+(a.count||0)+'</td><td style="padding:5px 8px">'+esc(a.note||'—')+'</td></tr>';
+  });
+  html+='</tbody></table></div>';
+  return html;
+}
+
+function _buildRptSalesHtml(cache){
+  if(!cache)return '<div style="text-align:center;padding:20px;color:var(--text-muted)">داده SQL بارگذاری نشده</div>';
+  var sales=cache.sales||[];
+  var pfs=cache.proformas||[];
+  var html='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">';
+  html+='<div style="flex:1;min-width:100px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px;text-align:center"><div style="font-size:18px;font-weight:700;color:#16a34a">'+sales.length+'</div><div style="font-size:10px">فروش</div></div>';
+  html+='<div style="flex:1;min-width:100px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px;text-align:center"><div style="font-size:18px;font-weight:700;color:#1d4ed8">'+Number(cache.summary&&cache.summary.salesTotal||0).toLocaleString('fa-IR')+'</div><div style="font-size:10px">جمع فروش</div></div>';
+  html+='<div style="flex:1;min-width:100px;background:#faf5ff;border:1px solid #ddd6fe;border-radius:8px;padding:8px;text-align:center"><div style="font-size:18px;font-weight:700;color:#7c3aed">'+pfs.length+'</div><div style="font-size:10px">پیشفاکتور</div></div>';
+  html+='</div>';
+  if(sales.length){
+    html+='<div style="font-weight:700;font-size:11px;margin-bottom:6px">💰 فروش‌ها</div><div style="max-height:25vh;overflow-y:auto;margin-bottom:12px"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg-raised)"><th>تاریخ</th><th>مرکز</th><th>مبلغ</th></tr></thead><tbody>';
+    sales.forEach(function(s,i){
+      html+='<tr style="background:'+(i%2?'var(--bg-raised)':'var(--bg-card)')+'"><td style="padding:4px 8px">'+esc(s.date||'')+'</td><td style="padding:4px 8px">'+esc(s.center_name||'')+'</td><td style="padding:4px 8px">'+Number(s.amount||0).toLocaleString('fa-IR')+'</td></tr>';
+    });
+    html+='</tbody></table></div>';
+  }
+  if(pfs.length){
+    html+='<div style="font-weight:700;font-size:11px;margin-bottom:6px">📄 پیشفاکتورها</div><div style="max-height:25vh;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg-raised)"><th>شماره</th><th>تاریخ</th><th>وضعیت</th><th>مبلغ</th></tr></thead><tbody>';
+    pfs.forEach(function(p,i){
+      html+='<tr style="background:'+(i%2?'var(--bg-raised)':'var(--bg-card)')+'"><td style="padding:4px 8px">'+esc(p.no||'')+'</td><td style="padding:4px 8px">'+esc(p.jalaliDate||'')+'</td><td style="padding:4px 8px">'+esc(p.status||'')+'</td><td style="padding:4px 8px">'+Number(p.total||0).toLocaleString('fa-IR')+'</td></tr>';
+    });
+    html+='</tbody></table></div>';
+  }
+  if(!sales.length&&!pfs.length)html+='<div style="text-align:center;color:var(--text-muted);padding:12px">فروش یا پیشفاکتوری در این بازه نیست</div>';
   return html;
 }
 

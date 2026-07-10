@@ -305,6 +305,7 @@ async function loadDB(){
     if(_migrated){saveDB();console.log('[migration] legacy contacts migrated');}
     _serverSynced=true;_invalidateEditsCache();
     _lastSyncedDB = JSON.parse(JSON.stringify(DB));
+    _loadKpiFromSql();
 
     if (isSynced !== 'false') {
       _clearLocalBackup();
@@ -330,6 +331,40 @@ async function loadTasksFromSQL(){
   }
 }
 window.loadTasksFromSQL=loadTasksFromSQL;
+
+async function _loadKpiFromSql(){
+  try{
+    var mon=typeof currentJMonth==='function'?currentJMonth():'';
+    var tR=await fetch('/api/kpi-data/targets'+(mon?'?month='+encodeURIComponent(mon):''));
+    if(tR.ok){
+      var td=await tR.json();
+      if(td.targets){
+        if(!DB.kpiTargets)DB.kpiTargets={};
+        Object.keys(td.targets).forEach(function(u){
+          if(!DB.kpiTargets[u])DB.kpiTargets[u]={};
+          Object.assign(DB.kpiTargets[u],td.targets[u]);
+        });
+      }
+    }
+    var hR=await fetch('/api/kpi-data/history');
+    if(hR.ok){
+      var hd=await hR.json();
+      if(hd.history&&hd.history.length){
+        if(!DB.kpiHistory)DB.kpiHistory=[];
+        hd.history.forEach(function(h){
+          var entry=Object.assign({userId:h.userId,month:h.month},h.snap||{});
+          var idx=DB.kpiHistory.findIndex(function(x){return x.userId===h.userId&&x.month===h.month;});
+          if(idx>=0)DB.kpiHistory[idx]=entry;else DB.kpiHistory.push(entry);
+        });
+      }
+    }
+    var pR=await fetch('/api/kpi-data/province-targets');
+    if(pR.ok){
+      var pd=await pR.json();
+      if(pd.targets)DB.kpiProvinceTargets=pd.targets;
+    }
+  }catch(e){console.warn('[kpi] SQL load:',e.message);}
+}
 function _weRemove(k){
   delete DB.weekEntries[k];
   if(!DB._weDeletedKeys)DB._weDeletedKeys=[];
