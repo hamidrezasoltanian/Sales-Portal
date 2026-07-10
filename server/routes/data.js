@@ -182,7 +182,6 @@ router.put('/db', async (req, res) => {
       const lastCid = lastVal.cid || null;
 
       const isDifferentTab = (lastSaveBy !== user) || (lastCid && lastCid !== _cid);
-      console.log('[DEBUG CONFLICT]', { _clientTs, serverTs, lastSaveBy, lastCid, user, _cid, match: serverTs === _clientTs, isDifferentTab });
       if (_clientTs && serverTs !== _clientTs && isDifferentTab) {
         await client.query('ROLLBACK');
         return res.status(409).json({ error: 'تغییرات توسط کاربر دیگری یا در تب دیگری ذخیره شده', by: lastSaveBy });

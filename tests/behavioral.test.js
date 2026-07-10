@@ -380,6 +380,69 @@ async function test8_hcpAndAffiliationEndpoints() {
   assert(deleteHcp.status === 200, 'حذف پزشک موفق بود (200)');
 }
 
+async function test9_weekEntriesNotWipedByBulkSave() {
+  console.log('\n── Test 9: week-entries survive PUT /db without weekEntries in body ──');
+  const tok = token(TEST_USERS[0]);
+  const weekId = '1404/01/01';
+  const entryId = 'we_test_' + Date.now();
+  const dbKey = weekId + ':::center:::test_wp_1';
+
+  const create = await req('POST', '/api/week-entries', {
+    id: entryId,
+    weekId: weekId,
+    recKey: 'center_test_wp_1',
+    rtype: 'center',
+    rid: 'test_wp_1',
+    scheduledDate: '1404/01/05',
+    actionType: 'call',
+    addedBy: TEST_USERS[0],
+    centerName: 'Test Center WP'
+  }, tok);
+  assert(create.status === 201, 'POST week-entry created (201)');
+
+  const putDb = await req('PUT', '/api/data/db', { edits: {} }, tok);
+  assert(putDb.status === 200, 'PUT /db without weekEntries returns 200');
+
+  const list = await req('GET', '/api/week-entries?week_id=' + encodeURIComponent(weekId), null, tok);
+  assert(list.status === 200, 'GET week-entries returns 200');
+  const found = (list.body || []).some(function (r) { return r.id === entryId; });
+  assert(found, 'week-entry still exists after bulk save without weekEntries');
+
+  await req('DELETE', '/api/week-entries/' + encodeURIComponent(entryId), null, tok);
+}
+
+async function test10_weekEntriesBulkUpdate() {
+  console.log('\n── Test 10: bulk-update marks entries done ──');
+  const tok = token(TEST_USERS[0]);
+  const weekId = '1404/01/02';
+  const entryId = 'we_bulk_' + Date.now();
+
+  const create = await req('POST', '/api/week-entries', {
+    id: entryId,
+    weekId: weekId,
+    recKey: 'center_test_wp_2',
+    rtype: 'center',
+    rid: 'test_wp_2',
+    actionType: 'call',
+    addedBy: TEST_USERS[0]
+  }, tok);
+  assert(create.status === 201, 'POST week-entry for bulk test (201)');
+
+  const bulk = await req('POST', '/api/week-entries/bulk-update', {
+    ids: [entryId],
+    done: true,
+    doneDate: '1404/01/10'
+  }, tok);
+  assert(bulk.status === 200, 'bulk-update returns 200');
+  assert(bulk.body && bulk.body.updated === 1, 'bulk-update updated 1 row');
+
+  const getOne = await req('GET', '/api/week-entries?week_id=' + encodeURIComponent(weekId), null, tok);
+  const row = (getOne.body || []).find(function (r) { return r.id === entryId; });
+  assert(row && row.done === true, 'entry marked done after bulk-update');
+
+  await req('DELETE', '/api/week-entries/' + encodeURIComponent(entryId), null, tok);
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -425,6 +488,8 @@ async function main() {
     await test6_sseDeliversToDifferentCid();
     await test7_sseDeliversToOtherUser();
     await test8_hcpAndAffiliationEndpoints();
+    await test9_weekEntriesNotWipedByBulkSave();
+    await test10_weekEntriesBulkUpdate();
 
   } catch (err) {
     console.error('\n❌ خطای غیرمنتظره:', err.message);

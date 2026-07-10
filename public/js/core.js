@@ -91,6 +91,7 @@ var _DEFAULT_MEMBERS=[]; // loaded from server via buildUSERS()
 var _sse = null;
 var _sseReconnectTimer = null;
 var _sseReloadTimer = null;
+var _sseWeekEntryTimer = null;
 var _ssePendingBy = null;
 
 function initSSE() {
@@ -101,6 +102,8 @@ function initSSE() {
       var data = JSON.parse(e.data);
       if (data.type === 'db-updated') {
         _sseReloadDB(data.by);
+      } else if (data.type === 'week-entry-changed') {
+        _sseWeekEntryChanged(data);
       } else if (data.type === 'app-reload') {
         if (typeof showToast === 'function') showToast('🔄 نسخه جدید بارگذاری شد. بازنشانی صفحه...', 3500);
         setTimeout(function(){ location.reload(); }, 2500);
@@ -154,6 +157,44 @@ function _sseReloadDB(byUser) {
       if (typeof showToast === 'function') showToast('\uD83D\uDD04 ' + name + _tgSuffix + ' تغییراتی اعمال کرد', 2500);
     }).catch(function() {});
   }, 1500);
+}
+
+function _sseWeekEntryChanged(data) {
+  if (data.by === currentUser) return;
+  clearTimeout(_sseWeekEntryTimer);
+  _sseWeekEntryTimer = setTimeout(function() {
+    fetch('/api/week-entries')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(rows) {
+        if (!rows || !Array.isArray(rows)) return;
+        if (!DB.weekEntries) DB.weekEntries = {};
+        rows.forEach(function(row) {
+          if (!row.weekId || !row.rtype || row.rid === undefined) return;
+          var k = row.weekId + ':::' + row.rtype + ':::' + row.rid;
+          DB.weekEntries[k] = {
+            id: row.id,
+            sqlId: row.id,
+            weekId: row.weekId,
+            recKey: row.recKey,
+            rtype: row.rtype,
+            rid: row.rid,
+            scheduledDate: row.scheduledDate,
+            actionType: row.actionType,
+            done: row.done,
+            doneDate: row.doneDate,
+            addedBy: row.addedBy,
+            centerName: row.centerName,
+            weekTagId: row.weekTagId
+          };
+        });
+        if (!_saveDebounceTimer && currentTab === 'weekplan' && typeof renderWeekPlan === 'function') {
+          renderWeekPlan();
+        }
+        var name = data.by ? (USERS[data.by] || data.by) : 'کاربر دیگری';
+        if (typeof showToast === 'function') showToast('\uD83D\uDD04 ' + name + ' برنامه هفته را به\u200cروز کرد', 2500);
+      })
+      .catch(function() {});
+  }, 400);
 }
 
 // نمایش راهنما اگر دیتابیس خالی است
@@ -320,9 +361,15 @@ function _weRemove(k){
   if(!DB._weDeletedKeys)DB._weDeletedKeys=[];
   if(DB._weDeletedKeys.indexOf(k)<0)DB._weDeletedKeys.push(k);
 }
-function _saveDBNow(){
+function _buildSavePayload(){
   var payload=JSON.parse(JSON.stringify(DB));
+  delete payload.weekEntries;
+  delete payload._weDeletedKeys;
   if(_dbServerTs)payload._clientTs=_dbServerTs;
+  return payload;
+}
+function _saveDBNow(){
+  var payload=_buildSavePayload();
   var seq=++_saveSeq; // capture sequence; ignore late-resolving responses
   return fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json','X-Cid':_sseClientId},body:JSON.stringify(payload)})
     .then(function(r){
@@ -348,8 +395,7 @@ function _saveDBNow(){
             if(conflictBy)showToast('🔄 تغییرات '+conflictBy+' ادغام شد',3000);
             
             // Retry save with updated timestamp
-            var p2=JSON.parse(JSON.stringify(DB));
-            if(_dbServerTs)p2._clientTs=_dbServerTs;
+            var p2=_buildSavePayload();
             return fetch('/api/data/db',{method:'PUT',headers:{'Content-Type':'application/json','X-Cid':_sseClientId},body:JSON.stringify(p2)})
               .then(function(r3){
                 if(!r3.ok)return;

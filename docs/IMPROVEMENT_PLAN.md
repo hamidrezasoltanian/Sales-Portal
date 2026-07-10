@@ -374,10 +374,15 @@ scripts/setup_dev_db.sh   ← new
 
 | تاریخ | مرحله | PR | وضعیت |
 |-------|-------|-----|--------|
-| | ۱.۱ CI | | ⬜ |
-| | ۲α.۱ bulk fix | | ⬜ |
-| | ۲α.۲ weekplan saveDB | | ⬜ |
-| | … | | |
+| 1404/04/19 | ۱.۱ CI | #13 | ✅ |
+| 1404/04/19 | ۱.۴ debug log | #13 | ✅ |
+| 1404/04/19 | ۱.۲ deploy.sh + .env.dev.example | #13 | ✅ |
+| 1404/04/19 | ۲α.۱ bulk fix | #13 | ✅ |
+| 1404/04/19 | ۲α.۲ weekplan saveDB حذف | #13 | ✅ |
+| 1404/04/19 | ۲α.۳ omit weekEntries از saveDB | #13 | ✅ |
+| 1404/04/19 | ۲α.۴ SSE week-entry-changed | #13 | ✅ |
+| 1404/04/19 | ۲α.۶ tests 9-10 | #13 | ✅ |
+| | ۲β PATCH centers | | ⬜ |
 
 ---
 
