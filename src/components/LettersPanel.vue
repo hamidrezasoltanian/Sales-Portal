@@ -1150,6 +1150,8 @@ async function saveLetter(actionStatus: 'draft' | 'pending') {
     return;
   }
 
+  syncEditorBody();
+
   newFormLoading.value = true;
   try {
     const r = await fetch('/api/letters', {
@@ -1194,11 +1196,7 @@ async function saveLetter(actionStatus: 'draft' | 'pending') {
 function applyTemplate(event: any) {
   const content = event.target.value;
   if (!content) return;
-  newForm.body = content;
-  if ((window as any).tinymce) {
-    const editor = (window as any).tinymce.get('letter-body-editor');
-    if (editor) editor.setContent(content);
-  }
+  setEditorContent(content);
 }
 
 // Label Helpers
@@ -1247,37 +1245,79 @@ function formatPersianDate(dateStr: string): string {
   }
 }
 
-// TinyMCE editor initialization in modal
+// ── TinyMCE rich-text editor (نامه اداری — شبیه Word) ─────────────────────
+const TINYMCE_FA_URL = 'https://cdn.jsdelivr.net/npm/tinymce-i18n@24.12.30/langs6/fa.js';
+
+function syncEditorBody() {
+  const tinymce = (window as any).tinymce;
+  if (!tinymce) return;
+  const editor = tinymce.get('letter-body-editor');
+  if (editor) newForm.body = editor.getContent();
+}
+
+function setEditorContent(html: string) {
+  newForm.body = html || '';
+  const tinymce = (window as any).tinymce;
+  if (!tinymce) return;
+  const editor = tinymce.get('letter-body-editor');
+  if (editor) editor.setContent(newForm.body);
+}
+
+function initLetterEditor() {
+  const tinymce = (window as any).tinymce;
+  if (!tinymce) {
+    console.warn('[letters] TinyMCE بارگذاری نشده — textarea ساده فعال است');
+    return;
+  }
+  tinymce.remove('#letter-body-editor');
+  tinymce.init({
+    selector: '#letter-body-editor',
+    height: 380,
+    min_height: 280,
+    resize: true,
+    directionality: 'rtl',
+    language: 'fa',
+    language_url: TINYMCE_FA_URL,
+    menubar: 'edit view insert format table',
+    plugins: 'directionality link table lists code autoresize wordcount searchreplace charmap',
+    toolbar:
+      'undo redo | blocks fontsize | bold italic underline strikethrough | forecolor backcolor | ' +
+      'alignright aligncenter alignleft alignjustify | bullist numlist outdent indent | ' +
+      'table link charmap | ltr rtl | removeformat code',
+    font_family_formats:
+      'وزیرمتن=Vazirmatn,Tahoma,sans-serif;Tahoma=Tahoma,sans-serif;Arial=Arial,Helvetica,sans-serif',
+    font_size_formats: '11px 12px 14px 16px 18px 20px 24px',
+    content_style:
+      'body { font-family: Vazirmatn, Tahoma, sans-serif; font-size: 14px; direction: rtl; line-height: 1.9; }',
+    branding: false,
+    promotion: false,
+    statusbar: true,
+    setup: (editor: any) => {
+      editor.on('change keyup undo redo', () => {
+        newForm.body = editor.getContent();
+      });
+    },
+    init_instance_callback: (editor: any) => {
+      editor.setContent(newForm.body || '');
+    },
+  });
+}
+
+function destroyLetterEditor() {
+  const tinymce = (window as any).tinymce;
+  if (tinymce) tinymce.remove('#letter-body-editor');
+}
+
 watch(showNewModal, (newVal) => {
   if (newVal) {
-    nextTick(() => {
-      if ((window as any).tinymce) {
-        (window as any).tinymce.init({
-          selector: '#letter-body-editor',
-          height: 250,
-          directionality: 'rtl',
-          language: 'fa',
-          plugins: 'directionality link table lists code',
-          toolbar: 'undo redo | blocks | bold italic forecolor backcolor | ltr rtl | alignleft aligncenter alignright alignjustify | bullist numlist outdent indent | removeformat | code',
-          setup: (editor: any) => {
-            editor.on('change keyup', () => {
-              newForm.body = editor.getContent();
-            });
-          }
-        });
-      }
-    });
+    nextTick(() => initLetterEditor());
   } else {
-    if ((window as any).tinymce) {
-      (window as any).tinymce.remove('#letter-body-editor');
-    }
+    destroyLetterEditor();
   }
 });
 
 onBeforeUnmount(() => {
-  if ((window as any).tinymce) {
-    (window as any).tinymce.remove('#letter-body-editor');
-  }
+  destroyLetterEditor();
 });
 
 onMounted(() => {
@@ -1637,6 +1677,20 @@ defineExpose({ load });
   font-size: 14px;
   color: #334155;
   line-height: 1.8;
+}
+.body-content-html table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+}
+.body-content-html td,
+.body-content-html th {
+  border: 1px solid #cbd5e1;
+  padding: 6px 10px;
+}
+.body-content-html ul,
+.body-content-html ol {
+  padding-right: 1.5em;
 }
 
 .lt-external-info {
@@ -2002,6 +2056,15 @@ defineExpose({ load });
 .textarea-modal {
   min-height: 120px;
   resize: vertical;
+}
+/* TinyMCE inside letter modal */
+:deep(.tox-tinymce) {
+  border-radius: 8px !important;
+  border-color: #cbd5e1 !important;
+  font-family: Vazirmatn, Tahoma, sans-serif !important;
+}
+:deep(.tox .tox-edit-area__iframe) {
+  background: #fff;
 }
 
 .multi-select-wrap {
