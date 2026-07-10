@@ -207,6 +207,9 @@ async function loadDBFromSQL(client) {
   let pricingComm = null;
   let pricingSettings = null;
   let hiddenProvs = null;
+  let mtrTrend = null;
+  let mtrFollowerMap = null;
+  let mtrFollower = null;
   settingsR.rows.forEach(function(r) {
     if (r.key === 'kpi_weights') {
       kpiTargets.weights = r.value;
@@ -222,6 +225,12 @@ async function loadDBFromSQL(client) {
       pricingSettings = r.value;
     } else if (r.key === 'hiddenProvs') {
       hiddenProvs = r.value;
+    } else if (r.key === 'mtrTrend') {
+      mtrTrend = r.value;
+    } else if (r.key === 'mtrFollowerMap') {
+      mtrFollowerMap = r.value;
+    } else if (r.key === 'mtrFollower') {
+      mtrFollower = r.value;
     } else {
       settings[r.key] = r.value;
     }
@@ -295,6 +304,9 @@ async function loadDBFromSQL(client) {
     pricingComm: pricingComm || undefined,
     pricingSettings: pricingSettings || undefined,
     hiddenProvs: hiddenProvs || undefined,
+    mtrTrend: mtrTrend || undefined,
+    mtrFollowerMap: mtrFollowerMap || undefined,
+    mtrFollower: mtrFollower || undefined,
   };
 }
 
@@ -331,6 +343,7 @@ router.put('/db', async (req, res) => {
     'tags', 'rTags', 'missionLog', 'provHistory', 'kpiHistory', 'kpiTargets', 'extra',
     'managerTasks', 'provOverrides', 'settings',
     'pricingProducts', 'pricingComm', 'pricingSettings', 'hiddenProvs',
+    'mtrTrend', 'mtrFollowerMap', 'mtrFollower', '_mtr',
   ];
   const hasKnown = Object.keys(body).some(k => KNOWN_KEYS.includes(k));
   if (!hasKnown && Object.keys(body).length > 0) {

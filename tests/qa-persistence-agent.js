@@ -373,6 +373,17 @@ async function flow_pricingSettings(mgrTok) {
   await query("DELETE FROM app_settings WHERE key = 'pricingProducts'");
 }
 
+async function flow_mtrFollowerMap(mgrTok) {
+  console.log('\n🔄 Flow: PATCH mtrFollowerMap → empty PUT /db → refresh');
+  const map = { qa_follower: TEST_USER };
+  const patch = await req('PATCH', '/api/crm-settings/mtrFollowerMap', { value: map }, mgrTok);
+  if (!assert(patch.status === 200, 'PATCH mtrFollowerMap')) return;
+  await req('PUT', '/api/data/db', {}, mgrTok);
+  const db = await refreshDb(mgrTok);
+  assert(db.mtrFollowerMap && db.mtrFollowerMap.qa_follower === TEST_USER, 'mtrFollowerMap survived bulk save');
+  await query("DELETE FROM app_settings WHERE key = 'mtrFollowerMap'");
+}
+
 async function runAllFlows() {
   passed = 0;
   failed = 0;
@@ -404,6 +415,7 @@ async function runAllFlows() {
   await flow_settingsPatch(mgrTok);
   await flow_centerExtra(tok);
   await flow_pricingSettings(mgrTok);
+  await flow_mtrFollowerMap(mgrTok);
 
   await query("DELETE FROM app_users WHERE username = '_qa_mgr'").catch(function () {});
 

@@ -462,14 +462,19 @@ function setNextFU(inv,d){
             mtrAmount:row.rem, mtrCustomer:row.customer,
             mtrInv:inv
           };
-          saveDB();
+          saveWeekEntryApi(eKey,DB.weekEntries[eKey]);
           showToast('📄 پیگیری مطالبات به برنامه هفته اضافه شد',2500);
         } else {
           // به‌روزرسانی اگر تاریخ تغییر کرده
           DB.weekEntries[eKey].scheduledDate=d;
           DB.weekEntries[eKey].centerName=label;
           DB.weekEntries[eKey].mtrAmount=row.rem;
-          saveDB();
+          (function(_we,_k){
+            if(_we&&_we.sqlId){
+              fetch('/api/week-entries/'+encodeURIComponent(_we.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({scheduledDate:d,centerName:label})}).catch(function(){});
+            }else if(_we){saveWeekEntryApi(_k,_we);}
+          })(DB.weekEntries[eKey],eKey);
         }
       }
     }
@@ -721,7 +726,7 @@ function processAB(ab){
     if(!last||last.d!==tDate){
       DB.mtrTrend.push({d:tDate,total:tTotal,count:DATA.length});
       if(DB.mtrTrend.length>12)DB.mtrTrend=DB.mtrTrend.slice(-12);
-      saveDB();
+      saveMtrTrendApi(DB.mtrTrend);
     }
   })();
   updateReminder();render();mtrCheckFollowupNotifs();
@@ -1024,7 +1029,7 @@ function mtrAutoMapFollowers(){
       saved++;
     }
   });
-  if(saved)saveDB();
+  if(saved)saveMtrFollowerMapApi(DB.mtrFollowerMap);
   return saved;
 }
 function mtrGetUnmappedFollowers(){
@@ -1086,7 +1091,7 @@ function mtrSaveFollowerMapping(){
       DB.mtrFollowerMap[fn]=val;  // also store raw
     }
   });
-  saveDB();
+  saveMtrFollowerMapApi(DB.mtrFollowerMap);
   closeModal('mtrMapModal');
   render();
   showToast('✅ نگاشت کارشناسان ذخیره شد',2500);
@@ -1095,7 +1100,7 @@ function mtrSetFollower(custKey,userId){
   if(!DB.mtrFollower)DB.mtrFollower={};
   if(userId)DB.mtrFollower[custKey]=userId;
   else delete DB.mtrFollower[custKey];
-  saveDB();
+  saveMtrFollowerApi(DB.mtrFollower);
 }
 function mtrEditFollower(custKey){
   var members=umGetActive();
@@ -1192,6 +1197,17 @@ function _mtrBuildGroups(rows){
   });
   return Object.values(customers).sort(function(a,b){return b.worstUrg.lv-a.worstUrg.lv||b.totalRem-a.totalRem;});
 }
+function mtrSaveSmsSettings(){
+  var ak=(document.getElementById('farazApiKeyInp')||{}).value||'';
+  var sn=(document.getElementById('farazSenderInp')||{}).value||'';
+  if(!DB.settings)DB.settings={};
+  DB.settings.farazApiKey=ak.trim();
+  DB.settings.farazSender=sn.trim();
+  patchCrmSetting('farazApiKey',DB.settings.farazApiKey);
+  patchCrmSetting('farazSender',DB.settings.farazSender);
+  closeModal('mtrSmsSettModal');
+  showToast('✅ تنظیمات SMS ذخیره شد');
+}
 function showMtrSmsSettings(){
   var ak=(DB.settings&&DB.settings.farazApiKey)||'';
   var sn=(DB.settings&&DB.settings.farazSender)||'';
@@ -1202,7 +1218,7 @@ function showMtrSmsSettings(){
     +'<input id="farazSenderInp" value="'+esc(sn)+'" placeholder="+98XXXXXXXXXX" dir="ltr" style="width:100%;background:var(--bg-input);border:1px solid var(--border-input);border-radius:6px;padding:7px 10px;font-size:12px;font-family:monospace;color:var(--text-primary)"></div>'
     +'<div style="font-size:10px;color:var(--text-muted);background:var(--bg-raised);border-radius:6px;padding:8px">API از پنل فراز SMS → تنظیمات → API دریافت کنید</div>'
     +'</div>';
-  var foot='<button onclick="var ak=document.getElementById(\'farazApiKeyInp\').value.trim();var sn=document.getElementById(\'farazSenderInp\').value.trim();if(!DB.settings)DB.settings={};DB.settings.farazApiKey=ak;DB.settings.farazSender=sn;saveDB();closeModal(\'mtrSmsSettModal\');showToast(\'✅ تنظیمات SMS ذخیره شد\')" style="background:#0ea5e9;color:white;border:none;border-radius:6px;padding:7px 18px;cursor:pointer;font-size:12px;font-family:inherit">💾 ذخیره</button>'
+  var foot='<button onclick="mtrSaveSmsSettings()" style="background:#0ea5e9;color:white;border:none;border-radius:6px;padding:7px 18px;cursor:pointer;font-size:12px;font-family:inherit">💾 ذخیره</button>'
     +'<button class="btn-secondary" onclick="closeModal(\'mtrSmsSettModal\')" style="margin-right:8px">انصراف</button>';
   openModal('mtrSmsSettModal','⚙ تنظیمات SMS فراز',body,foot);
 }
@@ -2114,10 +2130,11 @@ function bulkAddToWeekPlan(){
     wpRemoveFromOtherWeeks(key, weekId);
     if(!DB.weekEntries[eKey]){
       DB.weekEntries[eKey]={scheduledDate:null,done:false,doneDate:null,rtype:rtype,rid:rid,recKey:key,addedBy:currentUser,actionType:'call'};
+      saveWeekEntryApi(eKey,DB.weekEntries[eKey]);
       added++;
     }
   });
-  saveDB();clearCenterSelection();
+  clearCenterSelection();
   showToast('📋 '+added+' مرکز به برنامه هفته اضافه شد',2500);
 }
 function bulkChangeOwner(){
@@ -2165,7 +2182,6 @@ function bulkSetFollowup(){
       var parts=k.split('_');var rtype=parts[0];var id=parts.slice(1).join('_');
       setE(rtype,id,'followupDate',v);
     });
-    saveDB();
     clearCenterSelection();
     renderTable();
     showToast('✓ تاریخ پیگیری برای '+keys.length+' مرکز تنظیم شد');
@@ -2229,6 +2245,7 @@ function _doBulkDelete(){
     _cleanCenterData(rtype,id);
     if(isExtra){
       DB.extra=(DB.extra||[]).filter(function(c){return c.id!==id;});
+      deleteCenterExtraApi(id);
     }else{
       masterDeleted++;
       if(rtype==='center'){
@@ -2249,7 +2266,6 @@ function _doBulkDelete(){
     }
     deleted++;
   });
-  saveDB();
   clearPCCache();_ALL_PROVS=null;_typeFilterBuilt=false;
   if(masterDeleted>0){
     var _newCENTERS=CENTERS.slice();
@@ -2309,7 +2325,8 @@ function saveFilterPreset(){
   if(!DB.settings)DB.settings={};
   if(!DB.settings.filterPresets)DB.settings.filterPresets={};
   DB.settings.filterPresets[name.trim()]=preset;
-  saveDB();buildPresetSelector();
+  patchCrmSetting('filterPresets',DB.settings.filterPresets);
+  buildPresetSelector();
   showToast('💾 پریست «'+name.trim()+'» ذخیره شد',2000);
 }
 function loadFilterPreset(name){
@@ -2394,7 +2411,8 @@ function togglePin(rtype,id){
   var idx=DB.settings.pinnedCenters.indexOf(key);
   if(idx>=0)DB.settings.pinnedCenters.splice(idx,1);
   else DB.settings.pinnedCenters.push(key);
-  saveDB();renderTable();
+  patchCrmSetting('pinnedCenters',DB.settings.pinnedCenters);
+  renderTable();
 }
 
 // ════════ IMPROVEMENT 10: Province Excel export ════════

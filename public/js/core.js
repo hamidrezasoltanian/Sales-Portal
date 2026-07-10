@@ -440,7 +440,11 @@ function _buildSavePayload(){
   delete payload.pricingComm;
   delete payload.pricingSettings;
   delete payload.hiddenProvs;
-  // Residual blob: _mtr only (MTR — untouched)
+  delete payload.mtrTrend;
+  delete payload.mtrFollowerMap;
+  delete payload.mtrFollower;
+  delete payload._mtr;
+  // Residual blob: none — all entities use dedicated APIs
   if(_dbServerTs)payload._clientTs=_dbServerTs;
   return payload;
 }
@@ -550,6 +554,18 @@ function savePricingApi(products,comm,settings){
   if(products!==undefined){DB.pricingProducts=products;patchCrmSetting('pricingProducts',products);}
   if(comm!==undefined){DB.pricingComm=comm;patchCrmSetting('pricingComm',comm);}
   if(settings!==undefined){DB.pricingSettings=settings;patchCrmSetting('pricingSettings',settings);}
+}
+function saveMtrTrendApi(trend){
+  DB.mtrTrend=trend||[];
+  return patchCrmSetting('mtrTrend',DB.mtrTrend);
+}
+function saveMtrFollowerMapApi(map){
+  DB.mtrFollowerMap=map||{};
+  return patchCrmSetting('mtrFollowerMap',DB.mtrFollowerMap);
+}
+function saveMtrFollowerApi(map){
+  DB.mtrFollower=map||{};
+  return patchCrmSetting('mtrFollower',DB.mtrFollower);
 }
 function saveCenterExtraApi(center){
   if(!center||!center.id)return Promise.resolve();

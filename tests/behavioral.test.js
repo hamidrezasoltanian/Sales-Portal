@@ -626,6 +626,19 @@ async function test21_pricingSettingsPersist() {
   await query("DELETE FROM app_settings WHERE key = 'pricingProducts'");
 }
 
+async function test22_mtrAuxSettingsPersist() {
+  console.log('\n── Test 22: MTR follower map PATCH survives empty PUT /db ──');
+  const tok = managerToken(TEST_MANAGER);
+  const map = { 'کارشناس تست': 'Sarah.hosseini' };
+  const patch = await req('PATCH', '/api/crm-settings/mtrFollowerMap', { value: map }, tok);
+  assert(patch.status === 200, 'PATCH mtrFollowerMap returns 200');
+  const put = await req('PUT', '/api/data/db', {}, tok);
+  assert(put.status === 200, 'PUT /db without MTR keys returns 200');
+  const get = await req('GET', '/api/data/db', null, tok);
+  assert(get.body.mtrFollowerMap && get.body.mtrFollowerMap['کارشناس تست'] === 'Sarah.hosseini', 'mtrFollowerMap persisted');
+  await query("DELETE FROM app_settings WHERE key = 'mtrFollowerMap'");
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -684,6 +697,7 @@ async function main() {
     await test19_settingsNotWipedByBulkSave();
     await test20_centerExtrasApi();
     await test21_pricingSettingsPersist();
+    await test22_mtrAuxSettingsPersist();
 
   } catch (err) {
     console.error('\n❌ خطای غیرمنتظره:', err.message);

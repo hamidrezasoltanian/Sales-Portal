@@ -7,11 +7,12 @@ const { requireAuth, requireManager } = require('../auth');
 const router = express.Router();
 router.use(requireAuth);
 
-const SENSITIVE_KEYS = new Set(['anthropicKey']);
+const SENSITIVE_KEYS = new Set(['anthropicKey', 'farazApiKey']);
 
 function maskSettings(obj) {
   const out = Object.assign({}, obj || {});
   if (out.anthropicKey) out.anthropicKey = '***';
+  if (out.farazApiKey) out.farazApiKey = '***';
   return out;
 }
 
@@ -33,7 +34,7 @@ router.get('/', requireManager, async function (req, res) {
 const USER_PATCH_KEYS = new Set([
   'taskColumns', '_lastUser', 'firstUse', 'onboardingDisabled',
   'lastMorningReminder', 'lastAfternoonReminder', 'lastStartupReminder',
-  'homeWidgets',
+  'homeWidgets', 'pinnedCenters', 'filterPresets',
 ]);
 
 function isManagerRole(role) {
