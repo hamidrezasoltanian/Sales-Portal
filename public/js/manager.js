@@ -1251,6 +1251,7 @@ function openManagerDrilldown(memberId){
           body+='<div style="font-size:10px;color:var(--text-secondary);padding:2px 0">';
           body+='<span style="color:var(--text-muted)">'+esc(de.doneDate||'')+'</span> ';
           if(de.doneResult)body+='<span style="color:#0369a1">'+esc(de.doneResult)+'</span> ';
+          if(de.doneNote)body+='<span style="color:#475569">«'+esc(String(de.doneNote).substring(0,80))+'»</span> ';
           if(de.doneObstacle)body+='<span style="color:#dc2626">[مانع: '+esc(de.doneObstacle)+']</span> ';
           if(de.doneAmount)body+='<span style="color:#16a34a">['+de.doneAmount+'M]</span>';
           body+='</div>';
@@ -1297,6 +1298,26 @@ function overduePickDate(rtype,id,listMemberId){
   });
 }
 var _odFilters = {memberId: '', search: '', bucket: 'all'};
+var _odLastItems = [];
+
+function overdueBulkSnooze(days){
+  if(!_odLastItems.length){showToast('موردی برای تعویق نیست');return;}
+  if(!confirm('تعویق '+_odLastItems.length+' مرکز به '+days+' روز بعد؟'))return;
+  var today=todayStr();
+  _odLastItems.forEach(function(c){
+    var parts=today.split('/').map(Number);
+    var gDate=j2g(parts[0],parts[1],parts[2]);
+    var d=new Date(gDate[0],gDate[1]-1,gDate[2]+days);
+    var nj=g2j(d.getFullYear(),d.getMonth()+1,d.getDate());
+    var newDate=nj[0]+'/'+p2(nj[1])+'/'+p2(nj[2]);
+    setE(c.rtype,c.id,'followupDate',newDate);
+  });
+  saveDB();
+  renderBanner();
+  showToast('✅ '+_odLastItems.length+' مرکز '+days+' روز تعویق افتاد',2500);
+  closeModal('overdueList');
+  setTimeout(function(){openOverdueList(_odFilters.memberId||undefined);},150);
+}
 
 function openOverdueList(memberId){
   _odFilters.memberId = memberId || '';
@@ -1320,6 +1341,7 @@ function openOverdueList(memberId){
     + '<option value="month">🟠 این ماه (۸–۳۰ روز)</option>'
     + '<option value="old">⚫ قدیمی (بیش از ۳۰ روز)</option>'
     + '</select>'
+    + '<button onclick="overdueBulkSnooze(7)" style="padding:4px 10px;background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:5px;cursor:pointer;font-size:11px;font-family:inherit;margin-right:auto" title="تعویق ۷ روز برای همه موارد فیلترشده">⏭ همه +۷ روز</button>'
     + '</div>'
     + '<div id="overdueListBody" style="max-height:60vh;overflow-y:auto"></div>'
     + '</div>';
@@ -1371,6 +1393,7 @@ function filterOverdueList() {
   });
   
   items.sort(function(a,b){return a.followupDate < b.followupDate ? -1 : 1;});
+  _odLastItems = items.slice();
 
   var renderRow = function(c){
     var rescheduleTreeId = 'rtree_' + c.rtype + '_' + c.id;
@@ -2082,11 +2105,24 @@ function _sendWeeklyDigest(){
   var members=(DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS;
   var mon=currentJMonth();
   var lines=[];
+  var overdueByExpert={};
+  _buildPCCache();
+  getAllProvinces().forEach(function(p){
+    var rt=getProvType(p.id);
+    getProvCenters(p.id).forEach(function(c){
+      var e=getE(rt,c.id);
+      var fd=e.followupDate||'';
+      if(!fd||fd>=today||e.status==='قرارداد بسته شد'||e.status==='غیرفعال')return;
+      var ow=e.owner||c.owner||'';
+      if(!overdueByExpert[ow])overdueByExpert[ow]=0;
+      overdueByExpert[ow]++;
+    });
+  });
   members.filter(function(m){return m.active!==false&&m.role!=='مهمان'&&m.role!=='سوپر ادمین'&&m.role!=='مدیر';}).forEach(function(m){
     try{
       var calls=getCallsMonth(m.id,mon).reduce(function(s,l){return s+(l.count||0);},0);
       var visits=(getVisitsMonth(m.id,mon).total||0);
-      lines.push(m.name+': '+calls+' تماس، '+visits+' ملاقات');
+      lines.push(m.name+': '+calls+' تماس، '+visits+' ملاقات'+(overdueByExpert[m.id]?'، 🔴 '+overdueByExpert[m.id]+' معوق':''));
     }catch(e){}
   });
   if(!lines.length)return;

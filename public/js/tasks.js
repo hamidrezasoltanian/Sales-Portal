@@ -249,6 +249,11 @@ function tkDrop(ev,statusId){
   var tid=_tkDragging||ev.dataTransfer.getData('text/plain');
   var t=_tkFindTask(tid);
   if(!t)return;
+  var stCol=_getTkStatuses().find(function(s){return s.id===statusId;});
+  if(stCol&&stCol.wip){
+    var colCount=DB.tasks.filter(function(x){return(x.status||'todo')===statusId&&!x.done;}).length;
+    if(colCount>=stCol.wip){showToast('⚠️ ستون «'+stCol.label+'» به حد WIP ('+stCol.wip+') رسیده');return;}
+  }
   t.status=statusId;
   t.done=(statusId==='done');
   t.doneAt=t.done?todayStr():'';
@@ -333,7 +338,7 @@ function openTaskModal(tid, prefill){
     +'<textarea id="tkd_note" rows="2" style="'+inpS+';resize:vertical">'+esc(t.note||'')+'</textarea></div>'
     +'<div><label style="font-size:11px;display:block;margin-bottom:3px;font-weight:600">تکرار 🔁</label>'
     +'<select id="tkd_recurring" style="'+inpS+'">'
-    +[['none','بدون تکرار'],['weekly','هفتگی'],['monthly','ماهانه']].map(function(r){return'<option value="'+r[0]+'"'+((t.recurring||'none')===r[0]?' selected':'')+'>'+r[1]+'</option>';}).join('')
+    +[['none','بدون تکرار'],['daily','روزانه'],['weekly','هفتگی'],['monthly','ماهانه']].map(function(r){return'<option value="'+r[0]+'"'+((t.recurring||'none')===r[0]?' selected':'')+'>'+r[1]+'</option>';}).join('')
     +'</select></div>'
     +'<div style="grid-column:1/-1"><label style="font-size:11px;display:block;margin-bottom:3px;font-weight:600">مرکز (اختیاری)</label>'
     +'<div style="display:flex;gap:6px;align-items:center">'

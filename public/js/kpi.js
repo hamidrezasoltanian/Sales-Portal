@@ -61,7 +61,7 @@ function ensureKPIDB(){
   if(!DB.visitLog)DB.visitLog=[];
   if(!DB.salesLog)DB.salesLog=[];
   if(!DB.missionLog)DB.missionLog=[];
-  if(!DB.managerTasks)DB.managerTasks={};
+  if(typeof _migrateManagerTasksBlob==='function')_migrateManagerTasksBlob();
 }
 
 // ── تاریخ شمسی ──────────────────────────────────────────────────

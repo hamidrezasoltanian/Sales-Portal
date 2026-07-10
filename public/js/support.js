@@ -9,7 +9,10 @@
 var _supportData    = [];
 var _supportStats   = {};
 var _supportFilter  = 'all';  // all / open / resolved / mine
+var _supportCenterKey = '';
+var _supportCenterName = '';
 var _supportLoading = false;
+var _spDragging = null;
 
 var CATEGORIES = {
   complaint: '😤 شکایت',
@@ -46,15 +49,18 @@ function loadSupportData(cb) {
   if (_supportLoading) return;
   _supportLoading = true;
 
-  var params = '';
-  if (_supportFilter === 'open')     params = '?status=open';
-  else if (_supportFilter === 'resolved') params = '?status=resolved';
+  var qp = [];
+  if (_supportFilter === 'open')     qp.push('status=open');
+  else if (_supportFilter === 'resolved') qp.push('status=resolved');
   else if (_supportFilter === 'mine') {
     var cu = (typeof currentUser !== 'undefined') ? currentUser : '';
-    params = '?assigned_to=' + encodeURIComponent(cu);
+    qp.push('assigned_to=' + encodeURIComponent(cu));
   }
+  if (_supportCenterKey) qp.push('center_key=' + encodeURIComponent(_supportCenterKey));
+  qp.push('limit=100');
+  var params = '?' + qp.join('&');
 
-  fetch('/api/support' + params + (params ? '&limit=100' : '?limit=100'))
+  fetch('/api/support' + params)
     .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || r.status); return d; }); })
     .then(function(d) {
       _supportLoading = false;
@@ -86,6 +92,14 @@ function renderSupport(el) {
     { key: 'mine',      label: 'تخصیص به من' },
   ];
 
+  html += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">';
+  html += '<input type="text" id="spCenterFilter" placeholder="🔍 فیلتر مرکز..." value="' + esc(_supportCenterName || '') + '" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;min-width:160px;font-family:inherit" oninput="window._spCenterFilterSearch(this.value)">';
+  if (_supportCenterKey) {
+    html += '<button onclick="window._spClearCenterFilter()" style="padding:5px 10px;border:1px solid #fca5a5;background:#fef2f2;color:#dc2626;border-radius:8px;cursor:pointer;font-size:12px">✕ پاک کردن فیلتر مرکز</button>';
+  }
+  html += '<span style="font-size:11px;color:#94a3b8">کارت‌ها را بکشید برای تغییر وضعیت</span>';
+  html += '</div>';
+
   html += '<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">';
   filters.forEach(function(f) {
     var active = f.key === _supportFilter;
@@ -97,7 +111,7 @@ function renderSupport(el) {
   html += '<div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:16px;min-height:400px">';
   STATUSES.forEach(function(st) {
     var tickets = _supportData.filter(function(t) { return t.status === st.key; });
-    html += '<div style="min-width:240px;flex:1;background:#f8fafc;border-radius:12px;padding:12px">';
+    html += '<div class="sp-col" data-status="' + st.key + '" style="min-width:240px;flex:1;background:#f8fafc;border-radius:12px;padding:12px" ondragover="event.preventDefault();this.classList.add(\'sp-drop-over\')" ondragleave="this.classList.remove(\'sp-drop-over\')" ondrop="window._spDrop(event,\'' + st.key + '\')">';
     html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">';
     html += '<span style="width:10px;height:10px;border-radius:50%;background:' + st.color + ';display:inline-block"></span>';
     html += '<b style="font-size:14px;color:#1e293b">' + st.label + '</b>';
@@ -109,7 +123,7 @@ function renderSupport(el) {
       var cat = CATEGORIES[t.category] || '📋 سایر';
       var slaBreached = t.sla_deadline && t.sla_deadline < todayISO && st.key !== 'resolved' && st.key !== 'closed';
 
-      html += '<div onclick="window._spOpenTicket(\'' + esc(t.id) + '\')" style="background:#fff;border-radius:10px;padding:12px;margin-bottom:10px;cursor:pointer;border:1px solid ' + (slaBreached ? '#fca5a5' : '#e2e8f0') + ';border-right:4px solid ' + st.color + ';transition:box-shadow .15s" onmouseover="this.style.boxShadow=\'0 4px 12px rgba(0,0,0,.08)\'" onmouseout="this.style.boxShadow=\'\'">';
+      html += '<div draggable="true" ondragstart="window._spDragStart(event,\'' + esc(t.id) + '\')" ondragend="window._spDragEnd()" onclick="if(!window._spWasDrag)window._spOpenTicket(\'' + esc(t.id) + '\')" style="background:#fff;border-radius:10px;padding:12px;margin-bottom:10px;cursor:grab;border:1px solid ' + (slaBreached ? '#fca5a5' : '#e2e8f0') + ';border-right:4px solid ' + st.color + ';transition:box-shadow .15s" onmouseover="this.style.boxShadow=\'0 4px 12px rgba(0,0,0,.08)\'" onmouseout="this.style.boxShadow=\'\'">';
       html += '<div style="display:flex;align-items:flex-start;gap:6px;margin-bottom:6px">';
       html += '<span title="' + pri.label + '">' + pri.icon + '</span>';
       html += '<span style="font-size:14px;font-weight:600;color:#1e293b;flex:1;line-height:1.3">' + esc(t.title) + '</span>';
@@ -154,6 +168,96 @@ window._spSetFilter = function(f) {
   var el = document.getElementById('supportRoot');
   if (el) el.innerHTML = '<div style="text-align:center;padding:40px;color:#64748b">در حال بارگذاری…</div>';
   loadSupportData(function() { renderSupport(el); });
+};
+
+window._spCenterFilterSearch = function(q) {
+  q = (q || '').trim();
+  if (q.length < 1) return;
+  if (typeof fNorm !== 'function' || typeof _buildPCCache !== 'function') return;
+  window._spCenterFilterPick = function(key, name) {
+    _supportCenterKey = key;
+    _supportCenterName = name;
+    window._spSetFilter(_supportFilter);
+  };
+  var qn = fNorm(q);
+  var res = [];
+  _buildPCCache();
+  (typeof CENTERS !== 'undefined' ? CENTERS : []).forEach(function(c) {
+    if (res.length >= 8) return;
+    var name = (typeof _getCenterName === 'function' ? _getCenterName('center', c.id) : c.name) || '';
+    if (fNorm(name).indexOf(qn) !== -1) res.push({ key: 'center_' + c.id, name: name });
+  });
+  Object.keys(typeof _PC_CACHE !== 'undefined' ? _PC_CACHE : {}).forEach(function(pv) {
+    if (pv === 'tehran') return;
+    (_PC_CACHE[pv] || []).forEach(function(c) {
+      if (res.length >= 8) return;
+      var name = (typeof _getCenterName === 'function' ? _getCenterName('pc', c.id) : c.name) || '';
+      if (fNorm(name).indexOf(qn) !== -1) res.push({ key: 'pc_' + c.id, name: name });
+    });
+  });
+  if (!res.length) return;
+  if (res.length === 1 && fNorm(res[0].name) === qn) {
+    window._spCenterFilterPick(res[0].key, res[0].name);
+    return;
+  }
+  var pickHtml = res.map(function(r) {
+    return '<div style="padding:4px 8px;cursor:pointer;font-size:12px;border-bottom:1px solid #e2e8f0" onclick="window._spCenterFilterPick(\'' + esc(r.key) + '\',\'' + esc(r.name).replace(/'/g, '&#39;') + '\')">' + esc(r.name) + '</div>';
+  }).join('');
+  var inp = document.getElementById('spCenterFilter');
+  if (inp && inp.parentNode) {
+    var box = document.getElementById('spCenterPickBox');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'spCenterPickBox';
+      box.style.cssText = 'position:absolute;z-index:999;background:#fff;border:1px solid #e2e8f0;border-radius:8px;max-height:160px;overflow-y:auto;min-width:200px';
+      inp.parentNode.style.position = 'relative';
+      inp.parentNode.appendChild(box);
+    }
+    box.innerHTML = pickHtml;
+  }
+};
+
+window._spClearCenterFilter = function() {
+  _supportCenterKey = '';
+  _supportCenterName = '';
+  var box = document.getElementById('spCenterPickBox');
+  if (box) box.remove();
+  window._spSetFilter(_supportFilter);
+};
+
+window._spDragStart = function(ev, id) {
+  _spDragging = id;
+  window._spWasDrag = false;
+  ev.dataTransfer.effectAllowed = 'move';
+  ev.dataTransfer.setData('text/plain', id);
+};
+
+window._spDragEnd = function() {
+  window._spWasDrag = true;
+  setTimeout(function() { window._spWasDrag = false; }, 150);
+  _spDragging = null;
+  document.querySelectorAll('.sp-col.sp-drop-over').forEach(function(el) { el.classList.remove('sp-drop-over'); });
+};
+
+window._spDrop = function(ev, statusKey) {
+  ev.preventDefault();
+  document.querySelectorAll('.sp-col.sp-drop-over').forEach(function(el) { el.classList.remove('sp-drop-over'); });
+  var id = _spDragging || ev.dataTransfer.getData('text/plain');
+  if (!id) return;
+  var ticket = _supportData.find(function(t) { return t.id === id; });
+  if (!ticket || ticket.status === statusKey) return;
+  fetch('/api/support/' + encodeURIComponent(id), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: statusKey }),
+  })
+    .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || r.status); return d; }); })
+    .then(function() {
+      if (typeof showToast === 'function') showToast('✅ وضعیت تغییر کرد', 1500);
+      var el = document.getElementById('supportRoot');
+      if (el) loadSupportData(function() { renderSupport(el); });
+    })
+    .catch(function(e) { alert('خطا: ' + (e.message || e)); });
 };
 
 window._spOpenNew = function(prefill) {

@@ -340,6 +340,27 @@ router.get('/calc', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── GET /api/pricing/center/:key/commissions ─────────────────────────────────
+router.get('/center/:key/commissions', async (req, res) => {
+  try {
+    const center_key = decodeURIComponent(req.params.key);
+    const cc = await query('SELECT commission_level FROM center_pricing_config WHERE center_key=$1', [center_key]);
+    if (!cc.rows.length || !cc.rows[0].commission_level) return res.json([]);
+    const level = cc.rows[0].commission_level;
+    const r = await query(
+      `SELECT cr.product_id, p.name AS product_name, cr.amount
+       FROM commission_rules cr
+       JOIN products p ON p.id = cr.product_id
+       JOIN price_lists pl ON pl.id = cr.price_list_id AND pl.active = true
+       WHERE cr.level = $1
+       ORDER BY p.sort_order, p.name
+       LIMIT 12`,
+      [level]
+    );
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── GET /api/pricing/center/:key ──────────────────────────────────────────────
 router.get('/center/:key', async (req, res) => {
   try {

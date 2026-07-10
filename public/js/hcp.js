@@ -37,6 +37,14 @@ function renderHCPPanel() {
     + '<option value="خرید">تجهیزات / خرید</option>'
     + '</select>'
     + '</div>'
+    + '<div style="width:160px">'
+    + '<select id="hcpInfluenceFilter" style="width:100%;padding:8px 12px;border:1px solid var(--border-input);border-radius:8px;font-family:inherit;font-size:13px;background:var(--bg-input);color:var(--text-primary)" onchange="_hcpSearch()">'
+    + '<option value="">همه نقش‌ها...</option>'
+    + '<option value="KOL">⭐ KOL فقط</option>'
+    + '<option value="Decision Maker">تصمیم‌گیرنده</option>'
+    + '<option value="Influencer">تأثیرگذار</option>'
+    + '</select>'
+    + '</div>'
     + '<div style="display:flex;gap:6px">'
     + '<button id="hcpViewGridBtn" onclick="window._hcpView=\'grid\';_renderHCPData()" class="btn-primary" style="padding:6px 12px;border-radius:8px">🗂 کارتی</button>'
     + '<button id="hcpViewTreeBtn" onclick="window._hcpView=\'tree\';_renderHCPData()" class="btn-secondary" style="padding:6px 12px;border-radius:8px">🌳 درختی</button>'
@@ -61,6 +69,7 @@ function _hcpDebouncedSearch() {
 function _hcpSearch() {
   var q = document.getElementById('hcpSearchInput') ? document.getElementById('hcpSearchInput').value.trim() : '';
   var spec = document.getElementById('hcpSpecialtyFilter') ? document.getElementById('hcpSpecialtyFilter').value : '';
+  var infl = document.getElementById('hcpInfluenceFilter') ? document.getElementById('hcpInfluenceFilter').value : '';
   var listArea = document.getElementById('hcpListArea');
   if (!listArea) return;
 
@@ -70,6 +79,11 @@ function _hcpSearch() {
   fetch(url)
     .then(function(r) { return r.ok ? r.json() : []; })
     .then(function(data) {
+      if (infl) {
+        data = data.filter(function(hcp) {
+          return (hcp.affiliations || []).some(function(a) { return a.influence_level === infl; });
+        });
+      }
       window._hcpCache = data;
       _renderHCPData();
     });
@@ -159,20 +173,18 @@ function _renderHCPTreeView(data, listArea) {
       var cKey = aff.center_key;
       
       if (cKey !== 'no_center') {
-        var rtype = cKey.split('_')[0] || cKey.split('||')[0];
-        var id = cKey.replace(rtype+'_','').replace(rtype+'||','');
-        var centerObj = (typeof getProvCenters === 'function') ? null : null; // we need to find the center
-        // Let's look up in DB.edits or window.DATA if available
-        var centerData = window.DB && window.DB.edits && window.DB.edits[cKey];
-        var baseName = (window.DATA || []).find(c => String(c.id) === id && c.rtype === rtype);
-        if (baseName) {
-           centerName = baseName.name;
-           if (window.PROVINCES) {
-             var p = window.PROVINCES.find(x => x.id == baseName.province_id);
-             if (p) provName = p.name;
-           }
-        } else if (centerData && centerData.name) {
-           centerName = centerData.name;
+        if (typeof _getCenterName === 'function') {
+          var parts = cKey.split('_');
+          var rt = parts[0] || 'center';
+          var cid = parts.slice(1).join('_');
+          centerName = _getCenterName(rt, cid) || cKey;
+        } else if (typeof getRecLabel === 'function') {
+          centerName = getRecLabel(cKey) || cKey;
+        }
+        var provId = (cKey.indexOf('||') >= 0) ? cKey.split('||')[0] : (cKey.split('_')[0] === 'pc' ? cKey.split('_')[1] : 'tehran');
+        if (typeof getAllProvinces === 'function') {
+          var pObj = getAllProvinces().find(function(x) { return x.id === provId || x.name === provId; });
+          if (pObj) provName = pObj.name;
         }
       }
       

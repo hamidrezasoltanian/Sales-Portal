@@ -1134,6 +1134,7 @@ tr.row-upcoming td{background:var(--warning-bg)!important}
 @media(max-width:600px){.tk-board{grid-template-columns:1fr}}
 .tk-col{background:var(--bg-raised);border:1px solid var(--border);border-radius:12px;min-height:200px;display:flex;flex-direction:column;transition:all .15s ease}
 .tk-col.tk-drop-over{border-color:var(--brand,#6366f1);box-shadow:0 0 0 2px rgba(99,102,241,.25)}
+.sp-col.sp-drop-over{outline:2px dashed #6366f1;background:#eef2ff}
 .tk-col-head{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;font-size:12px;font-weight:700;border-bottom:1px solid var(--border);border-radius:12px 12px 0 0;background:var(--bg-card)}
 .tk-col-cnt{background:var(--bg-raised);border:1px solid var(--border);border-radius:10px;padding:1px 8px;font-size:10px;color:var(--text-muted)}
 .tk-col-body{padding:8px;display:flex;flex-direction:column;gap:7px;flex:1}

@@ -1363,8 +1363,8 @@ function openCenterModal(rtype,id){
   if(typeof _hcpLoadCenterAffiliations==='function'){setTimeout(function(){_hcpLoadCenterAffiliations(rtype,r.id,id);},20);}
   if(window.umGetColor){setTimeout(function(){document.querySelectorAll('.owner-dot[data-uid]').forEach(function(d){var u=decodeURIComponent(d.dataset.uid);if(u)d.style.background=umGetColor(u);});},0);}
   // ── قیمت‌گذاری ──
-  (function(_rid,_rname){
-    fetch('/api/pricing/center/'+encodeURIComponent(_rname))
+  (function(_rid,_centerKey,_rname){
+    fetch('/api/pricing/center/'+encodeURIComponent(_centerKey))
       .then(function(res){return res.json();})
       .then(function(cfg){
         var el=document.getElementById('cmPricingInfo_'+_rid);
@@ -1377,9 +1377,23 @@ function openCenterModal(rtype,id){
         if(parseFloat(cfg.discount_ceiling_pct)>0)parts.push('⬇ سقف تخفیف: <b>'+cfg.discount_ceiling_pct+'%</b>');
         if(cfg.payment_terms)parts.push('📅 شرایط پرداخت: <b>'+cfg.payment_terms+'</b>');
         el.innerHTML=parts.length?'<div style="font-size:11px;font-weight:700;color:#0369a1;margin-bottom:5px">💰 قیمت‌گذاری</div><div style="display:flex;flex-wrap:wrap;gap:8px">'+parts.map(function(p){return'<span style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:5px;padding:2px 7px;color:var(--text-primary)">'+p+'</span>';}).join('')+'</div>':'<span style="color:var(--text-muted);font-size:10px">قیمت‌گذاری تنظیم نشده</span>';
-  var elCom=document.getElementById('cmCommission_'+_rid);if(elCom){var _curLvl=cfg&&cfg.commission_level?String(cfg.commission_level):'';elCom.innerHTML='<div style="display:flex;align-items:center;gap:5px"><label style="font-size:10px;color:var(--text-muted);flex-shrink:0">💼 پورسانت:</label><select onchange="(function(sel,nm){fetch(\'/api/pricing/center/\'+encodeURIComponent(nm),{method:\'PUT\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({commission_level:sel.value||null})}).then(function(){showToast(sel.value?\'💼 سطح پورسانت ذخیره شد\':\'💼 پورسانت حذف شد\');}).catch(function(){showToast(\'خطا در ذخیره پورسانت\');});})(this,\''+esc(_rname)+'\')" style="font-size:10px;padding:2px 5px;border:1px solid var(--border-input);border-radius:4px;background:var(--bg-input);font-family:inherit;color:var(--text-primary)"><option value="">---</option><option value="1"'+(_curLvl==='1'?' selected':'')+'>سطح ۱</option><option value="2"'+(_curLvl==='2'?' selected':'')+'>سطح ۲</option><option value="3"'+(_curLvl==='3'?' selected':'')+'>سطح ۳</option></select>'+(function(){var _owId=e.owner||r.owner||'';var _owM=_DEFAULT_MEMBERS&&_DEFAULT_MEMBERS.find(function(mm){return mm.id===_owId;});return(_owM&&_owM.commissionPct)?'<span style="font-size:10px;color:#7c3aed;background:#f5f3ff;border:1px solid #e9d5ff;border-radius:4px;padding:1px 6px;margin-right:4px"> 👤 نرخ: '+_owM.commissionPct+'٪</span>':'';})()+' </div>';}
+  var elCom=document.getElementById('cmCommission_'+_rid);
+  if(elCom){
+    var _curLvl=cfg&&cfg.commission_level?String(cfg.commission_level):'';
+    var _ckEsc=esc(_centerKey);
+    elCom.innerHTML='<div style="display:flex;flex-direction:column;gap:4px"><div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap"><label style="font-size:10px;color:var(--text-muted);flex-shrink:0">💼 پورسانت:</label><select onchange="fetch(\'/api/pricing/center/\'+encodeURIComponent(\''+_ckEsc+'\'),{method:\'PUT\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({commission_level:this.value||null})}).then(function(){showToast(\'💼 سطح پورسانت ذخیره شد\');}).catch(function(){showToast(\'خطا در ذخیره پورسانت\');})" style="font-size:10px;padding:2px 5px;border:1px solid var(--border-input);border-radius:4px;background:var(--bg-input);font-family:inherit;color:var(--text-primary)"><option value="">---</option><option value="1"'+(_curLvl==='1'?' selected':'')+'>سطح ۱</option><option value="2"'+(_curLvl==='2'?' selected':'')+'>سطح ۲</option><option value="3"'+(_curLvl==='3'?' selected':'')+'>سطح ۳</option></select>'+(function(){var _owId=e.owner||r.owner||'';var _owM=_DEFAULT_MEMBERS&&_DEFAULT_MEMBERS.find(function(mm){return mm.id===_owId;});return(_owM&&_owM.commissionPct)?'<span style="font-size:10px;color:#7c3aed;background:#f5f3ff;border:1px solid #e9d5ff;border-radius:4px;padding:1px 6px">👤 نرخ کارشناس: '+_owM.commissionPct+'٪</span>':'';})()+'</div><div id="cmCommPreview_'+_rid+'" style="font-size:10px;color:var(--text-muted)"></div></div>';
+    if(_curLvl){
+      fetch('/api/pricing/center/'+encodeURIComponent(_centerKey)+'/commissions').then(function(r){return r.ok?r.json():[];}).then(function(rows){
+        var pv=document.getElementById('cmCommPreview_'+_rid);if(!pv)return;
+        if(!rows||!rows.length){pv.textContent='قوانین پورسانت برای این سطح ثبت نشده';return;}
+        pv.innerHTML=rows.slice(0,5).map(function(row){
+          return '<span style="display:inline-block;margin:2px 4px 0 0;background:#f0fdf4;border:1px solid #86efac;border-radius:4px;padding:1px 6px">'+esc(row.product_name||('#'+row.product_id))+': <b>'+Number(row.amount||0).toLocaleString('fa-IR')+'</b> ریال</span>';
+        }).join('')+(rows.length>5?'<span style="color:var(--text-muted)"> +'+ (rows.length-5)+' محصول</span>':'');
+      }).catch(function(){});
+    }
+  }
       }).catch(function(){var el=document.getElementById('cmPricingInfo_'+_rid);if(el)el.style.display='none';});
-  })(r.id, r.name);
+  })(id, recK(rtype,r.id), displayName);
 }
 
 function _mrgSearch(){
