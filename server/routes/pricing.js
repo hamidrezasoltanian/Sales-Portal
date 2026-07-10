@@ -340,6 +340,71 @@ router.get('/calc', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── GET /api/pricing/commission-rules ────────────────────────────────────────
+// ?buyer_type=hospital&list_id=5 — rules for active price list (default hospital)
+router.get('/commission-rules', async (req, res) => {
+  try {
+    let listId = req.query.list_id ? parseInt(req.query.list_id, 10) : null;
+    if (!listId || isNaN(listId)) {
+      const buyerType = req.query.buyer_type || 'hospital';
+      const pl = await query(
+        `SELECT id FROM price_lists WHERE buyer_type=$1 AND active=true ORDER BY version DESC LIMIT 1`,
+        [buyerType]
+      );
+      if (!pl.rows.length) return res.json({ list_id: null, buyer_type: buyerType, products: [] });
+      listId = pl.rows[0].id;
+    }
+    const products = await query(
+      'SELECT id, name FROM products WHERE active=true ORDER BY sort_order, id'
+    );
+    const rules = await query(
+      'SELECT product_id, level, amount FROM commission_rules WHERE price_list_id=$1',
+      [listId]
+    );
+    const byProd = {};
+    rules.rows.forEach((r) => {
+      if (!byProd[r.product_id]) byProd[r.product_id] = {};
+      byProd[r.product_id][r.level] = Number(r.amount) || 0;
+    });
+    const matrix = products.rows.map((p) => ({
+      product_id: p.id,
+      product_name: p.name,
+      level1: byProd[p.id]?.[1] ?? null,
+      level2: byProd[p.id]?.[2] ?? null,
+      level3: byProd[p.id]?.[3] ?? null,
+    }));
+    res.json({ list_id: listId, products: matrix });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── PUT /api/pricing/commission-rules (manager + mgmt access) ────────────────
+router.put('/commission-rules', requireManager, async (req, res) => {
+  if (!hasPricingMgmtAccess(req)) {
+    return res.status(403).json({ error: 'دسترسی به مدیریت قیمت\u200cگذاری الزامی است' });
+  }
+  const { list_id, rules } = req.body || {};
+  const listId = parseInt(list_id, 10);
+  if (!listId || isNaN(listId)) return res.status(400).json({ error: 'list_id required' });
+  if (!Array.isArray(rules)) return res.status(400).json({ error: 'rules required' });
+  try {
+    const pl = await query('SELECT id FROM price_lists WHERE id=$1', [listId]);
+    if (!pl.rows.length) return res.status(404).json({ error: 'price list not found' });
+    await query('DELETE FROM commission_rules WHERE price_list_id=$1', [listId]);
+    for (const r of rules) {
+      const pid = parseInt(r.product_id, 10);
+      const lvl = parseInt(r.level, 10);
+      const amt = parseInt(r.amount, 10);
+      if (!pid || isNaN(lvl) || lvl < 1 || lvl > 3 || isNaN(amt) || amt < 0) continue;
+      await query(
+        `INSERT INTO commission_rules (product_id, price_list_id, level, amount, label)
+         VALUES ($1,$2,$3,$4,$5)`,
+        [pid, listId, lvl, amt, r.label || `سطح ${lvl}`]
+      );
+    }
+    res.json({ ok: true, list_id: listId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── GET /api/pricing/center/:key/commissions ─────────────────────────────────
 router.get('/center/:key/commissions', async (req, res) => {
   try {

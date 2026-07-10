@@ -303,7 +303,7 @@ The receivables AI tab calls `https://api.anthropic.com/v1/messages` directly fr
 | 🎯 Pre-call brief: last notes, changes, competitor, address before calling | center list row (🎯), modal footer | ✅ |
 | 🗺 Navigation: map button next to address textarea → Google Maps | center modal | ✅ |
 | 🤖 Competitor tracking: text field in center modal + orange badge in list row | center modal, list | ✅ |
-| Commission placeholder div (cmCommission_) next to competitor field | center modal | ✅ (placeholder) |
+| Commission in center modal + SQL `commission_rules` editor in pricing mgmt tab | center modal, pricing | ✅ |
 | 9 UX confusion fixes (banner role tag, kanban empty states, etc.) | various | ✅ |
 | UI Polish v2: custom scrollbar, tab underline animation, card hover lift, pill buttons, input focus ring, modal entrance, notification pulse | css/app.css | ✅ |
 | Comprehensive bug-fix pass: 15+ bugs fixed across backend routes + frontend modules | all files | ✅ |
@@ -353,7 +353,7 @@ The product owner (hamidreza.soltanian@gmail.com) wants to connect the accountin
 
 Priorities expressed by the product owner (hamidreza.soltanian@gmail.com), roughly ordered:
 
-0. **Salesperson workflow polish** — `competitor` field is now tracked; commission view is a placeholder (`cmCommission_` div) — wire it to actual commission_rules table or pricing margins. Pre-call brief and quick-log are live; consider adding "call timer" or "call history" count to the brief.
+0. **Salesperson workflow polish** — `competitor` field tracked; commission wired to `commission_rules` SQL (center modal level picker + pricing mgmt tab editor). Pre-call brief and quick-log are live; consider adding "call timer" or "call history" count to the brief.
 1. **Manager drill-down depth** — keep extending کلی→جزئی: from expert detail down to full written reports per center (currently shows last note + 5 changeLog entries; owner wants full report reading). Consider a dedicated per-expert report page aggregating done-modal structured logs (نتیجه/یادداشت/اقدام بعدی) by date range.
 2. **Dashboard & overdue follow-up tracking** — keep making overdue work more actionable; possible next steps: overdue aging buckets, one-click reschedule from overdue list, weekly digest notification to manager.
 3. **Task system maturity** — column reordering (drag), per-column WIP hints, task comments/activity, recurring tasks.
@@ -475,7 +475,7 @@ Based on the Atena Sales Playbook v1.0. These are features the playbook requires
 | 9 | گزارش هفتگی: New Opportunity / مشتری جدید / مشتری خوابیده این هفته | 🟠 مهم | ✅ DONE |
 | 10 | فاصله پیگیری per-Stage: Lead 7d / Opportunity داغ 2-3d / Dormant ماهانه | 🟡 مطلوب | ✅ DONE |
 | 11 | Pipeline value: ارزش کل Pipeline به تفکیک Stage در dashboard مدیر | 🟡 مطلوب | ✅ DONE |
-| 12 | KOL/پزشک Entity جداگانه با رابطه many-to-many به مراکز | 🟡 مطلوب | 🔲 TODO |
+| 12 | KOL/پزشک Entity جداگانه با رابطه many-to-many به مراکز | 🟡 مطلوب | ✅ DONE (`hcp.js` + `/api/hcps`) |
 | 13 | Stage validation: فیلدهای اجباری قبل از تغییر Stage | 🟡 مطلوب | ✅ DONE |
 | 14 | فیلدهای Prospect تکمیلی: میزان مصرف / نحوه خرید / شرایط پرداخت | 🟡 مطلوب | ✅ DONE |
 | 15 | گزارش per-رقیب: چه مراکزی به کدام رقیب داده‌ایم و چرا | 🟡 مطلوب | ✅ DONE |

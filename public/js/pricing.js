@@ -614,37 +614,83 @@ function plApplyUpdate(){
 }
 function plCancelPreview(){var p=document.getElementById('pl-preview-section');if(p)p.style.display='none';_plPending=null;}
 
-// ── COMMISSIONS ───────────────────────────────────────────────────────────────
+// ── COMMISSIONS (SQL commission_rules) ────────────────────────────────────────
+var _plCommListId=null,_plCommProducts=[];
+
 function plRenderCommEdit(){
   var grid=document.getElementById('pl-comm-edit-grid');if(!grid)return;
-  grid.innerHTML=Object.keys(_plCOMM).map(function(key){
-    var vals=_plCOMM[key];
-    return '<div class="pl-comm-item">'
-      +'<div class="pl-cei-title">'+esc(_plCOMMNames[key]||key)+'</div>'
-      +Object.keys(_plCOMMLabels).map(function(k){
-        return '<div class="pl-cei-row">'
-          +'<span class="pl-cei-lbl">'+esc(_plCOMMLabels[k])+'</span>'
-          +'<input class="pl-cei-inp" type="number" id="plci-'+key+'-'+k+'" value="'+(vals[k]||'')+'" placeholder="—">'
-          +'</div>';
-      }).join('')
-      +'</div>';
-  }).join('');
+  grid.innerHTML='<div style="padding:12px;color:var(--text-muted)">در حال بارگذاری قوانین پورسانت...</div>';
+  fetch('/api/pricing/commission-rules?buyer_type=hospital',{credentials:'include'})
+    .then(function(r){return r.ok?r.json():Promise.reject(new Error('load failed'));})
+    .then(function(data){
+      _plCommListId=data.list_id||null;
+      _plCommProducts=data.products||[];
+      if(!_plCommListId){
+        grid.innerHTML='<div class="pl-info-box">ابتدا از تب «بروزرسانی» یک لیست قیمت import کنید تا قوانین پورسانت قابل ویرایش شوند.</div>';
+        return;
+      }
+      grid.innerHTML='<div class="pl-tbl-wrap"><table class="pl-tbl"><thead><tr>'
+        +'<th>محصول</th><th class="tc">سطح ۱ (ریال)</th><th class="tc">سطح ۲ (ریال)</th><th class="tc">سطح ۳ (ریال)</th>'
+        +'</tr></thead><tbody>'
+        +_plCommProducts.map(function(p){
+          return '<tr><td class="pl-pname">'+esc(p.product_name)+'</td>'
+            +[1,2,3].map(function(lvl){
+              var v=p['level'+lvl];
+              return '<td class="tc"><input class="pl-cei-inp" type="number" min="0" id="plcr-'+p.product_id+'-'+lvl+'" value="'+(v!=null&&v!==''?v:'')+'" placeholder="—" style="width:110px"></td>';
+            }).join('')
+            +'</tr>';
+        }).join('')
+        +'</tbody></table></div>'
+        +'<div style="font-size:10px;color:var(--text-muted);margin-top:8px">لیست قیمت فعال بیمارستان (#'+_plCommListId+') — مقادیر در دیتابیس ذخیره می\u200cشوند.</div>';
+    })
+    .catch(function(){
+      grid.innerHTML='<div style="color:#dc2626;padding:12px">خطا در بارگذاری قوانین پورسانت</div>';
+    });
 }
 function plSaveComm(){
-  Object.keys(_plCOMM).forEach(function(key){
-    Object.keys(_plCOMMLabels).forEach(function(k){
-      var el=document.getElementById('plci-'+key+'-'+k);
-      if(el){var v=parseFloat(el.value);_plCOMM[key][k]=isNaN(v)?null:v;}
+  if(!_plCommListId){showToast('لیست قیمت فعال یافت نشد');return;}
+  var rules=[];
+  _plCommProducts.forEach(function(p){
+    [1,2,3].forEach(function(lvl){
+      var el=document.getElementById('plcr-'+p.product_id+'-'+lvl);
+      if(!el)return;
+      var raw=el.value.trim();
+      if(raw==='')return;
+      var v=parseInt(raw,10);
+      if(isNaN(v)||v<0)return;
+      rules.push({product_id:p.product_id,level:lvl,amount:v});
     });
   });
-  plSaveAll();
-  var s=document.getElementById('pl-comm-status');
-  if(s){s.textContent='✅ پورسانت‌ها با موفقیت ذخیره شدند';s.className='pl-status ok';setTimeout(function(){s.className='pl-status';},3000);}
+  fetch('/api/pricing/commission-rules',{
+    method:'PUT',credentials:'include',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({list_id:_plCommListId,rules:rules})
+  }).then(function(r){return r.json().then(function(j){return {ok:r.ok,body:j};});})
+    .then(function(res){
+      var s=document.getElementById('pl-comm-status');
+      if(!res.ok){
+        if(s){s.textContent='❌ '+(res.body.error||'خطا در ذخیره');s.className='pl-status err';}
+        showToast('خطا در ذخیره پورسانت');
+        return;
+      }
+      if(s){s.textContent='✅ پورسانت\u200cها در دیتابیس ذخیره شدند';s.className='pl-status ok';setTimeout(function(){s.className='pl-status';},3000);}
+      showToast('💾 قوانین پورسانت ذخیره شد');
+      plRenderCommEdit();
+    })
+    .catch(function(){
+      showToast('خطا در ذخیره پورسانت');
+    });
 }
 function plResetComm(){
-  if(!confirm('آیا از بازگشت به مقادیر اولیه مطمئن هستید؟'))return;
-  _plCOMM=JSON.parse(JSON.stringify(PL_DEFAULT_COMM));
-  plSaveAll();plRenderCommEdit();
+  if(!_plCommListId){showToast('لیست قیمت فعال یافت نشد');return;}
+  if(!confirm('همه مقادیر پورسانت این لیست قیمت پاک شود؟'))return;
+  fetch('/api/pricing/commission-rules',{
+    method:'PUT',credentials:'include',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({list_id:_plCommListId,rules:[]})
+  }).then(function(r){return r.ok?r.json():Promise.reject();})
+    .then(function(){showToast('پورسانت\u200cها پاک شد');plRenderCommEdit();})
+    .catch(function(){showToast('خطا در پاک\u200cسازی');});
 }
 
 // ── SETTINGS ──────────────────────────────────────────────────────────────────
@@ -773,6 +819,18 @@ function _openTaskModalLazy(tid, prefill) {
     if (typeof openTaskModal === 'function') openTaskModal(tid, prefill);
     else showToast('خطا در بارگذاری وظایف');
   }).catch(function() { showToast('خطا در بارگذاری وظایف'); });
+}
+
+function convertFollowupToTask(rtype, rid) {
+  var e = getE(rtype, rid);
+  var name = typeof _getCenterName === 'function' ? _getCenterName(rtype, rid) : (rtype + '_' + rid);
+  _openTaskModalLazy(null, {
+    title: 'پیگیری: ' + name,
+    owner: e.owner || currentUser,
+    dueDate: e.followupDate || '',
+    priority: 1,
+    centerKey: rtype + '_' + rid
+  });
 }
 
 function _openSupportTicketLazy(id) {

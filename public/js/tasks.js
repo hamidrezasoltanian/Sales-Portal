@@ -71,7 +71,7 @@ function _ensureTasks(){
     if(hasNext)return;
     var dp=(t.dueDate||_today).split('/').map(Number);
     var g=j2g(dp[0],dp[1],dp[2]);
-    var days=t.recurring==='weekly'?7:30;
+    var days=t.recurring==='daily'?1:t.recurring==='weekly'?7:30;
     var nd=new Date(g[0],g[1]-1,g[2]+days,12);
     var nj=g2j(nd.getFullYear(),nd.getMonth()+1,nd.getDate());
     var newDate=nj[0]+'/'+p2(nj[1])+'/'+p2(nj[2]);
@@ -214,7 +214,8 @@ function _tkRenderCard(t,st,isList){
   var priCls=['','task-pri-1','task-pri-2','task-pri-3'][t.priority||2]||'task-pri-2';
   var subC=_tkCountSubs(t.subtasks);
   var subBadge=subC.total?'<span class="tk-sub-badge'+(subC.done===subC.total?' all-done':'')+'">'+subC.done+'/'+subC.total+' ✓</span>':'';
-  var recurBadge=(t.recurring&&t.recurring!=='none')?'<span style="font-size:9px;background:#f0fdf4;color:#16a34a;border:1px solid #86efac;border-radius:6px;padding:1px 5px">🔁 '+(t.recurring==='weekly'?'هفتگی':'ماهانه')+'</span>':'';
+  var _recurLbl={daily:'روزانه',weekly:'هفتگی',monthly:'ماهانه'};
+  var recurBadge=(t.recurring&&t.recurring!=='none')?'<span style="font-size:9px;background:#f0fdf4;color:#16a34a;border:1px solid #86efac;border-radius:6px;padding:1px 5px">🔁 '+(_recurLbl[t.recurring]||t.recurring)+'</span>':'';
   return '<div class="tk-card'+(t.status==='done'?' tk-done':'')+(isList?' tk-card-list':'')+'" draggable="true" '
     +'ondragstart="tkDragStart(event,\''+t.id+'\')" ondragend="tkDragEnd(event)" '
     +'onclick="openTaskModal(\''+t.id+'\')">'
@@ -920,18 +921,21 @@ function cpPickCenter(i){
   closeModal('centerPick');
 }
 
-// تبدیل پیگیری به وظیفه
-function convertFollowupToTask(rtype, rid){
-  var e = getE(rtype, rid);
-  var name = typeof _getCenterName==='function' ? _getCenterName(rtype, rid) : (rtype+'_'+rid);
-  var fd = e.followupDate || '';
-  openTaskModal(null, {
-    title: 'پیگیری: ' + name,
-    owner: e.owner || currentUser,
-    dueDate: fd,
-    priority: 1,
-    centerKey: rtype + '_' + rid
-  });
+// تبدیل پیگیری به وظیفه (اگر در pricing.js تعریف شده از همان lazy loader استفاده می‌شود)
+if (typeof convertFollowupToTask !== 'function') {
+  function convertFollowupToTask(rtype, rid) {
+    var e = getE(rtype, rid);
+    var name = typeof _getCenterName === 'function' ? _getCenterName(rtype, rid) : (rtype + '_' + rid);
+    var prefill = {
+      title: 'پیگیری: ' + name,
+      owner: e.owner || currentUser,
+      dueDate: e.followupDate || '',
+      priority: 1,
+      centerKey: rtype + '_' + rid
+    };
+    if (typeof _openTaskModalLazy === 'function') _openTaskModalLazy(null, prefill);
+    else openTaskModal(null, prefill);
+  }
 }
 
 // کمکی: پیدا کردن مسئول یک weekEntry
