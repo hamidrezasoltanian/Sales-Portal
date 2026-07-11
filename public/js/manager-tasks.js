@@ -1241,6 +1241,7 @@ function ubApplyAll(){
 
 // ── Main modal ────────────────────────────────────────────────
 function openUnifiedBackup(){
+  if(typeof openDataHub==='function'){ openDataHub(); return; }
   var lastBK='';
   try{lastBK=localStorage.getItem('alb_'+(USER.name||currentUser||''))||'';}catch(e){}
   var repName=USER.name||'';
@@ -1299,10 +1300,11 @@ function ubSwitchTab(tab){
   });
 }
 
-// Keyboard shortcut
+// Keyboard shortcut — delegated to data-hub.js if loaded
 document.addEventListener('keydown',function(e){
   if((e.ctrlKey||e.metaKey)&&e.key==='b'&&!e.target.matches('input,textarea')){
-    e.preventDefault(); openUnifiedBackup();
+    if(typeof openDataHub==='function'){ e.preventDefault(); openDataHub(); return; }
+    e.preventDefault(); if(typeof openUnifiedBackup==='function')openUnifiedBackup();
   }
 });
 // ══ END UNIFIED BACKUP ══════════════════════════════════════

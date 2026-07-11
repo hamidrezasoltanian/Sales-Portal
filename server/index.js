@@ -129,6 +129,7 @@ app.use('/api/reports', require('./routes/reports'));
 app.use('/api/kpi-data', require('./routes/kpi-data'));
 app.use('/api/manager-reports', require('./routes/manager-reports'));
 app.use('/api/center-reports', require('./routes/center-reports'));
+app.use('/api/backups', require('./routes/backups'));
 app.use('/api/faradis', require('./routes/faradis'));
 const faradisMatch = require('./routes/faradis-match');
 app.use('/api/faradis-match', faradisMatch);
@@ -252,6 +253,11 @@ async function start() {
     app.listen(PORT, function () {
       console.log('[Atena CRM] Server running on http://localhost:' + PORT);
     });
+    try {
+      require('./lib/auto-backup').startAutoBackupScheduler();
+    } catch (e) {
+      console.warn('[auto-backup] scheduler not started:', e.message);
+    }
     if (process.env.TELEGRAM_BOT_TOKEN) {
       const bot = require('./bot/telegram');
       bot.poll().catch(function(e){ console.error('[bot] fatal:', e.message); });

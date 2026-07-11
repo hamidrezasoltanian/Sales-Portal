@@ -308,7 +308,7 @@ The receivables AI tab calls `https://api.anthropic.com/v1/messages` directly fr
 | UI Polish v2: custom scrollbar, tab underline animation, card hover lift, pill buttons, input focus ring, modal entrance, notification pulse | css/app.css | ✅ |
 | Comprehensive bug-fix pass: 15+ bugs fixed across backend routes + frontend modules | all files | ✅ |
 | Tehran duplicate center merge: 219 mz_t_ pairs merged into c_ entries | scripts/merge_tehran_confirmed.py | ✅ |
-| Automated DB backup: appdata every 10min + full daily, 30-day retention | scripts/backup_db.sh + crontab | ✅ |
+| Automated DB backup: 3× daily (11/13/18 Tehran) + 30-day retention | scripts/backup_db.sh + server/lib/auto-backup.js + Settings Data Hub | ✅ |
 | weekEntries guard: server merges instead of overwriting when incoming has fewer entries | server/routes/data.js | ✅ |
 | DB history retention: extended from 30 snapshots to 30 days | server/routes/data.js | ✅ |
 | WMS warehouse module: served at /wms, backed by PostgreSQL (9 tables), REST API at /api/wms | public/wms.html + server/routes/wms.js | ✅ |

@@ -2092,6 +2092,23 @@ async function initSchema() {
     )
   `);
 
+  // 7c. Scheduled DB backup log (for auto-backup UI)
+  await query(`
+    CREATE TABLE IF NOT EXISTS scheduled_backups (
+      id           SERIAL PRIMARY KEY,
+      backup_type  TEXT NOT NULL DEFAULT 'scheduled',
+      file_path    TEXT,
+      file_size    BIGINT DEFAULT 0,
+      created_at   TIMESTAMPTZ DEFAULT NOW(),
+      created_by   TEXT,
+      note         TEXT
+    )
+  `);
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_scheduled_backups_created
+    ON scheduled_backups (created_at DESC)
+  `);
+
   // 8. Province Ownership History Table (province_history)
   await query(`
     CREATE TABLE IF NOT EXISTS province_history (

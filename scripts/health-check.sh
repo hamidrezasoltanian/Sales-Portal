@@ -27,18 +27,19 @@ else
 fi
 echo
 
-# Latest backup age
+# Latest backup age (3× daily schedule — warn if > 10 hours)
+BACKUP_DIR="${BACKUP_DIR:-${HOME}/db_backups}"
 if [ -d "$BACKUP_DIR" ]; then
-  latest=$(ls -t "$BACKUP_DIR"/appdata_*.sql.gz 2>/dev/null | head -1 || true)
+  latest=$(ls -t "$BACKUP_DIR"/scheduled_*.sql.gz "$BACKUP_DIR"/full_*.sql.gz 2>/dev/null | head -1 || true)
   if [ -n "$latest" ]; then
     age_sec=$(( $(date +%s) - $(stat -c %Y "$latest" 2>/dev/null || stat -f %m "$latest") ))
-    age_min=$(( age_sec / 60 ))
-    echo "[OK] Latest appdata backup: $(basename "$latest") (${age_min} min ago)"
-    if [ "$age_min" -gt 30 ]; then
-      echo "[WARN] Backup older than 30 minutes"
+    age_hr=$(( age_sec / 3600 ))
+    echo "[OK] Latest DB backup: $(basename "$latest") (${age_hr}h ago)"
+    if [ "$age_hr" -gt 10 ]; then
+      echo "[WARN] Backup older than 10 hours (expected 3× daily at 11/13/18)"
     fi
   else
-    echo "[WARN] No appdata backups in $BACKUP_DIR"
+    echo "[WARN] No scheduled/full backups in $BACKUP_DIR"
   fi
 else
   echo "[WARN] Backup dir not found: $BACKUP_DIR"

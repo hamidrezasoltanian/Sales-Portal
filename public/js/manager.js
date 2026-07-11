@@ -116,17 +116,18 @@ function openSettings(){
     +'<button style="background:var(--bg-raised);color:var(--text-secondary);border:1px solid #fcd34d;border-radius:5px;padding:6px 12px;cursor:pointer;font-size:12px;font-family:inherit" onclick="cleanupOrphanedEntries(true);renderDashboard()">🧹 پاک‌سازی ورودی‌های منسوخ</button>'
     +'<button style="background:var(--bg-raised);color:var(--text-secondary);border:1px solid #7dd3fc;border-radius:5px;padding:6px 12px;cursor:pointer;font-size:12px;font-family:inherit" onclick="var n=wpDeduplicateEntries();if(n>0){saveDBSync();_debouncedRenderWeekPlan();showToast(\'✅ \'+n+\' ورودی تکراری هفته حذف شد\',3000);}else{showToast(\'✅ هیچ تکراری یافت نشد\');}">📋 حذف تکراری‌های هفته</button>'
     +'<button class="btn-primary" onclick="saveSettings()">💾 ذخیره تنظیمات</button>';
-  // Data management section
+  // Data management — unified hub
   body += '<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">'
-    +'<div style="font-size:12px;font-weight:700;margin-bottom:10px">📂 مدیریت داده‌ها</div>'
-    +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px">'
-    +'<button onclick="closeModal(\'settingsModal\');openUnifiedBackup()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-raised);cursor:pointer;font-size:11px;font-family:inherit;color:var(--text-primary)"><span style=\"font-size:18px\">💾</span><span style=\"font-weight:600\">بک‌آپ / ریستور</span><span style=\"color:var(--text-muted);font-size:10px\">خروجی و بازیابی داده</span></button>'
-    +'<button onclick="closeModal(\'settingsModal\');openDBManager()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-raised);cursor:pointer;font-size:11px;font-family:inherit;color:var(--text-primary)"><span style=\"font-size:18px\">📦</span><span style=\"font-weight:600\">دیتابیس مراکز</span><span style=\"color:var(--text-muted);font-size:10px\">مدیریت لیست اصلی</span></button>'
-    +'<button onclick="closeModal(\'settingsModal\');document.getElementById(\'importCentersInp\').click()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-raised);cursor:pointer;font-size:11px;font-family:inherit;color:var(--text-primary)"><span style=\"font-size:18px\">📥</span><span style=\"font-weight:600\">ورود از اکسل</span><span style=\"color:var(--text-muted);font-size:10px\">افزودن مراکز جدید</span></button>'
-    +'<button onclick="exportCentersExcel();closeModal(\'settingsModal\')" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-raised);cursor:pointer;font-size:11px;font-family:inherit;color:var(--text-primary)"><span style=\"font-size:18px\">📊</span><span style=\"font-weight:600\">خروجی اکسل</span><span style=\"color:var(--text-muted);font-size:10px\">دانلود همه مراکز</span></button>'
-    +'<button onclick="if(confirm(\'پاکسازی همه داده‌ها؟\'))clearAllData()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 8px;border:1px solid #fca5a5;border-radius:8px;background:#fee2e220;cursor:pointer;font-size:11px;font-family:inherit;color:#dc2626"><span style=\"font-size:18px\">🗑</span><span style=\"font-weight:600\">پاکسازی داده‌ها</span><span style=\"font-size:10px\">حذف کامل اطلاعات</span></button>'
-    +(_isManager()?'<button onclick="closeModal(\'settingsModal\');openDistributionWizard()" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 8px;border:1px solid #c4b5fd;border-radius:8px;background:#f5f3ff;cursor:pointer;font-size:11px;font-family:inherit;color:#5b21b6"><span style=\"font-size:18px\">🔀</span><span style=\"font-weight:600\">تقسیم مراکز</span><span style=\"color:var(--text-muted);font-size:10px\">توزیع بین کارشناسان</span></button>':'')
-    +'</div></div>';
+    +'<div style="font-size:12px;font-weight:700;margin-bottom:10px">📂 مدیریت داده‌ها — ورود / خروجی / بکاپ</div>'
+    +'<div style="background:linear-gradient(135deg,#f0f9ff,#f0fdf4);border:1px solid #bae6fd;border-radius:10px;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">'
+    +'<div>'
+    +'<div style="font-size:13px;font-weight:700;color:var(--text-primary)">مرکز مدیریت داده</div>'
+    +'<div style="font-size:11px;color:var(--text-muted);margin-top:3px">بکاپ خودکار ۳× روز · JSON · Excel · بازیابی · نسخه‌های SQL</div>'
+    +'</div>'
+    +'<button onclick="closeModal(\'settingsModal\');openDataHub()" style="background:var(--brand);color:#fff;border:none;border-radius:8px;padding:9px 20px;cursor:pointer;font-size:12px;font-family:inherit;font-weight:700;white-space:nowrap">باز کردن ←</button>'
+    +'</div>'
+    +(_isManager()?'<div style="margin-top:8px"><button onclick="closeModal(\'settingsModal\');openDistributionWizard()" style="background:#f5f3ff;color:#5b21b6;border:1px solid #c4b5fd;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:11px;font-family:inherit">🔀 تقسیم مراکز بین کارشناسان</button></div>':'')
+    +'</div>';
   // ── Notification settings section ──────────────────────────────────────────
   var _np = (DB.settings&&DB.settings.notifPrefs)||{};
   var _npEnabled  = _np.enabled  !== false;   // default true
