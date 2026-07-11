@@ -1147,10 +1147,10 @@ function openManagerDrilldown(memberId){
       var fd=e.followupDate||'';
       var isOverdue=fd&&fd<today&&e.status!=='قرارداد بسته شد'&&e.status!=='غیرفعال';
       var noteArr=(DB.notes&&DB.notes[rkey])||[];
-      var recentLog=(DB.changeLog||[]).filter(function(l){return l.rkey===rkey;}).slice(-25);
+      var recentLog=(DB.changeLog||[]).filter(function(l){return l.rkey===rkey;}).slice(-50);
       var doneEntries=Object.keys(DB.weekEntries||{}).map(function(k){return DB.weekEntries[k];})
         .filter(function(we){var r2=we.rtype||(we.recKey?we.recKey.split('_')[0]:'');var i2=we.rid||(we.recKey?we.recKey.split('_').slice(1).join('_'):'');return r2===rt&&i2===c.id&&we.done&&(we.doneNote||we.doneResult||we.doneObstacle||we.doneAmount);})
-        .sort(function(a,b){return (b.doneDate||'')<(a.doneDate||'')?-1:1;}).slice(0,5);
+        .sort(function(a,b){return (b.doneDate||'')<(a.doneDate||'')?-1:1;});
       centers.push({rtype:rt,id:c.id,name:e.nameOverride||c.name||'?',status:e.status||'بدون تماس',lead:e.lead||c.lead||'سرنخ',followupDate:fd,isOverdue:isOverdue,potential:e.potential||c.potential||4,noteArr:noteArr,recentLog:recentLog,rkey:rkey,doneEntries:doneEntries});
     });
   });
@@ -1330,6 +1330,7 @@ function openOverdueList(memberId){
   _odFilters.memberId = memberId || '';
   _odFilters.search = '';
   _odFilters.bucket = 'all';
+  _odFilters.lead = '';
   
   var allMem = (DB.settings && DB.settings.members) || _DEFAULT_MEMBERS;
   
@@ -1347,6 +1348,13 @@ function openOverdueList(memberId){
     + '<option value="week">🔴 این هفته (۱–۷ روز)</option>'
     + '<option value="month">🟠 این ماه (۸–۳۰ روز)</option>'
     + '<option value="old">⚫ قدیمی (بیش از ۳۰ روز)</option>'
+    + '</select>'
+    + '<select id="odLead" onchange="_odFilters.lead=this.value;filterOverdueList()" style="padding:4px 8px;border:1px solid var(--border-input);border-radius:5px;font-family:inherit;font-size:11px">'
+    + '<option value="">🎯 همه وضعیت‌ها</option>'
+    + '<option value="فرصت">فرصت</option>'
+    + '<option value="سرنخ">سرنخ</option>'
+    + '<option value="لید">لید</option>'
+    + '<option value="مشتری">مشتری</option>'
     + '</select>'
     + '<button onclick="overdueBulkSnooze(7)" style="padding:4px 10px;background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:5px;cursor:pointer;font-size:11px;font-family:inherit;margin-right:auto" title="تعویق ۷ روز برای همه موارد فیلترشده">⏭ همه +۷ روز</button>'
     + '</div>'
@@ -1378,6 +1386,8 @@ function filterOverdueList() {
       
       var name = e.nameOverride || c.name || '?';
       if(searchQ && fNorm(name).indexOf(searchQ) < 0) return;
+      var leadVal = e.lead || c.lead || '';
+      if(_odFilters.lead && leadVal !== _odFilters.lead) return;
       
       var mObj = allMem.find(function(x){return x.id === owner;});
       var _fdp2 = fd.split('/').map(Number);
@@ -1394,7 +1404,9 @@ function filterOverdueList() {
         status: e.status || 'بدون تماس',
         ownerName: mObj ? mObj.name : (owner || 'بدون مسئول'),
         potential: e.potential || c.potential || 4,
-        daysAgo: daysAgo
+        daysAgo: daysAgo,
+        lead: e.lead || c.lead || '',
+        oppGrade: e.oppGrade || ''
       });
     });
   });
@@ -1409,6 +1421,7 @@ function filterOverdueList() {
       + '<span style="color:#dc2626;font-size:11px;min-width:60px;font-weight:700">'+c.followupDate+'</span>'
       + '<span style="font-size:10px;background:#fee2e2;color:#dc2626;padding:2px 6px;border-radius:9px;min-width:44px;text-align:center">'+c.daysAgo+' روز</span>'
       + '<span style="flex:1;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(c.name)+'</span>'
+      + (c.lead?'<span style="font-size:9px;background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:4px;flex-shrink:0">'+esc(c.lead)+(c.oppGrade?' '+c.oppGrade:'')+'</span>':'')
       + '<span style="font-size:10px;color:var(--text-muted);flex-shrink:0">'+esc(c.ownerName)+'</span>'
       + '<button onclick="toggleRescheduleTree(\''+c.rtype+'\',\''+c.id+'\',\''+c.followupDate+'\')" style="padding:3px 7px;background:#f3f4f6;color:#374151;border:1px solid var(--border);border-radius:5px;cursor:pointer;font-size:10px;font-family:inherit" title="تاریخچه جابجایی">🕒 تاریخچه</button>'
       + '<button onclick="overdueSnooze(\''+c.rtype+'\',\''+c.id+'\',3,\''+memberId+'\')" style="padding:3px 7px;background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:5px;cursor:pointer;font-size:10px;font-family:inherit" title="تعویق ۳ روز">+۳</button>'

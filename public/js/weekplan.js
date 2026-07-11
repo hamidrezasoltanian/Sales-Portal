@@ -556,7 +556,7 @@ function renderWpFullCenterList() {
     var oc = typeof umGetColor==='function' ? umGetColor(c.owner) : '#94a3b8';
     var ek = c._key.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     var ri = String(c.rid).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-    var aIcon = c.actionType==='visit' ? '🤝 ویزیت' : '📞 تماس';
+    var aIcon = (typeof wpActLabel==='function'?wpActLabel(c.actionType||'call'):(c.actionType==='visit'?'🤝 ویزیت':'📞 تماس'));
     var aBg = c.actionType==='visit' ? '#ede9fe' : '#e0f2fe';
     var aCol = c.actionType==='visit' ? '#5b21b6' : '#0369a1';
     return '<tr style="background:#fffbeb">'
@@ -882,8 +882,8 @@ function renderWpItem(entry,weekId){
   }
   
   var actType = entry.actionType || 'call';
-  var actIcon = actType === 'visit' ? '🤝 ویزیت' : '📞 تماس';
-  var actBg = actType === 'visit' ? '#8b5cf6' : '#0ea5e9';
+  var actIcon = (typeof wpActLabel==='function'?wpActLabel(actType):(actType==='visit'?'🤝 ویزیت':'📞 تماس'));
+  var actBg = (typeof wpActBg==='function'?wpActBg(actType):(actType==='visit'?'#8b5cf6':'#0ea5e9'));
   var isSel2 = _wpSelected.has(k);
 
   // نشانگر وضعیت (فقط مدیر): 🟠 بدون تاریخ | 🔴 معوق | 🟢 انجام شده | 🔴 امروز بدون گزارش
@@ -1113,6 +1113,9 @@ function _wpFinishDone(eKey){
   var logEntry={id:Date.now(),date:todayStr(),userId:currentUser||'',centerName:cname,centerKey:rtype+'_'+rid,note:note,count:1,outcome:outcome};
   if(actionType==='visit'){DB.visitLog.push(logEntry);}
   else{DB.callLog.push(logEntry);}
+  if(typeof _postActivityLog==='function'){
+    _postActivityLog(actionType==='visit'?'visit':'call', logEntry);
+  }
 
   // ── Mirror to DB.changeLog so _getTodayActivities() finds this entry ──────
   DB.changeLog=DB.changeLog||[];
@@ -1126,7 +1129,7 @@ function _wpFinishDone(eKey){
     if(!DB.notes)DB.notes={};
     var _dnKey=rtype+'_'+rid;
     if(!DB.notes[_dnKey])DB.notes[_dnKey]=[];
-    var pfx=actionType==='visit'?'🤝 مراجعه انجام شد: ':'📞 تماس انجام شد: ';
+    var pfx=(typeof wpActLabel==='function'?wpActLabel(actionType): (actionType==='visit'?'🤝 مراجعه':'📞 تماس'))+' انجام شد: ';
     var outcomeText = '';
     if(outcome==='won'){
       outcomeText = 'قرارداد / فروش بسته شد' + (amount > 0 ? ' (مبلغ: ' + amount + ' میلیون تومان)' : '');
@@ -1197,7 +1200,7 @@ function _wpFinishDone(eKey){
   }
 
   closeModal('wpDoneModal');
-  (function(){var _we3=DB.weekEntries[eKey];if(_we3&&_we3.sqlId){fetch('/api/week-entries/'+encodeURIComponent(_we3.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({done:_we3.done,doneDate:_we3.doneDate||null,scheduledDate:_we3.scheduledDate||null})}).catch(function(){});}})();
+  (function(){var _we3=DB.weekEntries[eKey];if(_we3&&_we3.sqlId){fetch('/api/week-entries/'+encodeURIComponent(_we3.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({done:_we3.done,doneDate:_we3.doneDate||null,scheduledDate:_we3.scheduledDate||null,doneResult:_we3.doneResult||null,doneNote:_we3.doneNote||null,doneAmount:_we3.doneAmount||null})}).catch(function(){});}})();
   _debouncedRenderWeekPlan();renderDashboard();
   if(currentTab==='provinces'&&_currentProvId)setTimeout(renderTable,100);
   var msg=outcome==='won'?'🎉 قرارداد ثبت شد! — '+cname
@@ -1311,8 +1314,7 @@ function wpSetScheduleFromKey(eKey){
   var body = '<div class="m-2col" style="margin-bottom:15px">'
     + '<div><label style="color:#0369a1;font-weight:bold;margin-bottom:5px;display:block">نوع برنامه:</label>'
     + '<select id="schActType" style="width:100%;padding:8px;border:1px solid var(--border-input);border-radius:5px;font-size:12px">'
-    + '<option value="call"'+(curType==='call'?' selected':'')+'>📞 تماس تلفنی</option>'
-    + '<option value="visit"'+(curType==='visit'?' selected':'')+'>🤝 ویزیت حضوری</option>'
+    + (typeof wpActOptionsHtml==='function'?wpActOptionsHtml(curType):('<option value="call"'+(curType==='call'?' selected':'')+'>📞 تماس تلفنی</option><option value="visit"'+(curType==='visit'?' selected':'')+'>🤝 ویزیت حضوری</option>'))
     + '</select></div>'
     + '<div><label style="color:#0369a1;font-weight:bold;margin-bottom:5px;display:block">تاریخ پیگیری:</label>'
     + '<input id="schDate" type="text" value="'+curDate+'" readonly placeholder="کلیک برای انتخاب..." style="width:100%;padding:8px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;cursor:pointer;background:var(--bg-raised)" onclick="openJDP(this,function(v){document.getElementById(\'schDate\').value=v;})">'
@@ -1541,8 +1543,7 @@ function wpOpenAssignAll(){
   var body = '<div style="margin-bottom:12px;display:flex;gap:10px;align-items:center;background:var(--brand-bg);padding:8px;border-radius:6px;border:1px solid #bae6fd;">'
     + '<label style="font-size:11px;font-weight:bold;color:#0369a1;">نوع برنامه (برای موارد انتخابی):</label>'
     + '<select id="wpAssignActType" style="padding:4px 8px;border:1px solid var(--border-input);border-radius:4px;font-size:11px;flex:1;">'
-    + '<option value="call">📞 تماس تلفنی</option>'
-    + '<option value="visit">🤝 ویزیت حضوری</option>'
+    + (typeof wpActOptionsHtml==='function'?wpActOptionsHtml('call'):('<option value="call">📞 تماس تلفنی</option><option value="visit">🤝 ویزیت حضوری</option>'))
     + '</select></div>'
     + '<div style="margin-bottom:8px;display:flex;gap:6px;align-items:center"><input id="wpAQ" type="text" placeholder="جستجو..." style="flex:1" oninput="filterWpAssign()"><span style="font-size:11px;color:var(--text-muted)">'+currentWeekList.length+' مورد انتخاب شده</span></div>'
     + '<div id="wpAList" style="max-height:50vh;overflow-y:auto;display:flex;flex-direction:column;gap:12px">'

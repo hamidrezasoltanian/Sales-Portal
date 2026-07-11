@@ -328,6 +328,14 @@ The receivables AI tab calls `https://api.anthropic.com/v1/messages` directly fr
 | WMS reconcile Faradis: GET /api/wms/reconcile/data + prefill UI | wms-ext.js | ✅ |
 | WMS valuation FIFO/LIFO/weighted: server simulation + report tab | server/lib/wms-valuation.js + wms-ext.js | ✅ |
 | WMS client reports Jalali date filters (mov/fct/compare) | wms-ext.js jalali upgrade on date fields | ✅ |
+| Center modal: deals + files + workflow + HCP lazy load | pricing.js + crm-complete.js | ✅ |
+| Week plan extended action types (price_send/sample/…) | ACTION_TYPE_LABELS + weekplan.js + crm-complete.js | ✅ |
+| Done-modal metadata → SQL + activity-log POST | weekplan `_wpFinishDone` PUT fields | ✅ |
+| Manager done-logs + full drilldown done entries | crm-complete.js + manager.js | ✅ |
+| Overdue lead filter (فرصت/سرنخ/…) | manager.js openOverdueList | ✅ |
+| Activity tab merges SQL `/api/activity-log` | activity-log.js GET + render merge | ✅ |
+| MTR sync stub → Faradis receivables summary | server/routes/mtr-sync.js | ✅ |
+| sync.js: no hardcoded API secret (env SYNC_API_KEY) | server/routes/sync.js | ✅ |
 | **Workflows module**: user-definable processes (stages/transitions), kanban board, SQL-backed | tab گردش‌کار + /api/workflows | ✅ |
 | Proforma invoice module: draft→sent→approved/rejected→reopen workflow, auto-number PF-YYYY-NNNN | proforma tab + /api/proforma | ✅ |
 | Proforma SQL: zod validation, rowToObj mapper, manager-only approve/reject | server/routes/proforma.js | ✅ |

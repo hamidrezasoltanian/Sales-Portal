@@ -4,10 +4,13 @@ const express = require('express');
 const { query } = require('../db');
 const router = express.Router();
 
-const API_SECRET = "YourStrongSecretKey2026";
+const API_SECRET = process.env.SYNC_API_KEY || process.env.FARADIS_SYNC_SECRET || '';
 
-// میدلور بررسی کلید API
+// میدلور بررسی کلید API — require env secret (no hardcoded default)
 router.use((req, res, next) => {
+  if (!API_SECRET) {
+    return res.status(503).json({ status: 'error', message: 'SYNC_API_KEY not configured' });
+  }
   const sentKey = req.headers['x-api-key'] || req.body.api_key || req.query.api_key;
   if (sentKey !== API_SECRET) {
     return res.status(403).json({ status: 'error', message: 'Invalid API Key' });

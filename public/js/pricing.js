@@ -1552,6 +1552,10 @@ function openCenterModal(rtype,id){
         +'<input type="text" value="'+(e.approxOrderTime||'')+'" placeholder="مثلاً: اسفند ۱۴۰۳" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'approxOrderTime\',this.value)" style="width:100%;padding:3px 6px;border:1px solid var(--border-input);border-radius:4px;font-size:10px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)"></div>'
         +'</div></div>';
     })()
+    +'<div id="cmDealsSec_'+id+'" class="cm-profile-section">'
+    +'<div class="cm-profile-section-title">💼 فرصت‌های فروش</div>'
+    +'<div id="cmDeals_'+id+'" style="font-size:11px;color:#94a3b8">در حال بارگذاری…</div>'
+    +'</div>'
     +'<div id="cmPricingInfo_'+r.id+'" class="cm-profile-section" style="font-size:11px"><span style="color:var(--text-muted)">در حال بارگذاری قیمت‌گذاری...</span></div>'
    // برنامه هفته
     +(wkEntries.length?'<label>برنامه هفته</label><div style="background:var(--bg-raised);border-radius:5px;padding:7px;font-size:11px">'
@@ -1604,6 +1608,11 @@ function openCenterModal(rtype,id){
     +'<div id="cmWorkInner_'+id+'" style="font-size:11px;color:#94a3b8">در حال بارگذاری…</div>'
     +'</div>';
 
+  body+='<div id="cmFilesSec_'+id+'" class="cm-profile-section">'
+    +'<div class="cm-profile-section-title">📎 پیوست‌ها</div>'
+    +'<div id="cmFiles_'+id+'" style="font-size:11px;color:#94a3b8">در حال بارگذاری…</div>'
+    +'</div>';
+
   // ── change history section ──
   var rkey=rtype+'_'+r.id;
   var hist=(DB.changeLog||[]).filter(function(h){return h.rkey===rkey;}).slice(-5).reverse();
@@ -1627,6 +1636,7 @@ function openCenterModal(rtype,id){
     +'<button style="background:#ecfdf5;color:#15803d;border:1px solid #86efac;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openCenterReport(\''+recK(rtype,r.id)+'\',\''+esc(displayName)+'\')">📊 گزارش مرکز</button>'
     +(_canEdit('provinces') ? '<button style="background:#f0fdf4;color:#15803d;border:1px solid #86efac;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openMergeCenterModal(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">🔀 ادغام</button>' : '')
     +(_isManager()?'<button style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openChangeProvinceModal(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">🗺 تغییر استان</button>':'')
+    +'<button style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="if(typeof wfCreateFromCenter===\'function\')wfCreateFromCenter(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">🔄 گردش‌کار</button>'
     +'<button style="background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" id="pfBtn_'+id+'">📄 پیشفاکتورها</button>'
     +'<button class="btn-secondary" onclick="closeModal(\'cm_'+id+'\')">بستن</button>'
     +'<button class="btn-primary" onclick="openAssignWeekForCenter(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">📋 اضافه به هفته</button>';
@@ -1689,7 +1699,12 @@ function openCenterModal(rtype,id){
     },150);
   })(recK(rtype,r.id), id, displayName);
   setTimeout(function(){_loadCenterWorkItems(rtype, id);},30);
-  if(typeof _hcpLoadCenterAffiliations==='function'){setTimeout(function(){_hcpLoadCenterAffiliations(rtype,r.id,id);},20);}
+  if(typeof _dealLoadSection==='function'){setTimeout(function(){_dealLoadSection(rtype,r.id,id);},25);}
+  if(typeof _cfLoadSection==='function'){setTimeout(function(){_cfLoadSection(rtype,r.id,id);},25);}
+  setTimeout(function(){
+    if(typeof _loadCenterHcpLazy==='function') _loadCenterHcpLazy(rtype,r.id,id);
+    else if(typeof _hcpLoadCenterAffiliations==='function') _hcpLoadCenterAffiliations(rtype,r.id,id);
+  },20);
   if(window.umGetColor){setTimeout(function(){document.querySelectorAll('.owner-dot[data-uid]').forEach(function(d){var u=decodeURIComponent(d.dataset.uid);if(u)d.style.background=umGetColor(u);});},0);}
   // ── قیمت‌گذاری ──
   (function(_rid,_centerKey,_rname,_isMgr,_ce,_cr){

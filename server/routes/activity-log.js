@@ -92,6 +92,46 @@ router.post('/', requireAuth, async function (req, res) {
   }
 });
 
+// GET /api/activity-log?type=call|visit|sales&limit=100&username=
+router.get('/', requireAuth, async function (req, res) {
+  try {
+    const type = req.query.type || '';
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
+    const username = req.query.username || '';
+    const types = type && TABLES[type] ? [type] : ['call', 'visit', 'sales'];
+    const out = [];
+
+    for (const t of types) {
+      const table = TABLES[t];
+      const params = [];
+      let where = '';
+      if (username) {
+        params.push(username);
+        where = ' WHERE username = $1';
+      }
+      params.push(limit);
+      const r = await query(
+        'SELECT * FROM ' + table + where + ' ORDER BY date DESC, id DESC LIMIT $' + params.length,
+        params
+      );
+      r.rows.forEach(function (row) {
+        const e = rowToEntry(t, row);
+        e._type = t;
+        out.push(e);
+      });
+    }
+
+    out.sort(function (a, b) {
+      if (a.date === b.date) return (b.id || 0) - (a.id || 0);
+      return (b.date || '') < (a.date || '') ? -1 : 1;
+    });
+    res.json({ ok: true, entries: out.slice(0, limit) });
+  } catch (e) {
+    console.error('[activity-log GET]', e.message);
+    res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
+
 // DELETE /api/activity-log/:type/:id
 router.delete('/:type/:id', requireAuth, async function (req, res) {
   try {

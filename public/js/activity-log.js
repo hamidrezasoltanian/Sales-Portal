@@ -64,7 +64,8 @@ function renderActivity(){
       if(we.rtype==='center'&&we.rid){var c=CENTERS.find(function(x){return x.id===we.rid;});if(c)name=c.name;}
       else if(we.recKey){name=we.recKey;}
       var actType=we.actionType||'call';
-      entries.push({ts:ts,name:name,desc:(actType==='visit'?'🚗 ویزیت انجام شد':'📞 تماس انجام شد')+' ✓',icon:'✅',user:we.doneUser||''});
+      var actLbl=(typeof wpActLabel==='function'?wpActLabel(actType):(actType==='visit'?'🚗 ویزیت انجام شد':'📞 تماس انجام شد'));
+      entries.push({ts:ts,name:name,desc:actLbl+' ✓'+(we.doneResult?' — '+we.doneResult:''),icon:'✅',user:we.doneUser||''});
     });
     // ۴. تماس‌های روزانه (callLog)
     (DB.callLog||[]).forEach(function(l){
@@ -77,6 +78,25 @@ function renderActivity(){
       if(!l.date)return;
       var ts=dateStrToTs(l.date);if(!ts)return;
       entries.push({ts:ts,name:l.centerName||'',desc:'🚗 '+(l.count>1?l.count+' بازدید':'بازدید')+(l.note?' — '+l.note:''),icon:'🚗',user:l.userId||''});
+    });
+    // ۶. SQL activity-log (async merge — fire and re-render once)
+    if(!window._actSqlMerged){
+      window._actSqlMerged=true;
+      fetch('/api/activity-log?limit=200',{credentials:'same-origin'}).then(function(r){return r.ok?r.json():null;}).then(function(data){
+        if(!data||!data.entries||!data.entries.length)return;
+        window._actSqlCache=data.entries;
+        // Re-render to include SQL entries
+        if(typeof renderActivity==='function'&&currentTab==='activity')renderActivity();
+      }).catch(function(){});
+    }
+    (window._actSqlCache||[]).forEach(function(l){
+      if(!l.date)return;
+      var ts=dateStrToTs(l.date);if(!ts)return;
+      var icon=l._type==='visit'?'🚗':(l._type==='sales'?'💰':'📞');
+      var desc=l._type==='sales'
+        ?('💰 فروش '+(l.amount||0).toLocaleString('fa-IR')+(l.centerName?' — '+l.centerName:''))
+        :(icon+' '+(l.count||1)+' '+(l._type==='visit'?'بازدید':'تماس')+(l.note?' — '+l.note:''));
+      entries.push({ts:ts,name:l.centerName||'',desc:desc,icon:icon,user:l.userId||'',_sql:true});
     });
   }catch(err){
     el.innerHTML='<div style="padding:20px;color:#dc2626">⚠ خطا در نمایش فعالیت‌ها: '+esc(err.message)+'</div>';
