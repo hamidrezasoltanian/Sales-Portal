@@ -432,7 +432,7 @@ function _flushPatchQueue(){
 function patchCrmSetting(key, value) {
   if (!DB.settings) DB.settings = {};
   DB.settings[key] = value;
-  return fetch('/api/settings/' + encodeURIComponent(key), {
+  return fetch('/api/crm-settings/' + encodeURIComponent(key), {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ value: value }),

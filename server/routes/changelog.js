@@ -3,6 +3,7 @@
 const express = require('express');
 const { query } = require('../db');
 const { requireAuth, requireManager } = require('../auth');
+const { requireCenterAccess } = require('../lib/center-access');
 
 const router = express.Router();
 
@@ -49,17 +50,17 @@ router.get('/', requireAuth, requireManager, async function (req, res) {
 });
 
 // ── POST /api/changelog ────────────────────────────────────────────────────
-router.post('/', requireAuth, async function (req, res) {
+router.post('/', requireAuth, requireCenterAccess(function(req){ return req.body && req.body.rkey; }), async function (req, res) {
   try {
-    const { at, by, rkey, field, val } = req.body;
-    if (!at || !by || !rkey || !field) {
-      return res.status(400).json({ error: 'فیلدهای at، by، rkey و field الزامی هستند' });
+    const { at, rkey, field, val } = req.body;
+    if (!at || !rkey || !field) {
+      return res.status(400).json({ error: 'فیلدهای at، rkey و field الزامی هستند' });
     }
     const result = await query(
       `INSERT INTO change_log (at, by, rkey, field, val)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [new Date(at), by, rkey, field, val !== undefined ? JSON.stringify(val) : null]
+      [new Date(at), req.user.username, rkey, field, val !== undefined ? JSON.stringify(val) : null]
     );
     res.status(201).json(rowToObj(result.rows[0]));
   } catch (e) {

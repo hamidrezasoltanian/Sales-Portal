@@ -99,6 +99,11 @@ async function setup() {
      ON CONFLICT (username) DO UPDATE SET role = EXCLUDED.role, active = true, token_version = 0`,
     [MANAGER, 'Manager', 'مدیر']
   );
+  const userHash = await bcrypt.hash('old-password-123', 4);
+  await query(
+    'UPDATE app_users SET password_hash = $1 WHERE username = ANY($2::text[])',
+    [userHash, [EXPERT, OTHER]]
+  );
 
   await query(
     `INSERT INTO center_edits (center_key, data, updated_at, updated_by)
@@ -110,10 +115,30 @@ async function setup() {
       JSON.stringify({ owner: OTHER, status: 'فعال' }),
     ]
   );
+  await query(
+    `INSERT INTO week_entries
+       (key, value, id, week_id, rec_key, rtype, rid, scheduled_date, action_type, added_by, center_name)
+     VALUES
+       ('_tsec_w:::center:::owned', '{}'::jsonb, '_tsec_we_owned', '_tsec_w', 'center_owned', 'center', 'owned', '1405/01/01', 'call', $1, 'Owned'),
+       ('_tsec_w:::center:::foreign', '{}'::jsonb, '_tsec_we_foreign', '_tsec_w', 'center_foreign', 'center', 'foreign', '1405/01/01', 'call', $2, 'Foreign')
+     ON CONFLICT (key) DO UPDATE SET added_by = EXCLUDED.added_by, rec_key = EXCLUDED.rec_key`,
+    [EXPERT, OTHER]
+  );
+  await query(
+    `INSERT INTO tasks (id, title, owner, created_by, center_key)
+     VALUES ('_tsec_task_owned','Owned task',$1,$1,'center_owned'),
+            ('_tsec_task_foreign','Foreign task',$2,$2,'center_foreign')
+     ON CONFLICT (id) DO UPDATE SET owner=EXCLUDED.owner, created_by=EXCLUDED.created_by`,
+    [EXPERT, OTHER]
+  );
 }
 
 async function teardown() {
   await query(`DELETE FROM center_edits WHERE center_key IN ('center_owned', 'center_foreign')`);
+  await query(`DELETE FROM week_entries WHERE week_id = '_tsec_w' OR id IN ('_tsec_we_owned', '_tsec_we_foreign')`);
+  await query(`DELETE FROM tasks WHERE id IN ('_tsec_task_owned', '_tsec_task_foreign')`);
+  await query(`DELETE FROM center_deals WHERE id = '_tsec_deal'`);
+  await query(`DELETE FROM change_log WHERE rkey = 'center_owned' AND field = '_tsec_field'`);
   await query(`DELETE FROM app_users WHERE username = ANY($1)`, [[EXPERT, OTHER, MANAGER]]);
 }
 
@@ -204,6 +229,43 @@ async function testPatchPartialSave() {
   assert(g2.body.edits.center_foreign.status === 'ملاقات', 'foreign center not overwritten by expert');
 }
 
+async function testSensitiveRouteRbac() {
+  console.log('\n📋 API: SQL-backed routes enforce ownership and module permissions');
+  const tok = token(EXPERT, 'کارشناس فروش', 0);
+  const ownedDeals = await req('GET', '/api/center-deals?center_key=center_owned', null, tok);
+  assert(ownedDeals.status === 200, 'expert can read owned center deals');
+  const foreignDeals = await req('GET', '/api/center-deals?center_key=center_foreign', null, tok);
+  assert(foreignDeals.status === 403, 'expert cannot read foreign center deals');
+  const foreignTimeline = await req('GET', '/api/center-reports/center_foreign/timeline', null, tok);
+  assert(foreignTimeline.status === 403, 'expert cannot read foreign center timeline');
+  const mtr = await req('GET', '/api/data/mtr', null, tok);
+  assert(mtr.status === 403, 'sales expert cannot read MTR financial data');
+
+  const week = await req('GET', '/api/week-entries?week_id=_tsec_w', null, tok);
+  assert(week.status === 200 && week.body.some((w) => w.recKey === 'center_owned')
+    && !week.body.some((w) => w.recKey === 'center_foreign'),
+    'week entries list is ownership-filtered');
+  const tasks = await req('GET', '/api/tasks', null, tok);
+  assert(tasks.status === 200 && tasks.body.some((t) => t.id === '_tsec_task_owned')
+    && !tasks.body.some((t) => t.id === '_tsec_task_foreign'), 'tasks list is ownership-filtered');
+
+  const forged = await req('POST', '/api/changelog', {
+    at: new Date().toISOString(), by: 'forged-user', rkey: 'center_owned', field: '_tsec_field', val: 'x',
+  }, tok);
+  assert(forged.status === 201 && forged.body.by === EXPERT, 'changelog identity is bound to authenticated user');
+}
+
+async function testPasswordChangeRevokesToken() {
+  console.log('\n📋 API: password change revokes existing session');
+  const tok = token(OTHER, 'کارشناس فروش', 0);
+  const changed = await req('POST', '/api/auth/change-password', {
+    oldPassword: 'old-password-123', newPassword: 'new-password-456',
+  }, tok);
+  assert(changed.status === 200 && changed.body.reauthRequired, 'password change succeeds and requires reauth');
+  const after = await req('GET', '/api/auth/me', null, tok);
+  assert(after.status === 401, 'old token invalid after password change');
+}
+
 async function testLogoutRevokesToken() {
   console.log('\n📋 API: logout increments token_version');
   const tok = token(EXPERT, 'کارشناس فروش', 0);
@@ -231,6 +293,8 @@ async function main() {
     await testPricingCostsGated();
     await testPricingVerify();
     await testPatchPartialSave();
+    await testSensitiveRouteRbac();
+    await testPasswordChangeRevokesToken();
     await testLogoutRevokesToken();
   } finally {
     await teardown().catch(() => {});

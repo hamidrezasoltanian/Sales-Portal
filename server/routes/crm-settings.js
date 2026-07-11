@@ -35,6 +35,7 @@ const USER_PATCH_KEYS = new Set([
   'taskColumns', '_lastUser', 'firstUse', 'onboardingDisabled',
   'lastMorningReminder', 'lastAfternoonReminder', 'lastStartupReminder',
   'homeWidgets', 'pinnedCenters', 'filterPresets',
+  'pfNoteTemplates', 'pfPrintTemplates', 'sellerInfo', 'hiddenProvs',
 ]);
 
 function isManagerRole(role) {

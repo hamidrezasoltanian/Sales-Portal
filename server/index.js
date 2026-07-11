@@ -21,7 +21,7 @@ const { initSchema } = require('./db');
 const { checkDevDatabaseGuard } = require('./lib/dev-guard');
 const { checkProductionGuard } = require('./lib/prod-guard');
 const { log, logRequest } = require('./lib/log');
-const { JWT_SECRET, _DEFAULT_SECRET } = require('./auth');
+const { JWT_SECRET, _DEFAULT_SECRET, requireManager } = require('./auth');
 
 let helmet, compression;
 try { helmet = require('helmet'); } catch(e) {}
@@ -40,7 +40,7 @@ if (helmet) {
         styleSrc: ["'self'", "'unsafe-inline'", 'cdn.jsdelivr.net'],
         fontSrc: ["'self'", 'cdn.jsdelivr.net', 'data:'],
         imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-        connectSrc: ["'self'", 'https://api.anthropic.com'],
+        connectSrc: ["'self'"],
         frameSrc: ["'self'", 'blob:'],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
@@ -52,8 +52,8 @@ if (compression) app.use(compression());
 
 // Middleware
 app.use(cookieParser());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: false, limit: '50mb' }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 
 app.use(function (req, res, next) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -127,8 +127,6 @@ app.use('/api/trade-kpi', require('./routes/trade-kpi'));
 app.use('/api/payroll', require('./routes/payroll'));
 app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/reports', require('./routes/reports'));
-app.use('/api/kpi-data', require('./routes/kpi-data'));
-app.use('/api/manager-reports', require('./routes/manager-reports'));
 app.use('/api/center-reports', require('./routes/center-reports'));
 app.use('/api/backups', require('./routes/backups'));
 app.use('/api/faradis', require('./routes/faradis'));
@@ -159,37 +157,30 @@ app.get('/api/health', async function (req, res) {
     result.ok = false;
   }
 
-  try {
-    const faradis = require('./integrations/faradis');
-    if (!faradis.isConfigured()) {
-      result.checks.faradis = { ok: null, note: 'not configured' };
-    } else {
-      const r = await Promise.race([
-        faradis.testConnection(),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000))
-      ]);
-      result.checks.faradis = { ok: true, server_time: r && r.now };
-    }
-  } catch (e) {
-    result.checks.faradis = { ok: false, error: e.message };
-  }
+  result.elapsed_ms = Date.now() - start;
+  res.status(result.ok ? 200 : 503).json(result);
+});
 
+app.get('/api/health/details', requireManager, async function (req, res) {
   try {
     const { query } = require('./db');
-    const r = await query(`
+    const faradis = require('./integrations/faradis');
+    const cache = await query(`
       SELECT
-        (SELECT COUNT(*) FROM faradis_customers_cache)  AS customers,
-        (SELECT COUNT(*) FROM faradis_factors_cache)    AS factors,
+        (SELECT COUNT(*) FROM faradis_customers_cache) AS customers,
+        (SELECT COUNT(*) FROM faradis_factors_cache) AS factors,
         (SELECT COUNT(*) FROM faradis_receivables_cache) AS receivables,
         (SELECT MAX(synced_at) FROM faradis_factors_cache) AS last_sync
     `);
-    result.checks.faradis_cache = r.rows[0];
+    res.json({
+      ok: true,
+      uptime_sec: Math.floor(process.uptime()),
+      faradisConfigured: faradis.isConfigured(),
+      faradisCache: cache.rows[0],
+    });
   } catch (e) {
-    result.checks.faradis_cache = { error: e.message };
+    res.status(500).json({ error: 'خطای دریافت وضعیت داخلی' });
   }
-
-  result.elapsed_ms = Date.now() - start;
-  res.status(result.ok ? 200 : 503).json(result);
 });
 
 app.get('/wms', function (req, res) {
@@ -258,6 +249,11 @@ async function start() {
       require('./lib/auto-backup').startAutoBackupScheduler();
     } catch (e) {
       console.warn('[auto-backup] scheduler not started:', e.message);
+    }
+    try {
+      require('./lib/faradis-auto-sync').startFaradisAutoSync();
+    } catch (e) {
+      console.warn('[faradis-auto-sync] scheduler not started:', e.message);
     }
     if (process.env.TELEGRAM_BOT_TOKEN) {
       const bot = require('./bot/telegram');

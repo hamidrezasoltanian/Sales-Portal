@@ -468,6 +468,7 @@ function _hcpLoadCenterAffiliations(rtype, rid, domId) {
   fetch('/api/hcps/centers/' + encodeURIComponent(centerKey) + '/affiliations')
     .then(function(r) { return r.ok ? r.json() : []; })
     .then(function(affs) {
+      area.dataset.hcpCount = String(affs.length);
       if (!affs.length) {
         area.innerHTML = '<div style="color:var(--text-muted);font-size:11px;padding:12px 0;text-align:center;background:var(--bg-raised);border:1px dashed var(--border);border-radius:6px">'
           + 'هیچ پزشک یا کارشناسی به این مرکز متصل نشده است'

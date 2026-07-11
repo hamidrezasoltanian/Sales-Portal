@@ -16,11 +16,16 @@ try {
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 
+const pgUser = process.env.PG_USER || 'postgres';
+if (process.env.NODE_ENV === 'production' && pgUser === 'postgres' && process.env.ALLOW_PG_SUPERUSER !== '1') {
+  throw new Error('PG_USER must be a limited application role in production (set ALLOW_PG_SUPERUSER=1 only for emergency compatibility)');
+}
+
 const pool = new Pool({
   host: process.env.PG_HOST || 'localhost',
   port: parseInt(process.env.PG_PORT || '5432'),
   database: process.env.PG_DATABASE || 'atena_crm',
-  user: process.env.PG_USER || 'postgres',
+  user: pgUser,
   password: process.env.PG_PASSWORD || '',
   max: 10,
   idleTimeoutMillis: 30000,
@@ -346,6 +351,8 @@ async function initSchema() {
   `);
   // Add sale_price column if it doesn't exist (for existing DBs)
   await query(`ALTER TABLE wms_products ADD COLUMN IF NOT EXISTS sale_price BIGINT DEFAULT 0`);
+  await query(`ALTER TABLE wms_products ADD COLUMN IF NOT EXISTS secondary_unit VARCHAR(50)`);
+  await query(`ALTER TABLE wms_products ADD COLUMN IF NOT EXISTS conversion_factor NUMERIC(12,3) DEFAULT 1`);
   await query(`CREATE INDEX IF NOT EXISTS idx_wms_prod_active ON wms_products(active)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_wms_prod_code ON wms_products(catalog_code)`);
 

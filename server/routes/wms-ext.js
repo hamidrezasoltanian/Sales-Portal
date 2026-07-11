@@ -335,7 +335,73 @@ router.post('/audit-log', wmsEdit, async function (req, res) {
   }
 });
 
-// ── IMED metadata ───────────────────────────────────────────────────────────
+// ── IMED external sync + metadata ───────────────────────────────────────────
+
+router.get('/imed/status', wmsView, async function (req, res) {
+  try {
+    const imed = require('../integrations/imed');
+    const pending = await query(
+      `SELECT COUNT(*)::int AS count FROM wms_transactions
+       WHERE status = 'approved' AND imed_status IS DISTINCT FROM 'registered'`
+    );
+    res.json({ ok: true, configured: imed.isConfigured(), pending: pending.rows[0].count });
+  } catch (e) {
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+router.post('/imed/sync', wmsEdit, async function (req, res) {
+  try {
+    const imed = require('../integrations/imed');
+    if (!imed.isConfigured()) {
+      return res.status(503).json({ error: 'اتصال IMED تنظیم نشده است' });
+    }
+    const limit = Math.min(Math.max(parseInt(req.body.limit, 10) || 100, 1), 500);
+    const rows = await query(
+      `SELECT t.id, t.txn_no, t.type, t.txn_type, t.qty, t.txn_date_jalali,
+              t.ttac_no, t.ref_no, p.catalog_code, p.irc_code, l.lot_no, l.expiry
+       FROM wms_transactions t
+       LEFT JOIN wms_products p ON p.id = t.product_id
+       LEFT JOIN wms_lots l ON l.id = t.lot_id
+       WHERE t.status = 'approved' AND t.imed_status IS DISTINCT FROM 'registered'
+       ORDER BY t.txn_date ASC LIMIT $1`,
+      [limit]
+    );
+    if (!rows.rows.length) return res.json({ ok: true, sent: 0, accepted: 0 });
+    const result = await imed.pushTransactions(rows.rows.map(function (r) {
+      return {
+        localId: r.id, documentNo: r.txn_no, direction: r.type,
+        transactionType: r.txn_type, quantity: Number(r.qty),
+        jalaliDate: r.txn_date_jalali, catalogCode: r.catalog_code,
+        ircCode: r.irc_code, ttacNo: r.ttac_no, lotNo: r.lot_no,
+        expiry: r.expiry, referenceNo: r.ref_no,
+      };
+    }));
+    const acceptedIds = Array.isArray(result.acceptedIds)
+      ? result.acceptedIds.map(String)
+      : (result.ok === true ? rows.rows.map(function (r) { return String(r.id); }) : []);
+    if (acceptedIds.length) {
+      await query(
+        `UPDATE wms_transactions
+         SET imed_status = 'registered',
+             imed_ref_no = COALESCE(NULLIF($2, ''), imed_ref_no),
+             imed_date = NOW()
+         WHERE id = ANY($1::varchar[])`,
+        [acceptedIds, result.batchRef || result.reference || '']
+      );
+    }
+    res.json({
+      ok: true,
+      sent: rows.rows.length,
+      accepted: acceptedIds.length,
+      rejected: result.rejected || [],
+      reference: result.batchRef || result.reference || null,
+    });
+  } catch (e) {
+    console.error('[wms/imed sync]', e.message);
+    res.status(502).json({ error: e.message });
+  }
+});
 
 router.patch('/transactions/:id/imed', wmsEdit, async function (req, res) {
   try {

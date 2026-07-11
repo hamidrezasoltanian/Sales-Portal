@@ -3,6 +3,7 @@
 const express = require('express');
 const { query } = require('../db');
 const { requireAuth } = require('../auth');
+const { isManagerRole } = require('../lib/roles');
 
 const router = express.Router();
 
@@ -53,7 +54,7 @@ router.post('/', requireAuth, async function (req, res) {
            date = EXCLUDED.date, username = EXCLUDED.username, count = EXCLUDED.count,
            note = EXCLUDED.note, updated_at = NOW(), updated_by = EXCLUDED.updated_by
          RETURNING *`,
-        [entry.id, entry.date || '', entry.userId || user, entry.count || 1, entry.note || null, user]
+        [entry.id, entry.date || '', isManagerRole(req.user.role) && entry.userId ? entry.userId : user, entry.count || 1, entry.note || null, user]
       );
     } else if (type === 'visit') {
       const note = entry.centerName
@@ -66,7 +67,7 @@ router.post('/', requireAuth, async function (req, res) {
            date = EXCLUDED.date, username = EXCLUDED.username, count = EXCLUDED.count,
            note = EXCLUDED.note, updated_at = NOW(), updated_by = EXCLUDED.updated_by
          RETURNING *`,
-        [entry.id, entry.date || '', entry.userId || user, entry.count || 1, note, user]
+        [entry.id, entry.date || '', isManagerRole(req.user.role) && entry.userId ? entry.userId : user, entry.count || 1, note, user]
       );
     } else {
       result = await query(
@@ -78,7 +79,7 @@ router.post('/', requireAuth, async function (req, res) {
            updated_at = NOW(), updated_by = EXCLUDED.updated_by
          RETURNING *`,
         [
-          entry.id, entry.date || '', entry.userId || user,
+          entry.id, entry.date || '', isManagerRole(req.user.role) && entry.userId ? entry.userId : user,
           entry.centerName || '', entry.centerKey || null,
           entry.amount || 0, !!entry.isCash, user,
         ]
@@ -97,7 +98,7 @@ router.get('/', requireAuth, async function (req, res) {
   try {
     const type = req.query.type || '';
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
-    const username = req.query.username || '';
+    const username = isManagerRole(req.user.role) ? (req.query.username || '') : req.user.username;
     const types = type && TABLES[type] ? [type] : ['call', 'visit', 'sales'];
     const out = [];
 
@@ -140,6 +141,11 @@ router.delete('/:type/:id', requireAuth, async function (req, res) {
     if (!table) return res.status(400).json({ error: 'type نامعتبر' });
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: 'شناسه نامعتبر' });
+    if (!isManagerRole(req.user.role)) {
+      const access = await query('SELECT username FROM ' + table + ' WHERE id = $1', [id]);
+      if (!access.rows.length) return res.status(404).json({ error: 'یافت نشد' });
+      if (access.rows[0].username !== req.user.username) return res.status(403).json({ error: 'دسترسی مجاز نیست' });
+    }
 
     const result = await query('DELETE FROM ' + table + ' WHERE id = $1 RETURNING id', [id]);
     if (!result.rows.length) return res.status(404).json({ error: 'یافت نشد' });

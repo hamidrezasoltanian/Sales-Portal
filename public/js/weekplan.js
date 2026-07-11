@@ -282,7 +282,7 @@ function wpExportExcel(){
     var e=DB.weekEntries[k];
     var name=e.centerName||e.mtrCustomer||k;
     var owner=e.addedBy?USERS[e.addedBy]||e.addedBy:'';
-    var type=e.rtype==='mtr'?'مطالبات':(e.actionType==='visit'?'ویزیت':'تماس');
+    var type=e.rtype==='mtr'?'مطالبات':(typeof wpActLabel==='function'?wpActLabel(e.actionType||'call'):(e.actionType==='visit'?'ویزیت':'تماس'));
     var date=e.scheduledDate||'بدون تاریخ';
     var status=e.done?'انجام شد':'در انتظار';
     rows.push([name,owner,type,date,status]);
@@ -557,8 +557,8 @@ function renderWpFullCenterList() {
     var ek = c._key.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     var ri = String(c.rid).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     var aIcon = (typeof wpActLabel==='function'?wpActLabel(c.actionType||'call'):(c.actionType==='visit'?'🤝 ویزیت':'📞 تماس'));
-    var aBg = c.actionType==='visit' ? '#ede9fe' : '#e0f2fe';
-    var aCol = c.actionType==='visit' ? '#5b21b6' : '#0369a1';
+    var aBg = (c.actionType==='visit' ? '#ede9fe' : ((c.actionType||'call')==='call' ? '#e0f2fe' : '#fef3c7'));
+    var aCol = (c.actionType==='visit' ? '#5b21b6' : ((c.actionType||'call')==='call' ? '#0369a1' : '#92400e'));
     return '<tr style="background:#fffbeb">'
       +'<td style="color:var(--text-muted);font-size:10px;text-align:center;border-right:3px solid #f59e0b">'+n+'</td>'
       +'<td style="cursor:pointer" onclick="openCenterModal(\''+c.rtype+'\',\''+ri+'\')">'
@@ -943,14 +943,74 @@ function wpClearSelection(){
   _wpUpdateBulkBar();
 }
 
-function wpBulkDone(){
+async function _wpPersistDoneEntry(eKey,we){
+  var payload={
+    done:true,
+    doneDate:we.doneDate||todayStr(),
+    doneResult:we.doneResult||'bulk_done',
+    doneNote:we.doneNote||'ثبت گروهی',
+    doneAmount:we.doneAmount||null,
+    scheduledDate:we.scheduledDate||null,
+    actionType:we.actionType||'call'
+  };
+  if(we.sqlId){
+    var putRes=await fetch('/api/week-entries/'+encodeURIComponent(we.sqlId),{
+      method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)
+    });
+    if(!putRes.ok)throw new Error('HTTP '+putRes.status);
+    return;
+  }
+  var parsed=wpParseEntryKey(eKey);
+  var newId='we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  var createRes=await fetch('/api/week-entries',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(Object.assign(payload,{
+      id:newId,weekId:parsed.weekId||eKey.split(':::')[0],
+      recKey:we.recKey||((we.rtype||parsed.rtype)+'_'+(we.rid||parsed.rid)),
+      rtype:we.rtype||parsed.rtype,rid:we.rid||parsed.rid,
+      addedBy:we.addedBy||currentUser,centerName:we.centerName||''
+    }))
+  });
+  if(!createRes.ok)throw new Error('HTTP '+createRes.status);
+  var created=await createRes.json();
+  if(created&&created.id){
+    we.sqlId=created.id;
+    var doneRes=await fetch('/api/week-entries/'+encodeURIComponent(created.id),{
+      method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)
+    });
+    if(!doneRes.ok)throw new Error('HTTP '+doneRes.status);
+  }
+}
+
+async function wpBulkDone(){
   var keys = Array.from(_wpSelected);
   if(!keys.length) return;
+  var previous={};
   keys.forEach(function(k){
-    if(DB.weekEntries[k]){ DB.weekEntries[k].done=true; DB.weekEntries[k].doneDate=todayStr(); }
+    if(DB.weekEntries[k]){
+      previous[k]={done:DB.weekEntries[k].done,doneDate:DB.weekEntries[k].doneDate,doneResult:DB.weekEntries[k].doneResult,doneNote:DB.weekEntries[k].doneNote};
+      DB.weekEntries[k].done=true;
+      DB.weekEntries[k].doneDate=todayStr();
+      DB.weekEntries[k].doneResult='bulk_done';
+      DB.weekEntries[k].doneNote='ثبت گروهی';
+    }
   });
-  _wpSaveWeek(keys); wpClearSelection(); _debouncedRenderWeekPlan();
-  showToast('✅ '+keys.length+' مورد به عنوان انجام‌شده ثبت شد — در تب فعالیت‌ها قابل مشاهده است',3000);
+  try{
+    await Promise.all(keys.map(function(k){return _wpPersistDoneEntry(k,DB.weekEntries[k]);}));
+    keys.forEach(function(k){
+      var we=DB.weekEntries[k];if(!we)return;
+      var actionType=we.actionType||'call';
+      var rkey=we.recKey||((we.rtype||'center')+'_'+(we.rid||''));
+      var cl={at:new Date().toISOString(),by:currentUser||'',rkey:rkey,field:actionType,val:'bulk_done'};
+      fetch('/api/changelog',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cl)}).catch(function(){});
+    });
+    wpClearSelection();_debouncedRenderWeekPlan();
+    showToast('✅ '+keys.length+' مورد در SQL به عنوان انجام‌شده ثبت شد',3000);
+  }catch(err){
+    keys.forEach(function(k){if(DB.weekEntries[k]&&previous[k])Object.assign(DB.weekEntries[k],previous[k]);});
+    _debouncedRenderWeekPlan();
+    showToast('⚠ ثبت گروهی ناموفق بود؛ تغییری اعمال نشد',3500);
+  }
 }
 
 function wpBulkRemove(){
@@ -1008,7 +1068,7 @@ function wpMarkDoneKey(eKey){
   var td=todayStr();var tdp=td.split('/').map(Number);
   var defNext=jAddDays(tdp[0],tdp[1],tdp[2],7);
   var defNextStr=defNext[0]+'/'+(defNext[1]<10?'0'+defNext[1]:defNext[1])+'/'+(defNext[2]<10?'0'+defNext[2]:defNext[2]);
-  var actLabel=we.actionType==='visit'?'مراجعه':'تماس';
+  var actLabel=typeof wpActLabel==='function'?wpActLabel(we.actionType||'call'):(we.actionType==='visit'?'مراجعه':'تماس');
   var body='<div style="padding:4px 0">'
     +'<div style="margin-bottom:12px;padding:8px 12px;background:var(--bg-raised);border-radius:7px;font-size:13px">مرکز: <b>'+esc(cname)+'</b> &nbsp;|&nbsp; نوع: <b>'+actLabel+'</b></div>'
     +'<div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">نتیجه این '+actLabel+' چه بود؟ <span style="color:#dc2626">*</span></div>'
@@ -1112,14 +1172,14 @@ function _wpFinishDone(eKey){
   ensureKPIDB();
   var logEntry={id:Date.now(),date:todayStr(),userId:currentUser||'',centerName:cname,centerKey:rtype+'_'+rid,note:note,count:1,outcome:outcome};
   if(actionType==='visit'){DB.visitLog.push(logEntry);}
-  else{DB.callLog.push(logEntry);}
-  if(typeof _postActivityLog==='function'){
-    _postActivityLog(actionType==='visit'?'visit':'call', logEntry);
+  else if(actionType==='call'){DB.callLog.push(logEntry);}
+  if(typeof _postActivityLog==='function'&&(actionType==='visit'||actionType==='call')){
+    _postActivityLog(actionType, logEntry);
   }
 
   // ── Mirror to DB.changeLog so _getTodayActivities() finds this entry ──────
   DB.changeLog=DB.changeLog||[];
-  var _clEntry={at:new Date().toISOString(),by:currentUser||'',rkey:rtype+'_'+rid,field:actionType==='visit'?'visit':'call',val:outcome+(note?' — '+note:'')};
+  var _clEntry={at:new Date().toISOString(),by:currentUser||'',rkey:rtype+'_'+rid,field:actionType,val:outcome+(note?' — '+note:'')};
   DB.changeLog.push(_clEntry);
   if(DB.changeLog.length>500)DB.changeLog=DB.changeLog.slice(-500);
   fetch('/api/changelog',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(_clEntry)}).catch(function(){});
@@ -1153,7 +1213,9 @@ function _wpFinishDone(eKey){
     if(rtype&&rid){setE(rtype,rid,'status','قرارداد بسته شد');}
     if(amount>0){
       ensureKPIDB();
-      DB.salesLog.push({id:Date.now()+1,date:todayStr(),userId:currentUser||'',centerName:cname,centerKey:rtype+'_'+rid,amount:amount,isCash:false});
+      var saleEntry={id:Date.now()+1,date:todayStr(),userId:currentUser||'',centerName:cname,centerKey:rtype+'_'+rid,amount:amount,isCash:false};
+      DB.salesLog.push(saleEntry);
+      if(typeof _postActivityLog==='function')_postActivityLog('sales',saleEntry);
     }
   } else if(outcome==='inactive'){
     if(rtype&&rid){
@@ -2191,7 +2253,7 @@ function openDailyMonitor(){
       if(hasEntries){
         entries.forEach(function(en){
           var icon=en.done?'✅':'🔴';
-          var actTypeLabel=en.actType==='visit'?'🤝 ویزیت':'📞 تماس';
+          var actTypeLabel=typeof wpActLabel==='function'?wpActLabel(en.actType||'call'):(en.actType==='visit'?'🤝 ویزیت':'📞 تماس');
           body+='<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-bottom:1px solid var(--border);font-size:12px">'
             +'<span style="font-size:16px">'+icon+'</span>'
             +'<span style="flex:1"><a href="#" onclick="closeModal(\'dmModal\');openCenterModal(\''+en.rtype+'\',\''+en.rid+'\');return false;" style="color:#2563eb;text-decoration:none;font-weight:600">'+esc(en.name)+'</a></span>'

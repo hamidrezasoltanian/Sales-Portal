@@ -71,23 +71,22 @@ function renderActivity(){
     (DB.callLog||[]).forEach(function(l){
       if(!l.date)return;
       var ts=dateStrToTs(l.date);if(!ts)return;
-      entries.push({ts:ts,name:l.centerName||'',desc:'📞 '+l.count+' تماس'+(l.note?' — '+l.note:''),icon:'📞',user:l.userId||''});
+      entries.push({ts:ts,name:l.centerName||'',desc:'📞 '+l.count+' تماس'+(l.note?' — '+l.note:''),icon:'📞',user:l.userId||'',_logId:l.id,_logType:'call'});
     });
     // ۵. ویزیت‌های دستی (visitLog)
     (DB.visitLog||[]).forEach(function(l){
       if(!l.date)return;
       var ts=dateStrToTs(l.date);if(!ts)return;
-      entries.push({ts:ts,name:l.centerName||'',desc:'🚗 '+(l.count>1?l.count+' بازدید':'بازدید')+(l.note?' — '+l.note:''),icon:'🚗',user:l.userId||''});
+      entries.push({ts:ts,name:l.centerName||'',desc:'🚗 '+(l.count>1?l.count+' بازدید':'بازدید')+(l.note?' — '+l.note:''),icon:'🚗',user:l.userId||'',_logId:l.id,_logType:'visit'});
     });
-    // ۶. SQL activity-log (async merge — fire and re-render once)
-    if(!window._actSqlMerged){
-      window._actSqlMerged=true;
+    // ۶. SQL activity-log (refresh at most once per minute)
+    if(!window._actSqlLoading&&(!window._actSqlFetchedAt||Date.now()-window._actSqlFetchedAt>60000)){
+      window._actSqlLoading=true;
       fetch('/api/activity-log?limit=200',{credentials:'same-origin'}).then(function(r){return r.ok?r.json():null;}).then(function(data){
-        if(!data||!data.entries||!data.entries.length)return;
-        window._actSqlCache=data.entries;
-        // Re-render to include SQL entries
+        window._actSqlFetchedAt=Date.now();
+        if(data&&data.entries)window._actSqlCache=data.entries;
         if(typeof renderActivity==='function'&&currentTab==='activity')renderActivity();
-      }).catch(function(){});
+      }).catch(function(){}).then(function(){window._actSqlLoading=false;});
     }
     (window._actSqlCache||[]).forEach(function(l){
       if(!l.date)return;
@@ -96,12 +95,19 @@ function renderActivity(){
       var desc=l._type==='sales'
         ?('💰 فروش '+(l.amount||0).toLocaleString('fa-IR')+(l.centerName?' — '+l.centerName:''))
         :(icon+' '+(l.count||1)+' '+(l._type==='visit'?'بازدید':'تماس')+(l.note?' — '+l.note:''));
-      entries.push({ts:ts,name:l.centerName||'',desc:desc,icon:icon,user:l.userId||'',_sql:true});
+      entries.push({ts:ts,name:l.centerName||'',desc:desc,icon:icon,user:l.userId||'',_sql:true,_logId:l.id,_logType:l._type});
     });
   }catch(err){
     el.innerHTML='<div style="padding:20px;color:#dc2626">⚠ خطا در نمایش فعالیت‌ها: '+esc(err.message)+'</div>';
     return;
   }
+  var seenLogs={};
+  entries=entries.filter(function(ev){
+    if(ev._logId==null||!ev._logType)return true;
+    var key=ev._logType+':'+ev._logId;
+    if(seenLogs[key])return false;
+    seenLogs[key]=true;return true;
+  });
   entries.sort(function(a,b){return b.ts-a.ts;});
   if(!entries.length){
     el.innerHTML='<div style="text-align:center;padding:60px;color:#94a3b8">'

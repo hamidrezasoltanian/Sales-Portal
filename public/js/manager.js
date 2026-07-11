@@ -1595,7 +1595,7 @@ function openExpertReport(memberId){
     body+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">';
     body+='<label style="font-size:11px">از: <input type="text" id="rptFrom" value="'+fromDate+'" readonly class="fd-inp" style="cursor:pointer;padding:4px 8px;border:1px solid var(--border-input);border-radius:5px;font-family:inherit;font-size:11px"></label>';
     body+='<label style="font-size:11px">تا: <input type="text" id="rptTo" value="'+toDate+'" readonly class="fd-inp" style="cursor:pointer;padding:4px 8px;border:1px solid var(--border-input);border-radius:5px;font-family:inherit;font-size:11px"></label>';
-    body+='<button onclick="var f=document.getElementById(\'rptFrom\').value,t=document.getElementById(\'rptTo\').value;document.getElementById(\'rptBody\').innerHTML=buildExpertReportHtml(\''+memberId+'\',f,t)" style="padding:4px 12px;background:var(--brand,#6366f1);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-family:inherit">🔍 فیلتر</button>';
+    body+='<button onclick="var f=document.getElementById(\'rptFrom\').value,t=document.getElementById(\'rptTo\').value;document.getElementById(\'rptBody\').innerHTML=buildExpertReportHtml(\''+memberId+'\',f,t);if(typeof refreshDoneLogsFromReport===\'function\')refreshDoneLogsFromReport(\''+memberId+'\')" style="padding:4px 12px;background:var(--brand,#6366f1);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-family:inherit">🔍 فیلتر</button>';
     body+='</div>';
     body+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">';
     body+='<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#1d4ed8">'+totalPlanned+'</div><div style="font-size:11px;color:#1d4ed8">کل برنامه‌ها</div></div>';
@@ -1862,7 +1862,7 @@ function buildReportEntriesHtml(memberId,fromDate,toDate){
   
   entries.forEach(function(we,i){
     var bg=i%2===0?'var(--bg-card)':'var(--bg-raised)';
-    var typeLabel=(we.actionType==='visit')?'🤝 ملاقات':'📞 تماس';
+    var typeLabel=typeof wpActLabel==='function'?wpActLabel(we.actionType||'call'):((we.actionType==='visit')?'🤝 ملاقات':'📞 تماس');
     var entryDate = we.scheduledDate || we._key.split(':::')[0] || '';
     
     var statusHtml = we.done 
@@ -2296,7 +2296,7 @@ async function init(){
     var _spid=localStorage.getItem('_spid');
     var _svm=localStorage.getItem('_svm');
     if(_svm&&['list','card','pipeline'].indexOf(_svm)>=0)_viewMode=_svm;
-    if(_st&&['home','provinces','weekplan','calendar','checklist','activity','kpi','manager','mtr','pricing','tasks','changelog','proforma','support','hr','trade-kpi'].indexOf(_st)>=0)currentTab=_st;
+    if(_st&&['home','provinces','weekplan','calendar','checklist','activity','kpi','manager','mtr','pricing','tasks','changelog','proforma','support','hr','trade-kpi','workflows'].indexOf(_st)>=0)currentTab=_st;
     if(_spid)_currentProvId=_spid;
   }catch(e){}
   if(!_st) currentTab=_isManager()?'manager':'home';
@@ -2318,7 +2318,7 @@ async function init(){
   })();
   // Apply granular permission hiding (additive — only hides, never shows what role already hides)
   (function(){
-    var _allMods=['provinces','weekplan','calendar','checklist','activity','tasks','mtr','pricing','proforma','support','hcp','hr','trade-kpi','kpi','manager','changelog','wms','letters'];
+    var _allMods=['provinces','weekplan','calendar','checklist','activity','tasks','mtr','pricing','proforma','support','hcp','hr','trade-kpi','kpi','manager','changelog','wms','letters','workflows'];
     _allMods.forEach(function(mod){
       if(!_hasAccess(mod)){
         var btnId='tab_'+mod.replace(/-/g,'_');
@@ -2333,6 +2333,9 @@ async function init(){
     var _dedup=wpDeduplicateEntries();if(_dedup>0){saveDBSync();console.info('[wp] dedup removed',_dedup,'duplicate week entries');}
     var _reconciled=wpReconcileFollowupDates();if(_reconciled>0){saveDBSync();console.info('[wp] reconciled',_reconciled,'missing week entries');}
     rebuildFilters();buildTypeFilter();
+    if(typeof loadKolCenterKeys==='function')loadKolCenterKeys(function(){
+      if(currentTab==='provinces'&&typeof renderTable==='function')renderTable();
+    });
     switchTab(currentTab);
     _initOnboarding();
     var _clbtn=document.getElementById('tab_changelog');if(_clbtn)_clbtn.style.display=_hasAccess('changelog')?'':'none';

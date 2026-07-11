@@ -359,7 +359,8 @@ function renderProvTable(){
     Object.values(DB.weekEntries||{}).forEach(function(we){
       if(!we.done)return;
       if((we.recKey||(we.rtype+'_'+we.rid))!==_recK2)return;
-      if(we.actionType==='visit')_tpVisits++;else _tpCalls++;
+      if(we.actionType==='visit')_tpVisits++;
+      else if((we.actionType||'call')==='call')_tpCalls++;
     });
     var _tpHtml=(_tpCalls||_tpVisits)
       ?'<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap">'

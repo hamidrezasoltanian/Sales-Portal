@@ -191,8 +191,8 @@ router.post('/change-password', requireAuth, async (req, res) => {
   if (!oldPassword || !newPassword) {
     return res.status(400).json({ error: 'رمز قدیم و جدید الزامی است' });
   }
-  if (newPassword.length < 6) {
-    return res.status(400).json({ error: 'رمز جدید باید حداقل ۶ کاراکتر باشد' });
+  if (newPassword.length < 8) {
+    return res.status(400).json({ error: 'رمز جدید باید حداقل ۸ کاراکتر باشد' });
   }
 
   try {
@@ -208,8 +208,13 @@ router.post('/change-password', requireAuth, async (req, res) => {
       return res.status(401).json({ error: 'رمز قدیم نادرست است' });
     }
     const hash = await bcrypt.hash(newPassword, 10);
-    await query('UPDATE app_users SET password_hash = $1 WHERE username = $2', [hash, req.user.username]);
-    return res.json({ ok: true });
+    await query(
+      'UPDATE app_users SET password_hash = $1, token_version = COALESCE(token_version, 0) + 1 WHERE username = $2',
+      [hash, req.user.username]
+    );
+    invalidateAuthCache(req.user.username);
+    res.clearCookie('atena_token');
+    return res.json({ ok: true, reauthRequired: true });
   } catch (e) {
     console.error('[auth/change-password]', e.message);
     return res.status(500).json({ error: 'خطای سرور' });

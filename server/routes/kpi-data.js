@@ -3,6 +3,7 @@
 const express = require('express');
 const { query } = require('../db');
 const { requireAuth, requireManager } = require('../auth');
+const { isManagerRole } = require('../lib/roles');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -13,7 +14,10 @@ router.get('/targets', async function (req, res) {
     const month = req.query.month;
     let sql = 'SELECT * FROM kpi_user_targets';
     const params = [];
-    if (month) { params.push(month); sql += ' WHERE month = $1'; }
+    const conditions = [];
+    if (month) { params.push(month); conditions.push('month = $' + params.length); }
+    if (!isManagerRole(req.user.role)) { params.push(req.user.username); conditions.push('username = $' + params.length); }
+    if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
     sql += ' ORDER BY month DESC, username';
     const r = await query(sql, params);
     const map = {};
@@ -41,7 +45,8 @@ router.get('/history', async function (req, res) {
     const month = req.query.month;
     let sql = 'SELECT username, month, data, updated_at FROM kpi_history WHERE 1=1';
     const params = [];
-    if (user) { params.push(user); sql += ' AND username = $' + params.length; }
+    if (user && isManagerRole(req.user.role)) { params.push(user); sql += ' AND username = $' + params.length; }
+    if (!isManagerRole(req.user.role)) { params.push(req.user.username); sql += ' AND username = $' + params.length; }
     if (month) { params.push(month); sql += ' AND month = $' + params.length; }
     sql += ' ORDER BY month DESC LIMIT 500';
     const r = await query(sql, params);
@@ -73,7 +78,7 @@ router.get('/province-targets', async function (req, res) {
 });
 
 // POST /api/kpi-data/user-target
-router.post('/user-target', async function (req, res) {
+router.post('/user-target', requireManager, async function (req, res) {
   try {
     const { username, month, callsPerDay, visitsPerWeek, salesCount, salesAmount, cashPct } = req.body || {};
     if (!username || !month) return res.status(400).json({ error: 'username و month الزامی هستند' });
@@ -107,6 +112,9 @@ router.post('/history', async function (req, res) {
   try {
     const snap = req.body || {};
     if (!snap.userId || !snap.month) return res.status(400).json({ error: 'userId و month الزامی هستند' });
+    if (!isManagerRole(req.user.role) && snap.userId !== req.user.username) {
+      return res.status(403).json({ error: 'ثبت KPI برای کاربر دیگر مجاز نیست' });
+    }
     await query(
       `INSERT INTO kpi_history (username, month, data, updated_at)
        VALUES ($1, $2, $3, NOW())

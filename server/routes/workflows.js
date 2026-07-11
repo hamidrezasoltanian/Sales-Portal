@@ -173,11 +173,13 @@ router.get('/instances', requirePermission('workflows', 'view'), async function 
   try {
     const defId = req.query.definitionId || req.query.definition_id;
     const owner = req.query.owner;
+    const centerKey = req.query.centerKey || req.query.center_key;
     const status = req.query.status || 'active';
     let sql = 'SELECT * FROM workflow_instances WHERE 1=1';
     const params = [];
     if (defId) { params.push(defId); sql += ' AND definition_id = $' + params.length; }
     if (owner) { params.push(owner); sql += ' AND owner = $' + params.length; }
+    if (centerKey) { params.push(centerKey); sql += ' AND center_key = $' + params.length; }
     if (status) { params.push(status); sql += ' AND status = $' + params.length; }
     if (!isManager(req.user) && !owner) {
       params.push(req.user.username);

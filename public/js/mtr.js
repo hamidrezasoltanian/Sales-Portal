@@ -414,6 +414,34 @@ var MERGE_LOG=[];   // [{name,at,cnt}] — merge history per rep
 
 // ═══════════ STORAGE ═══════════
 var _mtrMetaBulkTimer=null;
+function _mtrJsonFetch(url,opts){
+  opts=opts||{};
+  opts.credentials='same-origin';
+  opts.headers=Object.assign({'Content-Type':'application/json'},opts.headers||{});
+  return fetch(url,opts).then(function(r){
+    if(!r.ok)return r.json().catch(function(){return{};}).then(function(e){throw new Error(e.error||('HTTP '+r.status));});
+    return r.json();
+  });
+}
+function saveMtrMetaInvApi(inv,meta){
+  return _mtrJsonFetch('/api/mtr/meta/'+encodeURIComponent(inv),{
+    method:'PATCH',body:JSON.stringify(meta||{})
+  }).catch(function(e){console.warn('[mtr meta]',e.message);});
+}
+function saveMtrMetaBulkApi(meta){
+  return _mtrJsonFetch('/api/mtr/meta/bulk',{
+    method:'PUT',body:JSON.stringify(meta||{})
+  }).catch(function(e){console.warn('[mtr meta bulk]',e.message);});
+}
+function _saveMtrSettingApi(key,value){
+  return _mtrJsonFetch('/api/mtr/settings/'+encodeURIComponent(key),{
+    method:'PATCH',body:JSON.stringify({value:value})
+  }).catch(function(e){console.warn('[mtr setting '+key+']',e.message);});
+}
+function saveMtrFollowerMapApi(value){return _saveMtrSettingApi('mtrFollowerMap',value||{});}
+function saveMtrFollowerApi(value){return _saveMtrSettingApi('mtrFollower',value||{});}
+function saveMtrTrendApi(value){return _saveMtrSettingApi('mtrTrend',value||[]);}
+
 function saveMeta(inv){
   if(inv&&META[inv]){
     try{localStorage.setItem('am4',JSON.stringify(META));}catch(e){}
@@ -2091,7 +2119,7 @@ async function runAI(){
   var rows=filt().filter(function(r){return r.od>0;}).slice(0,12);
   var cases=rows.map(function(r){return'• ف'+r.inv+' | '+r.customer+' | '+r.province+' | '+fF(r.rem)+' ت | سررسید:'+r.due+' | '+r.od+' روز | پیگیر:'+r.follower;}).join('\n');
   try{
-    var res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},
+    var res=await fetch('/api/ai/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:900,
         messages:[{role:'user',content:'مشاور وصول مطالبات تجهیزات پزشکی. سقف ۶۰ روز (بالاتر ممنوع). همکار فقط با چک ضمانت.\n\n'+cases+'\n\nاقدام مشخص (یک جمله) برای هر مورد. فرمت: [ف{شماره}] → اقدام. بحرانی‌ها اول.'}]})});
     var j=await res.json();if(res.status===503){AI_TXT=j.error||'سرویس هوش مصنوعی در دسترس نیست';}else{AI_TXT=j.content&&j.content[0]?j.content[0].text:'خطا.';}
@@ -2144,27 +2172,6 @@ function mtrLazyInit(){
       if(DB.settings&&DB.settings.mtrSyncEnabled)mtrStartAutoSync(true);
     });
   }
-  if(typeof _mtrStartSyncPoll==='function')_mtrStartSyncPoll();
-}
-
-var _mtrSyncTimer=null;
-function _mtrPullSync(){
-  if(typeof DB==='undefined'||!(DB.settings&&DB.settings.mtrSyncEnabled))return;
-  fetch('/api/mtr/sync').then(function(r){return r.ok?r.json():null;}).then(function(d){
-    if(!d||!d.enabled)return;
-    if(d.rows&&d.rows.length){
-      DATA=d.rows;
-      if(typeof matchCentersToData==='function')matchCentersToData();
-      if(typeof render==='function')render();
-      toast('🔄 مطالبات بروز شد ('+d.rows.length+' فاکتور · '+d.source+')');
-    }
-  }).catch(function(){});
-}
-function _mtrStartSyncPoll(){
-  if(_mtrSyncTimer){clearInterval(_mtrSyncTimer);_mtrSyncTimer=null;}
-  if(typeof DB==='undefined'||!(DB.settings&&DB.settings.mtrSyncEnabled))return;
-  _mtrPullSync();
-  _mtrSyncTimer=setInterval(_mtrPullSync,5*60*1000);
 }
 
 

@@ -164,7 +164,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
 });
 
 // POST /api/discovery/import-file  — bulk upsert from scraper JSON output
-router.post('/import-file', requireAuth, async (req, res) => {
+router.post('/import-file', requireAuth, requireManager, async (req, res) => {
   try {
     await ensureTable();
     const centers = req.body.centers;

@@ -3,6 +3,9 @@
 const express = require('express');
 const { query } = require('../db');
 const { requireAuth } = require('../auth');
+const { requirePermission } = require('../permissions');
+const { isManagerRole } = require('../lib/roles');
+const { loadCenterAccessContext, canAccessCenter } = require('../lib/center-access');
 
 const router = express.Router();
 
@@ -26,6 +29,24 @@ async function resolveEntryIds(ids, keys) {
     });
   }
   return idList;
+}
+
+async function assertEntryIdsAllowed(req, idList) {
+  if (isManagerRole(req.user.role)) return idList;
+  const rows = await query(
+    'SELECT id, rec_key, added_by FROM week_entries WHERE id = ANY($1::text[])',
+    [idList]
+  );
+  const context = await loadCenterAccessContext();
+  const allowed = rows.rows.filter(function (row) {
+    return row.added_by === req.user.username || canAccessCenter(req.user, row.rec_key, context);
+  }).map(function (row) { return String(row.id); });
+  if (allowed.length !== idList.length) {
+    const err = new Error('دسترسی به بعضی برنامه‌ها مجاز نیست');
+    err.status = 403;
+    throw err;
+  }
+  return allowed;
 }
 
 // ── Helper: map DB row → camelCase object ──────────────────────────────────
@@ -77,7 +98,14 @@ router.get('/', requireAuth, async function (req, res) {
       `SELECT * FROM week_entries ${where} ORDER BY scheduled_date ASC, created_at ASC`,
       params
     );
-    res.json(result.rows.map(rowToObj));
+    let rows = result.rows;
+    if (!isManagerRole(req.user.role)) {
+      const context = await loadCenterAccessContext();
+      rows = rows.filter(function (row) {
+        return row.added_by === req.user.username || canAccessCenter(req.user, row.rec_key, context);
+      });
+    }
+    res.json(rows.map(rowToObj));
   } catch (e) {
     console.error('[week-entries GET /]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
@@ -85,13 +113,19 @@ router.get('/', requireAuth, async function (req, res) {
 });
 
 // ── POST /api/week-entries ─────────────────────────────────────────────────
-router.post('/', requireAuth, async function (req, res) {
+router.post('/', requireAuth, requirePermission('weekplan', 'edit'), async function (req, res) {
   try {
     const { id, weekId, recKey, rtype, rid, scheduledDate, actionType, addedBy, centerName, weekTagId } = req.body;
     if (!id || !weekId || !recKey || !rtype || !rid) {
       return res.status(400).json({ error: 'فیلدهای id، weekId، recKey، rtype و rid الزامی هستند' });
     }
     const cleanRecKey = (recKey && recKey !== rtype && recKey.includes('_')) ? recKey : `${rtype}_${rid}`;
+    if (!isManagerRole(req.user.role)) {
+      const context = await loadCenterAccessContext();
+      if (!canAccessCenter(req.user, cleanRecKey, context)) {
+        return res.status(403).json({ error: 'دسترسی به این مرکز مجاز نیست' });
+      }
+    }
     const dbKey = `${weekId}:::${rtype}:::${rid}`;
     const dbValue = {
       id,
@@ -145,13 +179,19 @@ router.post('/', requireAuth, async function (req, res) {
 });
 
 // ── PUT /api/week-entries/:id ──────────────────────────────────────────────
-router.put('/:id', requireAuth, async function (req, res) {
+router.put('/:id', requireAuth, requirePermission('weekplan', 'edit'), async function (req, res) {
   try {
     const { weekId, scheduledDate, done, doneDate, actionType, weekTagId, centerName,
             doneResult, doneNote, doneAmount } = req.body;
-    const rowRes = await query('SELECT key, value FROM week_entries WHERE id = $1', [req.params.id]);
+    const rowRes = await query('SELECT key, value, rec_key, added_by FROM week_entries WHERE id = $1', [req.params.id]);
     if (!rowRes.rows.length) {
       return res.status(404).json({ error: 'ورودی برنامه هفته یافت نشد' });
+    }
+    if (!isManagerRole(req.user.role) && rowRes.rows[0].added_by !== req.user.username) {
+      const context = await loadCenterAccessContext();
+      if (!canAccessCenter(req.user, rowRes.rows[0].rec_key, context)) {
+        return res.status(403).json({ error: 'دسترسی به این برنامه مجاز نیست' });
+      }
     }
     const currentVal = rowRes.rows[0].value || {};
     const updatedVal = {
@@ -208,8 +248,9 @@ router.put('/:id', requireAuth, async function (req, res) {
 });
 
 // ── DELETE /api/week-entries/:id ───────────────────────────────────────────
-router.delete('/:id', requireAuth, async function (req, res) {
+router.delete('/:id', requireAuth, requirePermission('weekplan', 'edit'), async function (req, res) {
   try {
+    await assertEntryIdsAllowed(req, [String(req.params.id)]);
     const result = await query('DELETE FROM week_entries WHERE id = $1 RETURNING id', [req.params.id]);
     if (!result.rows.length) {
       return res.status(404).json({ error: 'ورودی برنامه هفته یافت نشد' });
@@ -218,18 +259,19 @@ router.delete('/:id', requireAuth, async function (req, res) {
     res.json({ ok: true });
   } catch (e) {
     console.error('[week-entries DELETE /:id]', e.message);
-    res.status(500).json({ error: 'خطای داخلی سرور' });
+    res.status(e.status || 500).json({ error: e.status ? e.message : 'خطای داخلی سرور' });
   }
 });
 
 // ── POST /api/week-entries/bulk-update ───────────────────────────────────────
-router.post('/bulk-update', requireAuth, async function (req, res) {
+router.post('/bulk-update', requireAuth, requirePermission('weekplan', 'edit'), async function (req, res) {
   try {
     const { ids, keys, done, doneDate, weekId, scheduledDate, actionType } = req.body || {};
     const idList = await resolveEntryIds(ids, keys);
     if (!idList.length) {
       return res.status(400).json({ error: 'شناسه یا کلید ورودی الزامی است' });
     }
+    await assertEntryIdsAllowed(req, idList);
     const hasDone = done !== undefined;
     const hasDoneDate = doneDate !== undefined;
     const hasWeekId = weekId !== undefined;
@@ -260,18 +302,19 @@ router.post('/bulk-update', requireAuth, async function (req, res) {
     res.json({ updated: result.rows.length, rows: result.rows.map(rowToObj) });
   } catch (e) {
     console.error('[week-entries POST /bulk-update]', e.message);
-    res.status(500).json({ error: 'خطای داخلی سرور' });
+    res.status(e.status || 500).json({ error: e.status ? e.message : 'خطای داخلی سرور' });
   }
 });
 
 // ── POST /api/week-entries/bulk-delete ────────────────────────────────────
-router.post('/bulk-delete', requireAuth, async function (req, res) {
+router.post('/bulk-delete', requireAuth, requirePermission('weekplan', 'edit'), async function (req, res) {
   try {
     const { ids, keys } = req.body || {};
     const idList = await resolveEntryIds(ids, keys);
     if (!idList.length) {
       return res.status(400).json({ error: 'شناسه یا کلید ورودی الزامی است' });
     }
+    await assertEntryIdsAllowed(req, idList);
     const placeholders = idList.map(function (_, i) { return '$' + (i + 1); }).join(',');
     const result = await query(
       `DELETE FROM week_entries WHERE id IN (${placeholders}) RETURNING id`,
@@ -281,18 +324,19 @@ router.post('/bulk-delete', requireAuth, async function (req, res) {
     res.json({ deleted: result.rows.length });
   } catch (e) {
     console.error('[week-entries POST /bulk-delete]', e.message);
-    res.status(500).json({ error: 'خطای داخلی سرور' });
+    res.status(e.status || 500).json({ error: e.status ? e.message : 'خطای داخلی سرور' });
   }
 });
 
 // ── POST /api/week-entries/bulk-move ──────────────────────────────────────
-router.post('/bulk-move', requireAuth, async function (req, res) {
+router.post('/bulk-move', requireAuth, requirePermission('weekplan', 'edit'), async function (req, res) {
   try {
     const { ids, keys, weekId, scheduledDate } = req.body || {};
     const idList = await resolveEntryIds(ids, keys);
     if (!idList.length || !weekId) {
       return res.status(400).json({ error: 'شناسه/کلید و weekId الزامی است' });
     }
+    await assertEntryIdsAllowed(req, idList);
     const hasScheduledDate = scheduledDate !== undefined;
     const placeholders = idList.map(function (_, i) { return '$' + (i + 4); }).join(',');
     const result = await query(
@@ -308,7 +352,7 @@ router.post('/bulk-move', requireAuth, async function (req, res) {
     res.json(result.rows.map(rowToObj));
   } catch (e) {
     console.error('[week-entries POST /bulk-move]', e.message);
-    res.status(500).json({ error: 'خطای داخلی سرور' });
+    res.status(e.status || 500).json({ error: e.status ? e.message : 'خطای داخلی سرور' });
   }
 });
 

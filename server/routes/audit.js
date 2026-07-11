@@ -3,13 +3,13 @@ const express = require('express');
 const { query } = require('../db');
 const { requireAuth, requireManager } = require('../auth');
 const { isManagerRole } = require('../lib/roles');
-const { userOwnsCenter, buildOwnerMaps } = require('../lib/center-ownership');
+const { requireCenterAccess, userCanAccessCenter } = require('../lib/center-access');
 
 const router = express.Router();
 router.use(requireAuth);
 
 // POST /api/audit — log a change
-router.post('/', async (req, res) => {
+router.post('/', requireCenterAccess(function(req){ return req.body && req.body.centerKey; }), async (req, res) => {
   const { centerKey, centerName, field, oldValue, newValue } = req.body || {};
   if (!centerKey || !field) return res.status(400).json({ error: 'centerKey و field الزامی است' });
   try {
@@ -37,15 +37,7 @@ router.get('/', async (req, res) => {
     }
 
     if (key && !isMgr) {
-      const masterR = await query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS', 'PC_RAW')");
-      const extraR = await query('SELECT id, row_num as row, province_id, owner FROM center_extras');
-      const editsR = await query('SELECT center_key, data FROM center_edits');
-      const centersMaster = {};
-      masterR.rows.forEach(function (r) { centersMaster[r.key] = r.data; });
-      const edits = {};
-      editsR.rows.forEach(function (r) { edits[r.center_key] = r.data || {}; });
-      const ownerMaps = buildOwnerMaps(centersMaster, extraR.rows);
-      if (!userOwnsCenter(req.user.username, key, edits, ownerMaps)) {
+      if (!(await userCanAccessCenter(req.user, key))) {
         return res.status(403).json({ error: 'دسترسی به این مرکز مجاز نیست' });
       }
     }

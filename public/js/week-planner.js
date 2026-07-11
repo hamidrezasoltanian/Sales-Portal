@@ -315,8 +315,9 @@
 
           '<div style="min-width:110px"><label style="display:block;font-size:.78rem;font-weight:600;color:#374151;margin-bottom:5px">نوع</label>' +
           '<select id="wpActionType" onchange="_wpState.actionType=this.value" style="width:100%;'+inp()+'">' +
-            '<option value="call"'+(_wpState.actionType==='call'?' selected':'')+'>📞 تماس</option>' +
-            '<option value="visit"'+(_wpState.actionType==='visit'?' selected':'')+'>🤝 ملاقات</option>' +
+            (typeof wpActOptionsHtml==='function'?wpActOptionsHtml(_wpState.actionType):
+              '<option value="call"'+(_wpState.actionType==='call'?' selected':'')+'>📞 تماس</option>' +
+              '<option value="visit"'+(_wpState.actionType==='visit'?' selected':'')+'>🤝 ملاقات</option>') +
           '</select></div>' +
 
           '<button onclick="window._wpLoadCenters()" style="padding:9px 22px;background:#6366f1;color:white;border:none;border-radius:8px;font-family:inherit;font-size:.9rem;cursor:pointer;font-weight:600;white-space:nowrap">بارگذاری مراکز ▼</button>' +

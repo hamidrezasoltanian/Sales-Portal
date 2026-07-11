@@ -108,4 +108,4 @@ function invalidateAuthCache(username) {
   if (username) _activeCache.delete(username);
 }
 
-module.exports = { requireAuth, requireManager, JWT_SECRET, invalidateAuthCache };
+module.exports = { requireAuth, requireManager, JWT_SECRET, _DEFAULT_SECRET, invalidateAuthCache };

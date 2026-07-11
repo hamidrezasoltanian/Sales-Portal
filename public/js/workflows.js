@@ -150,6 +150,7 @@ function wfDrop(ev, toStage) {
 
 function openWfInstanceModal(prefill) {
   prefill = prefill || {};
+  window._wfPendingCenterKey = prefill.centerKey || '';
   var def = _wfGetDef(_wfCurrentDefId);
   if (!def) { showToast('⚠ ابتدا یک فرآیند انتخاب کنید'); return; }
   var members = typeof umGetActive === 'function' ? umGetActive() : ((DB.settings && DB.settings.members) || _DEFAULT_MEMBERS);
@@ -208,6 +209,7 @@ function _wfSubmitInstance() {
       title: title.trim(),
       owner: (document.getElementById('wfInstOwner') || {}).value || currentUser,
       dueDate: (document.getElementById('wfInstDue') || {}).value || '',
+      centerKey: window._wfPendingCenterKey || '',
       centerName: centerName.trim(),
       data: data,
     }),
@@ -216,6 +218,7 @@ function _wfSubmitInstance() {
     .then(function (res) {
       if (!res.ok) { showToast('⚠ ' + (res.d.error || 'خطا')); return; }
       closeModal('wfInstModal');
+      window._wfPendingCenterKey = '';
       showToast('✅ مورد ایجاد شد', 2000);
       renderWorkflowsPanel();
     })
@@ -403,7 +406,13 @@ function _wfSaveDef() {
 function wfCreateFromCenter(rtype, rid, name) {
   _wfLoadDefinitions(function () {
     if (!_wfDefinitions.length) { showToast('⚠ فرآیندی تعریف نشده'); return; }
-    openWfInstanceModal({ title: name || 'پیگیری مرکز', centerName: name, owner: currentUser, data: {} });
     _wfCurrentDefId = _wfCurrentDefId || _wfDefinitions[0].id;
+    openWfInstanceModal({
+      title: name || 'پیگیری مرکز',
+      centerKey: rtype + '_' + rid,
+      centerName: name,
+      owner: currentUser,
+      data: {}
+    });
   });
 }

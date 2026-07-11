@@ -3,12 +3,14 @@
 const express = require('express');
 const { query } = require('../db');
 const { requireAuth } = require('../auth');
+const { requirePermission } = require('../permissions');
+const { requireCenterAccess } = require('../lib/center-access');
 
 const router = express.Router();
 router.use(requireAuth);
 
 // GET /api/center-reports/:centerKey/timeline?from=&to=
-router.get('/:centerKey/timeline', async function (req, res) {
+router.get('/:centerKey/timeline', requirePermission('provinces', 'view'), requireCenterAccess(function(req){ return decodeURIComponent(req.params.centerKey); }), async function (req, res) {
   try {
     const ck = decodeURIComponent(req.params.centerKey);
     const from = req.query.from || '1400/01/01';

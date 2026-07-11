@@ -411,6 +411,25 @@
     return res;
   }
 
+  window.syncImedExternal = async function () {
+    var btn = document.getElementById('imedSyncBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ در حال همگام‌سازی...'; }
+    try {
+      var result = await wmsFetch('/api/wms/imed/sync', {
+        method: 'POST',
+        body: JSON.stringify({ limit: 500 }),
+      });
+      await loadS();
+      if (typeof renderIMEDPage === 'function') renderIMEDPage();
+      updateBadges();
+      toast('IMED: ' + result.accepted + ' از ' + result.sent + ' تراکنش ثبت شد', result.rejected && result.rejected.length ? 'w' : 's');
+    } catch (e) {
+      toast('خطای IMED: ' + e.message, 'e');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '🔄 همگام‌سازی API'; }
+    }
+  };
+
   window.markImed = async function (txnId) {
     var ref = window.prompt('شماره ثبت IMED (اختیاری):');
     if (ref === null) return;
@@ -848,6 +867,7 @@
       var data = await wmsFetch('/api/wms/reports/valuation' + q);
       var rep = data.report;
       window._lastValuationReport = rep;
+      var varianceCount = rep.products.filter(function (p) { return p.qtyVariance !== 0; }).length;
       var rows = rep.products.map(function (p) {
         return '<tr><td><strong>' + p.productName + '</strong><br><code style="font-size:10px">' + (p.catalogCode || '') + '</code></td>' +
           '<td style="text-align:center;font-weight:700">' + fmt(p.qty) + '</td>' +
@@ -861,7 +881,9 @@
         '<span class="badge bb">' + rep.methodLabel + '</span>' +
         '<span class="badge bg">موجودی: ' + fmt(rep.totalQty) + '</span>' +
         '<span class="badge bt">ارزش: ' + fmt(Math.round(rep.totalValue / 1000000)) + ' M</span>' +
-        '<span class="badge bt">' + rep.productCount + ' کالا</span></div>' +
+        '<span class="badge bt">' + rep.productCount + ' کالا</span>' +
+        (varianceCount ? '<span class="badge br">⚠ ' + varianceCount + ' مغایرت</span>' : '') + '</div>' +
+        (varianceCount ? '<div class="imed-alert"><div style="flex:1"><strong>مغایرت بین گردش و موجودی Lot</strong><div style="font-size:11px;margin-top:3px">برای اصلاح، انبارگردانی ثبت کنید تا سند تعدیل ایجاد شود.</div></div><button class="btn btn-warn btn-sm" onclick="go(\'count\')">رفتن به انبارگردانی</button></div>' : '') +
         '<div class="card"><div class="card-title">💰 گزارش ارزش موجودی — ' + rep.methodLabel + '</div>' +
         '<div class="tw"><table><thead><tr><th>کالا</th><th style="text-align:center">موجودی</th><th style="text-align:center">بهای واحد</th>' +
         '<th>ارزش (' + rep.methodLabel + ')</th><th>ارزش Lot</th><th style="text-align:center">مغایرت sim</th></tr></thead>' +

@@ -11,7 +11,8 @@
     "vue:dev": "vite",
     "setup": "node server/setup.js",
     "migrate": "node -e \"require('./server/db').initSchema().then(()=>process.exit(0)).catch(e=>{console.error(e);process.exit(1)})\"",
-    "test": "node tests/unit.test.js && node tests/behavioral.test.js && node tests/security.test.js",
+    "test": "node tests/unit.test.js && node tests/behavioral.test.js && node tests/persistence.test.js && node tests/security.test.js",
+    "test:qa": "node tests/qa-persistence-agent.js",
     "predeploy": "node scripts/predeploy-check.js",
     "rotate-secrets": "node scripts/rotate-secrets-checklist.js"
   },

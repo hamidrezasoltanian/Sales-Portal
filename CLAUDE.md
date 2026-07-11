@@ -341,16 +341,16 @@ The receivables AI tab calls `https://api.anthropic.com/v1/messages` directly fr
 | Proforma SQL: zod validation, rowToObj mapper, manager-only approve/reject | server/routes/proforma.js | ✅ |
 | Proforma auto-migration: blob migrated to SQL on first startup | server/db.js _migrateProformasFromBlob() | ✅ |
 | Telegram bot: long-polling, CRM auth, proforma approve/reject inline keyboard, inventory check, QR scan | server/bot/telegram.js | ✅ |
-| Security middleware: helmet (CSP off) + compression (graceful fallback) | server/index.js | ✅ |
+| Security middleware: Helmet CSP + compression (graceful fallback) | server/index.js | ✅ |
 | Vite + TypeScript + Vue 3 scaffold for incremental frontend migration | src/ + vite.config.ts + tsconfig.json | ✅ (placeholder) |
 | Slim PUT save: routine saves omit destructive collections; `_fullSync` for import | public/js/core.js + server/routes/data.js | ✅ |
-| Weekplan PATCH saves: week entries + notes via `savePatchDB` | public/js/weekplan.js | ✅ |
+| Weekplan SQL-only saves: individual + bulk mutations use `/api/week-entries`; blob paths ignore weekEntries | public/js/weekplan.js + server/routes/data.js | ✅ |
 | Production env guard + pre-deploy checklist | server/lib/prod-guard.js + scripts/predeploy-check.js | ✅ |
 | Legacy bundle archived to `public/js/_legacy/` | not served | ✅ |
 | Lazy tab script loading | `public/js/tab-loader.js` | ✅ |
 | PATCH expanded: events, checklist, KPI, settings | `core.js` + `data.js` | ✅ |
 | Per-collection GET APIs | `/api/data/collections/events`, `checklist` | ✅ |
-| MTR accounting sync stub | `/api/mtr/sync` + settings toggle | ✅ |
+| MTR Faradis sync: server cache refresh + normalized rows + optional auto scheduler | `/api/mtr/sync` + `faradis-auto-sync.js` | ✅ |
 | Secret rotation checklist | `scripts/rotate-secrets-checklist.js` | ✅ |
 | Reports upgrade: SQL-backed activity/competitor/coverage tabs + Excel export | reports.js + /api/reports | ✅ |
 | KPI SQL load: GET /api/kpi-data (targets/history/province) in loadDB | core.js + kpi-data.js | ✅ |
@@ -359,6 +359,12 @@ The receivables AI tab calls `https://api.anthropic.com/v1/messages` directly fr
 | Proforma stats bar + invoiced status on invoice issue | proforma.js + invoices.js | ✅ |
 | Workflows module: user-definable processes + kanban | workflows.js + /api/workflows | ✅ |
 | CRM gaps: deals, files, KOL badges | center-deals.js + center-files.js | ✅ |
+| SQL route RBAC: center ownership for deals/files/reports/week entries/tasks; MTR module permission | center-access.js + route middleware | ✅ |
+| Session hardening: password change increments token_version and requires re-login | auth.js + routes/auth.js | ✅ |
+| Portable JSON backup: critical CRM/Workflow/Proforma/WMS collections restored; binary files via pg_dump | data.js `/backup` + `/restore` | ✅ |
+| Workflow center linkage: centerKey persisted and active instances shown in center modal | workflows.js + pricing.js | ✅ |
+| IMED external adapter: configurable API sync (`IMED_API_URL`, `IMED_API_TOKEN`) + manual fallback | integrations/imed.js + wms-ext | ✅ |
+| WMS UOM conversion metadata: base/secondary unit + conversion factor | wms_products + wms UI | ✅ |
 
 ## Canonical development branch
 

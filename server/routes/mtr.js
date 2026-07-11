@@ -3,11 +3,13 @@
 const express = require('express');
 const { query } = require('../db');
 const { requireAuth } = require('../auth');
+const { requirePermission } = require('../permissions');
 const faradis = require('../integrations/faradis');
 const { calcTodayJ, enrichMtrRow, gregToJalali } = require('../lib/jalali-utils');
 
 const router = express.Router();
 router.use(requireAuth);
+router.use(requirePermission('mtr', 'view'));
 
 function isManagerRole(role) {
   return role === 'مدیر' || role === 'سوپر ادمین';
@@ -51,6 +53,28 @@ async function upsertMetaInv(inv, meta, user) {
   );
 }
 
+const MTR_SETTING_KEYS = new Set(['mtrFollowerMap', 'mtrFollower', 'mtrTrend']);
+
+router.patch('/settings/:key', requirePermission('mtr', 'edit'), async function (req, res) {
+  try {
+    const key = req.params.key;
+    if (!MTR_SETTING_KEYS.has(key)) return res.status(400).json({ error: 'کلید نامعتبر' });
+    const value = req.body && Object.prototype.hasOwnProperty.call(req.body, 'value')
+      ? req.body.value : req.body;
+    await query(
+      `INSERT INTO app_settings (key, value, updated_at, updated_by)
+       VALUES ($1, $2::jsonb, NOW(), $3)
+       ON CONFLICT (key) DO UPDATE
+         SET value = EXCLUDED.value, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+      [key, JSON.stringify(value == null ? (key === 'mtrTrend' ? [] : {}) : value), req.user.username]
+    );
+    res.json({ ok: true, key });
+  } catch (e) {
+    console.error('[mtr/settings PATCH]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
 // GET /api/mtr/meta — bulk load all invoice meta (MTR UI)
 router.get('/meta', async function (req, res) {
   try {
@@ -69,7 +93,7 @@ router.get('/meta', async function (req, res) {
 });
 
 // PATCH /api/mtr/meta/:inv — upsert single invoice meta
-router.patch('/meta/:inv', async function (req, res) {
+router.patch('/meta/:inv', requirePermission('mtr', 'edit'), async function (req, res) {
   try {
     const inv = String(req.params.inv || '').trim();
     if (!inv || inv.length > 128) return res.status(400).json({ error: 'شماره فاکتور نامعتبر' });
@@ -90,7 +114,7 @@ router.patch('/meta/:inv', async function (req, res) {
 });
 
 // PUT /api/mtr/meta/bulk — bulk upsert (backup merge)
-router.put('/meta/bulk', async function (req, res) {
+router.put('/meta/bulk', requirePermission('mtr', 'edit'), async function (req, res) {
   try {
     const bulk = req.body || {};
     if (!bulk || typeof bulk !== 'object' || Array.isArray(bulk)) {
@@ -191,6 +215,34 @@ async function syncFaradisCaches() {
     results.factors = { ok: true, count };
   } catch (e) {
     results.factors = { ok: false, error: e.message };
+  }
+
+  try {
+    const customers = await faradis.fetchCustomers();
+    let count = 0;
+    for (const c of customers) {
+      await query(
+        `INSERT INTO faradis_customers_cache
+           (company_num, company_name, company_code, person_name, phone, phone2,
+            mobile, mobile2, fax, email, national_code, state_name, city_name,
+            address, type_name, synced_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW())
+         ON CONFLICT (company_num) DO UPDATE SET
+           company_name=$2, company_code=$3, person_name=$4, phone=$5, phone2=$6,
+           mobile=$7, mobile2=$8, fax=$9, email=$10, national_code=$11,
+           state_name=$12, city_name=$13, address=$14, type_name=$15, synced_at=NOW()`,
+        [
+          c.CompanyNum, c.CompanyName || '', c.CompanyCode || '', c.PersonName || '',
+          c.Phone1 || '', c.Phone2 || '', c.Mobile1 || '', c.Mobile2 || '',
+          c.FaxNum || '', c.Email || '', c.NationalCode || '',
+          c.StateName1 || '', c.CityName1 || '', c.Address1 || '', c.TypeName || '',
+        ]
+      );
+      count++;
+    }
+    results.customers = { ok: true, count };
+  } catch (e) {
+    results.customers = { ok: false, error: e.message };
   }
 
   return results;
@@ -325,4 +377,6 @@ router.post('/sync', async function (req, res) {
   }
 });
 
+router.syncFaradisCaches = syncFaradisCaches;
+router.buildRowsFromCache = buildRowsFromCache;
 module.exports = router;

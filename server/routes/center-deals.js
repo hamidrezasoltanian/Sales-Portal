@@ -3,6 +3,8 @@
 const express = require('express');
 const { query } = require('../db');
 const { requireAuth } = require('../auth');
+const { requirePermission } = require('../permissions');
+const { requireCenterAccess, userCanAccessCenter } = require('../lib/center-access');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -26,7 +28,7 @@ function rowToDeal(r) {
 }
 
 // GET /api/center-deals?center_key=...
-router.get('/', async function (req, res) {
+router.get('/', requirePermission('provinces', 'view'), requireCenterAccess(function(req){ return req.query.center_key; }), async function (req, res) {
   try {
     const ck = req.query.center_key;
     if (!ck) return res.status(400).json({ error: 'center_key الزامی است' });
@@ -42,7 +44,7 @@ router.get('/', async function (req, res) {
 });
 
 // POST /api/center-deals
-router.post('/', async function (req, res) {
+router.post('/', requirePermission('provinces', 'view'), requireCenterAccess(function(req){ return req.body && req.body.centerKey; }), async function (req, res) {
   try {
     const b = req.body || {};
     if (!b.centerKey) return res.status(400).json({ error: 'centerKey الزامی است' });
@@ -67,9 +69,14 @@ router.post('/', async function (req, res) {
 });
 
 // PUT /api/center-deals/:id
-router.put('/:id', async function (req, res) {
+router.put('/:id', requirePermission('provinces', 'view'), async function (req, res) {
   try {
     const b = req.body || {};
+    const accessR = await query('SELECT center_key FROM center_deals WHERE id = $1', [req.params.id]);
+    if (!accessR.rows.length) return res.status(404).json({ error: 'یافت نشد' });
+    if (!(await userCanAccessCenter(req.user, accessR.rows[0].center_key))) {
+      return res.status(403).json({ error: 'دسترسی به این مرکز مجاز نیست' });
+    }
     const r = await query(
       `UPDATE center_deals SET
          title = COALESCE($2, title),
@@ -99,8 +106,13 @@ router.put('/:id', async function (req, res) {
 });
 
 // DELETE /api/center-deals/:id
-router.delete('/:id', async function (req, res) {
+router.delete('/:id', requirePermission('provinces', 'view'), async function (req, res) {
   try {
+    const accessR = await query('SELECT center_key FROM center_deals WHERE id = $1', [req.params.id]);
+    if (!accessR.rows.length) return res.status(404).json({ error: 'یافت نشد' });
+    if (!(await userCanAccessCenter(req.user, accessR.rows[0].center_key))) {
+      return res.status(403).json({ error: 'دسترسی به این مرکز مجاز نیست' });
+    }
     const r = await query('DELETE FROM center_deals WHERE id = $1 RETURNING id', [req.params.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'یافت نشد' });
     res.json({ ok: true });

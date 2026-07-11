@@ -240,7 +240,7 @@ router.put('/db', async (req, res) => {
 
     const { edits, notes, rTags, tags, settings, events, checklist, kpiTargets,
             extra, salesLog, callLog, visitLog, missionLog, provHistory, kpiHistory,
-            weekEntries, _weDeletedKeys, _mtr, provOverrides } = body;
+            _mtr, provOverrides } = body;
     const fullSync = body._fullSync === true;
 
     // ── center_edits ──────────────────────────────────────────────────────────
@@ -531,23 +531,8 @@ router.put('/db', async (req, res) => {
       }
     }
 
-    // ── week_entries ──────────────────────────────────────────────────────────
-    const incomingWE = weekEntries || {};
-    const deletedKeys = (Array.isArray(_weDeletedKeys) ? _weDeletedKeys : [])
-      .filter(function(k) { return !incomingWE[k]; });
-    if (deletedKeys.length > 0) {
-      await client.query('DELETE FROM week_entries WHERE key = ANY($1::text[])', [deletedKeys])
-        .catch(function(e) { console.warn('[week_entries DELETE]', e.message); });
-    }
-    if (Object.keys(incomingWE).length > 0) {
-      await client.query(
-        `INSERT INTO week_entries (key, value, updated_at, updated_by)
-         SELECT e.key, e.value, NOW(), $2 FROM jsonb_each($1::jsonb) AS e(key, value)
-         ON CONFLICT (key) DO UPDATE
-           SET value = EXCLUDED.value, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
-        [JSON.stringify(incomingWE), user]
-      ).catch(function(e) { console.error('[week_entries upsert FAILED]', e.message); throw e; });
-    }
+    // Week entries are exclusively persisted through /api/week-entries.
+    // Ignoring legacy blob fields prevents stale tabs from overwriting schedules.
 
     // ── _mtr ──────────────────────────────────────────────────────────────────
     if (_mtr) {
@@ -574,7 +559,7 @@ router.put('/db', async (req, res) => {
     try {
       const dbSnap = {
         edits, notes, rTags, tags, settings, provOverrides, events, checklist, kpiTargets,
-        extra, salesLog, callLog, visitLog, weekEntries: incomingWE
+        extra, salesLog, callLog, visitLog
       };
       await client.query(
         `INSERT INTO app_data_history (key, value, saved_by)
@@ -620,6 +605,20 @@ router.patch('/patch', async (req, res) => {
     const _cid = req.headers['x-cid'] || '';
     const _clientTs = body._clientTs || null;
 
+    const metaRow = await client.query(
+      "SELECT value, updated_at, updated_by FROM app_data WHERE key = '_db_meta' FOR UPDATE"
+    );
+    if (metaRow.rows.length && metaRow.rows[0].updated_at && _clientTs) {
+      const serverTs = metaRow.rows[0].updated_at.toISOString();
+      const lastBy = metaRow.rows[0].updated_by || null;
+      const lastCid = (metaRow.rows[0].value || {}).cid || null;
+      const differentClient = lastBy !== user || (lastCid && lastCid !== _cid);
+      if (serverTs !== _clientTs && differentClient) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'تغییرات هم‌زمان شناسایی شد؛ داده تازه‌سازی شود', by: lastBy });
+      }
+    }
+
     const ownerCtx = await loadOwnerContext(client);
     const rbac = filterPutBodyForUser(body, req.user, ownerCtx.edits, ownerCtx.ownerMaps);
     const patch = rbac.body;
@@ -627,7 +626,7 @@ router.patch('/patch', async (req, res) => {
       console.warn('[data/patch] RBAC stripped keys for', user, rbac.rejected.slice(0, 5));
     }
 
-    const { edits, notes, rTags, tags, weekEntries, _weDeletedKeys,
+    const { edits, notes, rTags, tags,
             events, checklist, settings, kpiTargets, provOverrides, _deletedEventIds, extra } = patch;
 
     if (edits && typeof edits === 'object' && Object.keys(edits).length > 0) {
@@ -669,24 +668,7 @@ router.patch('/patch', async (req, res) => {
       );
     }
 
-    const incomingWE = weekEntries || {};
-    const deletedKeys = (Array.isArray(_weDeletedKeys) ? _weDeletedKeys : [])
-      .filter(function (k) { return !incomingWE[k]; });
-    if (deletedKeys.length > 0) {
-      await client.query(
-        'DELETE FROM week_entries WHERE key = ANY($1::text[])',
-        [deletedKeys]
-      ).catch(function (e) { console.warn('[patch week_entries DELETE]', e.message); });
-    }
-    if (Object.keys(incomingWE).length > 0) {
-      await client.query(
-        `INSERT INTO week_entries (key, value, updated_at, updated_by)
-         SELECT e.key, e.value, NOW(), $2 FROM jsonb_each($1::jsonb) AS e(key, value)
-         ON CONFLICT (key) DO UPDATE
-           SET value = EXCLUDED.value, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
-        [JSON.stringify(incomingWE), user]
-      );
-    }
+    // Week entries are exclusively persisted through /api/week-entries.
 
     if (events && Array.isArray(events)) {
       for (const ev of events) {
@@ -1128,7 +1110,7 @@ router.post('/history/:id/restore', requireManager, async (req, res) => {
 });
 
 // GET /api/data/mtr
-router.get('/mtr', async (req, res) => {
+router.get('/mtr', requirePermission('mtr', 'view'), async (req, res) => {
   try {
     const result = await query("SELECT value FROM app_data WHERE key = 'mtr'");
     if (result.rows.length === 0) {
@@ -1142,7 +1124,7 @@ router.get('/mtr', async (req, res) => {
 });
 
 // PUT /api/data/mtr
-router.put('/mtr', async (req, res) => {
+router.put('/mtr', requirePermission('mtr', 'edit'), async (req, res) => {
   const body = req.body;
   if (!body || typeof body !== 'object') {
     return res.status(400).json({ error: 'داده نامعتبر' });
@@ -1216,14 +1198,88 @@ router.put('/centers/master', requirePermission('provinces', 'edit'), async (req
   }
 });
 
-// GET /api/data/backup — manager only
+const JSON_BACKUP_TABLES = [
+  'tasks', 'notifications', 'change_log', 'mtr_invoice_meta',
+  'workflow_definitions', 'workflow_instances', 'workflow_transitions',
+  'center_deals',
+  'proformas', 'invoices',
+  'wms_products', 'wms_warehouses', 'wms_counterparties', 'wms_fiscal_years',
+  'wms_lots', 'wms_transactions', 'wms_purchase_orders', 'wms_recalls',
+  'wms_opening_balances', 'wms_audit_log', 'wms_settings',
+];
+
+async function exportJsonCollections() {
+  const collections = {};
+  for (const table of JSON_BACKUP_TABLES) {
+    const result = await query('SELECT * FROM ' + table).catch(function () { return { rows: [] }; });
+    collections[table] = result.rows;
+  }
+  return collections;
+}
+
+function normalizeBackupValue(value) {
+  if (value && value.type === 'Buffer' && Array.isArray(value.data)) return Buffer.from(value.data);
+  if (value !== null && typeof value === 'object' && !(value instanceof Date) && !Buffer.isBuffer(value)) {
+    return JSON.stringify(value);
+  }
+  return value;
+}
+
+async function restoreJsonCollections(collections) {
+  if (!collections || typeof collections !== 'object') return;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const table of JSON_BACKUP_TABLES.slice().reverse()) {
+      if (Array.isArray(collections[table])) await client.query('DELETE FROM ' + table);
+    }
+    for (const table of JSON_BACKUP_TABLES) {
+      const rows = collections[table];
+      if (!Array.isArray(rows) || !rows.length) continue;
+      const colsR = await client.query(
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = $1 AND is_generated = 'NEVER'
+         ORDER BY ordinal_position`,
+        [table]
+      );
+      const allowed = new Set(colsR.rows.map(function (r) { return r.column_name; }));
+      for (const row of rows) {
+        const cols = Object.keys(row).filter(function (key) { return allowed.has(key); });
+        if (!cols.length) continue;
+        const params = cols.map(function (key) { return normalizeBackupValue(row[key]); });
+        const placeholders = cols.map(function (_, i) { return '$' + (i + 1); });
+        await client.query(
+          'INSERT INTO ' + table + ' (' + cols.map(function (c) { return '"' + c + '"'; }).join(',') + ') VALUES (' + placeholders.join(',') + ')',
+          params
+        );
+      }
+      const seqR = await client.query('SELECT pg_get_serial_sequence($1, $2) AS seq', [table, 'id']).catch(function () { return { rows: [] }; });
+      if (seqR.rows[0] && seqR.rows[0].seq) {
+        await client.query(
+          `SELECT setval($1, COALESCE((SELECT MAX(id) FROM ${table}), 1), true)`,
+          [seqR.rows[0].seq]
+        );
+      }
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK').catch(function () {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+// GET /api/data/backup — manager-only portable JSON snapshot.
+// Binary center_files remain covered by scheduled/full pg_dump backups.
 router.get('/backup', requireManager, async (req, res) => {
   try {
-    const [db, mtrR, usersR, centersR] = await Promise.all([
+    const [db, mtrR, usersR, centersR, collections] = await Promise.all([
       loadDBFromSQL(),
       query("SELECT value FROM app_data WHERE key = 'mtr'"),
       query('SELECT username, display_name, role, color, phone, active FROM app_users ORDER BY username'),
       query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS', 'PC_RAW')"),
+      exportJsonCollections(),
     ]);
 
     const centers = { CENTERS: [], PC_RAW: {} };
@@ -1238,6 +1294,8 @@ router.get('/backup', requireManager, async (req, res) => {
       users: usersR.rows,
       centers: centers,
       weekEntries: db.weekEntries || {},
+      collections: collections,
+      scope: 'portable-json-without-binary-center-files',
       exportedAt: new Date().toISOString(),
     });
   } catch (e) {
@@ -1248,7 +1306,7 @@ router.get('/backup', requireManager, async (req, res) => {
 
 // POST /api/data/restore
 router.post('/restore', requireManager, async (req, res) => {
-  const { db, mtr, users, centers, weekEntries } = req.body || {};
+  const { db, mtr, users, centers, weekEntries, collections } = req.body || {};
   const user = req.user.username;
 
   try {
@@ -1495,7 +1553,11 @@ router.post('/restore', requireManager, async (req, res) => {
       );
     }
 
-    return res.json({ ok: true });
+    if (collections && typeof collections === 'object') {
+      await restoreJsonCollections(collections);
+    }
+
+    return res.json({ ok: true, collectionsRestored: !!collections });
   } catch (e) {
     console.error('[data/restore]', e.message);
     return res.status(500).json({ error: 'خطای سرور' });
@@ -1535,7 +1597,7 @@ router.get('/debug/center', requireManager, async (req, res) => {
 });
 
 // GET /api/data/kv/:key  — generic key-value read (for MTR meta etc.)
-router.get('/kv/:key', async (req, res) => {
+router.get('/kv/:key', requireManager, async (req, res) => {
   const key = req.params.key.replace(/[^a-z0-9_-]/gi, '_');
   try {
     const result = await query('SELECT value FROM app_data WHERE key = $1', [key]);
@@ -1546,7 +1608,7 @@ router.get('/kv/:key', async (req, res) => {
 });
 
 // PUT /api/data/kv/:key  — generic key-value write
-router.put('/kv/:key', async (req, res) => {
+router.put('/kv/:key', requireManager, async (req, res) => {
   const key = req.params.key.replace(/[^a-z0-9_-]/gi, '_');
   const body = req.body;
   if (body === undefined || body === null) return res.status(400).json({ error: 'داده الزامی' });

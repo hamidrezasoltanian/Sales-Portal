@@ -3,6 +3,9 @@
 const express = require('express');
 const { query } = require('../db');
 const { requireAuth, requireManager } = require('../auth');
+const { requirePermission } = require('../permissions');
+const { isManagerRole } = require('../lib/roles');
+const { loadCenterAccessContext, canAccessCenter } = require('../lib/center-access');
 
 const router = express.Router();
 
@@ -28,9 +31,26 @@ function rowToObj(r) {
   };
 }
 
+async function canAccessTask(user, task, context) {
+  if (isManagerRole(user.role)) return true;
+  if (task.owner === user.username || task.created_by === user.username) return true;
+  if (task.center_key) {
+    const ctx = context || await loadCenterAccessContext();
+    return canAccessCenter(user, task.center_key, ctx);
+  }
+  return false;
+}
+
+async function loadAuthorizedTask(req, id) {
+  const r = await query('SELECT * FROM tasks WHERE id = $1', [id]);
+  if (!r.rows.length) return { status: 404 };
+  if (!(await canAccessTask(req.user, r.rows[0]))) return { status: 403 };
+  return { status: 200, row: r.rows[0] };
+}
+
 // ── GET /api/tasks ─────────────────────────────────────────────────────────
 // Query params: ?owner=, ?status=, ?overdue=true
-router.get('/', requireAuth, async function (req, res) {
+router.get('/', requireAuth, requirePermission('tasks', 'view'), async function (req, res) {
   try {
     const conditions = [];
     const params = [];
@@ -52,7 +72,15 @@ router.get('/', requireAuth, async function (req, res) {
       `SELECT * FROM tasks ${where} ORDER BY created_at DESC`,
       params
     );
-    res.json(result.rows.map(rowToObj));
+    let rows = result.rows;
+    if (!isManagerRole(req.user.role)) {
+      const context = await loadCenterAccessContext();
+      rows = rows.filter(function (task) {
+        return task.owner === req.user.username || task.created_by === req.user.username
+          || (task.center_key && canAccessCenter(req.user, task.center_key, context));
+      });
+    }
+    res.json(rows.map(rowToObj));
   } catch (e) {
     console.error('[tasks GET /]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
@@ -60,11 +88,20 @@ router.get('/', requireAuth, async function (req, res) {
 });
 
 // ── POST /api/tasks ────────────────────────────────────────────────────────
-router.post('/', requireAuth, async function (req, res) {
+router.post('/', requireAuth, requirePermission('tasks', 'edit'), async function (req, res) {
   try {
     const { id, title, owner, dueDate, priority, status, centerKey, note, subtasks, createdBy, recurring, activity, department } = req.body;
     if (!id || !title) {
       return res.status(400).json({ error: 'شناسه و عنوان وظیفه الزامی است' });
+    }
+    if (!isManagerRole(req.user.role) && owner && owner !== req.user.username) {
+      return res.status(403).json({ error: 'کارشناس فقط می‌تواند برای خودش وظیفه بسازد' });
+    }
+    if (centerKey && !isManagerRole(req.user.role)) {
+      const context = await loadCenterAccessContext();
+      if (!canAccessCenter(req.user, centerKey, context)) {
+        return res.status(403).json({ error: 'دسترسی به این مرکز مجاز نیست' });
+      }
     }
     const result = await query(
       `INSERT INTO tasks (id, title, owner, due_date, priority, status, center_key, note, subtasks, created_by, recurring, activity, department)
@@ -103,13 +140,11 @@ router.post('/', requireAuth, async function (req, res) {
 });
 
 // ── GET /api/tasks/:id ─────────────────────────────────────────────────────
-router.get('/:id', requireAuth, async function (req, res) {
+router.get('/:id', requireAuth, requirePermission('tasks', 'view'), async function (req, res) {
   try {
-    const result = await query('SELECT * FROM tasks WHERE id = $1', [req.params.id]);
-    if (!result.rows.length) {
-      return res.status(404).json({ error: 'وظیفه یافت نشد' });
-    }
-    res.json(rowToObj(result.rows[0]));
+    const access = await loadAuthorizedTask(req, req.params.id);
+    if (access.status !== 200) return res.status(access.status).json({ error: access.status === 404 ? 'وظیفه یافت نشد' : 'دسترسی مجاز نیست' });
+    res.json(rowToObj(access.row));
   } catch (e) {
     console.error('[tasks GET /:id]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
@@ -117,9 +152,20 @@ router.get('/:id', requireAuth, async function (req, res) {
 });
 
 // ── PUT /api/tasks/:id ─────────────────────────────────────────────────────
-router.put('/:id', requireAuth, async function (req, res) {
+router.put('/:id', requireAuth, requirePermission('tasks', 'edit'), async function (req, res) {
   try {
+    const access = await loadAuthorizedTask(req, req.params.id);
+    if (access.status !== 200) return res.status(access.status).json({ error: access.status === 404 ? 'وظیفه یافت نشد' : 'دسترسی مجاز نیست' });
     const { title, status, owner, dueDate, note, subtasks, done, centerKey, priority, recurring, activity } = req.body;
+    if (!isManagerRole(req.user.role) && owner !== undefined && owner !== req.user.username) {
+      return res.status(403).json({ error: 'تغییر مسئول به کاربر دیگر مجاز نیست' });
+    }
+    if (!isManagerRole(req.user.role) && centerKey) {
+      const context = await loadCenterAccessContext();
+      if (!canAccessCenter(req.user, centerKey, context)) {
+        return res.status(403).json({ error: 'دسترسی به این مرکز مجاز نیست' });
+      }
+    }
     const result = await query(
       `UPDATE tasks
        SET title      = COALESCE($1, title),
@@ -162,8 +208,10 @@ router.put('/:id', requireAuth, async function (req, res) {
 });
 
 // ── DELETE /api/tasks/:id ──────────────────────────────────────────────────
-router.delete('/:id', requireAuth, async function (req, res) {
+router.delete('/:id', requireAuth, requirePermission('tasks', 'edit'), async function (req, res) {
   try {
+    const access = await loadAuthorizedTask(req, req.params.id);
+    if (access.status !== 200) return res.status(access.status).json({ error: access.status === 404 ? 'وظیفه یافت نشد' : 'دسترسی مجاز نیست' });
     const result = await query('DELETE FROM tasks WHERE id = $1 RETURNING id', [req.params.id]);
     if (!result.rows.length) {
       return res.status(404).json({ error: 'وظیفه یافت نشد' });
@@ -176,8 +224,10 @@ router.delete('/:id', requireAuth, async function (req, res) {
 });
 
 // ── POST /api/tasks/:id/comment ───────────────────────────────────────────
-router.post('/:id/comment', requireAuth, async function (req, res) {
+router.post('/:id/comment', requireAuth, requirePermission('tasks', 'edit'), async function (req, res) {
   try {
+    const access = await loadAuthorizedTask(req, req.params.id);
+    if (access.status !== 200) return res.status(access.status).json({ error: access.status === 404 ? 'وظیفه یافت نشد' : 'دسترسی مجاز نیست' });
     const { text } = req.body;
     if (!text || !text.trim()) {
       return res.status(400).json({ error: 'متن کامنت الزامی است' });
@@ -198,8 +248,10 @@ router.post('/:id/comment', requireAuth, async function (req, res) {
 });
 
 // ── POST /api/tasks/:id/done ───────────────────────────────────────────────
-router.post('/:id/done', requireAuth, async function (req, res) {
+router.post('/:id/done', requireAuth, requirePermission('tasks', 'edit'), async function (req, res) {
   try {
+    const access = await loadAuthorizedTask(req, req.params.id);
+    if (access.status !== 200) return res.status(access.status).json({ error: access.status === 404 ? 'وظیفه یافت نشد' : 'دسترسی مجاز نیست' });
     const result = await query(
       `UPDATE tasks SET done = true, done_at = NOW(), status = 'done', updated_at = NOW()
        WHERE id = $1 RETURNING *`,

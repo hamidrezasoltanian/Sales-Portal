@@ -207,8 +207,8 @@ router.post('/:username/set-password', requireManager, async (req, res) => {
   const { username } = req.params;
   const { password } = req.body || {};
 
-  if (!password || password.length < 4) {
-    return res.status(400).json({ error: 'رمز باید حداقل ۴ کاراکتر باشد' });
+  if (!password || password.length < 8) {
+    return res.status(400).json({ error: 'رمز باید حداقل ۸ کاراکتر باشد' });
   }
 
   try {

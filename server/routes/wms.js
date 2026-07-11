@@ -24,6 +24,7 @@ router.use((req, res, next) => {
 function rowToProduct(r) {
   return { id:r.id, name:r.name, fullName:r.full_name, brand:r.brand, size:r.size,
            catalogCode:r.catalog_code, ircCode:r.irc_code, unit:r.unit,
+           secondaryUnit:r.secondary_unit || '', conversionFactor:Number(r.conversion_factor || 1),
            category:r.category, reorderPoint:r.reorder_point,
            salePrice:Number(r.sale_price||0), note:r.note, active:r.active };
 }
@@ -430,10 +431,11 @@ router.post('/products', requireAuth, async (req, res) => {
     if (!b.name) return res.status(400).json({ error: 'نام محصول الزامی است' });
     const id = _genId();
     const r = await query(
-      `INSERT INTO wms_products (id,name,full_name,brand,size,catalog_code,irc_code,unit,category,reorder_point,sale_price,note,active,updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,NOW()) RETURNING *`,
+      `INSERT INTO wms_products (id,name,full_name,brand,size,catalog_code,irc_code,unit,category,reorder_point,sale_price,note,secondary_unit,conversion_factor,active,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,true,NOW()) RETURNING *`,
       [id, b.name, b.fullName||'', b.brand||'', b.size||'', b.catalogCode||'',
-       b.ircCode||'', b.unit||'عدد', b.category||'', b.reorderPoint||10, b.salePrice||0, b.note||'']
+       b.ircCode||'', b.unit||'عدد', b.category||'', b.reorderPoint||10, b.salePrice||0, b.note||'',
+       b.secondaryUnit||null, Number(b.conversionFactor)||1]
     );
     res.status(201).json(rowToProduct(r.rows[0]));
   } catch(e) {
@@ -450,11 +452,13 @@ router.put('/products/:id', requireAuth, async (req, res) => {
          name=COALESCE($2,name), full_name=COALESCE($3,full_name), brand=COALESCE($4,brand),
          size=COALESCE($5,size), catalog_code=COALESCE($6,catalog_code), irc_code=COALESCE($7,irc_code),
          unit=COALESCE($8,unit), category=COALESCE($9,category), reorder_point=COALESCE($10,reorder_point),
-         sale_price=COALESCE($11,sale_price), note=COALESCE($12,note), updated_at=NOW()
+         sale_price=COALESCE($11,sale_price), note=COALESCE($12,note),
+         secondary_unit=COALESCE($13,secondary_unit), conversion_factor=COALESCE($14,conversion_factor), updated_at=NOW()
        WHERE id=$1 AND active=true RETURNING *`,
       [req.params.id, b.name||null, b.fullName||null, b.brand||null, b.size||null,
        b.catalogCode||null, b.ircCode||null, b.unit||null, b.category||null,
-       b.reorderPoint||null, b.salePrice != null ? Number(b.salePrice) : null, b.note||null]
+       b.reorderPoint||null, b.salePrice != null ? Number(b.salePrice) : null, b.note||null,
+       b.secondaryUnit||null, b.conversionFactor != null ? Number(b.conversionFactor) : null]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'محصول یافت نشد' });
     res.json(rowToProduct(r.rows[0]));

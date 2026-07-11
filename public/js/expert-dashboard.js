@@ -369,8 +369,9 @@
     var d = we.scheduledDate || '';
     var isToday = d === today;
     var dayLbl = isToday ? '<span style="color:#6366f1;font-weight:700">امروز</span>' : (_dayName(d) + ' ' + (d.slice(8) || ''));
-    var typeIcon = we.actionType === 'visit' ? '🤝' : '📞';
-    var typeLabel = we.actionType === 'visit' ? 'ملاقات حضوری' : 'تماس تلفنی';
+    var actionLabel = typeof wpActLabel === 'function' ? wpActLabel(we.actionType || 'call') : (we.actionType === 'visit' ? '🤝 ملاقات حضوری' : '📞 تماس تلفنی');
+    var typeIcon = actionLabel.split(' ')[0];
+    var typeLabel = actionLabel.substring(typeIcon.length).trim();
     
     return '<div class="db-list-item">' +
       '<div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1">' +

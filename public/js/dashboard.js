@@ -350,7 +350,7 @@ function _renderExpertUserPanel(el){
     if(ts>=wb.startTs&&ts<=wb.endTs)callsWeek+=parseInt(l.count)||1;
   });
   Object.values(DB.weekEntries||{}).forEach(function(we){
-    if(!we.done||we.actionType==='visit'||!we.doneDate)return;
+    if(!we.done||(we.actionType||'call')!=='call'||!we.doneDate)return;
     var ts=dateStrToTs(we.doneDate);if(!ts||ts<wb.startTs||ts>wb.endTs)return;
     var owner=(_getOwnerForRecKey?_getOwnerForRecKey(we.recKey||''):'')||we.addedBy||'';
     if(owner===currentUser)callsWeek++;
@@ -456,7 +456,8 @@ function _renderExpertUserPanel(el){
   } else {
     html+='<div style="display:flex;flex-direction:column;gap:4px;max-height:130px;overflow-y:auto">';
     todayItems.forEach(function(it){
-      var ic=it.actionType==='visit'?'🚗':'📞';
+      var actionLabel=typeof wpActLabel==='function'?wpActLabel(it.actionType||'call'):(it.actionType==='visit'?'🚗 ویزیت':'📞 تماس');
+      var ic=actionLabel.split(' ')[0];
       html+='<div onclick="openCenterModal(\''+it.rtype+'\',\''+it.id+'\')" style="display:flex;align-items:center;gap:5px;padding:5px 7px;background:'+(it.done?'#f0fdf4':'var(--bg-raised)')+';border-radius:5px;cursor:pointer;border:1px solid '+(it.done?'#bbf7d0':'var(--border)')+';font-size:11px">'
         +'<span>'+(it.done?'✅':ic)+'</span>'
         +'<span style="flex:1;'+(it.done?'text-decoration:line-through;opacity:.7':'')+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(it.name)+'</span>'

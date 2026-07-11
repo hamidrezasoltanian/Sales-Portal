@@ -25,8 +25,13 @@ function _dealRenderList(el, ck, deals, rtype, rid, domId) {
       + ['A', 'B', 'C'].map(function (g) { return '<option' + (d.grade === g ? ' selected' : '') + '>' + g + '</option>'; }).join('')
       + '</select>'
       + '<input type="number" value="' + (d.valueMillion || 0) + '" min="0" step="0.1" title="ارزش (M)" onchange="_dealUpdate(\'' + d.id + '\',\'valueMillion\',parseFloat(this.value)||0)" style="width:60px;font-size:10px;padding:2px 4px;border:1px solid var(--border-input);border-radius:4px"> M'
-      + '<span style="color:var(--text-muted)">' + (probFa[d.probability] || d.probability) + '</span>'
-      + (d.expectedClose ? '<span>📅 ' + esc(d.expectedClose) + '</span>' : '')
+      + '<select title="احتمال موفقیت" onchange="_dealUpdate(\'' + d.id + '\',\'probability\',this.value)" style="font-size:10px;padding:2px 4px;border-radius:4px">'
+      + ['low','medium','high'].map(function(p){return '<option value="'+p+'"'+(d.probability===p?' selected':'')+'>'+probFa[p]+'</option>';}).join('')
+      + '</select>'
+      + '<input type="text" readonly value="' + esc(d.expectedClose || '') + '" placeholder="تاریخ بستن" title="تاریخ مورد انتظار" onclick="var i=this;openJDP(i,function(v){i.value=v;_dealUpdate(\''+d.id+'\',\'expectedClose\',v);})" style="width:82px;font-size:10px;padding:2px 4px;border:1px solid var(--border-input);border-radius:4px;cursor:pointer">'
+      + '<select title="وضعیت فرصت" onchange="_dealUpdate(\'' + d.id + '\',\'status\',this.value)" style="font-size:10px;padding:2px 4px;border-radius:4px">'
+      + [['open','باز'],['won','موفق'],['lost','از دست رفته']].map(function(s){return '<option value="'+s[0]+'"'+(d.status===s[0]?' selected':'')+'>'+s[1]+'</option>';}).join('')
+      + '</select>'
       + '</div></div>'
       + '<button onclick="_dealDelete(\'' + d.id + '\',\'' + ck + '\',\'' + domId + '\',\'' + rtype + '\',\'' + rid + '\')" style="background:#fee2e2;color:#dc2626;border:none;border-radius:4px;padding:2px 6px;cursor:pointer;font-size:11px">✕</button>'
       + '</div></div>';

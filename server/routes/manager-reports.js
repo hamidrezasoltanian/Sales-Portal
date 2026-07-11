@@ -3,6 +3,8 @@
 const express = require('express');
 const { query } = require('../db');
 const { requireAuth, requireManager } = require('../auth');
+const { resolveCenterOwner } = require('../lib/center-ownership');
+const { loadCenterAccessContext } = require('../lib/center-access');
 
 const router = express.Router();
 router.use(requireAuth, requireManager);
@@ -28,6 +30,14 @@ function mapWeekEntry(r) {
   };
 }
 
+function filterWeekRowsForOwner(rows, username, context) {
+  return rows.filter(function (row) {
+    const centerKey = row.rtype && row.rid ? row.rtype + '_' + row.rid : row.rec_key;
+    const owner = centerKey ? resolveCenterOwner(centerKey, context.edits, context.ownerMaps) : null;
+    return (owner || row.added_by) === username;
+  });
+}
+
 // GET /api/manager-reports/expert/:username?from=&to=
 router.get('/expert/:username', async function (req, res) {
   try {
@@ -35,14 +45,14 @@ router.get('/expert/:username', async function (req, res) {
     const from = req.query.from || '1400/01/01';
     const to = req.query.to || '1410/12/29';
 
-    const [weR, actR, salesR, pfR] = await Promise.all([
+    const [weR, actR, salesR, pfR, ownerContext] = await Promise.all([
       query(
         `SELECT id, week_id, rtype, rid, center_name, scheduled_date, action_type,
-                done, done_date, value, added_by
+                done, done_date, value, added_by, rec_key
          FROM week_entries
-         WHERE added_by = $1 AND scheduled_date >= $2 AND scheduled_date <= $3
+         WHERE scheduled_date >= $1 AND scheduled_date <= $2
          ORDER BY scheduled_date DESC`,
-        [username, from, to]
+        [from, to]
       ),
       query(
         `SELECT date, username, count, note, 'call' AS kind FROM call_log
@@ -64,9 +74,10 @@ router.get('/expert/:username', async function (req, res) {
          ORDER BY created_at DESC LIMIT 100`,
         [username, from, to]
       ).catch(function () { return { rows: [] }; }),
+      loadCenterAccessContext(),
     ]);
 
-    const weekEntries = weR.rows.map(mapWeekEntry);
+    const weekEntries = filterWeekRowsForOwner(weR.rows, username, ownerContext).map(mapWeekEntry);
     const planned = weekEntries.length;
     const done = weekEntries.filter(function (w) { return w.done; }).length;
 
@@ -107,23 +118,20 @@ router.get('/expert/:username/done-logs', async function (req, res) {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
     const offset = (page - 1) * limit;
-
-    const countR = await query(
-      `SELECT COUNT(*)::int AS cnt FROM week_entries
-       WHERE added_by = $1 AND scheduled_date >= $2 AND scheduled_date <= $3 AND done = TRUE`,
-      [username, from, to]
-    );
-    const total = countR.rows[0]?.cnt || 0;
-
-    const r = await query(
+    const [r, ownerContext] = await Promise.all([
+      query(
       `SELECT id, week_id, rtype, rid, center_name, scheduled_date, action_type,
-              done, done_date, value, added_by
+              done, done_date, value, added_by, rec_key
        FROM week_entries
-       WHERE added_by = $1 AND scheduled_date >= $2 AND scheduled_date <= $3 AND done = TRUE
-       ORDER BY done_date DESC NULLS LAST, scheduled_date DESC
-       LIMIT $4 OFFSET $5`,
-      [username, from, to, limit, offset]
-    );
+       WHERE scheduled_date >= $1 AND scheduled_date <= $2 AND done = TRUE
+       ORDER BY done_date DESC NULLS LAST, scheduled_date DESC`,
+      [from, to]
+      ),
+      loadCenterAccessContext(),
+    ]);
+    const ownedRows = filterWeekRowsForOwner(r.rows, username, ownerContext);
+    const total = ownedRows.length;
+    const pageRows = ownedRows.slice(offset, offset + limit);
 
     res.json({
       ok: true,
@@ -134,7 +142,7 @@ router.get('/expert/:username/done-logs', async function (req, res) {
       limit,
       total,
       pages: Math.ceil(total / limit) || 1,
-      entries: r.rows.map(mapWeekEntry),
+      entries: pageRows.map(mapWeekEntry),
     });
   } catch (e) {
     console.error('[manager-reports done-logs]', e.message);

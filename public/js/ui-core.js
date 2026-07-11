@@ -35,7 +35,7 @@ function switchTab(tab){
   currentTab=tab;
   try{localStorage.setItem('_st',tab);}catch(e){}
   _navPush(tab, null);
-  ['home','provinces','weekplan','calendar','checklist','activity','changelog','tasks','manager','kpi','mtr','pricing','proforma','reports','hcp','letters'].forEach(function(t){
+  ['home','provinces','weekplan','calendar','checklist','activity','changelog','tasks','manager','kpi','mtr','pricing','proforma','reports','hcp','letters','workflows'].forEach(function(t){
     var b=document.getElementById('tab_'+t);if(b)b.classList.toggle('active',t===tab);
   });
   document.getElementById('dash').style.display=(tab==='provinces')?'':'none';
@@ -64,6 +64,7 @@ function switchTab(tab){
   var _wpp=document.getElementById('weekPlannerPanel');if(_wpp)_wpp.style.display=(tab==='week-planner')?'':'none';
   var _fmp=document.getElementById('faradisMatchPanel');if(_fmp)_fmp.style.display=(tab==='faradis-match')?'':'none';
   var lettersP=document.getElementById('lettersPanel');if(lettersP)lettersP.style.display=(tab==='letters')?'':'none';
+  var workflowsP=document.getElementById('workflowsPanel');if(workflowsP)workflowsP.style.display=(tab==='workflows')?'':'none';
   if(tab==='letters'&&typeof window._lettersVueLoad==='function')window._lettersVueLoad();
   // update mobile nav
   (function(){document.querySelectorAll('.mob-tab').forEach(function(btn){var fn=btn.getAttribute('onclick')||'';var m=fn.match(/switchTab\('([^']+)'\)/);if(m)btn.classList.toggle('active',m[1]===tab);});})();
@@ -117,6 +118,7 @@ function switchTab(tab){
   else if(tab==='reports'&&typeof renderReportsPanel==='function')_safeRender(renderReportsPanel,'reports');
   else if(tab==='week-planner'&&typeof renderWeekPlannerPanel==='function')_safeRender(renderWeekPlannerPanel,'week-planner');
   else if(tab==='faradis-match'&&typeof renderFaradisMatchPanel==='function')_safeRender(renderFaradisMatchPanel,'faradis-match');
+  else if(tab==='workflows'&&typeof renderWorkflowsPanel==='function')_safeRender(renderWorkflowsPanel,'workflows');
   var _clBtn=document.getElementById('tab_changelog');if(_clBtn)_clBtn.style.display=_isManager()?'':'none';
   var _tBtn=document.getElementById('tab_tasks');if(_tBtn)_tBtn.style.display='';
   setTimeout(function(){_showTabTutorial(tab);},400);

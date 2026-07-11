@@ -143,144 +143,39 @@
     });
   };
 
-  var _origBuildExpertReportHtml = window.buildExpertReportHtml;
-  if (typeof _origBuildExpertReportHtml === 'function') {
-    window.buildExpertReportHtml = function (memberId, from, to) {
-      var html = _origBuildExpertReportHtml(memberId, from, to);
-      // Inject done-logs tab button if tab bar exists
-      if (html && html.indexOf('erDoneLogsBody') < 0) {
-        html = html.replace(
-          /(id="erTabBody"[^>]*>)/,
-          '$1<div id="erDoneLogsBody" style="display:none"></div>'
-        );
-      }
-      return html;
+  window.refreshDoneLogsFromReport = function (memberId) {
+    var fromEl = document.getElementById('rptFrom');
+    var toEl = document.getElementById('rptTo');
+    window._doneLogsState = {
+      memberId: memberId,
+      from: fromEl ? fromEl.value : '',
+      to: toEl ? toEl.value : '',
+      page: 1
     };
-  }
+    var host = document.getElementById('rptDoneLogsSection');
+    if (!host) {
+      var rptBody = document.getElementById('rptBody');
+      if (!rptBody || !rptBody.parentNode) return;
+      host = document.createElement('div');
+      host.id = 'rptDoneLogsSection';
+      host.style.cssText = 'margin-top:16px;border-top:1px solid var(--border);padding-top:12px';
+      host.innerHTML =
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">' +
+        '<div style="font-weight:700;font-size:13px">📝 آرشیو گزارش‌های انجام‌شده</div>' +
+        '<button class="btn-secondary" style="font-size:11px" onclick="_doneLogsPage(1)">🔄 بروزرسانی</button></div>' +
+        '<div id="erDoneLogsBody"><div style="padding:16px;text-align:center;color:var(--text-muted)">⏳ بارگذاری...</div></div>';
+      rptBody.parentNode.appendChild(host);
+    }
+    _doneLogsPage(1);
+  };
 
-  // Patch openExpertReport to load done-logs after open
   var _origOpenExpertReport = window.openExpertReport;
   window.openExpertReport = function (memberId) {
     if (_origOpenExpertReport) _origOpenExpertReport(memberId);
     setTimeout(function () {
-      var fromEl = document.getElementById('erFrom');
-      var toEl = document.getElementById('erTo');
-      var from = fromEl ? fromEl.value : '';
-      var to = toEl ? toEl.value : '';
-      window._doneLogsState = { memberId: memberId, from: from, to: to, page: 1 };
-
-      // Add tab button if missing
-      var tabs = document.querySelector('#erTabs, .er-tabs, [data-er-tabs]');
-      var modal = document.querySelector('.modal.act, .modal[style*="display: block"], #mExpertReport');
-      if (!document.getElementById('erDoneLogsTab')) {
-        var tabBar = document.querySelector('[id^="er"] .tabs, .modal-body .tabs');
-        if (!tabBar) {
-          // Find first button group in expert report modal
-          var body = document.querySelector('#erBody') || (modal && modal.querySelector('.modal-body'));
-          if (body && !document.getElementById('erDoneLogsBody')) {
-            var sec = document.createElement('div');
-            sec.style.cssText = 'margin-top:16px;border-top:1px solid var(--border);padding-top:12px';
-            sec.innerHTML =
-              '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">' +
-              '<div style="font-weight:700;font-size:13px">📝 گزارش‌های انجام‌شده (نتیجه / یادداشت / مبلغ)</div>' +
-              '<button class="btn-secondary" style="font-size:11px" onclick="_doneLogsPage(1)">🔄 بروزرسانی</button></div>' +
-              '<div id="erDoneLogsBody"><div style="padding:16px;text-align:center;color:var(--text-muted)">⏳ بارگذاری...</div></div>';
-            body.appendChild(sec);
-          }
-        }
-      }
-      _doneLogsPage(1);
+      refreshDoneLogsFromReport(memberId);
     }, 400);
   };
-
-  // ── Overdue: lead filter + aging already exists; enhance ──────────────────
-  var _origFilterOverdue = window.filterOverdueList;
-  window.filterOverdueList = function () {
-    if (_origFilterOverdue) _origFilterOverdue();
-    // Add lead filter UI if missing
-    var bar = document.getElementById('odSearch');
-    if (bar && !document.getElementById('odLead')) {
-      var sel = document.createElement('select');
-      sel.id = 'odLead';
-      sel.style.cssText = 'padding:4px 8px;border:1px solid var(--border-input);border-radius:5px;font-family:inherit;font-size:11px';
-      sel.innerHTML = '<option value="">همه وضعیت‌ها</option>' +
-        '<option value="فرصت">فرصت</option>' +
-        '<option value="سرنخ">سرنخ</option>' +
-        '<option value="لید">لید</option>' +
-        '<option value="مشتری">مشتری</option>';
-      sel.onchange = function () {
-        window._odFilters = window._odFilters || {};
-        window._odFilters.lead = sel.value;
-        if (_origFilterOverdue) {
-          // Re-filter: temporarily wrap by hiding rows
-          var rows = document.querySelectorAll('#odListBody tr[data-lead]');
-          if (rows.length) {
-            rows.forEach(function (tr) {
-              var lead = tr.getAttribute('data-lead') || '';
-              tr.style.display = (!sel.value || lead === sel.value) ? '' : 'none';
-            });
-          } else {
-            _origFilterOverdue();
-          }
-        }
-      };
-      bar.parentNode.insertBefore(sel, bar.nextSibling);
-    }
-  };
-
-  // Patch openOverdueList to annotate rows with lead after render
-  var _origOpenOverdue = window.openOverdueList;
-  window.openOverdueList = function (memberId) {
-    if (_origOpenOverdue) _origOpenOverdue(memberId);
-    setTimeout(function () {
-      if (typeof filterOverdueList === 'function') filterOverdueList();
-      // Annotate rows
-      try {
-        var tbody = document.getElementById('odListBody');
-        if (!tbody) return;
-        Array.prototype.forEach.call(tbody.querySelectorAll('tr'), function (tr) {
-          if (tr.dataset.leadAnnotated) return;
-          var btn = tr.querySelector('[onclick*="openCenterModal"]');
-          if (!btn) return;
-          var m = (btn.getAttribute('onclick') || '').match(/openCenterModal\('([^']+)','([^']+)'/);
-          if (!m) return;
-          var e = typeof getE === 'function' ? getE(m[1], m[2]) : {};
-          tr.setAttribute('data-lead', e.lead || '');
-          tr.dataset.leadAnnotated = '1';
-          if (e.lead) {
-            var td = tr.cells[0];
-            if (td && td.innerHTML.indexOf('data-lead-badge') < 0) {
-              td.innerHTML += ' <span data-lead-badge style="font-size:9px;background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:4px">' +
-                esc(e.lead) + (e.oppGrade ? ' ' + e.oppGrade : '') + '</span>';
-            }
-          }
-        });
-      } catch (e) { /* ignore */ }
-    }, 200);
-  };
-
-  // ── One-click reschedule from overdue (ensure helpers exist) ──────────────
-  window.odReschedule = function (rtype, rid, days) {
-    days = days || 7;
-    if (typeof todayStr !== 'function' || typeof j2g !== 'function') return;
-    var t = todayStr().split('/');
-    var g = j2g(parseInt(t[0], 10), parseInt(t[1], 10), parseInt(t[2], 10));
-    var d = new Date(g[0], g[1] - 1, g[2] + days);
-    var j = g2j(d.getFullYear(), d.getMonth() + 1, d.getDate());
-    var nd = j[0] + '/' + (j[1] < 10 ? '0' : '') + j[1] + '/' + (j[2] < 10 ? '0' : '') + j[2];
-    if (typeof setE === 'function') setE(rtype, rid, 'followupDate', nd);
-    if (typeof showToast === 'function') showToast('پیگیری به ' + nd + ' منتقل شد');
-    if (typeof filterOverdueList === 'function') filterOverdueList();
-  };
-
-  // ── MTR sync consolidation ────────────────────────────────────────────────
-  if (typeof window._mtrPullSync === 'function') {
-    window._mtrPullSync = function () {
-      if (typeof mtrFaradisSync === 'function') return mtrFaradisSync();
-      return fetch('/api/mtr/sync', { method: 'POST', credentials: 'same-origin' })
-        .then(function (r) { return r.json(); });
-    };
-  }
 
   console.log('[crm-complete] patches loaded');
 })();

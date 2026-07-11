@@ -27,7 +27,8 @@ const ROLE_DEFAULTS = {
       provinces: 'edit', weekplan: 'edit', calendar: 'edit', checklist: 'edit',
       activity: 'edit', tasks: 'edit', mtr: 'edit', pricing: 'edit',
       proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'edit',
-      'trade-kpi': 'edit', kpi: 'edit', manager: 'edit', changelog: 'edit', wms: 'edit', letters: 'edit'
+      'trade-kpi': 'edit', kpi: 'edit', manager: 'edit', changelog: 'edit', wms: 'edit', letters: 'edit',
+      workflows: 'edit'
     }
   },
   'سوپر ادمین': {
@@ -35,7 +36,8 @@ const ROLE_DEFAULTS = {
       provinces: 'edit', weekplan: 'edit', calendar: 'edit', checklist: 'edit',
       activity: 'edit', tasks: 'edit', mtr: 'edit', pricing: 'edit',
       proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'edit',
-      'trade-kpi': 'edit', kpi: 'edit', manager: 'edit', changelog: 'edit', wms: 'edit', letters: 'edit'
+      'trade-kpi': 'edit', kpi: 'edit', manager: 'edit', changelog: 'edit', wms: 'edit', letters: 'edit',
+      workflows: 'edit'
     }
   },
   'IT': {
@@ -43,7 +45,8 @@ const ROLE_DEFAULTS = {
       provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
       activity: 'view', tasks: 'view', mtr: 'none', pricing: 'none',
       proforma: 'none', support: 'view', hcp: 'view', hr: 'none',
-      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'edit', wms: 'none', letters: 'none'
+      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'edit', wms: 'none', letters: 'none',
+      workflows: 'view'
     }
   },
   'بازرگانی': {
@@ -51,7 +54,8 @@ const ROLE_DEFAULTS = {
       provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
       activity: 'view', tasks: 'view', mtr: 'none', pricing: 'none',
       proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'none',
-      'trade-kpi': 'edit', kpi: 'none', manager: 'none', changelog: 'none', wms: 'edit', letters: 'edit'
+      'trade-kpi': 'edit', kpi: 'none', manager: 'none', changelog: 'none', wms: 'edit', letters: 'edit',
+      workflows: 'edit'
     }
   },
   'مالی': {
@@ -59,7 +63,8 @@ const ROLE_DEFAULTS = {
       provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
       activity: 'view', tasks: 'view', mtr: 'edit', pricing: 'edit',
       proforma: 'edit', support: 'none', hcp: 'none', hr: 'none',
-      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'view', letters: 'edit'
+      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'view', letters: 'edit',
+      workflows: 'view'
     }
   },
   'کارشناس فروش': {
@@ -76,7 +81,8 @@ const ROLE_DEFAULTS = {
       provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
       activity: 'view', tasks: 'view', mtr: 'none', pricing: 'none',
       proforma: 'none', support: 'none', hcp: 'none', hr: 'none',
-      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'none', letters: 'none'
+      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'none', letters: 'none',
+      workflows: 'none'
     }
   }
 };

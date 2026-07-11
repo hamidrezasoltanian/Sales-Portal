@@ -755,7 +755,8 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
       <div class="ph">
         <div><div class="pt">انبار مجازی IMED</div><div class="ps">تراکنش‌های در انتظار ثبت در سامانه IMED.ir</div></div>
         <div class="pa">
-          <button class="btn btn-warn btn-sm" onclick="markAllImed()">ثبت همه</button>
+          <button class="btn btn-primary btn-sm" id="imedSyncBtn" onclick="syncImedExternal()">🔄 همگام‌سازی API</button>
+          <button class="btn btn-warn btn-sm" onclick="markAllImed()">ثبت دستی همه</button>
           <a href="https://imed.ir" target="_blank" class="btn btn-ghost btn-sm">🔗 ورود به IMED</a>
         </div>
       </div>
@@ -1006,9 +1007,11 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
         <div class="fg"><label class="fl">سایز / مدل</label><input class="fi" id="mProdSize" placeholder="18G × 15cm"/></div>
         <div class="fg"><label class="fl">کد کاتالوگ</label><input class="fi" id="mProdCat" placeholder="MC-BX-18"/></div>
         <div class="fg"><label class="fl">کد IRC</label><input class="fi" id="mProdIrc" placeholder="IRC-12345678"/></div>
-        <div class="fg"><label class="fl">واحد <span class="req">*</span></label>
+        <div class="fg"><label class="fl">واحد پایه <span class="req">*</span></label>
           <select class="fs" id="mProdUnit"><option value="عدد">عدد</option><option value="ست">ست</option><option value="بسته">بسته</option><option value="جفت">جفت</option><option value="کیلو">کیلو</option></select>
         </div>
+        <div class="fg"><label class="fl">واحد فرعی</label><input class="fi" id="mProdSecondaryUnit" placeholder="مثلاً: کارتن"/></div>
+        <div class="fg"><label class="fl">ضریب تبدیل به واحد پایه</label><input class="fi" type="number" min="0.001" step="0.001" id="mProdConversionFactor" placeholder="مثلاً: 24"/></div>
         <div class="fg"><label class="fl">دسته‌بندی</label><input class="fi" id="mProdCatg" placeholder="بیوپسی، کاتتر..."/></div>
         <div class="fg"><label class="fl">حداقل موجودی (reorder)</label><input class="fi" type="number" id="mProdReo" placeholder="10"/></div>
         <div class="fg"><label class="fl">💰 قیمت فروش پیشفاکتور (ریال)</label><input class="fi" type="number" id="mProdSalePrice" placeholder="0" style="border-color:#6366f1"/></div>
@@ -2581,7 +2584,7 @@ function renderProds(){
     <td><code>${p.size}</code></td>
     <td><code>${p.catalogCode}</code></td>
     <td><code>${p.ircCode}</code></td>
-    <td>${p.unit}</td>
+    <td>${p.unit}${p.secondaryUnit&&p.conversionFactor>1?`<div style="font-size:9px;color:var(--text3)">۱ ${p.secondaryUnit} = ${p.conversionFactor} ${p.unit}</div>`:''}</td>
     <td>${p.category?`<span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;background:#f0f4ff;color:#6366f1;font-weight:600">${p.category}</span>`:''}</td>
     <td>${p.reorderPoint}</td>
     <td><span class="dot ${p.active?'dot-green':'dot-red'}"></span>${p.active?'فعال':'غیرفعال'}</td>
@@ -2597,8 +2600,8 @@ function openProdModal(id=null){
   const p=id?S.products.find(x=>x.id===id):null;
   document.getElementById('mProdTitle').textContent=p?'ویرایش کالا':'کالای جدید';
   document.getElementById('mProdId').value=id||'';
-  const f=['Name','Full','Brand','Size','Cat','Irc','Unit','Catg','Reo','Note'];
-  const v=p?[p.name,p.fullName,p.brand,p.size,p.catalogCode,p.ircCode,p.unit,p.category,p.reorderPoint,p.note]:Array(10).fill('');
+  const f=['Name','Full','Brand','Size','Cat','Irc','Unit','Catg','Reo','Note','SecondaryUnit','ConversionFactor'];
+  const v=p?[p.name,p.fullName,p.brand,p.size,p.catalogCode,p.ircCode,p.unit,p.category,p.reorderPoint,p.note,p.secondaryUnit||'',p.conversionFactor||1]:Array(12).fill('');
   f.forEach((k,i)=>{const el=document.getElementById('mProd'+k);if(el)el.value=v[i]||'';});
   const spEl=document.getElementById('mProdSalePrice');if(spEl)spEl.value=p?(p.salePrice||0):0;
   const prSec=document.getElementById('mProdPricingSec');
@@ -2643,7 +2646,7 @@ function saveProd(){
   const n=document.getElementById('mProdName').value.trim();
   const fn=document.getElementById('mProdFull').value.trim();
   if(!n||!fn){toast('اسم کوتاه و اسم کامل الزامی است','e');return;}
-  const obj={id:id||uid(),name:n,fullName:fn,brand:document.getElementById('mProdBrand').value.trim(),size:document.getElementById('mProdSize').value.trim(),catalogCode:document.getElementById('mProdCat').value.trim(),ircCode:document.getElementById('mProdIrc').value.trim(),unit:document.getElementById('mProdUnit').value,category:document.getElementById('mProdCatg').value.trim(),reorderPoint:parseInt(document.getElementById('mProdReo').value)||10,salePrice:parseInt(document.getElementById('mProdSalePrice')?.value)||0,note:document.getElementById('mProdNote').value.trim(),active:true};
+  const obj={id:id||uid(),name:n,fullName:fn,brand:document.getElementById('mProdBrand').value.trim(),size:document.getElementById('mProdSize').value.trim(),catalogCode:document.getElementById('mProdCat').value.trim(),ircCode:document.getElementById('mProdIrc').value.trim(),unit:document.getElementById('mProdUnit').value,secondaryUnit:document.getElementById('mProdSecondaryUnit').value.trim(),conversionFactor:parseFloat(document.getElementById('mProdConversionFactor').value)||1,category:document.getElementById('mProdCatg').value.trim(),reorderPoint:parseInt(document.getElementById('mProdReo').value)||10,salePrice:parseInt(document.getElementById('mProdSalePrice')?.value)||0,note:document.getElementById('mProdNote').value.trim(),active:true};
   if(id) Object.assign(S.products.find(x=>x.id===id),obj);
   else S.products.push(obj);
   const _pMethod=id?'PUT':'POST';
