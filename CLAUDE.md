@@ -321,6 +321,11 @@ The receivables AI tab calls `https://api.anthropic.com/v1/messages` directly fr
 | WMS recalls/audit/delivery: SQL persistence via wms-ext API | server/routes/wms-ext.js | ✅ |
 | WMS atomic warehouse transfer: POST /api/wms/transfers (paired exit+entry) | server/routes/wms-ext.js + wms-ext.js modal | ✅ |
 | WMS txn backfill: fiscal_year_id + txn_date_jalali on startup | server/db.js _backfillWmsTxnFiscal() | ✅ |
+| WMS IMED persist: PATCH transaction imed + bulk by refNo | server/routes/wms-ext.js + wms-ext.js | ✅ |
+| WMS stock count SQL: complete → lot qty + adjustment txn | server/routes/wms-ext.js + wms-ext.js | ✅ |
+| WMS TTAC + purchase price: PUT lots via wms-ext.js | wms-ext.js | ✅ |
+| WMS markDelivered → PATCH delivery SQL | wms-ext.js | ✅ |
+| WMS reconcile Faradis: GET /api/wms/reconcile/data + prefill UI | wms-ext.js | ✅ |
 | **Workflows module**: user-definable processes (stages/transitions), kanban board, SQL-backed | tab گردش‌کار + /api/workflows | ✅ |
 | Proforma invoice module: draft→sent→approved/rejected→reopen workflow, auto-number PF-YYYY-NNNN | proforma tab + /api/proforma | ✅ |
 | Proforma SQL: zod validation, rowToObj mapper, manager-only approve/reject | server/routes/proforma.js | ✅ |

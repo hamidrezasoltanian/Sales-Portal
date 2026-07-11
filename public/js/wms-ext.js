@@ -380,5 +380,282 @@
     }
   };
 
-  console.log('[wms-ext] fiscal year + reports + transfers loaded');
+  // ── IMED persistence ──────────────────────────────────────────────────────
+  async function patchTxnImed(txnId, imedRefNo) {
+    await wmsFetch('/api/wms/transactions/' + encodeURIComponent(txnId) + '/imed', {
+      method: 'PATCH',
+      body: JSON.stringify({ imedStatus: 'registered', imedRefNo: imedRefNo || '', imedDate: new Date().toISOString() }),
+    });
+    var t = S.transactions.find(function (x) { return x.id === txnId; });
+    if (t) { t.imedStatus = 'registered'; t.imedRefNo = imedRefNo || ''; t.imedDate = new Date().toISOString(); }
+  }
+
+  async function bulkImed(opts) {
+    var res = await wmsFetch('/api/wms/transactions/bulk-imed', {
+      method: 'POST',
+      body: JSON.stringify(opts),
+    });
+    (res.ids || []).forEach(function (id) {
+      var t = S.transactions.find(function (x) { return x.id === id; });
+      if (t) { t.imedStatus = 'registered'; t.imedRefNo = opts.imedRefNo || ''; t.imedDate = new Date().toISOString(); }
+    });
+    return res;
+  }
+
+  window.markImed = async function (txnId) {
+    var ref = window.prompt('شماره ثبت IMED (اختیاری):');
+    if (ref === null) return;
+    try {
+      await patchTxnImed(txnId, ref);
+      logAudit('imed_registered', 'transaction', txnId, ref || '—');
+      if (typeof renderCurrentRptTab === 'function') renderCurrentRptTab();
+      updateBadges();
+      toast('در IMED ثبت شد');
+    } catch (e) { toast('خطا: ' + e.message, 'e'); }
+  };
+
+  window.markInvImed = async function (refNo) {
+    var ref = window.prompt('شماره ثبت IMED (برای کل فاکتور):');
+    if (ref === null) return;
+    try {
+      await bulkImed({ refNo: refNo, imedRefNo: ref || refNo });
+      logAudit('imed_registered', 'invoice', refNo, ref || refNo);
+      if (typeof renderCurrentRptTab === 'function') renderCurrentRptTab();
+      updateBadges();
+      toast('فاکتور در IMED ثبت شد');
+    } catch (e) { toast('خطا: ' + e.message, 'e'); }
+  };
+
+  window.markAllImed = async function () {
+    if (!window.confirm('همه تراکنش‌های تأیید‌شده را در IMED ثبت‌شده علامت بزنیم؟')) return;
+    var ref = window.prompt('شماره ثبت دسته‌ای (اختیاری):') || ('BATCH-' + new Date().toISOString().split('T')[0]);
+    try {
+      var res = await bulkImed({ allApproved: true, imedRefNo: ref });
+      logAudit('imed_bulk', 'transaction', 'batch', ref + ' (' + res.count + ' ردیف)');
+      if (typeof renderCurrentRptTab === 'function') renderCurrentRptTab();
+      if (typeof renderIMEDPage === 'function') renderIMEDPage();
+      updateBadges();
+      toast(res.count + ' تراکنش ثبت IMED شد');
+    } catch (e) { toast('خطا: ' + e.message, 'e'); }
+  };
+
+  window.markImedDirect = async function (txnId) {
+    var t = S.transactions.find(function (x) { return x.id === txnId; });
+    if (!t) return;
+    var msg = 'شماره ثبت IMED را وارد کنید:';
+    if (t.refNo) {
+      var siblings = S.transactions.filter(function (x) { return x.refNo === t.refNo && x.imedStatus !== 'registered'; });
+      if (siblings.length > 1) msg = 'این فاکتور ' + siblings.length + ' ردیف ثبت‌نشده دارد. شماره ثبت IMED (برای همه):';
+    }
+    var ref = window.prompt(msg);
+    if (ref === null) return;
+    try {
+      if (t.refNo) {
+        await bulkImed({ refNo: t.refNo, imedRefNo: ref || '' });
+      } else {
+        await patchTxnImed(txnId, ref);
+      }
+      logAudit('imed_registered', 'transaction', txnId, ref || '—');
+      if (typeof renderIMEDPage === 'function') renderIMEDPage();
+      updateBadges();
+      toast('ثبت IMED انجام شد' + (t.refNo ? ' (کل فاکتور)' : ''));
+    } catch (e) { toast('خطا: ' + e.message, 'e'); }
+  };
+
+  // ── TTAC + purchase price → SQL lots ──────────────────────────────────────
+  window.saveTTAC = async function (lotId, ttacNo) {
+    if (!ttacNo || !ttacNo.trim()) return;
+    try {
+      await wmsFetch('/api/wms/lots/' + encodeURIComponent(lotId), {
+        method: 'PUT',
+        body: JSON.stringify({ ttacNo: ttacNo.trim() }),
+      });
+      var l = S.lots.find(function (x) { return x.id === lotId; });
+      if (l) l.ttacNo = ttacNo.trim();
+      renderTTAC();
+      toast('TTAC ذخیره شد');
+    } catch (e) { toast('خطا: ' + e.message, 'e'); }
+  };
+
+  window.applyPurchasePrice = async function () {
+    var pid = document.getElementById('ppProd').value;
+    var method = document.getElementById('ppMethod').value;
+    var lotNo = document.getElementById('ppLot').value.trim();
+    var price = 0;
+    if (method === 'rial') price = parseInt(document.getElementById('ppPrice').value, 10) || 0;
+    else {
+      var u = parseFloat(document.getElementById('ppUsd').value) || 0;
+      var r = parseFloat(document.getElementById('ppRate').value) || 0;
+      price = Math.round(u * r);
+    }
+    if (!price) { toast('قیمت را وارد کنید', 'e'); return; }
+    var targets = S.lots.filter(function (l) {
+      return (pid === 'all' || l.productId === pid) && (!lotNo || l.lotNo === lotNo);
+    });
+    if (!targets.length) { toast('Lot یافت نشد', 'e'); return; }
+    try {
+      for (var i = 0; i < targets.length; i++) {
+        var lot = targets[i];
+        await wmsFetch('/api/wms/lots/' + encodeURIComponent(lot.id), {
+          method: 'PUT',
+          body: JSON.stringify({ purchasePrice: price }),
+        });
+        lot.purchasePrice = price;
+        S.priceHistory.push({
+          product: lot.productId, lot: lot.lotNo, price: price, qty: lot.qty,
+          date: new Date().toISOString(), method: method === 'usd' ? 'دلاری' : 'ریالی',
+        });
+      }
+      await saveS();
+      renderPrPurchase();
+      toast('قیمت خرید ' + targets.length + ' Lot بروز شد');
+    } catch (e) { toast('خطا: ' + e.message, 'e'); }
+  };
+
+  // ── Stock count → SQL lots + adjustment txn ───────────────────────────────
+  window.submitCount = async function (scId) {
+    var sc = S.stockCounts.find(function (x) { return x.id === scId; });
+    if (!sc) return;
+    if (!window.confirm('ثبت نهایی انبارگردانی؟ مغایرت‌ها به صورت سند تعدیل ثبت می‌شوند.')) return;
+    try {
+      var res = await wmsFetch('/api/wms/stock-counts/complete', {
+        method: 'POST',
+        body: JSON.stringify({
+          items: sc.items.map(function (item) {
+            return { lotId: item.lotId, countedQty: item.countedQty, systemQty: item.systemQty, note: item.note || '' };
+          }),
+          note: 'انبارگردانی SC-' + sc.id,
+        }),
+      });
+      sc.items.forEach(function (item) {
+        var l = S.lots.find(function (x) { return x.id === item.lotId; });
+        if (l) l.qty = item.countedQty;
+      });
+      sc.status = 'completed';
+      sc.adjustments = res.adjustments || [];
+      await saveS();
+      var lotRes = await fetch('/api/wms/lots');
+      if (lotRes.ok) S.lots = await lotRes.json();
+      logAudit('stock_count', 'warehouse', sc.warehouseId, 'SC-' + sc.id + ' — ' + (res.adjustments || []).length + ' تعدیل');
+      closeModal('mCount');
+      renderCount();
+      updateBadges();
+      toast('انبارگردانی ثبت شد' + ((res.adjustments || []).length ? ' (' + res.adjustments.length + ' تعدیل)' : ''));
+    } catch (e) { toast('خطا: ' + e.message, 'e'); }
+  };
+
+  // ── markDelivered → SQL ───────────────────────────────────────────────────
+  window.markDelivered = async function (txnId) {
+    var t = S.transactions.find(function (x) { return x.id === txnId; });
+    if (!t) return;
+    try {
+      await wmsFetch('/api/wms/transactions/' + encodeURIComponent(txnId) + '/delivery', {
+        method: 'PATCH',
+        body: JSON.stringify({ delivStatus: 'delivered', deliveryStatus: 'delivered' }),
+      });
+      t.delivStatus = 'delivered';
+      t.deliveryStatus = 'delivered';
+      logAudit('delivery_delivered', 'transaction', txnId, t.txnNo);
+      renderDelivery();
+      toast('تحویل تأیید شد ✓');
+    } catch (e) { toast('خطا: ' + e.message, 'e'); }
+  };
+
+  // ── Reconcile + Faradis prefill ───────────────────────────────────────────
+  window._reconcileData = null;
+
+  window.loadReconcileData = async function (whId) {
+    whId = whId || 'all';
+    try {
+      window._reconcileData = await wmsFetch('/api/wms/reconcile/data?warehouse_id=' + encodeURIComponent(whId));
+      return window._reconcileData;
+    } catch (e) {
+      console.warn('[wms-ext] reconcile:', e.message);
+      window._reconcileData = null;
+      return null;
+    }
+  };
+
+  var _origRenderReconcilePage = window.renderReconcilePage;
+  window.renderReconcilePage = async function () {
+    var data = await loadReconcileData('all');
+    var con = document.getElementById('reconcileContent');
+    if (!con) return;
+    var recs = S.reconciliations || [];
+    var physTotal = data ? data.wmsTotal : S.lots.reduce(function (s, l) { return s + l.qty; }, 0);
+    var faradisLbl = data && data.faradisAvailable ? fmt(data.faradisTotal) : '—';
+    var imedLbl = data ? fmt(data.imedPendingTotal) + ' معوق' : '—';
+    var syncNote = data && data.faradisSyncedAt
+      ? '<div style="font-size:11px;color:var(--text3);margin-top:4px">آخرین sync فرادیس: ' + fmtDate(data.faradisSyncedAt) + '</div>' : '';
+    con.innerHTML =
+      '<div class="kpi-row" style="margin-bottom:16px">' +
+      '<div class="stat blue"><div class="stat-ic">📦</div><div class="stat-v">' + fmt(physTotal) + '</div><div class="stat-l">موجودی WMS</div></div>' +
+      '<div class="stat orange"><div class="stat-ic">💻</div><div class="stat-v">' + faradisLbl + '</div><div class="stat-l">فرادیس (cache)' + syncNote + '</div></div>' +
+      '<div class="stat green"><div class="stat-ic">🏛️</div><div class="stat-v">' + imedLbl + '</div><div class="stat-l">IMED ثبت‌نشده</div></div>' +
+      '</div>' +
+      '<div class="card" style="margin-bottom:16px;padding:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+      '<button class="btn btn-primary btn-sm" onclick="startReconcile()">➕ تطبیق جدید</button>' +
+      '<button class="btn btn-ghost btn-sm" onclick="renderReconcilePage()">🔄 بروزرسانی فرادیس</button>' +
+      '</div>' +
+      '<div class="card"><div class="card-title">📋 سابقه تطبیق‌ها</div>' +
+      (recs.length ? '<div class="tw"><table><thead><tr><th>تاریخ</th><th>انبار</th><th>توسط</th><th>مغایرت فرادیس</th><th>مغایرت IMED</th><th>وضعیت</th></tr></thead><tbody>' +
+        recs.map(function (r) {
+          return '<tr><td>' + fmtDate(r.date) + '</td><td>' + wh(r.warehouseId || 'all').name + '</td><td>' + usr(r.conductedBy).name + '</td>' +
+            '<td>' + (r.faradisDiff !== undefined ? '<span class="' + (r.faradisDiff === 0 ? 'badge bg' : 'badge br') + '">' + (r.faradisDiff === 0 ? 'تطابق' : r.faradisDiff) + '</span>' : '—') + '</td>' +
+            '<td>' + (r.imedDiff !== undefined ? '<span class="' + (r.imedDiff === 0 ? 'badge bg' : 'badge br') + '">' + (r.imedDiff === 0 ? 'تطابق' : r.imedDiff) + '</span>' : '—') + '</td>' +
+            '<td>' + sbadge(r.status) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' :
+        '<div class="empty" style="padding:24px"><p>تطبیقی ثبت نشده</p></div>') +
+      '</div>';
+  };
+
+  window.startReconcile = async function () {
+    var whs = S.warehouses.filter(function (w) { return w.active; });
+    var data = await loadReconcileData('all');
+    var faradisByProduct = {};
+    if (data && data.products) {
+      data.products.forEach(function (p) { faradisByProduct[p.productId] = p; });
+    }
+    var rows = S.products.filter(function (p) { return p.active; }).map(function (p) {
+      var rd = faradisByProduct[p.id];
+      var sysQty = rd ? rd.wmsQty : S.lots.filter(function (l) { return l.productId === p.id; }).reduce(function (s, l) { return s + l.qty; }, 0);
+      var fDefault = rd && rd.faradisQty != null ? rd.faradisQty : sysQty;
+      var iDefault = rd ? rd.imedRegisteredQty : sysQty;
+      return '<tr>' +
+        '<td><strong>' + (p.fullName || p.name) + '</strong><br><code style="font-size:10px">' + (p.catalogCode || '') + '</code></td>' +
+        '<td style="text-align:center;font-weight:700">' + fmt(sysQty) + '</td>' +
+        '<td><input class="fi" type="number" id="rec_f_' + p.id + '" value="' + fDefault + '" placeholder="' + sysQty + '" style="text-align:center"/></td>' +
+        '<td><input class="fi" type="number" id="rec_i_' + p.id + '" value="' + iDefault + '" placeholder="' + sysQty + '" style="text-align:center"/></td>' +
+        '<td id="rec_diff_' + p.id + '" style="font-size:12px;color:var(--text3)">' +
+        (rd && rd.faradisMatched ? (rd.faradisDiff === 0 ? '✓ فرادیس' : 'Δ ' + rd.faradisDiff) : '—') + '</td></tr>';
+    }).join('');
+    document.getElementById('mReconcileBody').innerHTML =
+      '<div class="form-grid" style="margin-bottom:14px">' +
+      '<div class="fg"><label class="fl">انبار</label><select class="fs" id="recWh" onchange="onRecWhChange()"><option value="all">همه انبارها</option>' +
+      whs.map(function (w) { return '<option value="' + w.id + '">' + w.name + '</option>'; }).join('') + '</select></div>' +
+      (data && data.faradisAvailable ? '<div class="fg"><label class="fl">&nbsp;</label><span class="badge bb">فرادیس از cache بارگذاری شد</span></div>' : '') +
+      '</div><div class="tw"><table><thead><tr><th>کالا</th><th style="text-align:center">WMS</th><th style="text-align:center">فرادیس</th><th style="text-align:center">IMED</th><th>وضعیت</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+    document.getElementById('mReconcileFoot').innerHTML =
+      '<button class="btn btn-primary" onclick="saveReconcile()">✅ ثبت تطبیق</button>' +
+      '<button class="btn btn-ghost" onclick="closeModal(\'mReconcile\')">انصراف</button>';
+    openModal('mReconcile');
+  };
+
+  window.onRecWhChange = async function () {
+    var whId = document.getElementById('recWh').value;
+    var data = await loadReconcileData(whId);
+    if (!data) return;
+    var map = {};
+    data.products.forEach(function (p) { map[p.productId] = p; });
+    S.products.filter(function (p) { return p.active; }).forEach(function (p) {
+      var rd = map[p.id];
+      var sysQty = rd ? rd.wmsQty : 0;
+      var fEl = document.getElementById('rec_f_' + p.id);
+      var iEl = document.getElementById('rec_i_' + p.id);
+      if (fEl) fEl.value = rd && rd.faradisQty != null ? rd.faradisQty : sysQty;
+      if (iEl) iEl.value = rd ? rd.imedRegisteredQty : sysQty;
+    });
+  };
+
+  console.log('[wms-ext] fiscal year + reports + transfers + persistence loaded');
 })();

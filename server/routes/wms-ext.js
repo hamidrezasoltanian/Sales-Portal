@@ -286,6 +286,62 @@ router.post('/audit-log', wmsEdit, async function (req, res) {
   }
 });
 
+// ── IMED metadata ───────────────────────────────────────────────────────────
+
+router.patch('/transactions/:id/imed', wmsEdit, async function (req, res) {
+  try {
+    const b = req.body || {};
+    const r = await query(
+      `UPDATE wms_transactions SET
+         imed_status = COALESCE($2, imed_status),
+         imed_ref_no = COALESCE($3, imed_ref_no),
+         imed_date = COALESCE($4, imed_date, NOW())
+       WHERE id = $1 RETURNING *`,
+      [req.params.id, b.imedStatus || 'registered', b.imedRefNo || '', b.imedDate || null]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'یافت نشد' });
+    res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) {
+    console.error('[wms/transactions imed PATCH]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+router.post('/transactions/bulk-imed', wmsEdit, async function (req, res) {
+  try {
+    const b = req.body || {};
+    const status = b.imedStatus || 'registered';
+    const refNo = b.imedRefNo || '';
+    const imedDate = b.imedDate || new Date();
+    let r;
+    if (b.refNo) {
+      r = await query(
+        `UPDATE wms_transactions SET imed_status = $2, imed_ref_no = $3, imed_date = $4
+         WHERE ref_no = $1 RETURNING id`,
+        [b.refNo, status, refNo, imedDate]
+      );
+    } else if (Array.isArray(b.ids) && b.ids.length) {
+      r = await query(
+        `UPDATE wms_transactions SET imed_status = $2, imed_ref_no = $3, imed_date = $4
+         WHERE id = ANY($1::varchar[]) RETURNING id`,
+        [b.ids, status, refNo, imedDate]
+      );
+    } else if (b.allApproved) {
+      r = await query(
+        `UPDATE wms_transactions SET imed_status = $2, imed_ref_no = $3, imed_date = $4
+         WHERE status = 'approved' AND imed_status IS DISTINCT FROM 'registered' RETURNING id`,
+        [status, refNo || ('BATCH-' + new Date().toISOString().slice(0, 10)), imedDate]
+      );
+    } else {
+      return res.status(400).json({ error: 'refNo، ids یا allApproved الزامی است' });
+    }
+    res.json({ ok: true, count: r.rowCount, ids: r.rows.map(function (row) { return row.id; }) });
+  } catch (e) {
+    console.error('[wms/transactions bulk-imed]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
 // ── Delivery metadata ───────────────────────────────────────────────────────
 
 router.patch('/transactions/:id/delivery', wmsEdit, async function (req, res) {
@@ -308,6 +364,165 @@ router.patch('/transactions/:id/delivery', wmsEdit, async function (req, res) {
     if (!r.rows.length) return res.status(404).json({ error: 'یافت نشد' });
     res.json({ ok: true });
   } catch (e) {
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+// ── Stock count completion (lot qty + adjustment txn) ───────────────────────
+
+async function _nextTxnNo(client, type) {
+  const key = type === 'exit' ? 'seq_exit' : 'seq_entry';
+  await client.query(
+    `INSERT INTO wms_settings (key, value) VALUES ($1, '1000'::jsonb) ON CONFLICT DO NOTHING`, [key]
+  );
+  const sr = await client.query(
+    `UPDATE wms_settings SET value = (value::int + 1)::text::jsonb WHERE key = $1 RETURNING value::int AS seq`, [key]
+  );
+  const prefix = type === 'exit' ? 'EXT' : 'ENT';
+  return prefix + '-' + String(sr.rows[0].seq).padStart(4, '0');
+}
+
+router.post('/stock-counts/complete', wmsEdit, async function (req, res) {
+  const b = req.body || {};
+  const items = b.items || [];
+  if (!items.length) return res.status(400).json({ error: 'items الزامی است' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const fyId = b.fiscalYearId || await getActiveFiscalYearId();
+    const user = req.user.username;
+    const jDate = dateToJalali(new Date());
+    const adjustments = [];
+
+    for (const item of items) {
+      const counted = Number(item.countedQty);
+      if (isNaN(counted) || counted < 0) continue;
+      const lotR = await client.query('SELECT * FROM wms_lots WHERE id = $1 FOR UPDATE', [item.lotId]);
+      if (!lotR.rows.length) continue;
+      const lot = lotR.rows[0];
+      const systemQty = Number(lot.qty);
+      const diff = counted - systemQty;
+
+      await client.query('UPDATE wms_lots SET qty = $2 WHERE id = $1', [item.lotId, counted]);
+
+      if (diff !== 0) {
+        const type = diff > 0 ? 'entry' : 'exit';
+        const qty = Math.abs(diff);
+        const txnId = 'wms_sc_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 5);
+        const txnNo = await _nextTxnNo(client, type);
+        const note = (item.note || b.note || '') + (item.note || b.note ? ' — ' : '') + 'تعدیل انبارگردانی';
+        await client.query(
+          `INSERT INTO wms_transactions (id, txn_no, type, txn_type, product_id, lot_id, warehouse_id, qty,
+             by_user, txn_date, status, note, fiscal_year_id, txn_date_jalali)
+           VALUES ($1,$2,$3,'stock_adjustment',$4,$5,$6,$7,$8,NOW(),'approved',$9,$10,$11)`,
+          [txnId, txnNo, type, lot.product_id, item.lotId, lot.warehouse_id, qty, user, note, fyId, jDate]
+        );
+        adjustments.push({ lotId: item.lotId, diff: diff, txnId: txnId, txnNo: txnNo });
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ ok: true, adjustments: adjustments, itemCount: items.length });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('[wms/stock-counts complete]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  } finally {
+    client.release();
+  }
+});
+
+// ── Reconcile data (WMS + Faradis + IMED) ───────────────────────────────────
+
+router.get('/reconcile/data', wmsView, async function (req, res) {
+  try {
+    const whId = req.query.warehouse_id || req.query.warehouseId || 'all';
+    const params = [];
+    let lotFilter = 'l.qty > 0';
+    if (whId && whId !== 'all') {
+      lotFilter += ' AND l.warehouse_id = $1';
+      params.push(whId);
+    }
+
+    const wmsProducts = await query(
+      `SELECT p.id, p.name, p.full_name, p.catalog_code,
+              COALESCE(SUM(l.qty), 0)::int AS wms_qty
+       FROM wms_products p
+       LEFT JOIN wms_lots l ON l.product_id = p.id AND ${lotFilter}
+       WHERE p.active = true
+       GROUP BY p.id, p.name, p.full_name, p.catalog_code
+       ORDER BY p.name`,
+      params
+    );
+
+    const faradisRows = await query(
+      `SELECT LOWER(TRIM(stuff_code)) AS code_key, stuff_code, stuff_name,
+              SUM(count_all)::float AS qty, MAX(synced_at) AS synced_at
+       FROM faradis_inventory_cache
+       WHERE stuff_code IS NOT NULL AND TRIM(stuff_code) != ''
+       GROUP BY LOWER(TRIM(stuff_code)), stuff_code, stuff_name`
+    ).catch(function () { return { rows: [] }; });
+
+    const faradisMap = {};
+    let faradisTotal = 0;
+    faradisRows.rows.forEach(function (row) {
+      faradisMap[row.code_key] = { stuffCode: row.stuff_code, stuffName: row.stuff_name, qty: Number(row.qty) || 0 };
+      faradisTotal += Number(row.qty) || 0;
+    });
+
+    const imedPending = await query(
+      `SELECT product_id, COALESCE(SUM(qty), 0)::int AS pending_qty
+       FROM wms_transactions
+       WHERE status = 'approved' AND imed_status IS DISTINCT FROM 'registered'
+       GROUP BY product_id`
+    );
+    const imedMap = {};
+    let imedPendingTotal = 0;
+    imedPending.rows.forEach(function (row) {
+      imedMap[row.product_id] = Number(row.pending_qty) || 0;
+      imedPendingTotal += Number(row.pending_qty) || 0;
+    });
+
+    let wmsTotal = 0;
+    const products = wmsProducts.rows.map(function (p) {
+      const wmsQty = Number(p.wms_qty) || 0;
+      wmsTotal += wmsQty;
+      const codeKey = (p.catalog_code || '').trim().toLowerCase();
+      const faradis = codeKey ? faradisMap[codeKey] : null;
+      const faradisQty = faradis ? faradis.qty : null;
+      const imedPendingQty = imedMap[p.id] || 0;
+      const imedRegisteredQty = Math.max(0, wmsQty - imedPendingQty);
+      return {
+        productId: p.id,
+        name: p.full_name || p.name,
+        catalogCode: p.catalog_code || '',
+        wmsQty: wmsQty,
+        faradisQty: faradisQty,
+        faradisMatched: faradisQty != null,
+        imedRegisteredQty: imedRegisteredQty,
+        imedPendingQty: imedPendingQty,
+        faradisDiff: faradisQty != null ? faradisQty - wmsQty : null,
+        imedDiff: imedPendingQty,
+      };
+    });
+
+    const syncedAt = faradisRows.rows.length
+      ? faradisRows.rows.reduce(function (max, r) { return (!max || r.synced_at > max) ? r.synced_at : max; }, null)
+      : null;
+
+    res.json({
+      ok: true,
+      warehouseId: whId,
+      wmsTotal: wmsTotal,
+      faradisTotal: Math.round(faradisTotal),
+      imedPendingTotal: imedPendingTotal,
+      faradisSyncedAt: syncedAt,
+      faradisAvailable: faradisRows.rows.length > 0,
+      products: products,
+    });
+  } catch (e) {
+    console.error('[wms/reconcile/data]', e.message);
     res.status(500).json({ error: 'خطای سرور' });
   }
 });
