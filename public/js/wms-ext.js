@@ -201,15 +201,24 @@
   // ── Report tabs: daily + ledger ─────────────────────────────────────────
   var _origSwitchRptTab = window.switchRptTab;
   window.switchRptTab = function (tab, el) {
-    if (tab === 'daily' || tab === 'ledger' || tab === 'fy') {
+    if (tab === 'daily' || tab === 'ledger' || tab === 'fy' || tab === 'valuation') {
       window.rptTab = tab;
       document.querySelectorAll('#rptTabs .tab').forEach(function (t) { t.classList.remove('act'); });
       if (el) el.classList.add('act');
+      if (tab === 'valuation') {
+        renderRptFiltersValuation();
+        renderRptValuation();
+        return;
+      }
       renderRptFiltersExt();
       renderRptExt();
       return;
     }
-    return _origSwitchRptTab(tab, el);
+    var r = _origSwitchRptTab(tab, el);
+    if (['mov', 'fct', 'compare'].indexOf(tab) >= 0) {
+      setTimeout(function () { upgradeReportJalaliFilters(tab); }, 30);
+    }
+    return r;
   };
 
   window.renderRptFiltersExt = function () {
@@ -657,5 +666,228 @@
     });
   };
 
-  console.log('[wms-ext] fiscal year + reports + transfers + persistence loaded');
+  // ── Jalali date helpers (client-side report filters) ───────────────────────
+  function p2(n) { return n < 10 ? '0' + n : String(n); }
+
+  function j2g(jy, jm, jd) {
+    var jy2 = jy + 1595;
+    var days = -355668 + (365 * jy2) + (Math.floor(jy2 / 33) * 8) + Math.floor(((jy2 % 33) + 3) / 4) + jd
+      + ((jm < 7) ? (jm - 1) * 31 : ((jm - 7) * 30) + 186);
+    var gy = 400 * Math.floor(days / 146097);
+    days %= 146097;
+    if (days > 36524) { gy += 100 * Math.floor(--days / 36524); days %= 36524; if (days >= 365) days++; }
+    gy += 4 * Math.floor(days / 1461);
+    days %= 1461;
+    if (days > 365) { gy += Math.floor((days - 1) / 365); days = (days - 1) % 365; }
+    var gd = days + 1;
+    var sal = [0, 31, ((gy % 4 === 0 && gy % 100 !== 0) || (gy % 400 === 0)) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    var gm = 0;
+    for (; gm < 13 && gd > sal[gm]; gm++) gd -= sal[gm];
+    return [gy, gm, gd];
+  }
+
+  function parseJalaliStr(str) {
+    if (!str || typeof str !== 'string') return null;
+    var parts = str.replace(/-/g, '/').trim().split('/');
+    if (parts.length < 3) return null;
+    var jy = parseInt(parts[0], 10);
+    var jm = parseInt(parts[1], 10);
+    var jd = parseInt(parts[2], 10);
+    if (!jy || !jm || !jd) return null;
+    return [jy, jm, jd];
+  }
+
+  function syncJalaliInputToGregorian(jId, gId) {
+    var j = document.getElementById(jId);
+    var g = document.getElementById(gId);
+    if (!j || !g) return;
+    var p = parseJalaliStr(j.value);
+    if (!p) { g.value = ''; return; }
+    var gg = j2g(p[0], p[1], p[2]);
+    g.value = gg[0] + '-' + p2(gg[1]) + '-' + p2(gg[2]);
+  }
+
+  function syncGregorianToJalaliInput(gId, jId) {
+    var g = document.getElementById(gId);
+    var j = document.getElementById(jId);
+    if (!g || !j) return;
+    j.value = g.value ? fmtDate(g.value) : '';
+  }
+
+  function upgradeOneJalaliField(gId, onChangeName) {
+    var g = document.getElementById(gId);
+    if (!g || g.dataset.jalaliUpgraded) return;
+    var jId = gId + 'J';
+    var fg = g.closest('.fg');
+    if (fg) {
+      var lbl = fg.querySelector('.fl');
+      if (lbl && lbl.textContent.indexOf('شمسی') < 0) lbl.textContent = lbl.textContent + ' (شمسی)';
+    }
+    g.type = 'hidden';
+    g.dataset.jalaliUpgraded = '1';
+    var wrap = g.parentElement;
+    if (!wrap.classList.contains('dp-wrap')) {
+      var outer = document.createElement('div');
+      outer.className = 'dp-wrap';
+      g.parentNode.insertBefore(outer, g);
+      outer.appendChild(g);
+      wrap = outer;
+    }
+    var jInput = document.createElement('input');
+    jInput.className = 'fi wms-jalali-filter';
+    jInput.id = jId;
+    jInput.placeholder = '1404/01/01';
+    jInput.setAttribute('dir', 'ltr');
+    jInput.style.textAlign = 'center';
+    if (g.value) jInput.value = fmtDate(g.value);
+    wrap.insertBefore(jInput, g);
+    var btn = wrap.querySelector('.dp-btn');
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'dp-btn';
+      btn.textContent = '📅';
+      wrap.appendChild(btn);
+    }
+    btn.onclick = function () {
+      if (typeof openDp === 'function') openDp(gId, btn);
+    };
+    var fire = function () {
+      syncJalaliInputToGregorian(jId, gId);
+      if (onChangeName && typeof window[onChangeName] === 'function') window[onChangeName]();
+    };
+    jInput.addEventListener('change', fire);
+    jInput.addEventListener('blur', fire);
+    g.addEventListener('change', function () { syncGregorianToJalaliInput(gId, jId); });
+  }
+
+  var JALALI_FILTER_MAP = {
+    mov: [{ g: 'rmFrom', fn: 'renderRptMov' }, { g: 'rmTo', fn: 'renderRptMov' }],
+    fct: [{ g: 'rfFrom', fn: 'renderRptFct' }, { g: 'rfTo', fn: 'renderRptFct' }],
+    compare: [
+      { g: 'cmpA1', fn: 'renderRptCompare' }, { g: 'cmpA2', fn: 'renderRptCompare' },
+      { g: 'cmpB1', fn: 'renderRptCompare' }, { g: 'cmpB2', fn: 'renderRptCompare' },
+    ],
+  };
+
+  window.upgradeReportJalaliFilters = function (tab) {
+    var fields = JALALI_FILTER_MAP[tab] || [];
+    fields.forEach(function (f) { upgradeOneJalaliField(f.g, f.fn); });
+  };
+
+  var _origRenderRpt = window.renderRpt;
+  window.renderRpt = function () {
+    _origRenderRpt();
+    setTimeout(function () { upgradeReportJalaliFilters(window.rptTab || 'inv'); }, 40);
+  };
+
+  var _origSetCmpPreset = window.setCmpPreset;
+  window.setCmpPreset = function (val) {
+    _origSetCmpPreset(val);
+    ['cmpA1', 'cmpA2', 'cmpB1', 'cmpB2'].forEach(function (id) {
+      syncGregorianToJalaliInput(id, id + 'J');
+    });
+  };
+
+  // ── FIFO / LIFO / Weighted valuation report ───────────────────────────────
+  window._valuationMethod = 'fifo';
+
+  async function loadValuationMethod() {
+    try {
+      var r = await wmsFetch('/api/wms/settings/valuation-method');
+      window._valuationMethod = r.method || 'fifo';
+    } catch (e) { window._valuationMethod = 'fifo'; }
+  }
+
+  window.renderRptFiltersValuation = function () {
+    var el = document.getElementById('rptFilters');
+    if (!el) return;
+    var wOpts = S.warehouses.map(function (w) {
+      return '<option value="' + w.id + '">' + w.name + '</option>';
+    }).join('');
+    var pOpts = S.products.map(function (p) {
+      return '<option value="' + p.id + '">' + (p.fullName || p.name) + '</option>';
+    }).join('');
+    var m = window._valuationMethod || 'fifo';
+    el.innerHTML = '<div class="card" style="padding:12px"><div class="form-grid">' +
+      '<div class="fg"><label class="fl">روش ارزش‌گذاری</label>' +
+      '<select class="fs" id="valMethod" onchange="onValMethodChange()">' +
+      '<option value="fifo"' + (m === 'fifo' ? ' selected' : '') + '>FIFO — اولین ورود، اولین خروج</option>' +
+      '<option value="lifo"' + (m === 'lifo' ? ' selected' : '') + '>LIFO — آخرین ورود، اولین خروج</option>' +
+      '<option value="weighted"' + (m === 'weighted' ? ' selected' : '') + '>میانگین موزون</option></select></div>' +
+      '<div class="fg"><label class="fl">انبار</label><select class="fs" id="valWh" onchange="renderRptValuation()"><option value="all">همه</option>' + wOpts + '</select></div>' +
+      '<div class="fg"><label class="fl">کالا</label><select class="fs" id="valProd" onchange="renderRptValuation()"><option value="">همه</option>' + pOpts + '</select></div>' +
+      '<div class="fg"><label class="fl">&nbsp;</label>' +
+      '<button class="btn btn-primary btn-sm" onclick="renderRptValuation()">🔄 بارگذاری</button>' +
+      '<button class="btn btn-success btn-sm" onclick="exportValuationRpt()" style="margin-right:6px">📊 Excel</button></div>' +
+      '</div></div>';
+  };
+
+  window.onValMethodChange = async function () {
+    var m = document.getElementById('valMethod').value;
+    window._valuationMethod = m;
+    try {
+      await wmsFetch('/api/wms/settings/valuation-method', { method: 'PUT', body: JSON.stringify({ method: m }) });
+      toast('روش پیش‌فرض: ' + (m === 'fifo' ? 'FIFO' : m === 'lifo' ? 'LIFO' : 'میانگین موزون'));
+    } catch (e) { /* ignore */ }
+    renderRptValuation();
+  };
+
+  window.renderRptValuation = async function () {
+    var con = document.getElementById('rptContent');
+    if (!con) return;
+    await loadValuationMethod();
+    var method = (document.getElementById('valMethod') || {}).value || window._valuationMethod || 'fifo';
+    var wh = (document.getElementById('valWh') || {}).value || 'all';
+    var prod = (document.getElementById('valProd') || {}).value || '';
+    con.innerHTML = '<div class="card"><div style="padding:24px;text-align:center;color:var(--text3)">⏳ محاسبه ارزش موجودی...</div></div>';
+    try {
+      var q = '?method=' + encodeURIComponent(method);
+      if (wh && wh !== 'all') q += '&warehouse_id=' + encodeURIComponent(wh);
+      if (prod) q += '&product_id=' + encodeURIComponent(prod);
+      var data = await wmsFetch('/api/wms/reports/valuation' + q);
+      var rep = data.report;
+      window._lastValuationReport = rep;
+      var rows = rep.products.map(function (p) {
+        return '<tr><td><strong>' + p.productName + '</strong><br><code style="font-size:10px">' + (p.catalogCode || '') + '</code></td>' +
+          '<td style="text-align:center;font-weight:700">' + fmt(p.qty) + '</td>' +
+          '<td style="text-align:center">' + fmt(p.avgUnitCost) + '</td>' +
+          '<td style="font-weight:700">' + fmt(p.totalValue) + '</td>' +
+          '<td style="font-size:12px;color:var(--text3)">' + fmt(p.lotSpecificValue) + '</td>' +
+          '<td style="text-align:center;font-size:11px">' + (p.qtyVariance === 0 ? '<span class="badge bg">✓</span>' : '<span class="badge br">' + p.qtyVariance + '</span>') + '</td></tr>';
+      }).join('');
+      con.innerHTML =
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">' +
+        '<span class="badge bb">' + rep.methodLabel + '</span>' +
+        '<span class="badge bg">موجودی: ' + fmt(rep.totalQty) + '</span>' +
+        '<span class="badge bt">ارزش: ' + fmt(Math.round(rep.totalValue / 1000000)) + ' M</span>' +
+        '<span class="badge bt">' + rep.productCount + ' کالا</span></div>' +
+        '<div class="card"><div class="card-title">💰 گزارش ارزش موجودی — ' + rep.methodLabel + '</div>' +
+        '<div class="tw"><table><thead><tr><th>کالا</th><th style="text-align:center">موجودی</th><th style="text-align:center">بهای واحد</th>' +
+        '<th>ارزش (' + rep.methodLabel + ')</th><th>ارزش Lot</th><th style="text-align:center">مغایرت sim</th></tr></thead>' +
+        '<tbody>' + (rows || '<tr><td colspan="6" style="text-align:center;padding:24px">بدون موجودی</td></tr>') + '</tbody>' +
+        '<tfoot><tr style="background:var(--surface2);font-weight:800"><td>جمع</td><td style="text-align:center">' + fmt(rep.totalQty) + '</td><td></td>' +
+        '<td>' + fmt(rep.totalValue) + '</td><td colspan="2"></td></tr></tfoot></table></div></div>' +
+        '<div class="card" style="margin-top:12px;padding:12px;font-size:12px;color:var(--text3)">' +
+        '<strong>FIFO/LIFO:</strong> شبیه‌سازی لایه‌های هزینه از تراکنش‌های تأیید‌شده. ' +
+        '<strong>میانگین موزون:</strong> میانگین متحرک پس از هر ورود/خروج. ' +
+        '«ارزش Lot» = مجموع qty×purchase_price فعلی.</div>';
+    } catch (e) {
+      con.innerHTML = '<div class="card"><div class="empty"><p>خطا: ' + e.message + '</p></div></div>';
+    }
+  };
+
+  window.exportValuationRpt = function () {
+    var rep = window._lastValuationReport;
+    if (!rep) { toast('ابتدا گزارش را بارگذاری کنید', 'e'); return; }
+    var rows = [['کالا', 'کد', 'موجودی', 'بهای واحد', 'ارزش', 'ارزش Lot', 'مغایرت']];
+    rep.products.forEach(function (p) {
+      rows.push([p.productName, p.catalogCode, p.qty, p.avgUnitCost, p.totalValue, p.lotSpecificValue, p.qtyVariance]);
+    });
+    exportCSV(rows, 'valuation_' + rep.method + '.csv');
+  };
+
+  loadValuationMethod();
+
+  console.log('[wms-ext] fiscal year + reports + transfers + persistence + valuation + jalali loaded');
 })();

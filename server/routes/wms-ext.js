@@ -6,6 +6,7 @@ const { requireAuth } = require('../auth');
 const { requirePermission } = require('../permissions');
 const { fiscalYearBounds, currentJalaliYear, dateToJalali, jalaliToDate } = require('../lib/wms-jalali');
 const { dailyMovementReport, ledgerReport, snapshotOpeningBalances } = require('../lib/wms-reports');
+const { computeValuation } = require('../lib/wms-valuation');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -201,6 +202,54 @@ router.get('/reports/opening-balances', wmsView, async function (req, res) {
       [fyId]
     );
     res.json({ ok: true, rows: r.rows });
+  } catch (e) {
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+router.get('/reports/valuation', wmsView, async function (req, res) {
+  try {
+    let method = req.query.method;
+    if (!method) {
+      const s = await query("SELECT value FROM wms_settings WHERE key = 'valuationConfig'");
+      if (s.rows.length && s.rows[0].value && s.rows[0].value.method) {
+        method = s.rows[0].value.method;
+      }
+    }
+    const report = await computeValuation({
+      method: method || 'fifo',
+      warehouseId: req.query.warehouse_id || req.query.warehouseId,
+      productId: req.query.product_id || req.query.productId,
+    });
+    res.json({ ok: true, report: report });
+  } catch (e) {
+    console.error('[wms/reports/valuation]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+router.get('/settings/valuation-method', wmsView, async function (req, res) {
+  try {
+    const r = await query("SELECT value FROM wms_settings WHERE key = 'valuationConfig'");
+    const method = (r.rows.length && r.rows[0].value && r.rows[0].value.method) ? r.rows[0].value.method : 'fifo';
+    res.json({ ok: true, method: method });
+  } catch (e) {
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+router.put('/settings/valuation-method', wmsEdit, async function (req, res) {
+  try {
+    const method = req.body.method || 'fifo';
+    if (!['fifo', 'lifo', 'weighted'].includes(method)) {
+      return res.status(400).json({ error: 'method باید fifo، lifo یا weighted باشد' });
+    }
+    await query(
+      `INSERT INTO wms_settings (key, value, updated_at) VALUES ('valuationConfig', $1::jsonb, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [JSON.stringify({ method: method })]
+    );
+    res.json({ ok: true, method: method });
   } catch (e) {
     res.status(500).json({ error: 'خطای سرور' });
   }

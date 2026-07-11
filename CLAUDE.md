@@ -326,6 +326,8 @@ The receivables AI tab calls `https://api.anthropic.com/v1/messages` directly fr
 | WMS TTAC + purchase price: PUT lots via wms-ext.js | wms-ext.js | ✅ |
 | WMS markDelivered → PATCH delivery SQL | wms-ext.js | ✅ |
 | WMS reconcile Faradis: GET /api/wms/reconcile/data + prefill UI | wms-ext.js | ✅ |
+| WMS valuation FIFO/LIFO/weighted: server simulation + report tab | server/lib/wms-valuation.js + wms-ext.js | ✅ |
+| WMS client reports Jalali date filters (mov/fct/compare) | wms-ext.js jalali upgrade on date fields | ✅ |
 | **Workflows module**: user-definable processes (stages/transitions), kanban board, SQL-backed | tab گردش‌کار + /api/workflows | ✅ |
 | Proforma invoice module: draft→sent→approved/rejected→reopen workflow, auto-number PF-YYYY-NNNN | proforma tab + /api/proforma | ✅ |
 | Proforma SQL: zod validation, rowToObj mapper, manager-only approve/reject | server/routes/proforma.js | ✅ |
