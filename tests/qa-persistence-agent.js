@@ -289,6 +289,12 @@ async function flow_tags(tok, mgrTok) {
   const put = await req('PUT', '/api/tags', tags, mgrTok);
   if (!assert(put.status === 200, 'PUT global tags')) return;
   const centerKey = 'qa_tag_center_' + Date.now();
+  await query(
+    `INSERT INTO center_edits (center_key, data, updated_at, updated_by)
+     VALUES ($1, $2::jsonb, NOW(), '_qa_agent')
+     ON CONFLICT (center_key) DO UPDATE SET data = EXCLUDED.data`,
+    [centerKey, JSON.stringify({ owner: TEST_USER })]
+  );
   const patch = await req('PATCH', '/api/tags/centers/' + encodeURIComponent(centerKey), { tagIds: [9901] }, tok);
   assert(patch.status === 200, 'PATCH center tags');
   await req('PUT', '/api/data/db', {}, tok);
@@ -296,15 +302,16 @@ async function flow_tags(tok, mgrTok) {
   assert((db.tags || []).some(function (t) { return t.id === 9901; }), 'global tags in refresh');
   assert(db.rTags && db.rTags[centerKey] && db.rTags[centerKey].indexOf(9901) >= 0, 'center tags in refresh');
   await query('DELETE FROM center_tags WHERE center_key = $1', [centerKey]);
+  await query('DELETE FROM center_edits WHERE center_key = $1', [centerKey]);
   await query("DELETE FROM app_settings WHERE key = 'tagDefinitions'");
 }
 
-async function flow_kpiTarget(tok) {
+async function flow_kpiTarget(tok, mgrTok) {
   console.log('\n🔄 Flow: KPI user target POST → refresh');
   const month = '1404/02';
   const post = await req('POST', '/api/kpi-data/user-target', {
     username: TEST_USER, month: month, callsPerDay: 12, visitsPerWeek: 6,
-  }, tok);
+  }, mgrTok);
   if (!assert(post.status === 200, 'POST kpi user target')) return;
   const db = await refreshDb(tok);
   const t = db.kpiTargets && db.kpiTargets[TEST_USER + ':' + month];
@@ -335,8 +342,8 @@ async function flow_seededCenterPatch(tok) {
   await query(
     `INSERT INTO center_edits (center_key, data, updated_at, updated_by)
      VALUES ($1, $2::jsonb, NOW(), 'qa_test')
-     ON CONFLICT (center_key) DO NOTHING`,
-    [key, JSON.stringify({ status: 'فعال', owner: 'Sarah.hosseini' })]
+     ON CONFLICT (center_key) DO UPDATE SET data=EXCLUDED.data, updated_at=NOW()`,
+    [key, JSON.stringify({ status: 'فعال', owner: TEST_USER })]
   ).catch(function () {});
   const patch = await req('PATCH', '/api/centers/' + encodeURIComponent(key), {
     field: 'status', val: 'مذاکره', centerName: 'QA Seed', oldValue: 'فعال',
@@ -344,6 +351,7 @@ async function flow_seededCenterPatch(tok) {
   if (!assert(patch.status === 200, 'PATCH seeded center')) return;
   const get = await req('GET', '/api/centers/' + encodeURIComponent(key), null, tok);
   assert(get.body && get.body.data && get.body.data.status === 'مذاکره', 'seeded center status persisted');
+  await query('DELETE FROM center_edits WHERE center_key = $1', [key]);
 }
 
 async function flow_settingsPatch(mgrTok) {
@@ -454,7 +462,7 @@ async function runAllFlows() {
   await flow_weekEntry(tok);
   await flow_missionLog(tok);
   await flow_tags(tok, mgrTok);
-  await flow_kpiTarget(tok);
+  await flow_kpiTarget(tok, mgrTok);
   await flow_managerFollowup(mgrTok);
   await flow_seededCenterPatch(tok);
   await flow_settingsPatch(mgrTok);

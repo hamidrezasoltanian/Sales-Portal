@@ -71,6 +71,7 @@ async function loadDBFromSQL(client) {
   let provOverrides = {};
   let pricingProducts = null;
   let mtrFollowerMap = null;
+  let globalTags = [];
   settingsR.rows.forEach(function(r) {
     if (r.key === 'kpi_weights') {
       kpiTargets.weights = r.value;
@@ -82,6 +83,8 @@ async function loadDBFromSQL(client) {
       pricingProducts = r.value;
     } else if (r.key === 'mtrFollowerMap') {
       mtrFollowerMap = r.value;
+    } else if (r.key === 'tagDefinitions') {
+      globalTags = Array.isArray(r.value) ? r.value : [];
     } else {
       settings[r.key] = r.value;
     }
@@ -128,6 +131,7 @@ async function loadDBFromSQL(client) {
   return {
     edits,
     notes,
+    tags: globalTags,
     rTags,
     settings,
     provOverrides,
