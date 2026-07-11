@@ -526,6 +526,7 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
     <div class="sb-lbl">مالی</div>
     <div class="nav" onclick="go('imed')" id="nav-imed"><span class="ico">🏛️</span><span class="lbl">انبار مجازی IMED</span><span class="nb" id="imedB">0</span></div>
     <div class="nav" onclick="go('prices')"><span class="ico">💰</span><span class="lbl">قیمت‌ها</span></div>
+    <div class="nav" onclick="go('fiscal')"><span class="ico">📅</span><span class="lbl">سال مالی</span></div>
     <div class="nav" onclick="go('rpt')"><span class="ico">📄</span><span class="lbl">گزارش‌ها</span></div>
   </div>
   <div class="sb-sect">
@@ -853,6 +854,14 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
       <div id="prTabFilters" style="margin-bottom:14px"></div>
       <div id="prContent"></div>
     </div>
+    <!-- FISCAL YEAR -->
+    <div class="page" id="p-fiscal">
+      <div class="ph">
+        <div><div class="pt">سال مالی</div><div class="ps">تعریف، فعال‌سازی و بستن سال مالی شمسی — snapshot مانده ابتدای دوره</div></div>
+      </div>
+      <div id="fiscalYearContent"></div>
+    </div>
+
     <!-- REPORTS -->
     <div class="page" id="p-rpt">
       <div class="ph">
@@ -861,6 +870,8 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
       </div>
       <div class="tabs" id="rptTabs">
         <button class="tab act" onclick="switchRptTab('inv',this)">📦 موجودی</button>
+        <button class="tab" onclick="switchRptTab('daily',this)">📅 گزارش روزانه</button>
+        <button class="tab" onclick="switchRptTab('ledger',this)">📒 کاردکس</button>
         <button class="tab" onclick="switchRptTab('mov',this)">📈 گردش کالا</button>
         <button class="tab" onclick="switchRptTab('compare',this)">🔄 مقایسه دوره‌ای</button>
         <button class="tab" onclick="switchRptTab('fct',this)">🧾 فاکتورها</button>
@@ -1811,7 +1822,7 @@ function emptyRow(cols,msg='موردی یافت نشد'){return `<tr><td colspan
 // ══════════════════════════════════════════
 // NAVIGATION
 // ══════════════════════════════════════════
-const PAGE_TITLES={imed:'انبار مجازی IMED',dash:'داشبورد',delivery:'ارسال و رهگیری',reconcile:'تطبیق سه‌گانه',po:'سفارش خرید',ttac:'برچسب TTAC',analytics:'تحلیل کسب‌وکار',customers:'پروفایل مشتریان',recall:'مدیریت Recall',system:'سیستم',audit:'لاگ فعالیت',inv:'موجودی انبار',count:'انبارگردانی',entry:'ورود کالا',exit:'خروج کالا',hist:'تاریخچه تراکنش‌ها',appr:'تأییدیه‌ها',alerts:'هشدارها',prods:'مدیریت کالاها',whs:'مدیریت انبارها',cp:'طرف‌حساب‌ها',users:'مدیریت کاربران',prices:'قیمت‌ها و ارزش انبار',rpt:'گزارش‌ها'};
+const PAGE_TITLES={imed:'انبار مجازی IMED',dash:'داشبورد',delivery:'ارسال و رهگیری',reconcile:'تطبیق سه‌گانه',po:'سفارش خرید',ttac:'برچسب TTAC',analytics:'تحلیل کسب‌وکار',customers:'پروفایل مشتریان',recall:'مدیریت Recall',system:'سیستم',audit:'لاگ فعالیت',inv:'موجودی انبار',count:'انبارگردانی',entry:'ورود کالا',exit:'خروج کالا',hist:'تاریخچه تراکنش‌ها',appr:'تأییدیه‌ها',alerts:'هشدارها',prods:'مدیریت کالاها',whs:'مدیریت انبارها',cp:'طرف‌حساب‌ها',users:'مدیریت کاربران',prices:'قیمت‌ها و ارزش انبار',fiscal:'سال مالی',rpt:'گزارش‌ها'};
 function go(id){
   if(window.innerWidth<=820) closeSb();
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('act'));
@@ -1826,7 +1837,7 @@ function go(id){
   updateBadges();
 }
 function renderPage(id){
-  const fn={dash:renderDash,inv:renderInv,count:renderCount,entry:renderEntry,exit:renderExit,hist:renderHist,appr:renderAppr,alerts:renderAlerts,imed:renderIMEDPage,prods:renderProds,whs:renderWhs,cp:renderCp,users:renderUsers,prices:renderPrices,rpt:renderRpt,delivery:renderDelivery,reconcile:renderReconcilePage,po:renderPO,ttac:renderTTAC,analytics:renderAnalytics,customers:renderCustomers,recall:renderRecall,system:renderSystem,audit:renderAudit};
+  const fn={dash:renderDash,inv:renderInv,count:renderCount,entry:renderEntry,exit:renderExit,hist:renderHist,appr:renderAppr,alerts:renderAlerts,imed:renderIMEDPage,prods:renderProds,whs:renderWhs,cp:renderCp,users:renderUsers,prices:renderPrices,rpt:renderRpt,fiscal:renderFiscalYear,delivery:renderDelivery,reconcile:renderReconcilePage,po:renderPO,ttac:renderTTAC,analytics:renderAnalytics,customers:renderCustomers,recall:renderRecall,system:renderSystem,audit:renderAudit};
   if(fn[id]) fn[id]();
 }
 
@@ -6645,6 +6656,7 @@ clearExit=function(){_uxClearExit();const h=document.getElementById('exStockHint
 const _uxGo=go;
 go=function(id){_uxGo(id);document.querySelectorAll('.mob-bnav-btn').forEach(b=>b.classList.remove('act'));const btn=document.getElementById('mbn-'+id);if(btn)btn.classList.add('act');};
 </script>
+<script src="/js/wms-ext.js"></script>
 
 <!-- Mobile bottom navigation -->
 <nav class="mob-bnav" id="mobBottomNav">

@@ -98,6 +98,7 @@ app.use('/api/files', require('./routes/files'));
 app.use('/api/discovery', require('./routes/discovery'));
 app.use('/api/missions', require('./routes/missions'));
 app.use('/api/wms', require('./routes/wms'));
+app.use('/api/wms', require('./routes/wms-ext').router);
 app.use('/api/proforma', require('./routes/proforma'));
 app.use('/api/tasks', require('./routes/tasks'));
 app.use('/api/week-entries', require('./routes/week-entries'));

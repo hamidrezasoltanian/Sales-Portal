@@ -120,6 +120,8 @@ attribute. Always run `node --check` on edited files after changes.
 | PostgreSQL `wms_recalls` | — | WMS product recalls |
 | PostgreSQL `wms_audit_log` | — | WMS immutable audit trail |
 | PostgreSQL `wms_settings` | key | WMS key-value config |
+| PostgreSQL `wms_fiscal_years` | — | Jalali fiscal years (active/closed) |
+| PostgreSQL `wms_opening_balances` | — | Opening qty snapshot per FY/product/warehouse |
 | `localStorage` `atena_crm_v2` | — | Client-side cache of `DB` |
 | IndexedDB `atenaCRM_master` | — | Master center list cache |
 
@@ -314,6 +316,11 @@ The receivables AI tab calls `https://api.anthropic.com/v1/messages` directly fr
 | WMS warehouse module: served at /wms, backed by PostgreSQL (9 tables), REST API at /api/wms | public/wms.html + server/routes/wms.js | ✅ |
 | WMS REST endpoints: /api/wms/inventory (aggregate), /api/wms/lots/scan/:code (QR), /api/wms/transactions (paginated) | server/routes/wms.js | ✅ |
 | WMS auto-migration: blob data migrated to SQL tables on first startup | server/db.js _migrateWMSFromBlob() | ✅ |
+| WMS fiscal year: Jalali FY CRUD, activate, close + opening balance snapshot | server/routes/wms-ext.js + public/js/wms-ext.js | ✅ |
+| WMS server reports: daily in/out movement + ledger (کاردکس) by fiscal year | server/lib/wms-reports.js + wms-ext.js | ✅ |
+| WMS recalls/audit/delivery: SQL persistence via wms-ext API | server/routes/wms-ext.js | ✅ |
+| WMS atomic warehouse transfer: POST /api/wms/transfers (paired exit+entry) | server/routes/wms-ext.js + wms-ext.js modal | ✅ |
+| WMS txn backfill: fiscal_year_id + txn_date_jalali on startup | server/db.js _backfillWmsTxnFiscal() | ✅ |
 | **Workflows module**: user-definable processes (stages/transitions), kanban board, SQL-backed | tab گردش‌کار + /api/workflows | ✅ |
 | Proforma invoice module: draft→sent→approved/rejected→reopen workflow, auto-number PF-YYYY-NNNN | proforma tab + /api/proforma | ✅ |
 | Proforma SQL: zod validation, rowToObj mapper, manager-only approve/reject | server/routes/proforma.js | ✅ |
@@ -420,10 +427,12 @@ pg_dump -U postgres atena_crm | psql -U postgres atena_crm_dev
 
 ### Backup system
 
-- **app_data every 10 min**: `scripts/backup_db.sh appdata` → `~/db_backups/appdata_*.sql.gz` (~456KB each, 30 days)
-- **Full pg_dump daily at 3 AM**: `scripts/backup_db.sh full` → `~/db_backups/full_*.sql.gz` (~35MB each, 30 days)
-- **Restore app_data**: `gunzip -c ~/db_backups/appdata_TIMESTAMP.sql.gz | psql -U postgres atena_crm`
-- **Restore full**: `gunzip -c ~/db_backups/full_TIMESTAMP.sql.gz | psql -U postgres atena_crm`
+- **Scheduled full backup 3× daily** (11:00, 13:00, 18:00 Asia/Tehran): `server/lib/auto-backup.js` (Node scheduler) or cron via `scripts/setup-backup-cron.sh` → `~/db_backups/scheduled_*.sql.gz`
+- **Manual backup from Settings → مدیریت داده‌ها** (Data Hub): full or lightweight appdata via `/api/backups/run`
+- **Retention**: 30 days (`BACKUP_RETENTION_DAYS` env)
+- **Restore full**: `gunzip -c ~/db_backups/scheduled_TIMESTAMP.sql.gz | psql -U postgres atena_crm`
+- **In-app snapshots**: `app_data_history` table (30 days) — browse/restore in Settings Data Hub
+- **Unified import/export**: Settings → مرکز مدیریت داده (JSON, Excel centers, server backup)
 - In-DB history: `app_data_history` table keeps 30 days of snapshots (previously was only 30 records)
 - Use `scripts/restore_weekentries.py` to find and restore from DB snapshots
 

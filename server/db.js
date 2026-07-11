@@ -494,6 +494,61 @@ async function initSchema() {
     )
   `);
 
+  await query(`
+    CREATE TABLE IF NOT EXISTS wms_fiscal_years (
+      id            SERIAL PRIMARY KEY,
+      title         VARCHAR(100) NOT NULL,
+      jalali_year   INT NOT NULL,
+      start_date    DATE NOT NULL,
+      end_date      DATE NOT NULL,
+      start_jalali  VARCHAR(12) NOT NULL,
+      end_jalali    VARCHAR(12) NOT NULL,
+      is_active     BOOLEAN DEFAULT false,
+      is_closed     BOOLEAN DEFAULT false,
+      closed_at     TIMESTAMPTZ,
+      closed_by     VARCHAR(100),
+      note          TEXT DEFAULT '',
+      created_at    TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_wms_fy_jalali ON wms_fiscal_years(jalali_year)`);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS wms_opening_balances (
+      fiscal_year_id  INT NOT NULL REFERENCES wms_fiscal_years(id) ON DELETE CASCADE,
+      product_id      VARCHAR(50) NOT NULL,
+      warehouse_id    VARCHAR(50) NOT NULL,
+      qty             INT NOT NULL DEFAULT 0,
+      total_value     BIGINT DEFAULT 0,
+      updated_at      TIMESTAMPTZ DEFAULT NOW(),
+      updated_by      VARCHAR(100),
+      PRIMARY KEY (fiscal_year_id, product_id, warehouse_id)
+    )
+  `);
+
+  await query(`ALTER TABLE wms_transactions ADD COLUMN IF NOT EXISTS fiscal_year_id INT REFERENCES wms_fiscal_years(id)`).catch(() => {});
+  await query(`ALTER TABLE wms_transactions ADD COLUMN IF NOT EXISTS transfer_pair_id VARCHAR(50)`).catch(() => {});
+  await query(`ALTER TABLE wms_transactions ADD COLUMN IF NOT EXISTS courier VARCHAR(50)`).catch(() => {});
+  await query(`ALTER TABLE wms_transactions ADD COLUMN IF NOT EXISTS tracking_no VARCHAR(100)`).catch(() => {});
+  await query(`ALTER TABLE wms_transactions ADD COLUMN IF NOT EXISTS delivery_status VARCHAR(30)`).catch(() => {});
+  await query(`ALTER TABLE wms_transactions ADD COLUMN IF NOT EXISTS delivery_date DATE`).catch(() => {});
+  await query(`ALTER TABLE wms_transactions ADD COLUMN IF NOT EXISTS delivery_phone VARCHAR(50)`).catch(() => {});
+  await query(`ALTER TABLE wms_transactions ADD COLUMN IF NOT EXISTS sms_status VARCHAR(30)`).catch(() => {});
+  await query(`ALTER TABLE wms_transactions ADD COLUMN IF NOT EXISTS sms_sent_at TIMESTAMPTZ`).catch(() => {});
+  await query(`ALTER TABLE wms_transactions ADD COLUMN IF NOT EXISTS txn_date_jalali VARCHAR(12)`).catch(() => {});
+  await query(`CREATE INDEX IF NOT EXISTS idx_wms_txn_fy ON wms_transactions(fiscal_year_id)`).catch(() => {});
+
+  await query(`ALTER TABLE wms_recalls ADD COLUMN IF NOT EXISTS recall_no VARCHAR(50)`).catch(() => {});
+  await query(`ALTER TABLE wms_recalls ADD COLUMN IF NOT EXISTS affected_lots JSONB DEFAULT '[]'::jsonb`).catch(() => {});
+  await query(`ALTER TABLE wms_recalls ADD COLUMN IF NOT EXISTS reason TEXT`).catch(() => {});
+  await query(`ALTER TABLE wms_recalls ADD COLUMN IF NOT EXISTS issued_by VARCHAR(100)`).catch(() => {});
+  await query(`ALTER TABLE wms_recalls ADD COLUMN IF NOT EXISTS issued_at TIMESTAMPTZ`).catch(() => {});
+
+  await query(`ALTER TABLE wms_purchase_orders ADD COLUMN IF NOT EXISTS fiscal_year_id INT REFERENCES wms_fiscal_years(id)`).catch(() => {});
+
+  await _seedWmsFiscalYears();
+  await _backfillWmsTxnFiscal();
+
   // ════════════════════════════════════════
   // PROFORMAS — proper normalized table
   // ════════════════════════════════════════
@@ -2273,6 +2328,55 @@ async function _migrateWMSFromBlob() {
                 'transactions:', (S.transactions||[]).length);
   } catch(e) {
     console.error('[DB] WMS migration error:', e.message);
+  }
+}
+
+async function _seedWmsFiscalYears() {
+  try {
+    const { fiscalYearBounds, currentJalaliYear } = require('./lib/wms-jalali');
+    const cnt = await query('SELECT COUNT(*)::int AS n FROM wms_fiscal_years');
+    if (cnt.rows[0].n > 0) return;
+    const jy = currentJalaliYear();
+    for (let y = jy - 1; y <= jy + 1; y++) {
+      const b = fiscalYearBounds(y);
+      await query(
+        `INSERT INTO wms_fiscal_years (title, jalali_year, start_date, end_date, start_jalali, end_jalali, is_active, is_closed)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, false)
+         ON CONFLICT (jalali_year) DO NOTHING`,
+        ['سال مالی ' + y, y, b.start.toISOString().slice(0, 10), b.end.toISOString().slice(0, 10),
+         b.startJalali, b.endJalali, y === jy]
+      );
+    }
+    console.log('[DB] WMS fiscal years seeded');
+  } catch (e) {
+    console.warn('[DB] WMS fiscal year seed:', e.message);
+  }
+}
+
+async function _backfillWmsTxnFiscal() {
+  try {
+    const { dateToJalali } = require('./lib/wms-jalali');
+    const fy = await query(
+      `UPDATE wms_transactions t
+       SET fiscal_year_id = fy.id
+       FROM wms_fiscal_years fy
+       WHERE t.fiscal_year_id IS NULL
+         AND DATE(t.txn_date AT TIME ZONE 'Asia/Tehran') >= fy.start_date
+         AND DATE(t.txn_date AT TIME ZONE 'Asia/Tehran') <= fy.end_date`
+    );
+    const r = await query(
+      `SELECT id, txn_date FROM wms_transactions
+       WHERE txn_date_jalali IS NULL AND txn_date IS NOT NULL
+       ORDER BY txn_date DESC LIMIT 5000`
+    );
+    for (const row of r.rows) {
+      await query('UPDATE wms_transactions SET txn_date_jalali = $2 WHERE id = $1', [row.id, dateToJalali(row.txn_date)]);
+    }
+    if (fy.rowCount || r.rows.length) {
+      console.log('[DB] WMS txn fiscal backfill: fy=' + (fy.rowCount || 0) + ' jalali=' + r.rows.length);
+    }
+  } catch (e) {
+    console.warn('[DB] WMS txn fiscal backfill:', e.message);
   }
 }
 

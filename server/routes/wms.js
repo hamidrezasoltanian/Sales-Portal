@@ -129,7 +129,13 @@ function rowToTransaction(r) {
            toWarehouseId:r.to_warehouse_id, by:r.by_user,
            date:r.txn_date, status:r.status, note:r.note, refNo:r.ref_no,
            imedStatus:r.imed_status, imedRefNo:r.imed_ref_no, imedDate:r.imed_date,
-           ttacNo:r.ttac_no, proformaId:r.proforma_id || null };
+           ttacNo:r.ttac_no, proformaId:r.proforma_id || null,
+           fiscalYearId:r.fiscal_year_id || null, transferPairId:r.transfer_pair_id || null,
+           txnDateJalali:r.txn_date_jalali || null,
+           courier:r.courier || '', trackingNo:r.tracking_no || '',
+           delivStatus:r.delivery_status || 'pending', deliveryStatus:r.delivery_status || 'pending',
+           delivDate:r.delivery_date || null, deliveryDate:r.delivery_date || null,
+           delivPhone:r.delivery_phone || '', smsStatus:r.sms_status || '', smsSentAt:r.sms_sent_at || null };
 }
 function rowToPO(r) {
   return { id:r.id, poNo:r.po_no, supplierId:r.supplier_id, warehouseId:r.warehouse_id,
@@ -154,6 +160,11 @@ function _defaultPrintConfig() {
 }
 function _genId() {
   return 'wms_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+}
+async function _activeFyId(client) {
+  const q = client ? client.query.bind(client) : query;
+  const r = await q('SELECT id FROM wms_fiscal_years WHERE is_active = true LIMIT 1');
+  return r.rows.length ? r.rows[0].id : null;
 }
 async function _nextTxnNo(client, type) {
   const prefix = type === 'exit' ? 'EXT' : 'ENT';
@@ -700,7 +711,7 @@ router.get('/transactions', requireAuth, async (req, res) => {
     if (to)      { conditions.push(`t.txn_date <= $${idx++}`);  params.push(to + ' 23:59:59'); }
 
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
-    params.push(Math.min(parseInt(limit)||50, 200));
+    params.push(Math.min(parseInt(limit)||50, 5000));
     params.push(parseInt(offset)||0);
 
     const rows = await query(
@@ -739,13 +750,18 @@ router.post('/transactions', requireAuth, async (req, res) => {
       const id = _genId();
       const txnNo = await _nextTxnNo(client, b.type);
       const qty = Number(b.qty);
+      const fyId = b.fiscalYearId || await _activeFyId(client);
+      let txnDateJalali = b.txnDateJalali || null;
+      if (!txnDateJalali && b.date) {
+        try { txnDateJalali = require('../lib/wms-jalali').dateToJalali(new Date(b.date)); } catch (e) {}
+      }
 
       const r = await client.query(
         `INSERT INTO wms_transactions
            (id,txn_no,type,txn_type,product_id,lot_id,warehouse_id,qty,unit_price,sale_price,
             counterparty_id,from_warehouse_id,to_warehouse_id,by_user,txn_date,status,note,
-            ref_no,imed_status,imed_ref_no,imed_date,ttac_no,proforma_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+            ref_no,imed_status,imed_ref_no,imed_date,ttac_no,proforma_id,fiscal_year_id,txn_date_jalali)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
          RETURNING *`,
         [id, txnNo, b.type, b.txnType||'',
          b.productId, b.lotId||null, b.warehouseId||null,
@@ -754,7 +770,7 @@ router.post('/transactions', requireAuth, async (req, res) => {
          b.by || req.user.username || null,
          b.date||new Date(), b.status||'pending', b.note||'',
          b.refNo||'', b.imedStatus||'not_registered', b.imedRefNo||'', b.imedDate||'', b.ttacNo||'',
-         b.proformaId || null]
+         b.proformaId || null, fyId, txnDateJalali]
       );
 
       // If approved immediately, update lot qty atomically
