@@ -1598,11 +1598,56 @@ button:active:not(:disabled){transform:scale(.97)}
 .content-area{margin-right:200px}
 .top-bar{margin-right:200px}
 .sb-logo{
-  padding:15px 16px;font-size:15px;font-weight:800;
+  padding:13px 14px;font-size:15px;font-weight:800;
   color:var(--brand);border-bottom:1px solid var(--border);
   letter-spacing:-.3px;flex-shrink:0;user-select:none;
-  display:flex;align-items:center;gap:7px
+  display:flex;align-items:center;gap:8px
 }
+.sb-logo-mark{font-size:17px;line-height:1}
+.sb-logo-text{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.sb-collapse-btn{
+  flex-shrink:0;width:24px;height:24px;border-radius:7px;
+  border:1px solid var(--border);background:var(--bg-raised);
+  color:var(--text-secondary);cursor:pointer;font-size:12px;line-height:1;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .15s,color .15s,transform .2s
+}
+.sb-collapse-btn:hover{background:var(--brand-bg);color:var(--brand);border-color:var(--brand-light)}
+body.sb-collapsed .sb-collapse-btn{transform:rotate(180deg)}
+/* ── Collapsible sidebar (icon-only) ─────────────────────────── */
+.sidebar{transition:width .22s ease}
+body.sb-collapsed .sidebar{width:64px}
+body.sb-collapsed .content-area,
+body.sb-collapsed .top-bar{margin-right:64px}
+body.sb-collapsed .sb-logo{justify-content:center;padding:13px 6px}
+body.sb-collapsed .sb-logo-text{display:none}
+body.sb-collapsed .sb-collapse-btn{position:absolute;top:14px;left:6px;z-index:2}
+body.sb-collapsed .sidebar .tab-btn{
+  justify-content:center;padding:10px 0;gap:0
+}
+body.sb-collapsed .sb-label{display:none}
+body.sb-collapsed .sb-section-label{
+  font-size:0;padding:6px 0;text-align:center;height:1px;overflow:hidden
+}
+body.sb-collapsed .sb-section-label::after{
+  content:'•';font-size:11px;color:var(--text-muted)
+}
+body.sb-collapsed .sb-icon{min-width:0}
+/* Tooltip on hover when collapsed */
+body.sb-collapsed .sidebar .tab-btn::after{
+  content:attr(title);position:absolute;right:100%;top:50%;transform:translateY(-50%);
+  margin-right:8px;background:var(--text-primary);color:var(--bg-card);
+  padding:4px 9px;border-radius:6px;font-size:11px;font-weight:600;white-space:nowrap;
+  opacity:0;pointer-events:none;transition:opacity .15s;z-index:200;
+  box-shadow:0 4px 12px rgba(0,0,0,.2);display:block!important
+}
+body.sb-collapsed .sidebar .tab-btn:hover::after{opacity:1}
+/* ── Button polish: keyboard focus ring for accessibility ─────── */
+.btn-primary:focus-visible,.btn-secondary:focus-visible,.btn-danger:focus-visible,.btn-print:focus-visible{
+  outline:none;box-shadow:0 0 0 3px var(--brand-bg),0 0 0 4px var(--brand)
+}
+.top-btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(255,255,255,.4)}
+.sidebar .tab-btn:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--brand)}
 .sb-nav{
   padding:8px 8px 14px;display:flex;flex-direction:column;gap:3px;
   flex:1;overflow-y:auto;overflow-x:hidden

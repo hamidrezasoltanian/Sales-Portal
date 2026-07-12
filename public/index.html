@@ -7,7 +7,7 @@
 <!-- cache-bust: v2.1 -->
 <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(function(){});}</script>
 <!-- Vazirmatn از jsDelivr — npm package، بدون Google dependency -->
-<link rel="stylesheet" href="/css/app.css?v=20260712a">
+<link rel="stylesheet" href="/css/app.css?v=20260712b">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" onerror="console.warn('XLSX CDN failed - only TSV format supported offline')"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
 </head>
@@ -48,7 +48,11 @@
 
 <!-- SIDEBAR -->
 <nav class="sidebar" id="appSidebar">
-  <div class="sb-logo">👆 <span>Click CRM</span></div>
+  <div class="sb-logo">
+    <span class="sb-logo-mark">👆</span>
+    <span class="sb-logo-text">Click CRM</span>
+    <button class="sb-collapse-btn" id="sbCollapseBtn" onclick="toggleSidebar()" title="جمع/باز کردن منو" aria-label="جمع کردن منو">⟩</button>
+  </div>
   <div class="sb-nav">
     <button class="tab-btn" id="tab_home" onclick="switchTab('home')" title="خانه"><span class="sb-icon">🏠</span><span class="sb-label">خانه</span></button>
     <button class="tab-btn active" id="tab_provinces" onclick="switchTab('provinces')" title="استان‌ها"><span class="sb-icon">🗺</span><span class="sb-label">استان‌ها</span></button>
@@ -76,6 +80,17 @@
     <button class="tab-btn sb-manager-wrap" id="tab_faradis_match" onclick="switchTab('faradis-match')" title="تطبیق فرادیس" style="display:none"><span class="sb-icon">🔗</span><span class="sb-label">تطبیق</span></button>
   </div>
 </nav>
+<script>
+(function(){
+  try{ if(localStorage.getItem('_sbCollapsed')==='1') document.body.classList.add('sb-collapsed'); }catch(e){}
+  window.toggleSidebar=function(){
+    var collapsed=document.body.classList.toggle('sb-collapsed');
+    try{ localStorage.setItem('_sbCollapsed', collapsed?'1':'0'); }catch(e){}
+    var b=document.getElementById('sbCollapseBtn');
+    if(b){ b.setAttribute('aria-label', collapsed?'باز کردن منو':'جمع کردن منو'); }
+  };
+})();
+</script>
 <div class="content-area">
 
 <!-- TOP BAR -->
@@ -315,7 +330,8 @@
 <script src="/js/settings.js?v=20260710g"></script>
 <script src="/js/data.js?v=20260710c"></script>
 <script src="/js/ui-core.js?v=20260710c"></script>
-<script src="/js/dashboard.js?v=20260710c"></script>
+<script src="/js/kpi.js?v=20260712b"></script>
+<script src="/js/dashboard.js?v=20260712b"></script>
 <script src="/js/provinces.js?v=20260710c"></script>
 <script src="/js/center-modal.js?v=20260710c"></script>
 <script src="/js/global-search.js?v=20260710c"></script>
