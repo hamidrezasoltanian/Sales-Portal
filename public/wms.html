@@ -45,9 +45,10 @@ body{font-family:'Vazirmatn',sans-serif;background:var(--bg);color:var(--text);f
 .sb-sect{padding:12px 0 4px;}
 .sb-lbl{font-size:9px;font-weight:700;color:rgba(148,163,184,.5);padding:4px 16px;letter-spacing:1px;text-transform:uppercase;}
 .nav{display:flex;align-items:center;gap:9px;padding:7px 14px;cursor:pointer;font-size:12.5px;color:var(--sb-text);border-right:3px solid transparent;transition:all .15s;margin:1px 0;border-radius:0;}
-.nav:hover{background:rgba(255,255,255,.05);color:#e2e8f0;}
-.nav.act{background:var(--sb-act-bg);color:var(--sb-act);border-right-color:var(--sb-act);font-weight:600;}
-.nav .ico{font-size:14px;width:18px;text-align:center;flex-shrink:0;}
+.nav:hover{background:rgba(255,255,255,.05);color:#e2e8f0;transform:translateX(-2px);}
+.nav.act{background:linear-gradient(90deg,var(--sb-act-bg),transparent 130%);color:var(--sb-act);border-right-color:var(--sb-act);border-right-width:3.5px;font-weight:700;box-shadow:inset 0 0 12px rgba(56,189,248,.06);}
+.nav.act .ico{transform:scale(1.15);}
+.nav .ico{font-size:14px;width:18px;text-align:center;flex-shrink:0;transition:transform .18s ease;}
 .nav .lbl{flex:1;}
 .nb{margin-right:auto;background:var(--danger);color:#fff;font-size:9px;font-weight:800;padding:1px 5px;border-radius:20px;min-width:16px;text-align:center;}
 .nb.y{background:var(--warn);}
