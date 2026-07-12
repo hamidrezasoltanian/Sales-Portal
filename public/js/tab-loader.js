@@ -1,6 +1,6 @@
 /* ═══ Lazy tab script loader (Phase 2) ═══ */
 (function () {
-  var V = '20260710j';
+  var V = '20260712j';
   var _loaded = {};
 
   var TAB_SCRIPTS = {
@@ -9,7 +9,7 @@
     activity: ['activity-log.js'],
     changelog: [],
     tasks: ['tasks.js'],
-    kpi: ['kpi.js', 'manager-tasks.js'],
+    kpi: ['tasks.js', 'manager-tasks.js'],
     mtr: ['mtr.js'],
     proforma: ['proforma.js'],
     hcp: ['hcp.js'],
@@ -22,7 +22,7 @@
     home: ['expert-dashboard.js'],
     pricing: [],
     weekplan: [],
-    manager: [],
+    manager: ['tasks.js'],
     provinces: [],
     letters: []
   };

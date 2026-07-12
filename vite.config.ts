@@ -10,9 +10,13 @@ import { resolve } from 'path';
 export default defineConfig({
   plugins: [vue()],
   root: 'src',
+  optimizeDeps: {
+    include: ['@stll/folio-vue', '@stll/folio-core'],
+  },
   build: {
     outDir: '../public/dist',
     emptyOutDir: true,
+    chunkSizeWarningLimit: 2500,
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'src/main.ts'),

@@ -767,8 +767,12 @@ function idbSet(key,value){
 
 // لود مراکز از IndexedDB و پر کردن CENTERS و PC_RAW
 function loadMasterCenters(){
-  return fetch('/api/data/centers/master')
-    .then(function(r){return r.ok?r.json():Promise.reject(r.status);})
+  return fetch('/api/data/centers/master',{credentials:'same-origin'})
+    .then(function(r){
+      if(r.status===401)return Promise.reject('auth');
+      if(!r.ok)return Promise.reject('HTTP '+r.status);
+      return r.json();
+    })
     .then(function(d){
       if(d.CENTERS&&Array.isArray(d.CENTERS))CENTERS=d.CENTERS;
       if(d.PC_RAW&&typeof d.PC_RAW==='object'){
@@ -776,13 +780,18 @@ function loadMasterCenters(){
         Object.keys(d.PC_RAW).forEach(function(k){PC_RAW[k]=d.PC_RAW[k];});
       }
       clearPCCache();_ALL_PROVS=null;
-      console.log('[AtenaCRM] Master centers loaded from server');
+      var total=(CENTERS.length||0)+Object.values(PC_RAW).reduce(function(s,a){return s+(a?a.length:0);},0);
+      console.log('[AtenaCRM] Master centers loaded from server ('+total+' rows)');
     })
     .catch(function(e){
-      // Fallback: try IndexedDB for offline use
       console.warn('[AtenaCRM] Server centers unavailable, trying IndexedDB:',e);
+      if(e==='auth'&&typeof showLoginOverlay==='function'){showLoginOverlay();return Promise.reject(e);}
+      if(typeof showToast==='function')showToast('⚠️ لیست مراکز از سرور لود نشد — ورود مجدد یا رفرش صفحه',5000,'w');
       return idbGet('centersDB').then(function(data){
-        if(!data||!data.centers||!data.centers.length)return;
+        if(!data||!data.centers||!data.centers.length){
+          if(typeof showToast==='function')showToast('⚠️ دیتابیس مراکز خالی است — از تنظیمات Excel وارد کنید',6000,'w');
+          return;
+        }
         var tehranCenters=[];
         var byProv={};
         data.centers.forEach(function(c){

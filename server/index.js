@@ -40,15 +40,24 @@ if (helmet) {
         styleSrc: ["'self'", "'unsafe-inline'", 'cdn.jsdelivr.net'],
         fontSrc: ["'self'", 'cdn.jsdelivr.net', 'data:'],
         imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-        connectSrc: ["'self'"],
-        frameSrc: ["'self'", 'blob:'],
+        connectSrc: ["'self'", 'cdn.jsdelivr.net', 'cdnjs.cloudflare.com', 'fonts.gstatic.com'],
+        frameSrc: ["'self'", 'blob:', 'cdn.jsdelivr.net'],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
       },
     },
   }));
 }
-if (compression) app.use(compression());
+if (compression) {
+  app.use(compression({
+    filter: function (req, res) {
+      if (req.path === '/api/events/stream' || (req.headers.accept || '').indexOf('text/event-stream') !== -1) {
+        return false;
+      }
+      return compression.filter(req, res);
+    },
+  }));
+}
 
 // Middleware
 app.use(cookieParser());

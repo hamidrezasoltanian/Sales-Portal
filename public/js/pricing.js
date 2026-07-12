@@ -80,6 +80,109 @@ var CM_BUYER_FA={
 };
 var CM_PAY_FA={d30:'۳۰ روزه',d60:'۶۰ روزه',cash:'نقدی'};
 var CM_TIER_FA=['تا ۲۰ عدد','۲۱–۵۰ عدد','۵۱–۱۰۰ عدد','بیش از ۱۰۰'];
+var CM_SHIP_METHODS=['','پیک','پست','باربری','تحویل حضوری','تیپاکس','اسنپ','باربری مطمئن'];
+
+function openCenterShipPrint(rtype, rid, cname) {
+  var e = getE(rtype, rid);
+  var shipAddr = String(e.shipAddress || e.address || '').trim();
+  var recipient = String(e.deliveryRecipient || '').trim();
+  var method = String(e.shipMethod || '').trim();
+  var seller = (DB.settings && DB.settings.companyName) || (typeof DEFAULT_COMPANY_NAME !== 'undefined' ? DEFAULT_COMPANY_NAME : 'فروشنده');
+  var sellerInfo = String((DB.settings && DB.settings.companyInfo) || '').trim();
+  var expert = USERS[e.owner] || USERS[currentUser] || '';
+  var today = typeof todayStr === 'function' ? todayStr() : '';
+  if (!shipAddr && !recipient) { showToast('آدرس یا تحویل‌گیرنده را وارد کنید'); return; }
+  var html = '<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><title>برچسب ارسال</title>'
+    + '<style>@page{size:A5;margin:12mm}body{font-family:Tahoma,Vazirmatn,sans-serif;margin:0;padding:16px;color:#111}'
+    + '.box{border:2px solid #111;border-radius:8px;padding:14px;margin-bottom:12px}'
+    + '.lbl{font-size:11px;color:#555;margin-bottom:4px}.val{font-size:14px;font-weight:700;line-height:1.6}'
+    + '.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.title{text-align:center;font-size:16px;font-weight:800;margin-bottom:12px}'
+    + '.meta{font-size:11px;color:#444;margin-top:8px}</style></head><body>'
+    + '<div class="title">📦 برچسب ارسال</div>'
+    + '<div class="row"><div class="box"><div class="lbl">فرستنده (فروشنده)</div><div class="val">' + esc(seller) + '</div>'
+    + (sellerInfo ? '<div class="meta">' + esc(sellerInfo) + '</div>' : '')
+    + (expert ? '<div class="meta">کارشناس: ' + esc(expert) + '</div>' : '')
+    + '</div><div class="box"><div class="lbl">گیرنده (خریدار)</div><div class="val">' + esc(cname || '') + '</div>'
+    + (recipient ? '<div class="meta">تحویل‌گیرنده: ' + esc(recipient) + '</div>' : '')
+    + '</div></div>'
+    + '<div class="box"><div class="lbl">آدرس ارسال</div><div class="val">' + esc(shipAddr || '—') + '</div></div>'
+    + (method ? '<div class="meta">روش ارسال: <b>' + esc(method) + '</b></div>' : '')
+    + '<div class="meta">تاریخ: ' + esc(today) + '</div>'
+    + '</body></html>';
+  var w = window.open('', '_blank', 'width=720,height=820');
+  if (!w) { showToast('پاپ‌آپ مسدود است — اجازه دهید'); return; }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  setTimeout(function () { try { w.focus(); w.print(); } catch (_) {} }, 350);
+}
+
+function _cmSetProductCommission(centerKey, productId, level) {
+  fetch('/api/pricing/center/' + encodeURIComponent(centerKey), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ product_commission_update: { product_id: productId, level: level || null } })
+  }).then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+    .then(function () { showToast('💼 پورسانت کالا ذخیره شد', 1500); })
+    .catch(function () { showToast('خطا در ذخیره پورسانت'); });
+}
+
+function _cmRenderProductCommissions(rid, centerKey, cfg, isMgr) {
+  var elCom = document.getElementById('cmCommission_' + rid);
+  if (!elCom) return;
+  var ckEsc = esc(centerKey).replace(/'/g, "\\'");
+  if (!isMgr) {
+    elCom.innerHTML = '<div style="font-size:10px;color:var(--text-muted);margin-bottom:4px">💼 پورسانت به تفکیک کالا (مدیر)</div>'
+      + '<div id="cmCommPreview_' + rid + '"></div>';
+  } else {
+    elCom.innerHTML = '<div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-bottom:4px">💼 پورسانت به تفکیک کالا</div>'
+      + '<div id="cmCommTable_' + rid + '" style="max-height:170px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">⏳</div>'
+      + '<div id="cmCommPreview_' + rid + '" style="margin-top:4px"></div>';
+  }
+  Promise.all([
+    fetch('/api/pricing/products', { credentials: 'include' }).then(function (r) { return r.ok ? r.json() : []; }),
+    fetch('/api/pricing/center/' + encodeURIComponent(centerKey) + '/commissions', { credentials: 'include' }).then(function (r) { return r.ok ? r.json() : []; })
+  ]).then(function (res) {
+    var products = res[0] || [];
+    var previewRows = res[1] || [];
+    var pc = (cfg && cfg.product_commissions) || {};
+    var fallbackLvl = cfg && cfg.commission_level ? String(cfg.commission_level) : '';
+    var tbl = document.getElementById('cmCommTable_' + rid);
+    if (tbl && isMgr && products.length) {
+      var rows = products.map(function (p) {
+        var pid = String(p.id);
+        var lvl = pc[pid] != null ? String(pc[pid]) : fallbackLvl;
+        return '<tr style="border-top:1px solid var(--border)"><td style="padding:4px 6px;text-align:right">'
+          + esc(p.name) + '</td><td style="padding:4px 6px;width:72px">'
+          + '<select onchange="_cmSetProductCommission(\'' + ckEsc + '\',' + p.id + ',this.value||null)" '
+          + 'style="width:100%;font-size:10px;padding:2px 4px;font-family:inherit">'
+          + '<option value="">—</option>'
+          + '<option value="1"' + (lvl === '1' ? ' selected' : '') + '>سطح ۱</option>'
+          + '<option value="2"' + (lvl === '2' ? ' selected' : '') + '>سطح ۲</option>'
+          + '<option value="3"' + (lvl === '3' ? ' selected' : '') + '>سطح ۳</option>'
+          + '</select></td></tr>';
+      }).join('');
+      tbl.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:10px"><thead><tr style="background:var(--bg-raised)">'
+        + '<th style="text-align:right;padding:4px 6px">کالا</th><th style="padding:4px 6px">سطح پورسانت</th></tr></thead><tbody>'
+        + rows + '</tbody></table>';
+    } else if (tbl) {
+      tbl.textContent = 'کالایی برای تنظیم پورسانت یافت نشد';
+    }
+    var pv = document.getElementById('cmCommPreview_' + rid);
+    if (!pv) return;
+    if (!previewRows.length) {
+      pv.textContent = 'هنوز سطح پورسانت برای کالاها تنظیم نشده';
+      return;
+    }
+    pv.innerHTML = previewRows.slice(0, 8).map(function (row) {
+      return '<span style="display:inline-block;margin:2px 4px 0 0;background:#f0fdf4;border:1px solid #86efac;border-radius:4px;padding:1px 6px">'
+        + esc(row.product_name) + ' (سطح ' + row.level + '): <b>'
+        + Number(row.amount || 0).toLocaleString('fa-IR') + '</b> ریال</span>';
+    }).join('') + (previewRows.length > 8 ? '<span style="color:var(--text-muted)"> +' + (previewRows.length - 8) + '</span>' : '');
+  }).catch(function () {});
+}
+
 
 function _inferBuyerTypeFromCenter(e, r) {
   var t = String((e && e.type) || (r && r.type) || '').toLowerCase();
@@ -1194,6 +1297,23 @@ function _renderAuditTimelineBody(events, centerName){
   return body;
 }
 
+function _wmsTxnToAudit(t) {
+  var d = t.date ? new Date(t.date) : null;
+  var ts = d && !isNaN(d.getTime()) ? d.getTime() : 0;
+  var dateStr = t.txnDateJalali || (d && !isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : '');
+  var label = t.type === 'entry' ? '📥 رسید' : '📤 حواله';
+  var detail = (t.productName || t.productFullName || t.productId || '') + ' — ' + Number(t.qty || 0).toLocaleString('fa-IR');
+  if (t.proformaNo) detail += ' | PF ' + t.proformaNo;
+  if (t.pairedTxnNo) detail += ' | ↔ ' + t.pairedTxnNo;
+  if (t.refNo) detail += ' | #' + t.refNo;
+  return {
+    ts: ts, type: 'wms', icon: t.type === 'entry' ? '📥' : '📤',
+    color: t.type === 'entry' ? '#15803d' : '#b45309',
+    title: label + ' ' + String(t.txnNo || ''),
+    detail: detail, by: t.by || '', at: d && !isNaN(d.getTime()) ? d : null, dateStr: dateStr
+  };
+}
+
 function openCenterAudit(centerKey, centerName) {
   fetch('/api/support?center_key='+encodeURIComponent(centerKey)+'&limit=50')
     .then(function(r){return r.ok?r.json():{tickets:[]};})
@@ -1201,59 +1321,353 @@ function openCenterAudit(centerKey, centerName) {
     .then(function(supportData){
       var localEvents=_buildLocalAuditEvents(centerKey, supportData.tickets||[]);
       var body=_renderAuditTimelineBody(localEvents.slice(), centerName);
-      openModal('auditModal','📅 تاریخچه — '+esc(centerName),body+'<div id="auditLoadHint" style="text-align:center;font-size:10px;color:#94a3b8;padding:4px">⏳ بارگذاری SQL...</div>','<button class="btn-secondary" onclick="closeModal(\'auditModal\')">\u0628\u0633\u062a\u0646</button>',{lg:true});
-      fetch('/api/center-reports/'+encodeURIComponent(centerKey)+'/timeline')
-        .then(function(r){return r.ok?r.json():null;})
-        .then(function(data){
-          var hint=document.getElementById('auditLoadHint');if(hint)hint.remove();
-          if(!data||!data.events||!data.events.length)return;
-          var merged=localEvents.slice();
+      openModal('auditModal','📅 تاریخچه — '+esc(centerName),body+'<div id="auditLoadHint" style="text-align:center;font-size:10px;color:#94a3b8;padding:4px">⏳ بارگذاری...</div>','<button class="btn-secondary" onclick="closeModal(\'auditModal\')">\u0628\u0633\u062a\u0646</button>',{lg:true});
+      Promise.all([
+        fetch('/api/center-reports/'+encodeURIComponent(centerKey)+'/timeline').then(function(r){return r.ok?r.json():null;}),
+        fetch('/api/wms/transactions/by-center/'+encodeURIComponent(centerKey)).then(function(r){return r.ok?r.json():{transactions:[]};})
+      ]).then(function(results){
+        var data=results[0];
+        var wmsData=results[1]||{transactions:[]};
+        var hint=document.getElementById('auditLoadHint');if(hint)hint.remove();
+        var merged=localEvents.slice();
+        if(data&&data.events&&data.events.length){
           data.events.forEach(function(ev){
             var a=_apiEventToAudit(ev);
             if(a)merged.push(a);
           });
-          var modal=document.getElementById('auditModal');
-          if(!modal)return;
-          var mb=modal.querySelector('.modal-body');
-          if(mb)mb.innerHTML=_renderAuditTimelineBody(merged, centerName);
-        })
-        .catch(function(){
-          var hint=document.getElementById('auditLoadHint');if(hint)hint.textContent='SQL در دسترس نیست — فقط داده محلی';
+        }
+        (wmsData.transactions||[]).forEach(function(t){
+          merged.push(_wmsTxnToAudit(t));
         });
+        var mb=_cmModalBody('auditModal');
+        if(mb)mb.innerHTML=_renderAuditTimelineBody(merged, centerName);
+      }).catch(function(){
+        var hint=document.getElementById('auditLoadHint');if(hint)hint.textContent='برخی داده‌ها بارگذاری نشد — نمایش محلی';
+      });
     });
 }
 
-function openCenterReport(centerKey, centerName){
-  openModal('centerReportModal','📊 گزارش مرکز — '+esc(centerName),'<div style="padding:30px;text-align:center;color:#94a3b8">⏳ بارگذاری...</div>','<button class="btn-secondary" onclick="closeModal(\'centerReportModal\')">بستن</button>',{lg:true});
-  fetch('/api/center-reports/'+encodeURIComponent(centerKey)+'/timeline')
-    .then(function(r){return r.ok?r.json():Promise.reject(new Error('API'));})
-    .then(function(data){
-      var evs=data.events||[];
-      var counts={note:0,change:0,week_entry:0,proforma:0,sale:0};
-      var salesTotal=0,pfTotal=0,pfApproved=0;
-      evs.forEach(function(ev){
-        counts[ev.type]=(counts[ev.type]||0)+1;
-        if(ev.type==='sale')salesTotal+=Number(ev.amount||0);
-        if(ev.type==='proforma'){pfTotal+=Number(ev.total||0);if(ev.status==='approved'||ev.status==='invoiced')pfApproved++;}
-      });
-      var body='<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px">';
-      body+='<div style="flex:1;min-width:100px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:800;color:#0284c7">'+(counts.note||0)+'</div><div style="font-size:10px">یادداشت</div></div>';
-      body+='<div style="flex:1;min-width:100px;background:#faf5ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:800;color:#7c3aed">'+(counts.change||0)+'</div><div style="font-size:10px">تغییر فیلد</div></div>';
-      body+='<div style="flex:1;min-width:100px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:800;color:#16a34a">'+(counts.week_entry||0)+'</div><div style="font-size:10px">برنامه/تماس</div></div>';
-      body+='<div style="flex:1;min-width:100px;background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:800;color:#b45309">'+(counts.proforma||0)+'</div><div style="font-size:10px">پیشفاکتور</div></div>';
-      body+='<div style="flex:1;min-width:100px;background:#ecfdf5;border:1px solid #86efac;border-radius:8px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:800;color:#15803d">'+(counts.sale||0)+'</div><div style="font-size:10px">فروش</div></div>';
-      body+='</div>';
-      body+='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;font-size:12px">';
-      body+='<div style="flex:1;background:var(--bg-raised);padding:10px;border-radius:8px;border:1px solid var(--border)"><strong>جمع فروش:</strong> '+salesTotal.toLocaleString('fa-IR')+' ریال</div>';
-      body+='<div style="flex:1;background:var(--bg-raised);padding:10px;border-radius:8px;border:1px solid var(--border)"><strong>پیشفاکتور:</strong> '+pfTotal.toLocaleString('fa-IR')+' ریال ('+pfApproved+' تأیید)</div>';
-      body+='</div>';
-      body+='<button onclick="openCenterAudit(\''+centerKey.replace(/'/g,"\\'")+'\',\''+String(centerName).replace(/'/g,"\\'")+'\');closeModal(\'centerReportModal\')" style="padding:6px 14px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px">📅 مشاهده تاریخچه کامل</button>';
-      var modal=document.getElementById('centerReportModal');
-      if(modal){var mb=modal.querySelector('.modal-body');if(mb)mb.innerHTML=body;}
+function _cmModalBody(modalId) {
+  var mo = document.getElementById('mo_' + modalId);
+  return mo ? mo.querySelector('.m-body') : null;
+}
+
+function _cmStripHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function _cmToggleLetterPreview(mid, lid) {
+  var el = document.getElementById('cmLtBody_' + mid + '_' + lid);
+  if (!el) return;
+  var open = el.style.display !== 'none';
+  el.style.display = open ? 'none' : 'block';
+  var btn = document.getElementById('cmLtToggle_' + mid + '_' + lid);
+  if (btn) btn.textContent = open ? '▸ نمایش متن نامه' : '▾ بستن متن';
+}
+window._cmToggleLetterPreview = _cmToggleLetterPreview;
+
+function _cmWmsTypeLabel(t) {
+  return t.type === 'entry' ? '📥 رسید' : '📤 حواله';
+}
+
+function _cmWmsStatusLabel(st) {
+  var m = { pending: '⏳ معلق', approved: '✅ تأیید', rejected: '❌ رد', cancelled: 'لغو' };
+  return m[st] || st || '—';
+}
+
+function _cmWmsLinkHtml(t) {
+  var parts = [];
+  if (t.proformaNo || t.proformaId) {
+    parts.push('<span style="background:#ede9fe;color:#6d28d9;padding:1px 6px;border-radius:6px;font-size:10px">📄 PF ' + esc(t.proformaNo || t.proformaId) + '</span>');
+  }
+  if (t.pairedTxnNo) {
+    var pl = t.pairedType === 'entry' ? 'رسید' : 'حواله';
+    parts.push('<span style="background:#ecfdf5;color:#15803d;padding:1px 6px;border-radius:6px;font-size:10px">↔ ' + pl + ' ' + esc(t.pairedTxnNo) + '</span>');
+  }
+  if (t.refNo) {
+    parts.push('<span style="background:#f1f5f9;color:#475569;padding:1px 6px;border-radius:6px;font-size:10px">#' + esc(t.refNo) + '</span>');
+  }
+  return parts.length ? parts.join(' ') : '<span style="color:#94a3b8">—</span>';
+}
+
+function _cmLoadWmsSection(rtype, rid, modalId) {
+  var centerKey = typeof recK === 'function' ? recK(rtype, rid) : ('center_' + rid);
+  var _mid = modalId;
+  var _modal = document.getElementById('mo_cm_' + _mid);
+  if (!_modal) return;
+  var _bd = _modal.querySelector('.m-body') || _modal;
+  if (document.getElementById('cmWmsSec_' + _mid)) return;
+  var _sec = document.createElement('div');
+  _sec.id = 'cmWmsSec_' + _mid;
+  _sec.setAttribute('data-cm-panel', 'sales');
+  _sec.style.cssText = 'display:none;margin-top:14px;padding:12px 14px;background:#ecfdf5;border-radius:10px;border:1px solid #86efac';
+  var _hdr = document.createElement('div');
+  _hdr.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px';
+  var _ttl = document.createElement('span');
+  _ttl.style.cssText = 'font-weight:700;font-size:12px;color:#15803d';
+  _ttl.textContent = '📦 حواله و رسید انبار';
+  var _lnk = document.createElement('button');
+  _lnk.textContent = 'انبار WMS ←';
+  _lnk.style.cssText = 'font-size:11px;color:#15803d;background:none;border:none;cursor:pointer;text-decoration:underline';
+  _lnk.addEventListener('click', function () {
+    window.open('/wms#hist', '_blank');
+  });
+  _hdr.appendChild(_ttl);
+  _hdr.appendChild(_lnk);
+  var _body = document.createElement('div');
+  _body.id = 'cmWmsInner_' + _mid;
+  _body.style.cssText = 'font-size:12px;color:#94a3b8';
+  _body.textContent = 'در حال بارگذاری\u2026';
+  _sec.appendChild(_hdr);
+  _sec.appendChild(_body);
+  _bd.appendChild(_sec);
+  fetch('/api/wms/transactions/by-center/' + encodeURIComponent(centerKey))
+    .then(function (r) { return r.ok ? r.json() : { transactions: [] }; })
+    .then(function (data) {
+      var _ei = document.getElementById('cmWmsInner_' + _mid);
+      if (!_ei) return;
+      var lst = data.transactions || [];
+      if (!lst.length) {
+        _ei.innerHTML = '<span style="color:#94a3b8">حواله یا رسیدی برای این مرکز ثبت نشده — هنگام ثبت در WMS مرکز CRM را انتخاب کنید یا از پیش\u200cفاکتور تأییدشده حواله صادر شود.</span>';
+        return;
+      }
+      var exits = lst.filter(function (t) { return t.type === 'exit'; });
+      var entries = lst.filter(function (t) { return t.type === 'entry'; });
+      var html = '';
+      if (exits.length) {
+        html += '<div style="font-size:10px;font-weight:800;color:#b45309;margin:6px 0 4px">📤 حواله\u200cهای خروج (' + exits.length + ')</div>';
+        html += exits.slice(0, 6).map(function (t) {
+          var dt = t.txnDateJalali || (t.date ? String(t.date).slice(0, 10) : '');
+          return '<div style="padding:6px 0;border-bottom:1px solid #bbf7d0">'
+            + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+            + '<code style="font-size:10px;color:#0284c7">' + esc(t.txnNo || '') + '</code>'
+            + '<span style="font-size:11px;font-weight:600;flex:1;min-width:120px">' + esc(t.productName || t.productId || '') + '</span>'
+            + '<span style="font-size:10px">' + (t.qty != null ? Number(t.qty).toLocaleString('fa-IR') : '') + '</span>'
+            + '<span style="font-size:10px;color:#64748b">' + esc(dt) + '</span>'
+            + '<span style="font-size:10px">' + _cmWmsStatusLabel(t.status) + '</span>'
+            + '</div>'
+            + '<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">' + _cmWmsLinkHtml(t) + '</div>'
+            + '</div>';
+        }).join('');
+      }
+      if (entries.length) {
+        html += '<div style="font-size:10px;font-weight:800;color:#15803d;margin:10px 0 4px">📥 رسید\u200cهای ورود (' + entries.length + ')</div>';
+        html += entries.slice(0, 6).map(function (t) {
+          var dt = t.txnDateJalali || (t.date ? String(t.date).slice(0, 10) : '');
+          return '<div style="padding:6px 0;border-bottom:1px solid #bbf7d0">'
+            + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+            + '<code style="font-size:10px;color:#0284c7">' + esc(t.txnNo || '') + '</code>'
+            + '<span style="font-size:11px;font-weight:600;flex:1;min-width:120px">' + esc(t.productName || t.productId || '') + '</span>'
+            + '<span style="font-size:10px">' + (t.qty != null ? Number(t.qty).toLocaleString('fa-IR') : '') + '</span>'
+            + '<span style="font-size:10px;color:#64748b">' + esc(dt) + '</span>'
+            + '<span style="font-size:10px">' + _cmWmsStatusLabel(t.status) + '</span>'
+            + '</div>'
+            + '<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">' + _cmWmsLinkHtml(t) + '</div>'
+            + '</div>';
+        }).join('');
+      }
+      if (lst.length > 12) {
+        html += '<div style="text-align:center;color:#94a3b8;font-size:10px;margin-top:6px">+ ' + (lst.length - 12) + ' مورد دیگر</div>';
+      }
+      _ei.innerHTML = html;
     })
-    .catch(function(e){
-      var modal=document.getElementById('centerReportModal');
-      if(modal){var mb=modal.querySelector('.modal-body');if(mb)mb.innerHTML='<p style="color:#ef4444;text-align:center">خطا: '+esc(e.message)+'</p>';}
+    .catch(function () {
+      var _ei = document.getElementById('cmWmsInner_' + _mid);
+      if (_ei) _ei.textContent = 'خطا در بارگذاری حواله/رسید';
+    });
+}
+window._cmLoadWmsSection = _cmLoadWmsSection;
+
+function _cmLoadLettersSection(rtype, rid, modalId) {
+  var centerKey = typeof recK === 'function' ? recK(rtype, rid) : ('center_' + rid);
+  var _mid = modalId;
+  var _modal = document.getElementById('mo_cm_' + _mid);
+  if (!_modal) return;
+  var _bd = _modal.querySelector('.m-body') || _modal;
+  if (document.getElementById('cmLtSec_' + _mid)) return;
+  var _sec = document.createElement('div');
+  _sec.id = 'cmLtSec_' + _mid;
+  _sec.setAttribute('data-cm-panel', 'letters');
+  _sec.style.cssText = 'display:none;margin-top:14px;padding:12px 14px;background:#eff6ff;border-radius:10px;border:1px solid #bfdbfe';
+  var _hdr = document.createElement('div');
+  _hdr.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px';
+  var _ttl = document.createElement('span');
+  _ttl.style.cssText = 'font-weight:700;font-size:12px;color:#1d4ed8';
+  _ttl.textContent = '✉️ نامه\u200cهای این مرکز';
+  var _lnk = document.createElement('button');
+  _lnk.textContent = 'ثبت نامه جدید ←';
+  _lnk.style.cssText = 'font-size:11px;color:#1d4ed8;background:none;border:none;cursor:pointer;text-decoration:underline';
+  _lnk.addEventListener('click', function () {
+    if (typeof switchTab === 'function') switchTab('letters');
+    if (typeof closeModal === 'function') closeModal('cm_' + _mid);
+  });
+  _hdr.appendChild(_ttl);
+  _hdr.appendChild(_lnk);
+  var _body = document.createElement('div');
+  _body.id = 'cmLtInner_' + _mid;
+  _body.style.cssText = 'font-size:12px;color:#94a3b8';
+  _body.textContent = 'در حال بارگذاری\u2026';
+  _sec.appendChild(_hdr);
+  _sec.appendChild(_body);
+  _bd.appendChild(_sec);
+  fetch('/api/letters/by-center/' + encodeURIComponent(centerKey))
+    .then(function (r) { return r.ok ? r.json() : { letters: [] }; })
+    .then(function (data) {
+      var _ei = document.getElementById('cmLtInner_' + _mid);
+      if (!_ei) return;
+      var lst = data.letters || [];
+      if (!lst.length) {
+        _ei.innerHTML = '<span style="color:#94a3b8">نامه\u200cای ثبت نشده</span>';
+        return;
+      }
+      var st = { draft: '#64748b', approved_for_sign: '#b45309', registered: '#15803d', in_referral: '#1d4ed8', pending_action: '#6366f1' };
+      var sl = { draft: 'پیش\u200cنویس', approved_for_sign: 'منتظر امضا', registered: 'صادر شده', in_referral: 'در پیگیری', pending_action: 'در انتظار' };
+      _ei.innerHTML = lst.slice(0, 8).map(function (lt) {
+        var bodyPlain = _cmStripHtml(lt.body || '');
+        var bodyPreview = bodyPlain ? esc(bodyPlain.slice(0, 400)) + (bodyPlain.length > 400 ? '\u2026' : '') : '';
+        var bodyFull = bodyPlain ? esc(bodyPlain) : '';
+        var hasBody = !!bodyPlain;
+        var hasDocx = !!lt.has_docx;
+        return '<div style="border-bottom:1px solid #dbeafe;padding:8px 0">'
+          + '<div style="display:flex;gap:8px;align-items:center">'
+          + '<span style="font-family:monospace;font-size:10px;color:#0284c7;flex-shrink:0">' + esc(lt.indicator_number || '—') + '</span>'
+          + '<span style="flex:1;font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(lt.subject || '') + '</span>'
+          + '<span style="font-size:10px;color:' + (st[lt.status] || '#6b7280') + ';font-weight:700;flex-shrink:0">' + (sl[lt.status] || lt.status) + '</span>'
+          + '</div>'
+          + '<div style="font-size:10px;color:#64748b;margin-top:3px">'
+          + esc(lt.creator_name || '') + (hasDocx ? ' · 📄 Word' : '')
+          + '</div>'
+          + (hasBody
+            ? '<button type="button" id="cmLtToggle_' + _mid + '_' + lt.id + '" onclick="_cmToggleLetterPreview(\'' + _mid + '\',' + lt.id + ')" '
+              + 'style="margin-top:6px;font-size:10px;color:#1d4ed8;background:#fff;border:1px solid #bfdbfe;border-radius:6px;padding:3px 8px;cursor:pointer">▸ نمایش متن نامه</button>'
+              + '<div id="cmLtBody_' + _mid + '_' + lt.id + '" style="display:none;margin-top:6px;padding:8px 10px;background:#fff;border:1px solid #dbeafe;border-radius:8px;font-size:11px;line-height:1.7;color:#334155;max-height:160px;overflow-y:auto;white-space:pre-wrap">' + bodyFull + '</div>'
+            : '<div style="margin-top:4px;font-size:10px;color:#94a3b8">' + (hasDocx ? 'متن در سند Word — تب دبیرخانه' : 'بدون متن') + '</div>')
+          + '<div style="margin-top:6px">'
+          + '<button type="button" onclick="if(typeof switchTab===\'function\')switchTab(\'letters\')" '
+          + 'style="font-size:10px;color:#6366f1;background:none;border:none;cursor:pointer;text-decoration:underline;padding:0">باز کردن در دبیرخانه ←</button>'
+          + '</div>'
+          + '</div>';
+      }).join('') + (lst.length > 8 ? '<div style="text-align:center;color:#94a3b8;font-size:10px;margin-top:4px">+ ' + (lst.length - 8) + ' مورد دیگر</div>' : '');
+    })
+    .catch(function () {
+      var _ei = document.getElementById('cmLtInner_' + _mid);
+      if (_ei) _ei.textContent = 'خطا در بارگذاری';
+    });
+}
+
+function _cmProfileTab(modalDomId, tab, btn) {
+  var root = document.getElementById('mo_' + modalDomId);
+  if (!root) return;
+  root.querySelectorAll('.cm-tab-btn').forEach(function (b) {
+    b.classList.toggle('active', b === btn);
+  });
+  root.querySelectorAll('[data-cm-panel]').forEach(function (el) {
+    el.style.display = el.getAttribute('data-cm-panel') === tab ? '' : 'none';
+  });
+  if (tab === 'overview') {
+    var opp = root.querySelector('[id^="cmOppSection_"]');
+    var cust = root.querySelector('[id^="cmCustSection_"]');
+    var leadSel = root.querySelector('select[onchange*="_onLeadChange"]');
+    if (leadSel) {
+      var lv = leadSel.value;
+      if (opp) opp.style.display = lv === 'فرصت' ? '' : 'none';
+      if (cust) cust.style.display = lv === 'مشتری' ? '' : 'none';
+    }
+  } else {
+    root.querySelectorAll('[id^="cmOppSection_"],[id^="cmCustSection_"]').forEach(function (el) {
+      el.style.display = 'none';
+    });
+  }
+}
+
+function _renderCenterReportBody(centerKey, centerName, evs) {
+  evs = evs || [];
+  var counts = { note: 0, change: 0, week_entry: 0, proforma: 0, sale: 0, done: 0, task: 0, support: 0 };
+  var salesTotal = 0, pfTotal = 0, pfApproved = 0;
+  evs.forEach(function (ev) {
+    var t = ev.type || '';
+    counts[t] = (counts[t] || 0) + 1;
+    if (t === 'sale') salesTotal += Number(ev.amount || 0);
+    if (t === 'proforma') {
+      pfTotal += Number(ev.total || 0);
+      if (ev.status === 'approved' || ev.status === 'invoiced') pfApproved++;
+    }
+  });
+  var activityCount = (counts.week_entry || 0) + (counts.done || 0);
+  var body = '<div class="cm-report-wrap"><div class="cm-report-head"><div class="cm-report-title">📊 ' + esc(centerName) + '</div>'
+    + '<div class="cm-report-sub">' + esc(centerKey) + '</div></div>';
+  body += '<div class="cm-report-stats">';
+  [
+    { n: counts.note || 0, l: 'یادداشت', c: 'blue' },
+    { n: counts.change || 0, l: 'تغییر فیلد', c: 'purple' },
+    { n: activityCount, l: 'تماس/برنامه', c: 'green' },
+    { n: counts.proforma || 0, l: 'پیشفاکتور', c: 'amber' },
+    { n: counts.sale || 0, l: 'فروش', c: 'teal' }
+  ].forEach(function (s) {
+    body += '<div class="cm-report-stat cm-report-stat-' + s.c + '"><div class="cm-report-stat-n">' + s.n + '</div><div class="cm-report-stat-l">' + s.l + '</div></div>';
+  });
+  body += '</div>';
+  body += '<div class="cm-report-summary">'
+    + '<div class="cm-report-sum-card"><span>جمع فروش</span><strong>' + salesTotal.toLocaleString('fa-IR') + ' ریال</strong></div>'
+    + '<div class="cm-report-sum-card"><span>پیشفاکتور</span><strong>' + pfTotal.toLocaleString('fa-IR') + ' ریال</strong><em>' + pfApproved + ' تأیید</em></div>'
+    + '</div>';
+  body += '<div class="cm-report-actions">'
+    + '<button type="button" class="cm-foot-btn" id="cmReportAuditBtn" style="background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe">📅 تاریخچه کامل</button>'
+    + '</div></div>';
+  return body;
+}
+
+function _localReportEvents(centerKey) {
+  var events = _buildLocalAuditEvents(centerKey, []);
+  return events.map(function (ev) {
+    var type = ev.type;
+    if (type === 'done') type = 'week_entry';
+    return {
+      type: type,
+      at: ev.dateStr || '',
+      by: ev.by || '',
+      text: ev.detail || '',
+      total: type === 'sale' ? parseFloat(String(ev.detail || '').replace(/[^\d]/g, '')) || 0 : 0,
+      amount: type === 'sale' ? parseFloat(String(ev.detail || '').replace(/[^\d]/g, '')) || 0 : 0,
+      sortKey: ev.dateStr || String(ev.ts || '')
+    };
+  });
+}
+
+function openCenterReport(centerKey, centerName) {
+  openModal('centerReportModal', '📊 گزارش مرکز — ' + esc(centerName),
+    '<div class="cm-report-loading">⏳ در حال بارگذاری گزارش...</div>',
+    '<button class="btn-secondary" onclick="closeModal(\'centerReportModal\')">بستن</button>', { lg: true });
+  var localEvs = _localReportEvents(centerKey);
+  fetch('/api/center-reports/' + encodeURIComponent(centerKey) + '/timeline', { credentials: 'include' })
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('خطا در دریافت گزارش')); })
+    .then(function (data) {
+      var evs = (data && data.events && data.events.length) ? data.events : localEvs;
+      var body = _renderCenterReportBody(centerKey, centerName, evs);
+      var mb = _cmModalBody('centerReportModal');
+      if (mb) mb.innerHTML = body;
+      var auditBtn = document.getElementById('cmReportAuditBtn');
+      if (auditBtn) {
+        auditBtn.addEventListener('click', function () {
+          openCenterAudit(centerKey, centerName);
+          closeModal('centerReportModal');
+        });
+      }
+    })
+    .catch(function () {
+      var body = _renderCenterReportBody(centerKey, centerName, localEvs);
+      var mb = _cmModalBody('centerReportModal');
+      if (mb) {
+        mb.innerHTML = body + '<div class="cm-report-offline">⚠️ گزارش SQL در دسترس نبود — نمایش داده محلی</div>';
+      }
+      var auditBtn = document.getElementById('cmReportAuditBtn');
+      if (auditBtn) {
+        auditBtn.addEventListener('click', function () {
+          openCenterAudit(centerKey, centerName);
+          closeModal('centerReportModal');
+        });
+      }
     });
 }
 
@@ -1317,7 +1731,7 @@ function _onLeadChange(id,newLead,rtype,rid,selectEl){
     }
     if(missing.length){
       var warn=document.getElementById('cmStageWarn_'+id);
-      if(warn){warn.textContent='⚠️ فیلدهای الزامی: '+missing.join(' / ');warn.style.display='';}
+      if(warn){warn.textContent='⚠️ فیلدهای الزامی: '+missing.join(' / ');warn.style.display='block';}
       if(selectEl)selectEl.value=e.lead||'سرنخ';
       showToast('ابتدا فیلدهای الزامی مرحله را تکمیل کنید');
       return false;
@@ -1458,7 +1872,19 @@ function openCenterModal(rtype,id){
     +'<span class="cm-profile-chip cm-chip-status">'+esc(st)+'</span>'
   +(pot?'<span class="cm-profile-chip">P'+pot+'</span>':'')
     +'</div></div>'
-    +'<div class="cm-profile-section"><div class="cm-profile-section-title">🏥 مشخصات مرکز</div>'
+    +'<div class="cm-tab-bar" role="tablist">'
+    +'<button type="button" class="cm-tab-btn active" onclick="_cmProfileTab(\'cm_'+id+'\',\'overview\',this)">📋 خلاصه</button>'
+    +'<button type="button" class="cm-tab-btn" onclick="_cmProfileTab(\'cm_'+id+'\',\'contact\',this)">📞 تماس</button>'
+    +'<button type="button" class="cm-tab-btn" onclick="_cmProfileTab(\'cm_'+id+'\',\'sales\',this)">💰 فروش</button>'
+    +'<button type="button" class="cm-tab-btn" onclick="_cmProfileTab(\'cm_'+id+'\',\'activity\',this)">📝 فعالیت</button>'
+    +'<button type="button" class="cm-tab-btn" onclick="_cmProfileTab(\'cm_'+id+'\',\'letters\',this)">✉️ نامه\u200cها</button>'
+    +'</div>'
+    +'<div class="cm-quick-actions">'
+    +'<button type="button" class="cm-qact cm-qact-task" id="cmQuickTask_'+id+'">📌 + وظیفه</button>'
+    +'<button type="button" class="cm-qact cm-qact-ticket" id="cmQuickTicket_'+id+'">🎧 + تیکت</button>'
+    +'<button type="button" class="cm-qact cm-qact-week" id="cmQuickWeek_'+id+'">📋 اضافه به هفته</button>'
+    +'</div>'
+    +'<div class="cm-profile-section" data-cm-panel="overview"><div class="cm-profile-section-title">🏥 مشخصات مرکز</div>'
     +'<div class="cm-profile-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
     +'<div><label style="font-size:10px;font-weight:700;display:block;margin-bottom:3px">نام مرکز</label>'
     +'<input type="text" value="'+esc(displayName)+'" style="'+inpStyle+'" '
@@ -1472,35 +1898,36 @@ function openCenterModal(rtype,id){
         +'<div class="cm-inp" style="background:var(--bg-page);color:var(--text-muted)">'+esc(provName)+'</div></div>'
     )
     +'</div></div>'
-    +'<div class="cm-profile-section"><div class="cm-profile-section-title">⚙️ وضعیت و مسئولیت</div><div class="m-2col">'
-    +'<div><label>پتانسیل</label><select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'potential\',parseInt(this.value))">'
+    +'<div class="cm-profile-section" data-cm-panel="overview"><div class="cm-profile-section-title">⚙️ وضعیت و مسئولیت</div>'
+    +'<div class="cm-form-grid cm-form-grid-3">'
+    +'<div class="cm-field"><label>پتانسیل</label><select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'potential\',parseInt(this.value))">'
     +[1,2,3,4].map(function(v){return'<option value="'+v+'"'+(pot==v?' selected':'')+'>'+v+'</option>';}).join('')+'</select></div>'
-    +'<div><label>مسئول</label>'
+    +'<div class="cm-field"><label>مسئول</label><div class="cm-owner-row">'
     +'<span class="owner-dot" data-uid="'+encodeURIComponent(e.owner||r.owner||'')+'"></span>'
-    +'<select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'owner\',this.value);var _d=this.previousElementSibling;if(_d)_d.style.background=window.umGetColor?umGetColor(this.value):\'#e2e8f0\'">'
+    +'<select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'owner\',this.value);var _d=this.closest(\'.cm-owner-row\').querySelector(\'.owner-dot\');if(_d)_d.style.background=window.umGetColor?umGetColor(this.value):\'#e2e8f0\'">'
     +'<option value="">—</option>'
-    +(function(){var _act=typeof umGetActive==='function'?umGetActive():[];return _act.map(function(m){return'<option value="'+m.id+'"'+((e.owner||r.owner||'')==m.id?' selected':'')+'>'+m.name+'</option>';}).join('');})()+'</select></div>'
-    +(function(){var _typeOpts=[''].concat(TYPE_LIST);var _curType=e.type||r.type||'';return'<div><label>نوع مرکز</label><select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'type\',this.value)">'+_typeOpts.map(function(t){return'<option value="'+t+'"'+(_curType===t?' selected':'')+'>'+(t||'-- نوع --')+'</option>';}).join('')+'</select></div>';})()
-    +'</div><div class="m-2col">'
-    +'<div><label>وضعیت</label><select class="ed-sel" onchange="_onStatusChange(\''+rtype+'\',\''+r.id+'\',this.value,this)">'
+    +(function(){var _act=typeof umGetActive==='function'?umGetActive():[];return _act.map(function(m){return'<option value="'+m.id+'"'+((e.owner||r.owner||'')==m.id?' selected':'')+'>'+m.name+'</option>';}).join('');})()+'</select></div></div>'
+    +(function(){var _typeOpts=[''].concat(TYPE_LIST);var _curType=e.type||r.type||'';return'<div class="cm-field"><label>نوع مرکز</label><select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'type\',this.value)">'+_typeOpts.map(function(t){return'<option value="'+t+'"'+(_curType===t?' selected':'')+'>'+(t||'-- نوع --')+'</option>';}).join('')+'</select></div>';})()
+    +'</div>'
+    +'<div class="cm-form-grid cm-form-grid-2">'
+    +'<div class="cm-field"><label>وضعیت</label><select class="ed-sel" onchange="_onStatusChange(\''+rtype+'\',\''+r.id+'\',this.value,this)">'
     +STATUS_LIST.map(function(s){return'<option'+(s===st?' selected':'')+'>'+s+'</option>';}).join('')+'</select></div>'
-    +'<div><label>سرنخ</label><select class="ed-sel" onchange="_onLeadChange(\''+id+'\',this.value,\''+rtype+'\',\''+r.id+'\',this)">'
+    +'<div class="cm-field"><label>سرنخ</label><select class="ed-sel" onchange="_onLeadChange(\''+id+'\',this.value,\''+rtype+'\',\''+r.id+'\',this)">'
     +LEAD_LIST.map(function(l){return'<option'+(l===lead?' selected':'')+'>'+l+'</option>';}).join('')+'</select></div>'
     +'</div>'
-    // Stage validation warning
-    +'<div id="cmStageWarn_'+id+'" style="display:none;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;padding:6px 10px;margin-top:4px;font-size:10px;color:#92400e"></div>'
-    // ── بخش فرصت (فقط وقتی lead=فرصت) ──
+    +'<div id="cmStageWarn_'+id+'" class="cm-stage-warn"></div>'
+    +'</div>'
     +'<div id="cmOppSection_'+id+'" class="cm-profile-section cm-profile-accent-opp" style="'+(lead==='فرصت'?'':'display:none')+'">'
     +'<div class="cm-profile-section-title">🎯 جزئیات فرصت</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px">'
-    +'<div><label style="font-size:10px;display:block;margin-bottom:3px">احتمال موفقیت</label>'
+    +'<div class="cm-form-grid cm-form-grid-2">'
+    +'<div class="cm-field"><label>احتمال موفقیت</label>'
     +'<select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'oppProbability\',this.value)">'
     +'<option value="">—</option>'
     +'<option value="low"'+(e.oppProbability==='low'?' selected':'')+'>کم</option>'
     +'<option value="medium"'+(e.oppProbability==='medium'?' selected':'')+'>متوسط</option>'
     +'<option value="high"'+(e.oppProbability==='high'?' selected':'')+'>زیاد ✅</option>'
     +'</select></div>'
-    +'<div><label style="font-size:10px;display:block;margin-bottom:3px">درجه فرصت</label>'
+    +'<div class="cm-field"><label>درجه فرصت</label>'
     +'<select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'oppGrade\',this.value)">'
     +'<option value="">—</option>'
     +'<option value="A"'+(e.oppGrade==='A'?' selected':'')+'>🔥 A (داغ)</option>'
@@ -1508,14 +1935,13 @@ function openCenterModal(rtype,id){
     +'<option value="C"'+(e.oppGrade==='C'?' selected':'')+'>❄️ C (سرد)</option>'
     +'</select></div>'
     +'</div>'
-    +'<label style="font-size:10px;display:block;margin-bottom:3px">💰 ارزش فرصت (میلیون ریال)</label>'
-    +'<input type="number" min="0" step="1" value="'+(e.oppValue||'')+'" placeholder="مثلاً: 150" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'oppValue\',parseFloat(this.value)||0)" style="width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)">'
-    +'</div>'
-    // ── بخش مشتری (فقط وقتی lead=مشتری) ──
+    +'<div class="cm-field" style="margin-top:4px"><label>💰 ارزش فرصت (میلیون ریال)</label>'
+    +'<input type="number" min="0" step="1" class="cm-inp" value="'+(e.oppValue||'')+'" placeholder="مثلاً: 150" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'oppValue\',parseFloat(this.value)||0)">'
+    +'</div></div>'
     +'<div id="cmCustSection_'+id+'" class="cm-profile-section cm-profile-accent-cust" style="'+(lead==='مشتری'?'':'display:none')+'">'
     +'<div class="cm-profile-section-title">🏆 اطلاعات مشتری</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:4px">'
-    +'<div><label style="font-size:10px;display:block;margin-bottom:3px">وضعیت مشتری</label>'
+    +'<div class="cm-form-grid cm-form-grid-2">'
+    +'<div class="cm-field"><label>وضعیت مشتری</label>'
     +'<select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'customerStatus\',this.value)">'
     +'<option value="">خودکار</option>'
     +'<option value="new"'+(e.customerStatus==='new'?' selected':'')+'>🆕 جدید</option>'
@@ -1524,11 +1950,12 @@ function openCenterModal(rtype,id){
     +'<option value="dormant"'+(e.customerStatus==='dormant'?' selected':'')+'>😴 خوابیده (+90 روز)</option>'
     +'<option value="lost"'+(e.customerStatus==='lost'?' selected':'')+'>❌ از دست رفته</option>'
     +'</select></div>'
-    +'<div><label style="font-size:10px;display:block;margin-bottom:3px">📅 آخرین خرید</label>'
-    +'<input type="text" id="cmLastPurch_'+id+'" value="'+(e.lastPurchaseDate||'')+'" readonly class="fd-inp" style="cursor:pointer;width:100%;box-sizing:border-box" placeholder="انتخاب تاریخ" onclick="openJDP(this,function(v){_cmSetLastPurch(\''+rtype+'\',\''+r.id+'\',\''+id+'\',v);})">'
+    +'<div class="cm-field"><label>📅 آخرین خرید</label>'
+    +'<input type="text" id="cmLastPurch_'+id+'" value="'+(e.lastPurchaseDate||'')+'" readonly class="fd-inp cm-inp" style="cursor:pointer" placeholder="انتخاب تاریخ" onclick="openJDP(this,function(v){_cmSetLastPurch(\''+rtype+'\',\''+r.id+'\',\''+id+'\',v);})">'
     +'</div></div>'
     +(function(){var _cs=_computeCustomerStatus(rtype,r.id);return _cs==='dormant'?'<div style="font-size:10px;background:#fef9c3;border:1px solid #fde047;border-radius:5px;padding:4px 8px;color:#92400e">⚠️ مشتری خوابیده — بیش از ۹۰ روز از آخرین خرید گذشته</div>':'';})()+''
     +'</div>'
+    +'<div class="cm-profile-section" data-cm-panel="overview">'
     +'<label>تاریخ پیگیری بعدی</label>'
     +'<div style="display:flex;gap:5px;align-items:center">'
     +'<input id="mfd_'+id+'" type="text" value="'+fd+'" readonly class="fd-inp'+(fd&&fd<today?' ov':'')+'" style="cursor:pointer;flex:1" '
@@ -1541,9 +1968,8 @@ function openCenterModal(rtype,id){
     +'<div id="tagArea_'+id+'" style="display:flex;flex-wrap:wrap;gap:4px;padding:7px;background:var(--bg-raised);border-radius:6px;min-height:30px;border:1px solid var(--border)">'
     +tgs.map(function(tid){var t=tagById(tid);return t?'<span class="tag-badge" style="background:'+_safeColor(t.color)+';display:inline-flex;align-items:center;gap:3px">'+esc(t.name)+'<button onclick="removeCenterTag(event,\''+rtype+'\',\''+r.id+'\',\''+tid+'\')" style="background:rgba(0,0,0,.2);border:none;color:var(--text-primary);width:14px;height:14px;border-radius:50%;cursor:pointer;font-size:9px;line-height:1;padding:0;display:inline-flex;align-items:center;justify-content:center">✕</button></span>':'';}).join('')
     +'<button class="tag-add-btn" style="width:24px;height:24px;line-height:22px;font-size:14px" onclick="openTagMenu(event,\''+rtype+'\',\''+r.id+'\')">+</button>'
-    +'</div>'
-        // ── بخش اطلاعات تماس ──
-    +'<div class="cm-profile-section cm-profile-accent-contact">'
+    +'</div></div>'
+    +'<div class="cm-profile-section cm-profile-accent-contact" data-cm-panel="contact" style="display:none">'
     +'<div class="cm-profile-section-title" style="display:flex;align-items:center;justify-content:space-between">'
     +'<span>📞 اطلاعات تماس</span>'
     +'<button onclick="if(typeof _hcpOpenLinkModal===\'function\')_hcpOpenLinkModal(\''+rtype+'\',\''+r.id+'\',\''+id+'\');else addContact(\''+rtype+'\',\''+r.id+'\',\''+id+'\')" style="padding:3px 10px;border-radius:6px;border:none;background:#0ea5e9;color:#fff;font-size:11px;font-family:inherit;cursor:pointer;font-weight:700">+ افزودن مخاطب</button>'
@@ -1554,46 +1980,69 @@ function openCenterModal(rtype,id){
     +'<textarea id="maddr_'+id+'" placeholder="آدرس کامل مرکز..." rows="2" style="width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;resize:vertical;background:var(--bg-input);color:var(--text-primary);direction:rtl" '
     +'onchange="setE(\''+rtype+'\',\''+r.id+'\',\'address\',this.value)">'+esc(e.address||'')+'</textarea>'
     +'<button onclick="var _v=document.getElementById(\'maddr_\'+\''+id+'\').value.trim();if(_v)window.open(\'https://www.google.com/maps/search/?api=1&query=\'+encodeURIComponent(_v),\'_blank\');else showToast(\'آدرس را وارد کنید\')" style="background:#f0f9ff;color:#0369a1;border:1px solid #7dd3fc;border-radius:5px;padding:3px 10px;font-size:11px;font-family:inherit;cursor:pointer;margin-top:4px">🗺 نقشه</button>'
+    +'<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)">'
+    +'<div style="font-size:10px;font-weight:700;color:#0369a1;margin-bottom:6px">📦 اطلاعات ارسال</div>'
+    +'<div class="cm-form-grid cm-form-grid-2">'
+    +'<div class="cm-field"><label>🚚 روش ارسال</label>'
+    +'<select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'shipMethod\',this.value)">'
+    +CM_SHIP_METHODS.map(function(m){return'<option value="'+m+'"'+((e.shipMethod||'')===m?' selected':'')+'>'+(m||'— انتخاب —')+'</option>';}).join('')
+    +'</select></div>'
+    +'<div class="cm-field"><label>👤 شخص تحویل‌گیرنده</label>'
+    +'<input type="text" class="cm-inp" value="'+esc(e.deliveryRecipient||'')+'" placeholder="نام و سمت تحویل‌گیرنده..." onchange="setE(\''+rtype+'\',\''+r.id+'\',\'deliveryRecipient\',this.value)"></div>'
     +'</div>'
-    +'<div style="background:var(--bg-raised);border-radius:8px;padding:8px 12px;margin-top:6px;border:1px solid var(--border)">'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end">'
-    +'<div><label style="font-size:10px;display:block;margin-bottom:3px">🤖 رقیب اصلی</label>'
-    +'<input type="text" list="compDatalist_'+r.id+'" value="'+esc(e.competitor||'')+'" placeholder="نام رقیب / برند..." onchange="setE(\''+rtype+'\',\''+r.id+'\',\'competitor\',this.value)" style="width:100%;padding:4px 7px;border:1px solid var(--border-input);border-radius:5px;font-family:inherit;font-size:11px;background:var(--bg-input);color:var(--text-primary)"><datalist id="compDatalist_'+r.id+'">'+_getCompetitorList().map(function(c){return'<option value="'+esc(c)+'">';}).join('')+'</datalist></div>'
-    +'<div id="cmCommission_'+r.id+'" style="font-size:10px;color:var(--text-muted);padding:4px 0"></div>'
-    +'</div>'
-    // ── جزئیات رقیب ──
-    +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px">'
-    +'<div><label style="font-size:9px;color:var(--text-muted);display:block;margin-bottom:2px">💪 مزیت رقیب</label>'
-    +'<input type="text" value="'+(e.competitorAdvantage||'')+'" placeholder="مثلاً: قیمت پایین‌تر" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'competitorAdvantage\',this.value)" style="width:100%;padding:3px 6px;border:1px solid var(--border-input);border-radius:4px;font-size:10px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)"></div>'
-    +'<div><label style="font-size:9px;color:var(--text-muted);display:block;margin-bottom:2px">⚠ ضعف رقیب</label>'
-    +'<input type="text" value="'+(e.competitorWeakness||'')+'" placeholder="مثلاً: خدمات ضعیف" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'competitorWeakness\',this.value)" style="width:100%;padding:3px 6px;border:1px solid var(--border-input);border-radius:4px;font-size:10px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)"></div>'
-    +'<div><label style="font-size:9px;color:var(--text-muted);display:block;margin-bottom:2px">🎯 دلیل خرید از رقیب</label>'
-    +'<input type="text" value="'+(e.buyReasonFromCompetitor||'')+'" placeholder="مثلاً: رابطه قدیمی" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'buyReasonFromCompetitor\',this.value)" style="width:100%;padding:3px 6px;border:1px solid var(--border-input);border-radius:4px;font-size:10px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)"></div>'
+    +'<div class="cm-field" style="margin-top:8px"><label>📍 آدرس ارسال (گیرنده / خریدار)</label>'
+    +'<textarea id="mshipaddr_'+id+'" rows="2" class="cm-inp" placeholder="آدرس دقیق تحویل بار..." style="resize:vertical;direction:rtl" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'shipAddress\',this.value)">'+esc(e.shipAddress||e.address||'')+'</textarea>'
+    +'<button type="button" class="cm-qact cm-qact-week" style="margin-top:6px" onclick="openCenterShipPrint(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName).replace(/'/g,"\\'")+'\')">🖨️ چاپ برچسب ارسال</button>'
     +'</div></div>'
+    +'</div>'
+    +'<div class="cm-profile-section" data-cm-panel="overview">'
+    +'<div class="cm-profile-section-title">🤖 رقبا و Prospect</div>'
+    +'<div class="cm-form-grid cm-form-grid-2">'
+    +'<div class="cm-field"><label>🤖 رقیب اصلی</label>'
+    +'<input type="text" class="cm-inp" list="compDatalist_'+r.id+'" value="'+esc(e.competitor||'')+'" placeholder="نام رقیب / برند..." onchange="setE(\''+rtype+'\',\''+r.id+'\',\'competitor\',this.value)"><datalist id="compDatalist_'+r.id+'">'+_getCompetitorList().map(function(c){return'<option value="'+esc(c)+'">';}).join('')+'</datalist></div>'
+    +'<div class="cm-field"><label>💪 مزیت رقیب</label>'
+    +'<input type="text" class="cm-inp" value="'+(e.competitorAdvantage||'')+'" placeholder="مثلاً: قیمت پایین‌تر" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'competitorAdvantage\',this.value)"></div>'
+    +'<div class="cm-field"><label>⚠ ضعف رقیب</label>'
+    +'<input type="text" class="cm-inp" value="'+(e.competitorWeakness||'')+'" placeholder="مثلاً: خدمات ضعیف" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'competitorWeakness\',this.value)"></div>'
+    +'<div class="cm-field"><label>🎯 دلیل خرید از رقیب</label>'
+    +'<input type="text" class="cm-inp" value="'+(e.buyReasonFromCompetitor||'')+'" placeholder="مثلاً: رابطه قدیمی" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'buyReasonFromCompetitor\',this.value)"></div>'
+    +'</div>'
+    +'<div id="cmCommission_'+r.id+'" style="font-size:10px;color:var(--text-muted);padding:8px 0 0"></div>'
     +(function(){
       if(e.lead!=='سرنخ'&&e.lead!=='فرصت')return '';
       var pm=e.purchaseMethod||'';
       var pt=e.paymentTerms||'';
-      return '<div style="background:var(--bg-raised);border-radius:8px;padding:8px 12px;margin-top:6px;border:1px solid var(--border)">'
-        +'<div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-bottom:6px">📋 اطلاعات Prospect</div>'
-        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'
-        +'<div><label style="font-size:9px;color:var(--text-muted);display:block;margin-bottom:2px">📦 میزان مصرف تقریبی</label>'
-        +'<input type="text" value="'+(e.approxConsumption||'')+'" placeholder="مثلاً: ۵۰ عدد/ماه" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'approxConsumption\',this.value)" style="width:100%;padding:3px 6px;border:1px solid var(--border-input);border-radius:4px;font-size:10px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)"></div>'
-        +'<div><label style="font-size:9px;color:var(--text-muted);display:block;margin-bottom:2px">🛒 نحوه خرید</label>'
-        +'<select onchange="setE(\''+rtype+'\',\''+r.id+'\',\'purchaseMethod\',this.value)" style="width:100%;padding:3px 6px;border:1px solid var(--border-input);border-radius:4px;font-size:10px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)">'
+      return '<div class="cm-prospect-block">'
+        +'<div class="cm-profile-section-title" style="margin-bottom:10px">📋 اطلاعات Prospect</div>'
+        +'<div class="cm-form-grid cm-form-grid-2">'
+        +'<div class="cm-field"><label>📦 میزان مصرف تقریبی</label>'
+        +'<input type="text" class="cm-inp" value="'+(e.approxConsumption||'')+'" placeholder="مثلاً: ۵۰ عدد/ماه" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'approxConsumption\',this.value)"></div>'
+        +'<div class="cm-field"><label>🛒 نحوه خرید</label>'
+        +'<select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'purchaseMethod\',this.value)">'
         +['','مستقیم','توزیع‌کننده','بیمارستانی','مناقصه'].map(function(v){return'<option'+(v===pm?' selected':'')+'>'+v+'</option>';}).join('')+'</select></div>'
-        +'<div><label style="font-size:9px;color:var(--text-muted);display:block;margin-bottom:2px">💳 شرایط پرداخت</label>'
-        +'<select onchange="setE(\''+rtype+'\',\''+r.id+'\',\'paymentTerms\',this.value)" style="width:100%;padding:3px 6px;border:1px solid var(--border-input);border-radius:4px;font-size:10px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)">'
+        +'<div class="cm-field"><label>💳 شرایط پرداخت</label>'
+        +'<select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'paymentTerms\',this.value)">'
         +['','نقدی','۳۰ روزه','۶۰ روزه','۹۰ روزه','اعتباری'].map(function(v){return'<option'+(v===pt?' selected':'')+'>'+v+'</option>';}).join('')+'</select></div>'
-        +'<div><label style="font-size:9px;color:var(--text-muted);display:block;margin-bottom:2px">📅 زمان تقریبی سفارش</label>'
-        +'<input type="text" value="'+(e.approxOrderTime||'')+'" placeholder="مثلاً: اسفند ۱۴۰۳" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'approxOrderTime\',this.value)" style="width:100%;padding:3px 6px;border:1px solid var(--border-input);border-radius:4px;font-size:10px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)"></div>'
+        +'<div class="cm-field"><label>📅 زمان تقریبی سفارش</label>'
+        +'<input type="text" class="cm-inp" value="'+(e.approxOrderTime||'')+'" placeholder="مثلاً: اسفند ۱۴۰۳" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'approxOrderTime\',this.value)"></div>'
         +'</div></div>';
     })()
-    +'<div id="cmDealsSec_'+id+'" class="cm-profile-section">'
+    +'</div>'
+    +'<div id="cmWorkSec_'+id+'" class="cm-profile-section cm-profile-accent-work" data-cm-panel="overview">'
+    +'<div class="cm-profile-section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">'
+    +'<span>📌 وظایف و تیکت‌های باز</span>'
+    +'<span style="display:flex;gap:6px">'
+    +'<button type="button" class="cm-qact cm-qact-task" id="cmSecTaskBtn_'+id+'">+ وظیفه</button>'
+    +'<button type="button" class="cm-qact cm-qact-ticket" id="cmSecTicketBtn_'+id+'">+ تیکت</button>'
+    +'</span></div>'
+    +'<div id="cmWorkInner_'+id+'" style="font-size:11px;color:#94a3b8">در حال بارگذاری…</div>'
+    +'</div>'
+    +'<div id="cmDealsSec_'+id+'" class="cm-profile-section" data-cm-panel="sales" style="display:none">'
     +'<div class="cm-profile-section-title">💼 فرصت‌های فروش</div>'
     +'<div id="cmDeals_'+id+'" style="font-size:11px;color:#94a3b8">در حال بارگذاری…</div>'
     +'</div>'
-    +'<div id="cmPricingInfo_'+r.id+'" class="cm-profile-section" style="font-size:11px"><span style="color:var(--text-muted)">در حال بارگذاری قیمت‌گذاری...</span></div>'
+    +'<div id="cmPricingInfo_'+r.id+'" class="cm-profile-section" data-cm-panel="sales" style="display:none;font-size:11px"><span style="color:var(--text-muted)">در حال بارگذاری قیمت‌گذاری...</span></div>'
+    +'<div data-cm-panel="activity" style="display:none">'
    // برنامه هفته
     +(wkEntries.length?'<label>برنامه هفته</label><div style="background:var(--bg-raised);border-radius:5px;padding:7px;font-size:11px">'
     +wkEntries.map(function(we){
@@ -1633,18 +2082,6 @@ function openCenterModal(rtype,id){
         +'</div></div>';
     })();
 
-  var _ckWork=recK(rtype,r.id);
-  var _snWork=displayName.replace(/'/g,'&#39;');
-  body+='<div id="cmWorkSec_'+id+'" class="cm-profile-section cm-profile-accent-work">'
-    +'<div class="cm-profile-section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">'
-    +'<span>📌 وظایف و تیکت‌های باز</span>'
-    +'<span style="display:flex;gap:4px">'
-    +'<button type="button" onclick="_openTaskModalLazy(null,{centerKey:\''+_ckWork+'\',title:\'وظیفه: '+esc(displayName)+'\'})" style="font-size:10px;padding:3px 10px;background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;border-radius:5px;cursor:pointer;font-family:inherit">+ وظیفه</button>'
-    +'<button type="button" onclick="_openSupportNewForCenterLazy(\''+_ckWork+'\',\''+_snWork+'\')" style="font-size:10px;padding:3px 10px;background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;border-radius:5px;cursor:pointer;font-family:inherit">+ تیکت</button>'
-    +'</span></div>'
-    +'<div id="cmWorkInner_'+id+'" style="font-size:11px;color:#94a3b8">در حال بارگذاری…</div>'
-    +'</div>';
-
   body+='<div id="cmFilesSec_'+id+'" class="cm-profile-section">'
     +'<div class="cm-profile-section-title">📎 پیوست‌ها</div>'
     +'<div id="cmFiles_'+id+'" style="font-size:11px;color:#94a3b8">در حال بارگذاری…</div>'
@@ -1654,7 +2091,9 @@ function openCenterModal(rtype,id){
   var rkey=rtype+'_'+r.id;
   var hist=(DB.changeLog||[]).filter(function(h){return h.rkey===rkey;}).slice(-5).reverse();
   var fNames={status:'وضعیت',followupDate:'تاریخ پیگیری',contactName:'مخاطب',owner:'کارشناس',notes:'یادداشت',lead:'سرنخ',potential:'پتانسیل'};
-  body+='<div class="cm-profile-section">'
+  body+='</div>'; // activity panel
+
+  body+='<div class="cm-profile-section" data-cm-panel="activity">'
     +'<div class="cm-profile-section-title">📋 تغییرات اخیر</div>'
     +(hist.length?hist.map(function(h){
       var d=new Date(h.at);var jd=g2j(d.getFullYear(),d.getMonth()+1,d.getDate());
@@ -1667,24 +2106,66 @@ function openCenterModal(rtype,id){
     +'</div>';
 
   var canDelete = (id.indexOf('_new_') >= 0) || _canEdit('provinces');
-  var foot=(canDelete ? '<button style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="closeModal(\'cm_'+id+'\');confirmDeleteCenter(\''+rtype+'\',\''+id+'\',\''+esc(displayName)+'\')">🗑 حذف</button>' : '')
-    +'<button style="background:#faf5ff;color:#7c3aed;border:1px solid #d8b4fe;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openPreCallBrief(\''+rtype+'\',' +'\''+r.id+'\')">🎯 خلاصه</button>'
-    +'<button style="background:#f0f9ff;color:#0369a1;border:1px solid #7dd3fc;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openCenterAudit(\''+recK(rtype,r.id)+'\',\''+esc(displayName)+'\')">📋 تاریخچه</button>'
-    +'<button style="background:#ecfdf5;color:#15803d;border:1px solid #86efac;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openCenterReport(\''+recK(rtype,r.id)+'\',\''+esc(displayName)+'\')">📊 گزارش مرکز</button>'
-    +(_canEdit('provinces') ? '<button style="background:#f0fdf4;color:#15803d;border:1px solid #86efac;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openMergeCenterModal(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">🔀 ادغام</button>' : '')
-    +(_isManager()?'<button style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="openChangeProvinceModal(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">🗺 تغییر استان</button>':'')
-    +'<button style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="if(typeof wfCreateFromCenter===\'function\')wfCreateFromCenter(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">🔄 گردش‌کار</button>'
-    +'<button style="background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" id="pfBtn_'+id+'">📄 پیشفاکتورها</button>'
+  var _ckFoot=recK(rtype,r.id);
+  var foot='<div class="cm-profile-foot">'
+    +(canDelete ? '<button type="button" class="cm-foot-btn" style="background:#fee2e2;color:#dc2626;border-color:#fca5a5" id="cmDelBtn_'+id+'">🗑 حذف</button>' : '')
+    +'<button type="button" class="cm-foot-btn" style="background:#ede9fe;color:#6d28d9;border-color:#c4b5fd" id="cmTaskBtn_'+id+'">📌 + وظیفه</button>'
+    +'<button type="button" class="cm-foot-btn" style="background:#dbeafe;color:#1d4ed8;border-color:#93c5fd" id="cmTicketBtn_'+id+'">🎧 + تیکت</button>'
+    +'<button type="button" class="cm-foot-btn" style="background:#faf5ff;color:#7c3aed;border-color:#d8b4fe" id="cmBriefBtn_'+id+'">🎯 خلاصه</button>'
+    +'<button type="button" class="cm-foot-btn" style="background:#f0f9ff;color:#0369a1;border-color:#7dd3fc" id="cmAuditBtn_'+id+'">📋 تاریخچه</button>'
+    +'<button type="button" class="cm-foot-btn" style="background:#ecfdf5;color:#15803d;border-color:#86efac" id="cmReportBtn_'+id+'">📊 گزارش</button>'
+    +(_canEdit('provinces') ? '<button type="button" class="cm-foot-btn" style="background:#f0fdf4;color:#15803d;border-color:#86efac" id="cmMergeBtn_'+id+'">🔀 ادغام</button>' : '')
+    +(_isManager()?'<button type="button" class="cm-foot-btn" style="background:#fff7ed;color:#c2410c;border-color:#fed7aa" id="cmProvBtn_'+id+'">🗺 استان</button>':'')
+    +'<button type="button" class="cm-foot-btn" style="background:#ede9fe;color:#6d28d9;border-color:#c4b5fd" id="pfBtn_'+id+'">📄 پیشفاکتور</button>'
     +'<button class="btn-secondary" onclick="closeModal(\'cm_'+id+'\')">بستن</button>'
-    +'<button class="btn-primary" onclick="openAssignWeekForCenter(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">📋 اضافه به هفته</button>';
+    +'<button class="btn-primary" id="cmWeekBtn_'+id+'">📋 اضافه به هفته</button>'
+    +'</div>';
   // ── مطالبات section ──
   if(typeof mtrCenterSection==='function'){
     if(typeof DATA!=='undefined'&&DATA.length&&!Object.keys(MTR_BY_CENTER).length)matchCentersToData();
     var mtrHtml=mtrCenterSection(r.id);
-    if(mtrHtml) body+=mtrHtml;
+    if(mtrHtml) body+='<div class="cm-profile-section" data-cm-panel="sales" style="display:none">'+mtrHtml+'</div>';
   }
   body+='</div>'; // .cm-profile
-  openModal('cm_'+id,'🏥 '+esc(displayName),body,foot,{lg:true});
+  openModal('cm_'+id,'🏥 '+esc(displayName),body,foot,{xl:true});
+  (function(_rid){
+    setTimeout(function(){
+      var mo=document.getElementById('mo_cm_'+_rid);
+      if(mo){var b=mo.querySelector('.m-box');if(b)b.classList.add('cm-profile-modal');}
+    },0);
+  })(id);
+  (function(_rid,_rtype,_rid2,_nm,_ck){
+    setTimeout(function(){
+      var del=document.getElementById('cmDelBtn_'+_rid);
+      if(del)del.addEventListener('click',function(){closeModal('cm_'+_rid);confirmDeleteCenter(_rtype,_rid2,_nm);});
+      var taskBtn=document.getElementById('cmTaskBtn_'+_rid);
+      if(taskBtn)taskBtn.addEventListener('click',function(){_openTaskModalLazy(null,{centerKey:_ck,title:'وظیفه: '+_nm});});
+      var ticketBtn=document.getElementById('cmTicketBtn_'+_rid);
+      if(ticketBtn)ticketBtn.addEventListener('click',function(){_openSupportNewForCenterLazy(_ck,_nm);});
+      var qTask=document.getElementById('cmQuickTask_'+_rid);
+      if(qTask)qTask.addEventListener('click',function(){_openTaskModalLazy(null,{centerKey:_ck,title:'وظیفه: '+_nm});});
+      var qTicket=document.getElementById('cmQuickTicket_'+_rid);
+      if(qTicket)qTicket.addEventListener('click',function(){_openSupportNewForCenterLazy(_ck,_nm);});
+      var qWeek=document.getElementById('cmQuickWeek_'+_rid);
+      if(qWeek)qWeek.addEventListener('click',function(){openAssignWeekForCenter(_rtype,_rid2,_nm);});
+      var secTask=document.getElementById('cmSecTaskBtn_'+_rid);
+      if(secTask)secTask.addEventListener('click',function(){_openTaskModalLazy(null,{centerKey:_ck,title:'وظیفه: '+_nm});});
+      var secTicket=document.getElementById('cmSecTicketBtn_'+_rid);
+      if(secTicket)secTicket.addEventListener('click',function(){_openSupportNewForCenterLazy(_ck,_nm);});
+      var brief=document.getElementById('cmBriefBtn_'+_rid);
+      if(brief)brief.addEventListener('click',function(){openPreCallBrief(_rtype,_rid2);});
+      var audit=document.getElementById('cmAuditBtn_'+_rid);
+      if(audit)audit.addEventListener('click',function(){openCenterAudit(_ck,_nm);});
+      var report=document.getElementById('cmReportBtn_'+_rid);
+      if(report)report.addEventListener('click',function(){openCenterReport(_ck,_nm);});
+      var merge=document.getElementById('cmMergeBtn_'+_rid);
+      if(merge)merge.addEventListener('click',function(){openMergeCenterModal(_rtype,_rid2,_nm);});
+      var prov=document.getElementById('cmProvBtn_'+_rid);
+      if(prov)prov.addEventListener('click',function(){openChangeProvinceModal(_rtype,_rid2,_nm);});
+      var week=document.getElementById('cmWeekBtn_'+_rid);
+      if(week)week.addEventListener('click',function(){openAssignWeekForCenter(_rtype,_rid2,_nm);});
+    },0);
+  })(id,rtype,r.id,displayName,_ckFoot);
   // Wire up proforma button (DOM, no onclick string)
   (function(_ck4,_mid4,_nm4){
     setTimeout(function(){
@@ -1696,12 +2177,13 @@ function openCenterModal(rtype,id){
         });
       }
       // Append mini proforma list section
-      var _modal4=document.getElementById('cm_'+_mid4); if(!_modal4)return;
-      var _bd4=_modal4.querySelector('.modal-body')||_modal4;
+      var _modal4=document.getElementById('mo_cm_'+_mid4); if(!_modal4)return;
+      var _bd4=_modal4.querySelector('.m-body')||_modal4;
       if(document.getElementById('cmPfSec_'+_mid4))return;
       var _sec=document.createElement('div');
       _sec.id='cmPfSec_'+_mid4;
-      _sec.style.cssText='margin-top:14px;padding:12px 14px;background:#f5f3ff;border-radius:10px;border:1px solid #ddd6fe';
+      _sec.setAttribute('data-cm-panel','sales');
+      _sec.style.cssText='display:none;margin-top:14px;padding:12px 14px;background:#f5f3ff;border-radius:10px;border:1px solid #ddd6fe';
       var _hdr=document.createElement('div');
       _hdr.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px';
       var _ttl=document.createElement('span');
@@ -1738,6 +2220,8 @@ function openCenterModal(rtype,id){
   setTimeout(function(){_loadCenterWorkItems(rtype, id);},30);
   if(typeof _dealLoadSection==='function'){setTimeout(function(){_dealLoadSection(rtype,r.id,id);},25);}
   if(typeof _cfLoadSection==='function'){setTimeout(function(){_cfLoadSection(rtype,r.id,id);},25);}
+  if(typeof _cmLoadWmsSection==='function'){setTimeout(function(){_cmLoadWmsSection(rtype,r.id,id);},27);}
+  if(typeof _cmLoadLettersSection==='function'){setTimeout(function(){_cmLoadLettersSection(rtype,r.id,id);},28);}
   setTimeout(function(){
     if(typeof _loadCenterHcpLazy==='function') _loadCenterHcpLazy(rtype,r.id,id);
     else if(typeof _hcpLoadCenterAffiliations==='function') _hcpLoadCenterAffiliations(rtype,r.id,id);
@@ -1772,21 +2256,7 @@ function openCenterModal(rtype,id){
           +(chips?'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">'+chips+'</div>'
             :'<div style="font-size:10px;color:var(--text-muted);margin-top:4px">پیش‌فرض: بیمارستان — برای تغییر نوع، مدیر تنظیم کند</div>')
           +buyerSel;
-  var elCom=document.getElementById('cmCommission_'+_rid);
-  if(elCom){
-    var _curLvl=cfg&&cfg.commission_level?String(cfg.commission_level):'';
-    var _ckEsc=esc(_centerKey);
-    elCom.innerHTML='<div style="display:flex;flex-direction:column;gap:4px"><div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap"><label style="font-size:10px;color:var(--text-muted);flex-shrink:0">💼 پورسانت:</label><select onchange="fetch(\'/api/pricing/center/\'+encodeURIComponent(\''+_ckEsc+'\'),{method:\'PUT\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({commission_level:this.value||null})}).then(function(){showToast(\'💼 سطح پورسانت ذخیره شد\');}).catch(function(){showToast(\'خطا در ذخیره پورسانت\');})" style="font-size:10px;padding:2px 5px;border:1px solid var(--border-input);border-radius:4px;background:var(--bg-input);font-family:inherit;color:var(--text-primary)"><option value="">---</option><option value="1"'+(_curLvl==='1'?' selected':'')+'>سطح ۱</option><option value="2"'+(_curLvl==='2'?' selected':'')+'>سطح ۲</option><option value="3"'+(_curLvl==='3'?' selected':'')+'>سطح ۳</option></select>'+(function(){var _owId=e.owner||r.owner||'';var _owM=_DEFAULT_MEMBERS&&_DEFAULT_MEMBERS.find(function(mm){return mm.id===_owId;});return(_owM&&_owM.commissionPct)?'<span style="font-size:10px;color:#7c3aed;background:#f5f3ff;border:1px solid #e9d5ff;border-radius:4px;padding:1px 6px">👤 نرخ کارشناس: '+_owM.commissionPct+'٪</span>':'';})()+'</div><div id="cmCommPreview_'+_rid+'" style="font-size:10px;color:var(--text-muted)"></div></div>';
-    if(_curLvl){
-      fetch('/api/pricing/center/'+encodeURIComponent(_centerKey)+'/commissions').then(function(r){return r.ok?r.json():[];}).then(function(rows){
-        var pv=document.getElementById('cmCommPreview_'+_rid);if(!pv)return;
-        if(!rows||!rows.length){pv.textContent='قوانین پورسانت برای این سطح ثبت نشده';return;}
-        pv.innerHTML=rows.slice(0,5).map(function(row){
-          return '<span style="display:inline-block;margin:2px 4px 0 0;background:#f0fdf4;border:1px solid #86efac;border-radius:4px;padding:1px 6px">'+esc(row.product_name||('#'+row.product_id))+': <b>'+Number(row.amount||0).toLocaleString('fa-IR')+'</b> ریال</span>';
-        }).join('')+(rows.length>5?'<span style="color:var(--text-muted)"> +'+ (rows.length-5)+' محصول</span>':'');
-      }).catch(function(){});
-    }
-  }
+  _cmRenderProductCommissions(_rid, _centerKey, cfg, _isMgr);
       }).catch(function(){
         var el=document.getElementById('cmPricingInfo_'+_rid);
         if(!el)return;

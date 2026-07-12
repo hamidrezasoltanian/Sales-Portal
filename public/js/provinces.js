@@ -434,7 +434,8 @@ function quickAddToToday(rtype,id,name){
   });
   if(existing){showToast('قبلاً امروز در برنامه هست',1500);return;}
   var weekId=getWeekId(today);
-  var eKey=weekId+':::'+recKey;
+  if(!weekId){showToast('⚠ هفته جاری یافت نشد',1500);return;}
+  var eKey=wpEntryKey(weekId,rtype,id);
   if(!DB.weekEntries)DB.weekEntries={};
   DB.weekEntries[eKey]={rtype:rtype,rid:id,recKey:recKey,centerName:name,scheduledDate:today,actionType:'call',done:false,addedBy:currentUser,weekId:weekId};
   saveWeekEntryApi(eKey,DB.weekEntries[eKey]);
@@ -891,3 +892,352 @@ function createTagPrompt(){
   saveGlobalTagsApi(DB.tags);rebuildFilters();showToast('برچسب "'+name.trim()+'" ساخته شد ✅');
 }
 
+// ════════ Center selection + bulk actions ════════
+function toggleCenterSelect(cb,id){
+  var rtype=cb.getAttribute('data-rtype');
+  var key=rtype+'_'+id;
+  if(cb.checked)_selectedCenters.add(key);
+  else _selectedCenters.delete(key);
+  var row=cb.closest('tr');
+  if(row)row.classList.toggle('bulk-selected',cb.checked);
+  _updateCenterBulkBar();
+}
+function toggleSelectAll(cb){
+  document.querySelectorAll('.row-cb').forEach(function(c){
+    c.checked=cb.checked;
+    var rtype2=c.getAttribute('data-rtype');
+    var rid=c.getAttribute('data-rid');
+    var key=rtype2+'_'+rid;
+    if(cb.checked)_selectedCenters.add(key);
+    else _selectedCenters.delete(key);
+    var row=c.closest('tr');
+    if(row)row.classList.toggle('bulk-selected',cb.checked);
+  });
+  _updateCenterBulkBar();
+}
+function _updateCenterBulkBar(){
+  var bar=document.getElementById('centersBulkBar');
+  var cnt=document.getElementById('centersBulkCount');
+  if(!bar)return;
+  if(_selectedCenters.size>0){
+    bar.classList.add('active');
+    if(cnt)cnt.textContent=_selectedCenters.size+' مرکز انتخاب شده';
+    var delBtn=document.getElementById('bulkDeleteBtn');
+    if(delBtn){
+      var hasMaster=Array.from(_selectedCenters).some(function(key){
+        var parts=key.split('_');
+        var id=parts.slice(1).join('_');
+        return id.indexOf('_new_')<0;
+      });
+      var canDeleteMaster=(typeof _canEdit==='function')&&_canEdit('provinces');
+      if(hasMaster && !canDeleteMaster){
+        delBtn.style.display='none';
+      }else{
+        delBtn.style.display='inline-block';
+      }
+    }
+  }else{
+    bar.classList.remove('active');
+    var allCb=document.getElementById('selectAllCb');
+    if(allCb)allCb.checked=false;
+  }
+}
+function clearCenterSelection(){
+  _selectedCenters.clear();
+  document.querySelectorAll('.row-cb').forEach(function(c){c.checked=false;});
+  document.querySelectorAll('tr.bulk-selected').forEach(function(r){r.classList.remove('bulk-selected');});
+  var allCb=document.getElementById('selectAllCb');
+  if(allCb)allCb.checked=false;
+  _updateCenterBulkBar();
+}
+function bulkAddToWeekPlan(){
+  var keys=Array.from(_selectedCenters);
+  if(!keys.length)return;
+  var sel=document.getElementById('wpSel');
+  var weekId=sel?sel.value:null;
+  if(!weekId){var ws=wpGetWeeks();if(ws.length){var nw=ws.find(function(w){return !w.isPast;});weekId=nw?nw.id:ws[ws.length-1].id;}}
+  if(!weekId){showToast('⚠ هیچ هفته‌ای یافت نشد');return;}
+  var added=0;
+  keys.forEach(function(key){
+    var parts=key.split('_');var rtype=parts[0];var rid=parts.slice(1).join('_');
+    var eKey=wpEntryKey(weekId,rtype,rid);
+    wpRemoveFromOtherWeeks(key, weekId);
+    if(!DB.weekEntries[eKey]){
+      DB.weekEntries[eKey]={scheduledDate:null,done:false,doneDate:null,rtype:rtype,rid:rid,recKey:key,addedBy:currentUser,actionType:'call'};
+      saveWeekEntryApi(eKey,DB.weekEntries[eKey]);
+      added++;
+    }
+  });
+  clearCenterSelection();
+  showToast('📋 '+added+' مرکز به برنامه هفته اضافه شد',2500);
+}
+function bulkChangeOwner(){
+  var keys=Array.from(_selectedCenters);
+  if(!keys.length)return;
+  var body='<div style="font-size:12px;margin-bottom:10px;color:var(--text-muted)">'+keys.length+' مرکز انتخابی</div>'
+    +'<select id="bulkOwnerSel" style="width:100%;padding:8px;border:1px solid var(--border-input);border-radius:6px;font-family:inherit;font-size:13px">'
+    +'<option value="">— بدون مسئول —</option>'
+    +Object.keys(USERS).map(function(u){return'<option value="'+u+'">'+USERS[u]+'</option>';}).join('')
+    +'</select>';
+  openModal('bulkOwnerModal','👤 تغییر مسئول',body,
+    '<button class="btn-secondary" onclick="closeModal(\'bulkOwnerModal\')">انصراف</button>'
+    +'<button class="btn-primary" onclick="_doBulkOwner()">✅ تأیید</button>');
+}
+function _doBulkOwner(){
+  var val=(document.getElementById('bulkOwnerSel')||{}).value||'';
+  var keys=Array.from(_selectedCenters);
+  keys.forEach(function(key){
+    var parts=key.split('_');var rtype=parts[0];var rid=parts.slice(1).join('_');
+    setE(rtype,rid,'owner',val);
+  });
+  closeModal('bulkOwnerModal');clearCenterSelection();renderTable();
+  showToast('✅ مسئول '+keys.length+' مرکز تغییر کرد',2000);
+}
+function bulkChangeStatus(){
+  var keys=Array.from(_selectedCenters);
+  if(!keys.length)return;
+  var body='<div style="font-size:12px;margin-bottom:10px;color:var(--text-muted)">'+keys.length+' مرکز انتخابی</div>'
+    +'<select id="bulkStatusSel" style="width:100%;padding:8px;border:1px solid var(--border-input);border-radius:6px;font-family:inherit;font-size:13px">'
+    +STATUS_LIST.map(function(s){return'<option>'+s+'</option>';}).join('')
+    +'</select>';
+  openModal('bulkStatusModal','🔄 تغییر وضعیت',body,
+    '<button class="btn-secondary" onclick="closeModal(\'bulkStatusModal\')">انصراف</button>'
+    +'<button class="btn-primary" onclick="_doBulkStatus()">✅ تأیید</button>');
+}
+function bulkSetFollowup(){
+  var keys=Array.from(_selectedCenters);
+  if(!keys.length)return;
+  var tmp=document.createElement('input');tmp.type='text';tmp.style.position='absolute';tmp.style.opacity='0';document.body.appendChild(tmp);
+  openJDP(tmp,function(v){
+    document.body.removeChild(tmp);
+    if(!v)return;
+    keys.forEach(function(k){
+      var parts=k.split('_');var rtype=parts[0];var id=parts.slice(1).join('_');
+      setE(rtype,id,'followupDate',v);
+    });
+    clearCenterSelection();
+    renderTable();
+    showToast('✓ تاریخ پیگیری برای '+keys.length+' مرکز تنظیم شد');
+  });
+}
+function _doBulkStatus(){
+  var val=(document.getElementById('bulkStatusSel')||{}).value||STATUS_LIST[0];
+  var keys=Array.from(_selectedCenters);
+  keys.forEach(function(key){
+    var parts=key.split('_');var rtype=parts[0];var rid=parts.slice(1).join('_');
+    setE(rtype,rid,'status',val);
+  });
+  closeModal('bulkStatusModal');clearCenterSelection();renderTable();
+  showToast('✅ وضعیت '+keys.length+' مرکز تغییر کرد',2000);
+}
+function bulkExport(){
+  var keys=Array.from(_selectedCenters);
+  if(!keys.length)return;
+  if(typeof XLSX==='undefined'){showToast('⚠ کتابخانه Excel بارگذاری نشده');return;}
+  var rtype=getProvType(_currentProvId);
+  var rows=[['نام مرکز','پتانسیل','نوع','مسئول','وضعیت','تاریخ پیگیری']];
+  keys.forEach(function(key){
+    var parts=key.split('_');var rt=parts[0];var rid=parts.slice(1).join('_');
+    var centers=getProvCenters(_currentProvId);
+    var r=centers.find(function(x){return x.id===rid;});
+    if(!r)return;
+    var e=getE(rt,rid);
+    rows.push([r.name,e.potential||r.potential||'',e.type||r.type||'',USERS[e.owner||r.owner||'']||'',e.status||'بدون تماس',e.followupDate||'']);
+  });
+  var ws=XLSX.utils.aoa_to_sheet(rows);
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'مراکز');
+  XLSX.writeFile(wb,'centers_selected_'+todayStr().replace(/\//g,'-')+'.xlsx');
+}
+function bulkDeleteCenters(){
+  var keys=Array.from(_selectedCenters);
+  if(!keys.length)return;
+  var extraCount=keys.filter(function(k){return k.indexOf('_new_')>=0;}).length;
+  var baseCount=keys.length-extraCount;
+  var body='<div style="text-align:center;padding:10px 0">'
+    +'<div style="font-size:36px;margin-bottom:12px">🗑</div>'
+    +'<div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:8px">حذف گروهی مراکز</div>'
+    +'<div style="font-size:13px;color:var(--text-muted);margin-bottom:14px">'+keys.length+' مرکز انتخاب شده</div>'
+    +(baseCount?'<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:7px;padding:10px;font-size:12px;color:#991b1b;text-align:right;margin-bottom:8px">'+baseCount+' مرکز از دیتابیس اصلی حذف می‌شود. این عمل قابل بازگشت نیست.</div>':'')
+    +(extraCount?'<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:7px;padding:10px;font-size:12px;color:#92400e;text-align:right">'+extraCount+' مرکز دستی (extra) حذف می‌شود.</div>':'')
+    +'</div>';
+  var foot='<button class="btn-secondary" onclick="closeModal(\'bulkDelModal\')">لغو</button>'
+    +'<button style="background:#dc2626;color:#fff;border:none;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600" onclick="_doBulkDelete()">🗑 حذف '+keys.length+' مرکز</button>';
+  openModal('bulkDelModal','حذف گروهی',body,foot);
+}
+function _doBulkDelete(){
+  var keys=Array.from(_selectedCenters);
+  closeModal('bulkDelModal');
+  var deleted=0;
+  var masterDeleted=0;
+  keys.forEach(function(key){
+    var parts=key.split('_');var rtype=parts[0];var id=parts.slice(1).join('_');
+    var isExtra=(id.indexOf('_new_')>=0);
+    _cleanCenterData(rtype,id);
+    if(isExtra){
+      DB.extra=(DB.extra||[]).filter(function(c){return c.id!==id;});
+      deleteCenterExtraApi(id);
+    }else{
+      masterDeleted++;
+      if(rtype==='center'){
+        for(var _ci=CENTERS.length-1;_ci>=0;_ci--){
+          var _cc=CENTERS[_ci];var _cid='c_'+(_cc.row||_cc.id||'');
+          if(_cid===id||String(_cc.id)===String(id)){CENTERS.splice(_ci,1);break;}
+        }
+      }else{
+        var _provId=id.split('||')[0];var _row=Number(id.split('||')[1]);
+        PROVINCES.forEach(function(p){
+          if(p.id===_provId){
+            var _pname=p.name.replace(/[ي]/g,'ی').replace(/[ك]/g,'ک');
+            if(PC_RAW[_pname]){PC_RAW[_pname]=PC_RAW[_pname].filter(function(r){return(Array.isArray(r)?r[0]:r.row)!==_row;});}
+            if(PC_RAW[p.id]){PC_RAW[p.id]=PC_RAW[p.id].filter(function(r){return(Array.isArray(r)?r[0]:r.row)!==_row;});}
+          }
+        });
+      }
+    }
+    deleted++;
+  });
+  clearPCCache();_ALL_PROVS=null;_typeFilterBuilt=false;
+  if(masterDeleted>0){
+    var _newCENTERS=CENTERS.slice();
+    var _newPC_RAW={};Object.keys(PC_RAW).forEach(function(k){_newPC_RAW[k]=PC_RAW[k];});
+    fetch('/api/data/centers/master',{method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({CENTERS:_newCENTERS,PC_RAW:_newPC_RAW})
+    }).then(function(r){
+      if(!r.ok)console.error('[bulk delete] server save failed:',r.status);
+      clearCenterSelection();rebuildFilters();renderTable();
+      showToast('✅ '+deleted+' مرکز حذف شد');
+    }).catch(function(e){
+      console.error('[bulk delete]',e.message);
+      clearCenterSelection();rebuildFilters();renderTable();
+      showToast('✅ '+deleted+' مرکز حذف شد');
+    });
+  }else{
+    clearCenterSelection();rebuildFilters();renderTable();
+    showToast('✅ '+deleted+' مرکز حذف شد');
+  }
+}
+
+function applyQuickFilter(f){
+  _quickFilter=(_quickFilter===f)?'':f;
+  document.querySelectorAll('.qf-btn').forEach(function(b){b.classList.remove('active');});
+  if(_quickFilter){var btn=document.getElementById('qf_'+_quickFilter);if(btn)btn.classList.add('active');}
+  renderTable();
+}
+function saveFilterPreset(){
+  var name=prompt('نام پریست را وارد کنید:');
+  if(!name||!name.trim())return;
+  var _existingPresets=(DB.settings&&DB.settings.filterPresets)||{};
+  if(_existingPresets[name.trim()]){
+    if(!confirm('پریست «'+name.trim()+'» از قبل وجود دارد. جایگزین شود؟'))return;
+  }
+  var preset={
+    q:(document.getElementById('srch')||{}).value||'',
+    pot:(document.getElementById('fPot')||{}).value||'',
+    status:(document.getElementById('fStatus')||{}).value||'',
+    lead:(document.getElementById('fLead')||{}).value||'',
+    owner:(document.getElementById('fOwner')||{}).value||'',
+    type:(document.getElementById('fType')||{}).value||'',
+    qf:_quickFilter
+  };
+  if(!DB.settings)DB.settings={};
+  if(!DB.settings.filterPresets)DB.settings.filterPresets={};
+  DB.settings.filterPresets[name.trim()]=preset;
+  patchCrmSetting('filterPresets',DB.settings.filterPresets);
+  buildPresetSelector();
+  showToast('💾 پریست «'+name.trim()+'» ذخیره شد',2000);
+}
+function loadFilterPreset(name){
+  if(!name)return;
+  var presets=(DB.settings&&DB.settings.filterPresets)||{};
+  var p=presets[name];
+  if(!p)return;
+  var set=function(id,v){var el=document.getElementById(id);if(el)el.value=v||'';};
+  set('srch',p.q);set('fPot',p.pot);set('fStatus',p.status);
+  set('fLead',p.lead);set('fOwner',p.owner);set('fType',p.type);
+  _quickFilter=p.qf||'';
+  document.querySelectorAll('.qf-btn').forEach(function(b){b.classList.remove('active');});
+  if(_quickFilter){var btn=document.getElementById('qf_'+_quickFilter);if(btn)btn.classList.add('active');}
+  var sel=document.getElementById('filterPresetSel');if(sel)sel.value='';
+  renderTable();
+}
+function buildPresetSelector(){
+  var sel=document.getElementById('filterPresetSel');
+  if(!sel)return;
+  var presets=(DB.settings&&DB.settings.filterPresets)||{};
+  var names=Object.keys(presets);
+  sel.innerHTML='<option value="">📁 پریست‌ها</option>'
+    +names.map(function(n){return'<option value="'+esc(n)+'">'+esc(n)+'</option>';}).join('');
+  sel.style.display=names.length?'':'none';
+}
+function _renderCenterStatsBar(data,rtype){
+  var bar=document.getElementById('centerStatsBar');
+  if(!bar)return;
+  var counts={};
+  STATUS_LIST.forEach(function(s){counts[s]=0;});
+  var overdueCnt=0,stalledCnt=0;
+  data.forEach(function(r){
+    var e=getE(rtype,r.id);
+    var st=e.status||'بدون تماس';
+    counts[st]=(counts[st]||0)+1;
+    if(isOverdue(rtype,r.id))overdueCnt++;
+    if(isStalled(rtype,r.id))stalledCnt++;
+  });
+  var ST_COLORS2=['#94a3b8','#3b82f6','#8b5cf6','#f59e0b','#22c55e','#ef4444'];
+  var ST_ICONS2=['⬜','📞','🤝','📋','✅','🚫'];
+  bar.style.display='flex';
+  bar.innerHTML='<span style="font-weight:700;color:var(--text-primary)">جمع: '+data.length+'</span>'
+    +STATUS_LIST.map(function(s,i){
+      if(!counts[s])return '';
+      return'<span style="background:'+ST_COLORS2[i]+'20;color:'+ST_COLORS2[i]+';border:1px solid '+ST_COLORS2[i]+'44;border-radius:10px;padding:2px 8px">'+ST_ICONS2[i]+' '+s+': '+counts[s]+'</span>';
+    }).join('')
+    +(overdueCnt?'<span style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:10px;padding:2px 8px;font-weight:700">🔴 سررسیده: '+overdueCnt+'</span>':'')
+    +(stalledCnt?'<span style="background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1;border-radius:10px;padding:2px 8px">⏸ بی‌فعالیت: '+stalledCnt+'</span>':'');
+}
+function setCenterSort(field){
+  if(_sortField===field)_sortDir*=-1;
+  else{_sortField=field;_sortDir=1;}
+  var sel=document.getElementById('sortSel');if(sel){
+    var v=_sortField?(_sortField+(_sortDir===-1?'_desc':'_asc')):'';sel.value=v;
+  }
+  renderTable();
+}
+function setCenterSortFromSel(val){
+  if(!val){_sortField='';_sortDir=1;}
+  else{
+    var last=val.lastIndexOf('_');
+    _sortField=val.substring(0,last);
+    _sortDir=val.substring(last+1)==='desc'?-1:1;
+  }
+  renderTable();
+}
+function isPinned(rtype,id){
+  var pins=(DB.settings&&DB.settings.pinnedCenters)||[];
+  return pins.indexOf(recK(rtype,id))>=0;
+}
+function togglePin(rtype,id){
+  if(!DB.settings)DB.settings={};
+  if(!DB.settings.pinnedCenters)DB.settings.pinnedCenters=[];
+  var key=recK(rtype,id);
+  var idx=DB.settings.pinnedCenters.indexOf(key);
+  if(idx>=0)DB.settings.pinnedCenters.splice(idx,1);
+  else DB.settings.pinnedCenters.push(key);
+  patchCrmSetting('pinnedCenters',DB.settings.pinnedCenters);
+  renderTable();
+}
+function exportCurrentXlsx(){
+  if(!_currentProvId){showToast('ابتدا یک استان را باز کنید');return;}
+  if(typeof XLSX==='undefined'){showToast('⚠ SheetJS بارگذاری نشده');return;}
+  var rtype=getProvType(_currentProvId);
+  var data=getFiltered();
+  var rows=[['ردیف','نام مرکز','پتانسیل','نوع','سرنخ','مسئول','وضعیت','پیگیری بعدی','تلفن']];
+  data.forEach(function(r){
+    var e=getE(rtype,r.id);
+    rows.push([r.row,r.name,e.potential||r.potential||'',e.type||r.type||'',e.lead||r.lead||'',USERS[e.owner||r.owner||'']||'',e.status||'بدون تماس',e.followupDate||'',(e.phones&&e.phones[0])||'']);
+  });
+  var ws=XLSX.utils.aoa_to_sheet(rows);
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'مراکز');
+  XLSX.writeFile(wb,'centers_'+(_currentProvId||'all')+'_'+todayStr().replace(/\//g,'-')+'.xlsx');
+  showToast('✅ Excel دانلود شد ('+data.length+' مرکز)',2500);
+}

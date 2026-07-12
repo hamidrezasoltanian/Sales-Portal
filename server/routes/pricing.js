@@ -1,4 +1,18 @@
 'use strict';
+
+function _parseProductCommissions(raw) {
+  if (!raw) return {};
+  if (typeof raw === 'object') return raw;
+  try { return JSON.parse(raw); } catch (_) { return {}; }
+}
+
+function _productCommLevel(cfg, productId) {
+  const pc = _parseProductCommissions(cfg?.product_commissions);
+  const pid = String(productId);
+  if (pc[pid] != null && pc[pid] !== '') return parseInt(pc[pid], 10) || null;
+  return cfg?.commission_level || null;
+}
+
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -321,7 +335,7 @@ router.get('/calc', async (req, res) => {
       );
       if (cc.rows.length) {
         buyer_type = bt_override || cc.rows[0].buyer_type || 'hospital';
-        commission_level = cc.rows[0].commission_level;
+        commission_level = _productCommLevel(cc.rows[0], product_id);
         discount_pct = parseFloat(cc.rows[0].discount_pct) || 0;
         discount_ceiling_pct = parseFloat(cc.rows[0].discount_ceiling_pct) || 5;
       }
@@ -494,17 +508,23 @@ router.get('/center/:key/prices', async (req, res) => {
     );
 
     const commRules = {};
-    if (commission_level) {
+    const allLevels = new Set();
+    products.rows.forEach((p) => {
+      const lvl = _productCommLevel(cfg, p.id);
+      if (lvl) allLevels.add(lvl);
+    });
+    for (const lvl of allLevels) {
       const cr = await query(
         'SELECT product_id, amount FROM commission_rules WHERE price_list_id=$1 AND level=$2',
-        [listId, commission_level]
+        [listId, lvl]
       );
-      cr.rows.forEach((r) => { commRules[r.product_id] = Number(r.amount) || 0; });
+      cr.rows.forEach((r) => { commRules[r.product_id + ':' + lvl] = Number(r.amount) || 0; });
     }
 
     const rows = products.rows.map((p) => {
       const base_price = p.price != null ? Number(p.price) : null;
-      const commission = base_price != null ? (commRules[p.id] || 0) : 0;
+      const lvl = _productCommLevel(cfg, p.id);
+      const commission = base_price != null && lvl ? (commRules[p.id + ':' + lvl] || 0) : 0;
       const inflated = base_price != null ? base_price + commission : null;
       const discount_amount = inflated != null ? Math.round(inflated * discount_pct / 100) : 0;
       const center_price = inflated != null ? inflated - discount_amount : null;
@@ -539,20 +559,28 @@ router.get('/center/:key/prices', async (req, res) => {
 router.get('/center/:key/commissions', async (req, res) => {
   try {
     const center_key = decodeURIComponent(req.params.key);
-    const cc = await query('SELECT commission_level FROM center_pricing_config WHERE center_key=$1', [center_key]);
-    if (!cc.rows.length || !cc.rows[0].commission_level) return res.json([]);
-    const level = cc.rows[0].commission_level;
-    const r = await query(
-      `SELECT cr.product_id, p.name AS product_name, cr.amount
-       FROM commission_rules cr
-       JOIN products p ON p.id = cr.product_id
-       JOIN price_lists pl ON pl.id = cr.price_list_id AND pl.active = true
-       WHERE cr.level = $1
-       ORDER BY p.sort_order, p.name
-       LIMIT 12`,
-      [level]
+    const cc = await query('SELECT * FROM center_pricing_config WHERE center_key=$1', [center_key]);
+    if (!cc.rows.length) return res.json([]);
+    const cfg = cc.rows[0];
+    const pl = await query(
+      `SELECT id FROM price_lists WHERE buyer_type=$1 AND active=true ORDER BY version DESC LIMIT 1`,
+      [cfg.buyer_type || 'hospital']
     );
-    res.json(r.rows);
+    if (!pl.rows.length) return res.json([]);
+    const listId = pl.rows[0].id;
+    const products = await query('SELECT id, name FROM products WHERE active=true ORDER BY sort_order, id LIMIT 50');
+    const rows = [];
+    for (const p of products.rows) {
+      const lvl = _productCommLevel(cfg, p.id);
+      if (!lvl) continue;
+      const cr = await query(
+        'SELECT amount FROM commission_rules WHERE product_id=$1 AND price_list_id=$2 AND level=$3',
+        [p.id, listId, lvl]
+      );
+      if (!cr.rows.length) continue;
+      rows.push({ product_id: p.id, product_name: p.name, level: lvl, amount: Number(cr.rows[0].amount) || 0 });
+    }
+    res.json(rows.slice(0, 20));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -570,21 +598,39 @@ router.get('/center/:key', async (req, res) => {
 // ── PUT /api/pricing/center/:key (manager) ────────────────────────────────────
 router.put('/center/:key', requireManager, async (req, res) => {
   const center_key = decodeURIComponent(req.params.key);
-  const { center_name, buyer_type, commission_level, discount_pct, discount_ceiling_pct, notes } = req.body || {};
+  const { center_name, buyer_type, commission_level, discount_pct, discount_ceiling_pct, notes, product_commission_update } = req.body || {};
   if (buyer_type && !BUYER_TYPES.includes(buyer_type))
     return res.status(400).json({ error: 'buyer_type invalid' });
   try {
+    if (product_commission_update && product_commission_update.product_id != null) {
+      const pid = String(product_commission_update.product_id);
+      const lvl = product_commission_update.level;
+      const cur = await query('SELECT product_commissions FROM center_pricing_config WHERE center_key=$1', [center_key]);
+      const pc = _parseProductCommissions(cur.rows[0]?.product_commissions);
+      if (lvl === null || lvl === '' || lvl === undefined) delete pc[pid];
+      else pc[pid] = parseInt(lvl, 10) || null;
+      await query(
+        `INSERT INTO center_pricing_config (center_key, product_commissions, updated_by, updated_at)
+         VALUES ($1, $2::jsonb, $3, NOW())
+         ON CONFLICT (center_key) DO UPDATE SET
+           product_commissions=EXCLUDED.product_commissions,
+           updated_by=EXCLUDED.updated_by,
+           updated_at=NOW()`,
+        [center_key, JSON.stringify(pc), req.user.username]
+      );
+      return res.json({ ok: true, product_commissions: pc });
+    }
     await query(
       `INSERT INTO center_pricing_config
          (center_key, center_name, buyer_type, commission_level, discount_pct, discount_ceiling_pct, notes, updated_by, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())
        ON CONFLICT (center_key) DO UPDATE SET
-         center_name=EXCLUDED.center_name,
-         buyer_type=EXCLUDED.buyer_type,
-         commission_level=EXCLUDED.commission_level,
-         discount_pct=EXCLUDED.discount_pct,
-         discount_ceiling_pct=EXCLUDED.discount_ceiling_pct,
-         notes=EXCLUDED.notes,
+         center_name=COALESCE(EXCLUDED.center_name, center_pricing_config.center_name),
+         buyer_type=COALESCE(EXCLUDED.buyer_type, center_pricing_config.buyer_type),
+         commission_level=COALESCE(EXCLUDED.commission_level, center_pricing_config.commission_level),
+         discount_pct=COALESCE(EXCLUDED.discount_pct, center_pricing_config.discount_pct),
+         discount_ceiling_pct=COALESCE(EXCLUDED.discount_ceiling_pct, center_pricing_config.discount_ceiling_pct),
+         notes=COALESCE(EXCLUDED.notes, center_pricing_config.notes),
          updated_by=EXCLUDED.updated_by,
          updated_at=NOW()`,
       [center_key, center_name||'', buyer_type||'hospital',

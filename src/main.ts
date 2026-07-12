@@ -4,8 +4,8 @@ import TasksPanel from './components/TasksPanel.vue';
 import LettersPanel from './components/LettersPanel.vue';
 import SyncStatusBadge from './components/SyncStatusBadge.vue';
 
-fetch('/api/auth/me')
-  .then(r => r.ok ? r.json() : null)
+fetch('/api/auth/me', { credentials: 'same-origin' })
+  .then(r => (r.ok ? r.json() : null))
   .then(user => {
     if (!user) return;
     const userRole = user.role || '';

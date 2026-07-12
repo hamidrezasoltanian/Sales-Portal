@@ -1,22 +1,26 @@
 <template>
   <div class="lt-panel animate-fade-in" dir="rtl">
-    <!-- TOP NOTIFICATION BADGES / STATS ROW -->
+    <!-- WORKFLOW QUICK NAV -->
     <div class="lt-stats-row">
       <div class="lt-stat-card border-action" :class="{ active: activeTab === 'pending' }" @click="selectTab('pending')">
         <div class="lt-stat-val text-action">{{ statPendingCount }}</div>
-        <div class="lt-stat-lbl">⏳ کارتابل من (اقدام لازم)</div>
+        <div class="lt-stat-lbl">⏳ کارتابل من</div>
+        <div class="lt-stat-hint">نامه‌های نیازمند اقدام</div>
+      </div>
+      <div class="lt-stat-card border-followup" :class="{ active: activeTab === 'followup' }" @click="selectTab('followup')">
+        <div class="lt-stat-val text-followup">{{ statFollowupCount }}</div>
+        <div class="lt-stat-lbl">📨 پیگیری من</div>
+        <div class="lt-stat-hint">ارجاع‌های باز برای شما</div>
       </div>
       <div class="lt-stat-card border-sign" :class="{ active: activeTab === 'sign_desk' }" @click="selectTab('sign_desk')">
         <div class="lt-stat-val text-sign">{{ statSignDeskCount }}</div>
         <div class="lt-stat-lbl">✍️ میز کار امضا</div>
+        <div class="lt-stat-hint">منتظر امضای شما</div>
       </div>
       <div class="lt-stat-card border-drafts" :class="{ active: activeTab === 'drafts' }" @click="selectTab('drafts')">
         <div class="lt-stat-val text-drafts">{{ statDraftsCount }}</div>
         <div class="lt-stat-lbl">✏️ پیش‌نویس‌ها</div>
-      </div>
-      <div class="lt-stat-card border-pin" @click="showPinModal = true">
-        <div class="lt-stat-val text-pin">⚙️</div>
-        <div class="lt-stat-lbl">تغییر پین‌کد امضا</div>
+        <div class="lt-stat-hint">ثبت نشده</div>
       </div>
     </div>
 
@@ -34,19 +38,45 @@
             />
             <span class="search-icon">🔍</span>
           </div>
-          <button class="lt-new-btn" @click="openNewModal">➕ ثبت نامه جدید</button>
+          <div class="lt-toolbar-actions">
+            <button v-if="isManager" class="lt-pin-btn" title="ویرایش قالب چاپ نامه" @click="openPrintTplModal">🖨 قالب چاپ</button>
+            <button class="lt-pin-btn" title="تغییر پین‌کد امضا" @click="showPinModal = true">
+              <span class="lt-btn-icon">⚙️</span>
+              <span class="lt-btn-text">پین امضا</span>
+            </button>
+            <button class="lt-new-btn" @click="openNewModal">
+              <span class="lt-btn-icon">➕</span>
+              <span class="lt-btn-text">ثبت نامه جدید</span>
+            </button>
+          </div>
         </div>
 
-        <div class="lt-tabs-nav">
-          <button
-            v-for="t in TABS"
-            :key="t.key"
-            :class="['lt-tab-btn', { active: activeTab === t.key }]"
-            @click="selectTab(t.key)"
-          >
-            <span class="tab-label">{{ t.label }}</span>
-            <span v-if="tabBadge(t.key) > 0" class="lt-tab-badge">{{ tabBadge(t.key) }}</span>
-          </button>
+        <div class="lt-nav-groups">
+          <div class="lt-nav-group">
+            <span class="lt-nav-group-label">نمایش بر اساس نوع</span>
+            <div class="lt-nav-chips">
+              <button
+                v-for="t in VIEW_TABS"
+                :key="t.key"
+                :class="['lt-chip-btn', { active: activeTab === t.key }]"
+                @click="selectTab(t.key)"
+              >
+                {{ t.label }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="activeTab === 'followup'" class="lt-tab-help">
+          <strong>چطور تکمیل کنم؟</strong>
+          <ol class="lt-help-steps">
+            <li>نامه را از لیست باز کنید</li>
+            <li>نتیجه اقدام را در کادر بنویسید</li>
+            <li>دکمه «خاتمه ارجاع» را بزنید</li>
+          </ol>
+        </div>
+        <div v-else-if="activeTab === 'pending'" class="lt-tab-help">
+          ⏳ کارتابل کلی — نامه‌هایی که منتظر ثبت، امضا، یا ارجاع هستند.
         </div>
 
         <div v-if="loading" class="lt-loading-spinner">
@@ -55,7 +85,8 @@
         </div>
 
         <div v-else-if="filteredLetters.length === 0" class="lt-empty-state">
-          <span>📭 نامه‌ای یافت نشد</span>
+          <span v-if="activeTab === 'followup'">📭 ارجاع پیگیری باز برای شما نیست</span>
+          <span v-else>📭 نامه‌ای یافت نشد</span>
         </div>
 
         <div v-else class="lt-list-container">
@@ -71,12 +102,17 @@
             </div>
             <div class="lt-card-subject">{{ l.subject }}</div>
             <div class="lt-card-meta-row">
+              <span class="wf-stage-badge" :class="workflowStageKey(l)">{{ workflowStageLabel(l) }}</span>
+              <span v-if="myOpenReferralCount(l) > 0" class="lt-my-action-badge">📨 {{ myOpenReferralCount(l) }} اقدام</span>
               <span class="priority-badge" :class="l.priority">{{ priorityLabel(l.priority) }}</span>
               <span class="classification-badge" :class="l.classification">{{ classificationLabel(l.classification) }}</span>
             </div>
             <div class="lt-card-footer">
               <span class="lt-creator">👤 {{ l.creator_name || l.created_by }}</span>
               <span class="lt-date">📅 {{ formatPersianDate(l.created_at) }}</span>
+            </div>
+            <div v-if="myOpenReferralCount(l) > 0" class="lt-card-action-hint">
+              👆 برای ثبت نتیجه و خاتمه ارجاع کلیک کنید
             </div>
           </div>
         </div>
@@ -105,34 +141,61 @@
               </div>
             </div>
             <div class="lt-details-actions">
-              <!-- Action: Register & Issue Indicator (for draft internal/incoming) -->
+              <!-- Print -->
               <button
-                v-if="selectedLetter.status === 'draft' && (selectedLetter.type === 'internal' || selectedLetter.type === 'incoming') && (selectedLetter.created_by === username || isManager)"
+                v-if="selectedLetter.status !== 'draft' && selectedLetter.indicator_number"
+                class="lt-btn-print"
+                @click="printLetter(selectedLetter.id)"
+              >
+                🖨 چاپ نامه
+              </button>
+
+              <!-- Edit Draft -->
+              <button
+                v-if="canEditLetter(selectedLetter)"
+                class="lt-btn-approve"
+                @click="openEditDraft(selectedLetter)"
+              >
+                ✏️ ویرایش پیش‌نویس
+              </button>
+
+              <!-- Register internal/incoming -->
+              <button
+                v-if="canRegisterInternal(selectedLetter)"
                 class="lt-btn-approve"
                 @click="approveInternalLetter(selectedLetter)"
               >
-                📝 ثبت نهایی و صدور شماره اندیکاتور
+                📝 ثبت نهایی و صدور شماره
               </button>
 
-              <!-- Action: Send for Signature (for draft outgoing) -->
+              <!-- Send to sign desk (outgoing) -->
               <button
-                v-if="selectedLetter.status === 'draft' && selectedLetter.type === 'outgoing' && (selectedLetter.created_by === username || isManager)"
-                class="lt-btn-approve"
+                v-if="canSendToSignDesk(selectedLetter)"
+                class="lt-btn-sign"
                 @click="approveOutgoingLetter(selectedLetter)"
               >
                 ✍️ ارسال به میز کار امضا
               </button>
 
-              <!-- Action: Digital Signature / PIN Verification Modal -->
+              <!-- Digital Signature -->
               <button
-                v-if="selectedLetter.status === 'approved_for_sign' && selectedLetter.my_signer_status === 'pending'"
+                v-if="canSignLetter(selectedLetter)"
                 class="lt-btn-sign"
                 @click="openSignModal"
               >
-                🖋️ تایید و امضای دیجیتال نامه
+                🖋️ امضای دیجیتال
               </button>
 
-              <!-- Action: Cancel Signature -->
+              <!-- Refer / Follow-up -->
+              <button
+                v-if="canReferLetter(selectedLetter) || myPendingReferralsForSelected.length > 0"
+                class="lt-btn-refer"
+                @click="scrollToFollowupPanel"
+              >
+                📨 {{ myPendingReferralsForSelected.length > 0 ? 'اقدام پیگیری من' : 'ارجاع برای پیگیری' }}
+              </button>
+
+              <!-- Cancel Signature -->
               <button
                 v-if="selectedLetter.status === 'approved_for_sign' && selectedLetter.my_signer_status === 'signed'"
                 class="lt-btn-unsign"
@@ -141,46 +204,204 @@
                 🚫 لغو امضای من
               </button>
 
-              <!-- Action: Archive (only for registered active letters) -->
+              <!-- Archive -->
               <button
-                v-if="selectedLetter.status === 'registered' && !selectedLetter.is_archived && !selectedLetter.is_deleted"
+                v-if="canArchiveLetter(selectedLetter)"
                 class="lt-btn-archive"
                 @click="archiveLetter(selectedLetter.id)"
               >
-                🗄️ بایگانی نامه و اتمام اقدام
+                🗄️ بایگانی
               </button>
 
-              <!-- Action: Restore from Trash -->
+              <!-- Restore from Trash -->
               <button
                 v-if="selectedLetter.is_deleted"
                 class="lt-btn-restore"
                 @click="restoreLetter(selectedLetter.id)"
               >
-                ♻️ بازیابی از زباله‌دان
+                ♻️ بازیابی
               </button>
 
-              <!-- Action: Delete Draft / Trash -->
+              <!-- Delete -->
               <button
                 v-if="!selectedLetter.is_deleted && (selectedLetter.status === 'draft' || isManager)"
                 class="lt-btn-delete"
                 @click="deleteLetter(selectedLetter.id)"
               >
-                🗑️ حذف نامه
+                🗑️ حذف
               </button>
             </div>
           </div>
 
-          <!-- Letter Body HTML Content -->
-          <div class="lt-details-body">
-            <div class="section-title">📝 متن نامه / خلاصه موضوع:</div>
-            <div class="body-content-html" v-html="selectedLetter.body || 'بدون متن'"></div>
-
-            <!-- External Info -->
-            <div v-if="selectedLetter.sender_external" class="lt-external-info">
-              🚪 <strong>فرستنده خارجی:</strong> {{ selectedLetter.sender_external }}
+          <!-- Status banner + workflow -->
+          <div class="lt-status-banner" :class="'stage-' + workflowStageKey(selectedLetter)">
+            <div class="lt-status-main">
+              <span class="lt-status-chip">{{ workflowStageLabel(selectedLetter) }}</span>
+              <p class="lt-status-desc">{{ statusDescription(selectedLetter) }}</p>
             </div>
-            <div v-if="selectedLetter.receiver_external" class="lt-external-info">
-              🚪 <strong>گیرنده خارجی:</strong> {{ selectedLetter.receiver_external }}
+            <div v-if="pendingSignersText(selectedLetter)" class="lt-status-waiting">
+              ⏳ منتظر: <strong>{{ pendingSignersText(selectedLetter) }}</strong>
+            </div>
+          </div>
+
+          <div class="lt-workflow-tracker" :style="{ '--wf-pct': workflowProgressPct(selectedLetter) + '%' }">
+            <div
+              v-for="(step, idx) in workflowStepsFor(selectedLetter)"
+              :key="step.key"
+              :class="['wf-step', { active: step.active, done: step.done, pending: !step.active && !step.done }]"
+            >
+              <div class="wf-dot">
+                <span class="wf-num">{{ idx + 1 }}</span>
+                <span v-if="step.badge" class="wf-badge">{{ step.badge }}</span>
+              </div>
+              <div class="wf-label">{{ step.label }}</div>
+            </div>
+          </div>
+
+          <!-- Letter completion guide -->
+          <div v-if="showCompletionGuide(selectedLetter)" class="lt-completion-guide">
+            <div class="lt-guide-title">📋 مراحل تکمیل نامه بعد از ارجاع</div>
+            <div class="lt-guide-steps-row">
+              <div :class="['lt-guide-step', { done: hasAnyReferral(selectedLetter), active: !hasAnyReferral(selectedLetter) }]">
+                <span class="lt-guide-num">۱</span>
+                <span class="lt-guide-lbl">ارجاع به همکار</span>
+              </div>
+              <div :class="['lt-guide-step', { done: openReferralsOnSelected.length === 0 && hasAnyReferral(selectedLetter), active: openReferralsOnSelected.length > 0 }]">
+                <span class="lt-guide-num">۲</span>
+                <span class="lt-guide-lbl">ثبت نتیجه توسط گیرنده</span>
+              </div>
+              <div :class="['lt-guide-step', { done: canArchiveLetter(selectedLetter), active: openReferralsOnSelected.length === 0 && hasAnyReferral(selectedLetter) && !canArchiveLetter(selectedLetter) }]">
+                <span class="lt-guide-num">۳</span>
+                <span class="lt-guide-lbl">بستن همه ارجاع‌ها</span>
+              </div>
+              <div :class="['lt-guide-step', { done: selectedLetter.is_archived, active: canArchiveLetter(selectedLetter) }]">
+                <span class="lt-guide-num">۴</span>
+                <span class="lt-guide-lbl">بایگانی نهایی</span>
+              </div>
+            </div>
+            <div v-if="openReferralsOnSelected.length" class="lt-open-refs-box">
+              <strong>⏳ {{ openReferralsOnSelected.length }} ارجاع باز:</strong>
+              <span
+                v-for="ref in openReferralsOnSelected"
+                :key="'open-' + ref.id"
+                class="lt-open-ref-tag"
+              >
+                {{ getUserDisplayName(ref.receiver_id) }}
+                <template v-if="ref.receiver_id === username"> (شما)</template>
+              </span>
+            </div>
+            <div v-else-if="hasAnyReferral(selectedLetter) && canArchiveLetter(selectedLetter)" class="lt-ready-archive-box">
+              ✅ همه ارجاع‌ها بسته شد — نامه آماده بایگانی است.
+              <button class="lt-btn-archive lt-btn-archive-inline" @click="archiveLetter(selectedLetter.id)">
+                🗄️ تکمیل و بایگانی نامه
+              </button>
+            </div>
+          </div>
+
+          <!-- Follow-up / Referral action panel (prominent) -->
+          <div
+            v-if="showFollowupPanel(selectedLetter)"
+            id="lt-followup-panel"
+            class="lt-followup-panel"
+          >
+            <div class="lt-followup-panel-head">
+              <div>
+                <h3>📨 پیگیری و ارجاع نامه</h3>
+                <p class="lt-followup-help">
+                  <template v-if="myPendingReferralsForSelected.length">
+                    این نامه برای <strong>اقدام شما</strong> ارجاع شده — نتیجه را بنویسید و «خاتمه ارجاع» بزنید.
+                  </template>
+                  <template v-else-if="canReferLetter(selectedLetter)">
+                    برای پیگیری، نامه را به همکار دیگر <strong>ارجاع</strong> کنید (جهت اقدام / اطلاع / امضا).
+                  </template>
+                </p>
+              </div>
+            </div>
+
+            <div v-if="myPendingReferralsForSelected.length" class="lt-my-actions-block">
+              <div class="sub-title">✅ اقدامات منتظر پاسخ شما:</div>
+              <div
+                v-for="ref in myPendingReferralsForSelected"
+                :key="'my-' + ref.id"
+                class="lt-my-action-card"
+              >
+                <div class="lt-my-action-head">
+                  <span class="lt-my-action-type">{{ actionTypeLabel(ref.action_type) }}</span>
+                  <span class="lt-my-action-from">از {{ getUserDisplayName(ref.sender_id) }} · {{ formatPersianDate(ref.referred_at) }}</span>
+                </div>
+                <div v-if="ref.note" class="lt-my-action-note">💬 {{ ref.note }}</div>
+                <textarea
+                  v-model="referralCompletionNotes[ref.id]"
+                  placeholder="نتیجه اقدام، پاسخ یا توضیحات پیگیری..."
+                  class="lt-input textarea-mini"
+                ></textarea>
+                <button
+                  class="lt-btn-complete"
+                  :disabled="completingReferralId === ref.id"
+                  @click="completeReferral(ref.id)"
+                >
+                  ✔ خاتمه ارجاع و ثبت نتیجه
+                </button>
+              </div>
+            </div>
+
+            <div v-if="canReferLetter(selectedLetter)" class="lt-refer-form-prominent">
+              <div class="sub-title">➕ ارجاع جدید به همکار:</div>
+              <div class="refer-inputs">
+                <div class="refer-row-grid">
+                  <select v-model="referForm.receiverId" class="lt-input">
+                    <option value="">انتخاب گیرنده ارجاع... *</option>
+                    <option v-for="u in users" :key="u.username" :value="u.username" :disabled="u.username === username">
+                      {{ u.display_name }} ({{ u.role }})
+                    </option>
+                  </select>
+                  <select v-model="referForm.actionType" class="lt-input">
+                    <option value="for_action">📨 جهت اقدام و پیگیری</option>
+                    <option value="for_information">👁️ جهت اطلاع</option>
+                    <option value="for_signature">✍️ جهت امضا و تایید</option>
+                  </select>
+                </div>
+                <textarea
+                  v-model="referForm.note"
+                  placeholder="دستور اقدام یا یادداشت پیگیری (مثلاً: پیگیری تایید کمیته خرید تا پایان هفته)"
+                  class="lt-input textarea"
+                ></textarea>
+                <textarea
+                  v-model="referForm.privateNote"
+                  placeholder="یادداشت محرمانه (فقط فرستنده و گیرنده ارجاع)"
+                  class="lt-input textarea"
+                ></textarea>
+                <button
+                  class="lt-btn-save"
+                  :disabled="!referForm.receiverId || referFormLoading"
+                  @click="submitReferral"
+                >
+                  🚀 ثبت و ارجاع نامه
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Letter Body (Folio DOCX viewer) -->
+          <div class="lt-details-body">
+            <div class="section-title">📝 متن نامه:</div>
+            <div class="lt-editor-wrap">
+              <LetterBodyEditor
+                v-if="selectedLetterDocx"
+                :key="'view-' + selectedLetter.id"
+                :document-buffer="selectedLetterDocx"
+                read-only
+                height="520px"
+              />
+              <div v-else-if="docxLoading" class="body-content-loading">در حال بارگذاری سند Word...</div>
+              <div v-else class="body-content-html" v-html="selectedLetter.body || 'بدون متن'"></div>
+            </div>
+
+            <div v-if="selectedLetter.sender_external || selectedLetter.sender_center_key" class="lt-external-info">
+              🚪 <strong>فرستنده (مرکز):</strong> {{ selectedLetter.sender_external || selectedLetter.sender_center_key }}
+            </div>
+            <div v-if="selectedLetter.receiver_external || selectedLetter.receiver_center_key" class="lt-external-info">
+              🚪 <strong>گیرنده (مرکز):</strong> {{ selectedLetter.receiver_external || selectedLetter.receiver_center_key }}
             </div>
 
             <!-- Signers Status Grid (for outgoing letters) -->
@@ -230,6 +451,26 @@
             </div>
           </div>
 
+          <!-- Change history -->
+          <div v-if="letterHistory.length > 0" class="lt-history-section">
+            <div class="section-title">🗃 تاریخچه تغییرات:</div>
+            <div class="timeline">
+              <div v-for="h in letterHistory" :key="h.id" class="timeline-item">
+                <div class="timeline-badge history">📝</div>
+                <div class="timeline-content">
+                  <div class="timeline-header">
+                    <span class="timeline-title">{{ historyFieldLabel(h.field) }}</span>
+                    <span class="timeline-date">{{ formatPersianDate(h.at) }}</span>
+                  </div>
+                  <div class="timeline-text">
+                    توسط <strong>{{ getUserDisplayName(h.by) }}</strong>
+                    — {{ historyChangeText(h) }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Referral workflow timeline & response forms -->
           <div class="lt-referrals-section">
             <div class="section-title">🔄 تاریخچه گردش کار و ارجاعات نامه:</div>
@@ -273,8 +514,8 @@
                     🔒 <strong>یادداشت خصوصی:</strong> {{ ref.private_note }}
                   </div>
 
-                  <!-- Action: Complete referral directed to current user -->
-                  <div v-if="!ref.is_completed && ref.receiver_id === username" class="timeline-complete-action">
+                  <!-- Action: Complete referral directed to current user (timeline view) -->
+                  <div v-if="!ref.is_completed && ref.receiver_id === username && ref.action_type !== 'for_action'" class="timeline-complete-action">
                     <textarea
                       v-model="referralCompletionNotes[ref.id]"
                       placeholder="توضیحات یا نتیجه اقدام جهت مختومه کردن ارجاع..."
@@ -301,41 +542,8 @@
               </div>
             </div>
 
-            <!-- Compose Referral Form -->
-            <div v-if="selectedLetter.status === 'registered' && !selectedLetter.is_archived && !selectedLetter.is_deleted" class="lt-refer-form">
-              <div class="section-title">✍️ ارجاع یا پیگیری جدید:</div>
-              <div class="refer-inputs">
-                <div class="refer-row-grid">
-                  <select v-model="referForm.receiverId" class="lt-input">
-                    <option value="">انتخاب گیرنده ارجاع... *</option>
-                    <option v-for="u in users" :key="u.username" :value="u.username">
-                      {{ u.display_name }} ({{ u.role }})
-                    </option>
-                  </select>
-                  <select v-model="referForm.actionType" class="lt-input">
-                    <option value="for_action">جهت اقدام و پیگیری</option>
-                    <option value="for_information">جهت اطلاع</option>
-                    <option value="for_signature">جهت امضا و تایید</option>
-                  </select>
-                </div>
-                <textarea
-                  v-model="referForm.note"
-                  placeholder="دستور اقدام، یادداشت پیگیری یا پاسخ خود را بنویسید..."
-                  class="lt-input textarea"
-                ></textarea>
-                <textarea
-                  v-model="referForm.privateNote"
-                  placeholder="یادداشت محرمانه/خصوصی (فقط برای فرستنده و گیرنده ارجاع نمایش داده می‌شود)"
-                  class="lt-input textarea"
-                ></textarea>
-                <button
-                  class="lt-btn-save"
-                  :disabled="!referForm.receiverId || referFormLoading"
-                  @click="submitReferral"
-                >
-                  🚀 ثبت و ارجاع نامه
-                </button>
-              </div>
+            <div v-if="canReferLetter(selectedLetter) && myPendingReferralsForSelected.length === 0" class="lt-refer-form-hint">
+              💡 برای ارجاع جدید از پنل «پیگیری و ارجاع» در بالای صفحه استفاده کنید.
             </div>
           </div>
         </div>
@@ -343,13 +551,14 @@
     </div>
 
     <!-- NEW LETTER MODAL -->
-    <div v-if="showNewModal" class="lt-modal-overlay" @click.self="closeNewModal">
-      <div class="lt-modal" dir="rtl">
+    <div v-if="showNewModal" class="lt-modal-overlay lt-modal-overlay--compose" @click.self="closeNewModal">
+      <div class="lt-modal modal-compose" dir="rtl">
         <div class="lt-modal-header">
-          <span>ثبت نامه اداری جدید</span>
+          <span>{{ editingLetterId ? 'ویرایش پیش‌نویس نامه' : 'ثبت نامه اداری جدید' }}</span>
           <button @click="closeNewModal">✕</button>
         </div>
-        <div class="lt-modal-body">
+        <div class="compose-modal-layout">
+          <div class="compose-form-scroll lt-modal-body">
           <div class="modal-form-grid">
             <div class="modal-form-row">
               <label>نوع نامه *</label>
@@ -394,15 +603,62 @@
             <input v-model="newForm.subject" placeholder="موضوع نامه اداری را وارد کنید..." class="lt-input" />
           </div>
 
-          <!-- Dynamic external fields -->
           <div v-if="newForm.type === 'incoming'" class="modal-form-row">
-            <label>فرستنده خارجی (مبدا) *</label>
-            <input v-model="newForm.senderExternal" placeholder="مثال: بیمارستان شهید بهشتی / شرکت مهندسی فرادیس" class="lt-input" />
+            <label>فرستنده (مرکز CRM) *</label>
+            <div class="center-picker">
+              <input
+                v-model="senderCenterQuery"
+                placeholder="جستجوی نام مرکز..."
+                class="lt-input"
+                @input="debouncedCenterSearch('sender')"
+                @focus="debouncedCenterSearch('sender')"
+              />
+              <div v-if="selectedSenderCenter" class="center-picked">
+                <span>🏥 {{ selectedSenderCenter.name }} <small>({{ selectedSenderCenter.province }})</small></span>
+                <button type="button" class="center-clear" @click="clearSenderCenter">✕</button>
+              </div>
+              <div v-if="senderCenterResults.length && !selectedSenderCenter" class="center-results">
+                <button
+                  v-for="c in senderCenterResults"
+                  :key="c.centerKey"
+                  type="button"
+                  class="center-result-item"
+                  @click="pickSenderCenter(c)"
+                >
+                  <strong>{{ c.name }}</strong>
+                  <small>{{ c.province }}{{ c.owner ? ' — ' + c.owner : '' }}</small>
+                </button>
+              </div>
+            </div>
           </div>
 
           <div v-if="newForm.type === 'outgoing'" class="modal-form-row">
-            <label>گیرنده خارجی (مقصد) *</label>
-            <input v-model="newForm.receiverExternal" placeholder="مثال: دانشگاه علوم پزشکی گیلان / دکتر احمدی" class="lt-input" />
+            <label>گیرنده (مرکز CRM) *</label>
+            <div class="center-picker">
+              <input
+                v-model="receiverCenterQuery"
+                placeholder="جستجوی نام مرکز..."
+                class="lt-input"
+                @input="debouncedCenterSearch('receiver')"
+                @focus="debouncedCenterSearch('receiver')"
+              />
+              <div v-if="selectedReceiverCenter" class="center-picked">
+                <span>🏥 {{ selectedReceiverCenter.name }} <small>({{ selectedReceiverCenter.province }})</small></span>
+                <button type="button" class="center-clear" @click="clearReceiverCenter">✕</button>
+              </div>
+              <div v-if="receiverCenterResults.length && !selectedReceiverCenter" class="center-results">
+                <button
+                  v-for="c in receiverCenterResults"
+                  :key="c.centerKey"
+                  type="button"
+                  class="center-result-item"
+                  @click="pickReceiverCenter(c)"
+                >
+                  <strong>{{ c.name }}</strong>
+                  <small>{{ c.province }}{{ c.owner ? ' — ' + c.owner : '' }}</small>
+                </button>
+              </div>
+            </div>
           </div>
 
           <!-- Multiple receivers list (Internal / Incoming) -->
@@ -435,19 +691,20 @@
               <option v-for="t in templates" :key="t.id" :value="t.content">{{ t.title }}</option>
             </select>
           </div>
+          </div>
 
-          <div class="modal-form-row">
-            <label>متن نامه اداری</label>
-            <textarea id="letter-body-editor" class="lt-input textarea-modal"></textarea>
+          <div class="compose-editor-panel">
+            <label class="compose-editor-label">متن نامه اداری (Word)</label>
+            <LetterBodyEditor ref="letterEditorRef" height="100%" :author="username" />
           </div>
         </div>
         <div class="lt-modal-footer">
           <button class="lt-btn-cancel" @click="closeNewModal">انصراف</button>
           <button class="lt-btn-save-draft" :disabled="!newForm.subject.trim() || newFormLoading" @click="saveLetter('draft')">
-            💾 ذخیره به عنوان پیش‌نویس
+            💾 {{ editingLetterId ? 'ذخیره تغییرات پیش‌نویس' : 'ذخیره به عنوان پیش‌نویس' }}
           </button>
           <button class="lt-btn-save" :disabled="!newForm.subject.trim() || newFormLoading" @click="saveLetter('pending')">
-            🚀 ثبت نهایی / ارسال جهت اقدام
+            🚀 {{ editingLetterId ? 'ثبت نهایی تغییرات' : 'ثبت نهایی / ارسال جهت اقدام' }}
           </button>
         </div>
       </div>
@@ -515,6 +772,42 @@
       </div>
     </div>
 
+    <!-- PRINT TEMPLATE EDITOR MODAL -->
+    <div v-if="showPrintTplModal" class="lt-modal-overlay" @click.self="showPrintTplModal = false">
+      <div class="lt-modal modal-print-tpl" dir="rtl">
+        <div class="lt-modal-header">
+          <span>🖨 ویرایش قالب چاپ نامه</span>
+          <button @click="showPrintTplModal = false">✕</button>
+        </div>
+        <div class="lt-modal-body print-tpl-body">
+          <p class="modal-alert-info">
+            قالب HTML با placeholderها — هنگام چاپ هر نامه، مقادیر واقعی جایگزین می‌شوند.
+          </p>
+          <div class="print-tpl-placeholders">
+            <span
+              v-for="ph in printTplPlaceholders"
+              :key="ph"
+              class="print-tpl-ph"
+              @click="insertPrintPlaceholder(ph)"
+            >{{ formatPlaceholder(ph) }}</span>
+          </div>
+          <textarea
+            v-model="printTplForm.template"
+            class="lt-input print-tpl-editor"
+            spellcheck="false"
+            dir="ltr"
+          ></textarea>
+        </div>
+        <div class="lt-modal-footer">
+          <button class="lt-btn-cancel" @click="resetPrintTemplate">بازگشت به پیش‌فرض</button>
+          <button class="lt-btn-secondary" :disabled="!selectedLetter" @click="previewPrintTemplate">👁 پیش‌نمایش</button>
+          <button class="lt-btn-save" :disabled="printTplLoading || !printTplForm.template.trim()" @click="savePrintTemplate">
+            💾 ذخیره قالب
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- CHANGE PIN CONFIG MODAL -->
     <div v-if="showPinModal" class="lt-modal-overlay" @click.self="showPinModal = false">
       <div class="lt-modal modal-small" dir="rtl">
@@ -544,7 +837,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, reactive, watch, nextTick, onBeforeUnmount } from 'vue';
+import { ref, computed, onMounted, reactive, nextTick } from 'vue';
+import LetterBodyEditor from './LetterBodyEditor.vue';
+import { arrayBufferToBase64, fetchLetterDocx } from '../utils/letterDocx';
 
 interface User {
   username: string;
@@ -565,18 +860,36 @@ interface Template {
   content: string;
 }
 
+interface LetterCenter {
+  centerKey: string;
+  name: string;
+  province: string;
+  owner: string;
+}
+
+interface LetterHistoryEntry {
+  id: number;
+  at: string;
+  by: string;
+  field: string;
+  val: string | { action?: string; old?: unknown; new?: unknown; note?: string };
+}
+
 interface Letter {
   id: number;
   indicator_number: string;
   subject: string;
   body: string;
+  has_docx?: boolean;
   type: 'incoming' | 'outgoing' | 'internal';
-  status: 'draft' | 'pending_action' | 'approved_for_sign' | 'registered' | 'archived';
+  status: 'draft' | 'pending_action' | 'approved_for_sign' | 'registered' | 'in_referral' | 'archived';
   priority: 'normal' | 'high' | 'immediate';
   classification: 'normal' | 'confidential' | 'secret';
   department_prefix: string;
   sender_external: string;
   receiver_external: string;
+  sender_center_key?: string;
+  receiver_center_key?: string;
   created_by: string;
   creator_name?: string;
   created_at: string;
@@ -621,15 +934,12 @@ const props = defineProps<{
   isManager: boolean;
 }>();
 
-const TABS = [
-  { key: 'pending', label: '⏳ کارتابل من' },
-  { key: 'sign_desk', label: '✍️ میز کار امضا' },
-  { key: 'incoming', label: '📥 نامه‌های وارده' },
-  { key: 'outgoing', label: '📤 نامه‌های صادره' },
-  { key: 'internal', label: '🏢 نامه‌های داخلی' },
-  { key: 'drafts', label: '✏️ پیش‌نویس‌ها' },
-  { key: 'archived', label: '🗄️ بایگانی شده' },
-  { key: 'trash', label: '🗑️ زباله‌دان' },
+const VIEW_TABS = [
+  { key: 'incoming', label: '📥 وارده' },
+  { key: 'outgoing', label: '📤 صادره' },
+  { key: 'internal', label: '🏢 داخلی' },
+  { key: 'archived', label: '🗄️ بایگانی' },
+  { key: 'trash', label: '🗑️ زباله' },
 ];
 
 const loading = ref(false);
@@ -641,6 +951,9 @@ const templates = ref<Template[]>([]);
 const activeTab = ref('pending');
 const searchQuery = ref('');
 const selectedLetter = ref<Letter | null>(null);
+const selectedLetterDocx = ref<ArrayBuffer | null>(null);
+const docxLoading = ref(false);
+const letterEditorRef = ref<InstanceType<typeof LetterBodyEditor> | null>(null);
 
 // Letter attachments
 const letterFiles = ref<LetterFile[]>([]);
@@ -654,6 +967,7 @@ const completingReferralId = ref<number | null>(null);
 
 // Forms & Modals toggle
 const showNewModal = ref(false);
+const editingLetterId = ref<number | null>(null);
 const newFormLoading = ref(false);
 const newForm = reactive({
   type: 'internal' as 'incoming' | 'outgoing' | 'internal',
@@ -662,11 +976,22 @@ const newForm = reactive({
   classification: 'normal' as 'normal' | 'confidential' | 'secret',
   subject: '',
   body: '',
-  senderExternal: '',
-  receiverExternal: '',
+  bodyDocx: '' as string,
   receivers: [] as string[],
   signers: [] as string[],
 });
+
+// Center picker (CRM centers list)
+const senderCenterQuery = ref('');
+const receiverCenterQuery = ref('');
+const senderCenterResults = ref<LetterCenter[]>([]);
+const receiverCenterResults = ref<LetterCenter[]>([]);
+const selectedSenderCenter = ref<LetterCenter | null>(null);
+const selectedReceiverCenter = ref<LetterCenter | null>(null);
+let centerSearchTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Change history
+const letterHistory = ref<LetterHistoryEntry[]>([]);
 
 // Signature Form
 const showSignModal = ref(false);
@@ -690,6 +1015,17 @@ const pinFormLoading = ref(false);
 const pinForm = reactive({
   currentPin: '',
   newPin: '',
+});
+
+const showPrintTplModal = ref(false);
+const printTplLoading = ref(false);
+const printTplPlaceholders = ref<string[]>([
+  'letterhead', 'indicator_number', 'type', 'date', 'creator',
+  'sender_block', 'receiver_block', 'subject', 'body', 'signers_block',
+]);
+const printTplForm = reactive({
+  template: '',
+  defaultTemplate: '',
 });
 
 // Refer New Form
@@ -721,20 +1057,79 @@ const statPendingCount = computed(() => {
 
 const statSignDeskCount = computed(() => {
   return letters.value.filter(l => {
-    if (l.is_deleted || l.status === 'draft') return false;
+    if (l.is_deleted || l.status !== 'approved_for_sign') return false;
+    if (l.my_signer_status === 'pending') return true;
     return referrals.value.some(r => r.letter_id === l.id && r.receiver_id === props.username && r.action_type === 'for_signature' && !r.is_completed);
   }).length;
+});
+
+const statFollowupCount = computed(() => {
+  const letterIds = new Set<number>();
+  referrals.value.forEach(r => {
+    if (!r.is_completed && r.action_type === 'for_action' && r.receiver_id === props.username) {
+      letterIds.add(r.letter_id);
+    }
+  });
+  return letterIds.size;
 });
 
 const statDraftsCount = computed(() => {
   return letters.value.filter(l => l.status === 'draft' && !l.is_deleted).length;
 });
 
-function tabBadge(key: string): number {
-  if (key === 'pending') return statPendingCount.value;
-  if (key === 'sign_desk') return statSignDeskCount.value;
-  if (key === 'drafts') return statDraftsCount.value;
-  return 0;
+const myPendingReferralsForSelected = computed(() => {
+  if (!selectedLetter.value) return [];
+  return selectedReferrals.value.filter(
+    r => !r.is_completed && r.receiver_id === props.username && r.action_type === 'for_action'
+  );
+});
+
+const openReferralsOnSelected = computed(() => {
+  if (!selectedLetter.value) return [];
+  return selectedReferrals.value.filter(r => !r.is_completed && r.action_type === 'for_action');
+});
+
+function hasAnyReferral(l: Letter): boolean {
+  return referrals.value.some(r => r.letter_id === l.id);
+}
+
+function showCompletionGuide(l: Letter): boolean {
+  if (l.is_archived || l.is_deleted || l.status === 'draft') return false;
+  if (['registered', 'in_referral'].includes(l.status)) return true;
+  if (l.status === 'approved_for_sign' && l.type !== 'outgoing') return false;
+  return false;
+}
+
+function myOpenReferralCount(l: Letter): number {
+  return referrals.value.filter(
+    r => r.letter_id === l.id && !r.is_completed && r.receiver_id === props.username && r.action_type === 'for_action'
+  ).length;
+}
+
+function showFollowupPanel(l: Letter): boolean {
+  if (l.is_archived || l.is_deleted) return false;
+  const myPending = referrals.value.filter(
+    r => r.letter_id === l.id && !r.is_completed && r.receiver_id === props.username && r.action_type === 'for_action'
+  );
+  if (myPending.length > 0) return true;
+  return canReferLetter(l);
+}
+
+function canReferLetter(l: Letter): boolean {
+  if (l.is_archived || l.is_deleted) return false;
+  if (!['registered', 'in_referral'].includes(l.status)) return false;
+  if (props.isManager || props.userRole === 'مدیر' || props.userRole === 'سوپر ادمین') return true;
+  if (l.created_by === props.username) return true;
+  return referrals.value.some(
+    r => r.letter_id === l.id && (r.sender_id === props.username || r.receiver_id === props.username)
+  );
+}
+
+function scrollToFollowupPanel() {
+  nextTick(() => {
+    const el = document.getElementById('lt-followup-panel');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
 }
 
 const filteredLetters = computed(() => {
@@ -813,13 +1208,154 @@ async function load() {
 
 async function selectLetter(l: Letter) {
   selectedLetter.value = l;
+  selectedLetterDocx.value = null;
   referForm.receiverId = '';
   referForm.note = '';
   referForm.privateNote = '';
   referForm.actionType = 'for_action';
-  
+
+  if (l.has_docx) {
+    docxLoading.value = true;
+    try {
+      selectedLetterDocx.value = await fetchLetterDocx(l.id);
+    } catch (e) {
+      console.warn('[letters] docx load failed', e);
+    } finally {
+      docxLoading.value = false;
+    }
+  }
+
   loadLetterFiles(l.id);
   loadLetterReferrals(l.id);
+  loadLetterHistory(l.id);
+}
+
+async function loadLetterHistory(letterId: number) {
+  try {
+    const r = await fetch(`/api/letters/${letterId}/history`);
+    if (r.ok) {
+      const data = await r.json();
+      letterHistory.value = (data.history || []).slice().reverse();
+    } else {
+      letterHistory.value = [];
+    }
+  } catch {
+    letterHistory.value = [];
+  }
+}
+
+function parseHistoryVal(val: LetterHistoryEntry['val']) {
+  if (typeof val === 'string') {
+    try {
+      return JSON.parse(val) as Record<string, unknown>;
+    } catch {
+      return { new: val };
+    }
+  }
+  return (val || {}) as Record<string, unknown>;
+}
+
+function historyFieldLabel(field: string): string {
+  const map: Record<string, string> = {
+    subject: 'موضوع',
+    body: 'متن نامه',
+    body_docx: 'سند Word',
+    type: 'نوع نامه',
+    priority: 'فوریت',
+    classification: 'طبقه‌بندی',
+    sender_external: 'فرستنده',
+    receiver_external: 'گیرنده',
+    sender_center_key: 'مرکز فرستنده',
+    receiver_center_key: 'مرکز گیرنده',
+    status: 'وضعیت',
+    letters: 'ایجاد نامه',
+  };
+  return map[field] || field;
+}
+
+function historyChangeText(h: LetterHistoryEntry): string {
+  const v = parseHistoryVal(h.val);
+  if (v.action === 'create') {
+    const subj = v.subject ? ` — ${String(v.subject)}` : '';
+    return `نامه ایجاد شد${subj}`;
+  }
+  if (h.field === 'body_docx') {
+    return v.note ? String(v.note) : 'سند Word به‌روزرسانی شد';
+  }
+  const oldV = v.old;
+  const newV = v.new;
+  if (oldV !== undefined && newV !== undefined) {
+    const o = String(oldV).slice(0, 100);
+    const n = String(newV).slice(0, 100);
+    if (!o) return `→ ${n}`;
+    return `${o} → ${n}`;
+  }
+  return v.note ? String(v.note) : 'تغییر ثبت شد';
+}
+
+function resetCenterPicker() {
+  senderCenterQuery.value = '';
+  receiverCenterQuery.value = '';
+  senderCenterResults.value = [];
+  receiverCenterResults.value = [];
+  selectedSenderCenter.value = null;
+  selectedReceiverCenter.value = null;
+}
+
+function debouncedCenterSearch(which: 'sender' | 'receiver') {
+  if (centerSearchTimer) clearTimeout(centerSearchTimer);
+  centerSearchTimer = setTimeout(() => searchCenters(which), 250);
+}
+
+async function searchCenters(which: 'sender' | 'receiver') {
+  const q = which === 'sender' ? senderCenterQuery.value.trim() : receiverCenterQuery.value.trim();
+  if (q.length < 1) {
+    if (which === 'sender') senderCenterResults.value = [];
+    else receiverCenterResults.value = [];
+    return;
+  }
+  try {
+    const r = await fetch(`/api/letters/centers?q=${encodeURIComponent(q)}&limit=25`);
+    const ct = r.headers.get('content-type') || '';
+    if (!r.ok) {
+      console.warn('[letters center search] HTTP', r.status);
+      return;
+    }
+    if (!ct.includes('application/json')) {
+      console.warn('[letters center search] non-JSON response — سرور را ری‌استارت کنید');
+      return;
+    }
+    const data = await r.json();
+    const list = data.centers || [];
+    if (which === 'sender') senderCenterResults.value = list;
+    else receiverCenterResults.value = list;
+  } catch (e) {
+    console.warn('[letters center search]', e);
+  }
+}
+
+function pickSenderCenter(c: LetterCenter) {
+  selectedSenderCenter.value = c;
+  senderCenterQuery.value = '';
+  senderCenterResults.value = [];
+}
+
+function pickReceiverCenter(c: LetterCenter) {
+  selectedReceiverCenter.value = c;
+  receiverCenterQuery.value = '';
+  receiverCenterResults.value = [];
+}
+
+function clearSenderCenter() {
+  selectedSenderCenter.value = null;
+  senderCenterQuery.value = '';
+  senderCenterResults.value = [];
+}
+
+function clearReceiverCenter() {
+  selectedReceiverCenter.value = null;
+  receiverCenterQuery.value = '';
+  receiverCenterResults.value = [];
 }
 
 async function loadLetterFiles(letterId: number) {
@@ -845,6 +1381,13 @@ async function loadLetterReferrals(letterId: number) {
   } catch (e) {}
 }
 
+async function refreshSelectedLetter() {
+  if (!selectedLetter.value) return;
+  const id = selectedLetter.value.id;
+  const updated = letters.value.find(l => l.id === id);
+  if (updated) selectedLetter.value = updated;
+}
+
 // Letter registration / approvals
 async function approveInternalLetter(letter: Letter) {
   if (!confirm('آیا از تایید نهایی و صدور شماره اندیکاتور برای این نامه اطمینان دارید؟')) return;
@@ -865,13 +1408,14 @@ async function approveInternalLetter(letter: Letter) {
 }
 
 async function approveOutgoingLetter(letter: Letter) {
-  if (!confirm('آیا می‌خواهید این نامه صادره را جهت امضا و تایید برای امضاکنندگان ارسال کنید؟')) return;
+  if (!confirm('آیا می‌خواهید این نامه را به میز کار امضاکنندگان ارسال کنید؟')) return;
   try {
     const r = await fetch(`/api/letters/${letter.id}/approve-outgoing`, { method: 'POST' });
     if (r.ok) {
-      alert('نامه با موفقیت به میز کار امضاکنندگان منتقل شد.');
-      load();
-      selectedLetter.value = null;
+      const res = await r.json();
+      alert('نامه به میز کار امضا ارسال شد.');
+      await load();
+      if (res.letter) selectLetter(res.letter);
     } else {
       const err = await r.json();
       alert(err.error || 'خطا در ارسال جهت امضا');
@@ -910,8 +1454,11 @@ async function submitSignature() {
         alert('امضای شما ثبت شد. نامه منتظر امضای بقیه گیرندگان است.');
       }
       showSignModal.value = false;
-      load();
-      selectedLetter.value = null;
+      await load();
+      if (selectedLetter.value) {
+        const refreshed = letters.value.find(x => x.id === selectedLetter.value!.id);
+        if (refreshed) selectLetter(refreshed);
+      }
     } else {
       const err = await r.json();
       alert(err.error || 'خطا در تایید امضای دیجیتال');
@@ -956,7 +1503,6 @@ async function submitUnsign() {
   }
 }
 
-// Update Signature Pin Code
 async function updatePinCode() {
   pinFormLoading.value = true;
   try {
@@ -984,6 +1530,70 @@ async function updatePinCode() {
   }
 }
 
+async function openPrintTplModal() {
+  showPrintTplModal.value = true;
+  printTplLoading.value = true;
+  try {
+    const r = await fetch('/api/letters/print-template');
+    if (r.ok) {
+      const data = await r.json();
+      printTplForm.template = data.template || '';
+      printTplForm.defaultTemplate = data.default_template || data.template || '';
+      if (Array.isArray(data.placeholders) && data.placeholders.length) {
+        printTplPlaceholders.value = data.placeholders;
+      }
+    }
+  } catch (e) {
+    alert('خطا در بارگذاری قالب چاپ');
+  } finally {
+    printTplLoading.value = false;
+  }
+}
+
+function insertPrintPlaceholder(ph: string) {
+  printTplForm.template += `{{${ph}}}`;
+}
+
+function formatPlaceholder(ph: string): string {
+  return `{{${ph}}}`;
+}
+
+function resetPrintTemplate() {
+  if (!confirm('قالب به حالت پیش‌فرض بازگردانده شود؟')) return;
+  printTplForm.template = printTplForm.defaultTemplate;
+}
+
+function previewPrintTemplate() {
+  if (selectedLetter.value) {
+    printLetter(selectedLetter.value.id);
+  } else {
+    alert('ابتدا یک نامه را از لیست انتخاب کنید، سپس پیش‌نمایش بزنید.');
+  }
+}
+
+async function savePrintTemplate() {
+  if (!printTplForm.template.trim()) return;
+  printTplLoading.value = true;
+  try {
+    const r = await fetch('/api/letters/print-template', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ template: printTplForm.template }),
+    });
+    if (r.ok) {
+      alert('قالب چاپ با موفقیت ذخیره شد.');
+      showPrintTplModal.value = false;
+    } else {
+      const err = await r.json();
+      alert(err.error || 'خطا در ذخیره قالب');
+    }
+  } catch (e) {
+    alert('خطای ارتباط با سرور');
+  } finally {
+    printTplLoading.value = false;
+  }
+}
+
 // Refer Letter
 async function submitReferral() {
   if (!selectedLetter.value || !referForm.receiverId) return;
@@ -1005,7 +1615,9 @@ async function submitReferral() {
       referForm.note = '';
       referForm.privateNote = '';
       referForm.actionType = 'for_action';
-      loadLetterReferrals(selectedLetter.value.id);
+      await loadLetterReferrals(selectedLetter.value.id);
+      await load();
+      await refreshSelectedLetter();
     } else {
       const err = await r.json();
       alert(err.error || 'خطا در ثبت ارجاع');
@@ -1029,7 +1641,9 @@ async function completeReferral(refId: number) {
       alert('ارجاع با موفقیت مختومه شد.');
       delete referralCompletionNotes.value[refId];
       if (selectedLetter.value) {
-        loadLetterReferrals(selectedLetter.value.id);
+        await loadLetterReferrals(selectedLetter.value.id);
+        await load();
+        await refreshSelectedLetter();
       }
     } else {
       alert('خطا در ثبت خاتمه ارجاع');
@@ -1123,21 +1737,83 @@ function downloadFile(fileId: number, filename: string) {
 
 // Composition Modal
 function openNewModal() {
+  editingLetterId.value = null;
   newForm.type = 'internal';
   newForm.departmentPrefix = 'الف';
   newForm.priority = 'normal';
   newForm.classification = 'normal';
   newForm.subject = '';
   newForm.body = '';
-  newForm.senderExternal = '';
-  newForm.receiverExternal = '';
+  newForm.bodyDocx = '';
   newForm.receivers = [];
   newForm.signers = [];
+  resetCenterPicker();
   showNewModal.value = true;
+  nextTick(() => letterEditorRef.value?.reset());
+}
+
+async function openEditDraft(letter: Letter) {
+  if (letter.status !== 'draft') return;
+  editingLetterId.value = letter.id;
+  newForm.type = letter.type;
+  newForm.departmentPrefix = letter.department_prefix || 'الف';
+  newForm.priority = letter.priority;
+  newForm.classification = letter.classification;
+  newForm.subject = letter.subject;
+  newForm.body = letter.body || '';
+  newForm.bodyDocx = '';
+  newForm.receivers = (letter.receivers || [])
+    .filter(r => r.receiver_type === 'user')
+    .map(r => r.receiver_id);
+  newForm.signers = (letter.signers || []).map(s => s.username);
+  resetCenterPicker();
+
+  if (letter.sender_center_key) {
+    selectedSenderCenter.value = {
+      centerKey: letter.sender_center_key,
+      name: letter.sender_external || letter.sender_center_key,
+      province: '',
+      owner: '',
+    };
+  }
+  if (letter.receiver_center_key) {
+    selectedReceiverCenter.value = {
+      centerKey: letter.receiver_center_key,
+      name: letter.receiver_external || letter.receiver_center_key,
+      province: '',
+      owner: '',
+    };
+  }
+
+  showNewModal.value = true;
+  await nextTick();
+
+  if (letter.has_docx) {
+    try {
+      const buf = await fetchLetterDocx(letter.id);
+      await letterEditorRef.value?.loadBuffer(buf);
+    } catch {
+      letterEditorRef.value?.loadFromHtml(letter.body || '');
+    }
+  } else {
+    letterEditorRef.value?.loadFromHtml(letter.body || '');
+  }
 }
 
 function closeNewModal() {
   showNewModal.value = false;
+  editingLetterId.value = null;
+  resetCenterPicker();
+}
+
+async function syncEditorBody() {
+  const editor = letterEditorRef.value;
+  if (!editor) return;
+  const buf = await editor.exportDocx();
+  if (buf) {
+    newForm.bodyDocx = arrayBufferToBase64(buf);
+    newForm.body = editor.getPlainPreview() || newForm.subject.trim();
+  }
 }
 
 async function saveLetter(actionStatus: 'draft' | 'pending') {
@@ -1145,38 +1821,55 @@ async function saveLetter(actionStatus: 'draft' | 'pending') {
     alert('موضوع نامه الزامی است.');
     return;
   }
+  if (newForm.type === 'incoming' && !selectedSenderCenter.value) {
+    alert('انتخاب فرستنده از لیست مراکز CRM الزامی است.');
+    return;
+  }
+  if (newForm.type === 'outgoing' && !selectedReceiverCenter.value) {
+    alert('انتخاب گیرنده از لیست مراکز CRM الزامی است.');
+    return;
+  }
   if (newForm.type === 'outgoing' && newForm.signers.length === 0 && actionStatus === 'pending') {
     alert('انتخاب حداقل یک امضاکننده برای نامه‌های صادره الزامی است.');
     return;
   }
 
-  syncEditorBody();
+  await syncEditorBody();
+
+  const payload = {
+    type: newForm.type,
+    department_prefix: newForm.departmentPrefix,
+    priority: newForm.priority,
+    classification: newForm.classification,
+    subject: newForm.subject,
+    body: newForm.body,
+    body_docx: newForm.bodyDocx || undefined,
+    sender_center_key: selectedSenderCenter.value?.centerKey || undefined,
+    receiver_center_key: selectedReceiverCenter.value?.centerKey || undefined,
+    sender_external: selectedSenderCenter.value?.name || '',
+    receiver_external: selectedReceiverCenter.value?.name || '',
+    receivers: newForm.receivers,
+    signers: newForm.signers,
+    status: actionStatus,
+  };
+
+  const isEdit = editingLetterId.value != null;
+  const url = isEdit ? `/api/letters/${editingLetterId.value}` : '/api/letters';
+  const method = isEdit ? 'PUT' : 'POST';
 
   newFormLoading.value = true;
   try {
-    const r = await fetch('/api/letters', {
-      method: 'POST',
+    const r = await fetch(url, {
+      method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: newForm.type,
-        department_prefix: newForm.departmentPrefix,
-        priority: newForm.priority,
-        classification: newForm.classification,
-        subject: newForm.subject,
-        body: newForm.body,
-        sender_external: newForm.senderExternal,
-        receiver_external: newForm.receiverExternal,
-        receivers: newForm.receivers,
-        signers: newForm.signers,
-        status: actionStatus,
-      }),
+      body: JSON.stringify(payload),
     });
     if (r.ok) {
       const res = await r.json();
       if (actionStatus === 'draft') {
-        alert('نامه با موفقیت به عنوان پیش‌نویس ذخیره گردید.');
+        alert(isEdit ? 'پیش‌نویس با موفقیت به‌روزرسانی شد.' : 'نامه با موفقیت به عنوان پیش‌نویس ذخیره گردید.');
       } else {
-        alert('نامه با موفقیت ثبت نهایی شد.');
+        alert(isEdit ? 'نامه با موفقیت به‌روزرسانی و ثبت شد.' : 'نامه با موفقیت ثبت نهایی شد.');
       }
       closeNewModal();
       load();
@@ -1193,10 +1886,153 @@ async function saveLetter(actionStatus: 'draft' | 'pending') {
 }
 
 // Templates helper
-function applyTemplate(event: any) {
-  const content = event.target.value;
+function applyTemplate(event: Event) {
+  const select = event.target as HTMLSelectElement;
+  const content = select.value;
   if (!content) return;
-  setEditorContent(content);
+  letterEditorRef.value?.loadFromHtml(content);
+  select.value = '';
+}
+
+function isLetterOwner(l: Letter): boolean {
+  return l.created_by === props.username || props.isManager;
+}
+
+function canEditLetter(l: Letter): boolean {
+  return l.status === 'draft' && isLetterOwner(l);
+}
+
+function canRegisterInternal(l: Letter): boolean {
+  return l.status === 'draft' && (l.type === 'internal' || l.type === 'incoming') && isLetterOwner(l);
+}
+
+function canSendToSignDesk(l: Letter): boolean {
+  if (l.type !== 'outgoing' || !isLetterOwner(l)) return false;
+  if (l.status === 'draft' || l.status === 'pending_action') return true;
+  return false;
+}
+
+function canSignLetter(l: Letter): boolean {
+  return l.status === 'approved_for_sign' && l.my_signer_status === 'pending';
+}
+
+function canArchiveLetter(l: Letter): boolean {
+  if (l.is_archived || l.is_deleted) return false;
+  if (l.status === 'registered' || l.status === 'in_referral') {
+    const openRefs = referrals.value.filter(r => r.letter_id === l.id && !r.is_completed);
+    return openRefs.length === 0;
+  }
+  return false;
+}
+
+function pendingSignersText(l: Letter): string {
+  if (l.type !== 'outgoing' || l.status !== 'approved_for_sign') return '';
+  const pending = (l.signers || []).filter(s => s.status !== 'signed');
+  if (!pending.length) return '';
+  return pending.map(s => s.display_name || s.username).join('، ');
+}
+
+function statusDescription(l: Letter): string {
+  const stage = workflowStageKey(l);
+  if (stage === 'draft') return 'نامه در حالت پیش‌نویس است. پس از تکمیل متن، آن را ثبت نهایی کنید.';
+  if (l.status === 'pending_action' && l.type === 'outgoing') {
+    return 'نامه ثبت شده اما هنوز به امضاکنندگان ارسال نشده — دکمه «ارسال به میز کار امضا» را بزنید.';
+  }
+  if (stage === 'sign') {
+    if (canSignLetter(l)) return 'این نامه منتظر امضای دیجیتال شماست.';
+    return 'نامه در میز کار امضا است و منتظر تایید امضاکنندگان می‌باشد.';
+  }
+  if (stage === 'registered') return 'نامه ثبت و شماره‌گذاری شده — برای پیگیری، از پنل «پیگیری و ارجاع» همکار را انتخاب کنید.';
+  if (stage === 'followup') {
+    const mine = referrals.value.filter(r => r.letter_id === l.id && !r.is_completed && r.receiver_id === props.username && r.action_type === 'for_action');
+    if (mine.length) return `📨 ${mine.length} ارجاع منتظر اقدام شماست — نتیجه را بنویسید و «خاتمه ارجاع» بزنید.`;
+    return 'نامه در مرحله پیگیری است — ارجاع‌های باز را در پنل بالا تکمیل کنید یا ارجاع جدید ثبت کنید.';
+  }
+  if (stage === 'done') return 'تمام ارجاعات تکمیل شده — آماده بایگانی.';
+  if (stage === 'archived') return 'نامه بایگانی شده است.';
+  return '';
+}
+
+function workflowProgressPct(l: Letter): number {
+  const steps = workflowStepsFor(l);
+  const doneCount = steps.filter(s => s.done).length;
+  const activeCount = steps.filter(s => s.active).length;
+  const progress = doneCount + (activeCount ? 0.5 : 0);
+  return Math.round((progress / steps.length) * 100);
+}
+
+function printLetter(letterId: number) {
+  window.open(`/api/letters/${letterId}/print`, '_blank');
+}
+
+interface WorkflowStep {
+  key: string;
+  label: string;
+  icon: string;
+  active: boolean;
+  done: boolean;
+  badge?: number;
+}
+
+function workflowStageKey(l: Letter): string {
+  if (l.is_archived) return 'archived';
+  if (l.status === 'draft') return 'draft';
+  if (l.status === 'pending_action') return 'sign';
+  if (l.status === 'approved_for_sign') return 'sign';
+  if (l.status === 'in_referral') return 'followup';
+  if (l.status === 'registered') {
+    const openRefs = referrals.value.filter(r => r.letter_id === l.id && !r.is_completed && r.action_type === 'for_action');
+    if (openRefs.length) return 'followup';
+    const allRefs = referrals.value.filter(r => r.letter_id === l.id && r.action_type === 'for_action');
+    if (allRefs.length && allRefs.every(r => r.is_completed)) return 'done';
+    return 'registered';
+  }
+  return l.status;
+}
+
+function workflowStageLabel(l: Letter): string {
+  if (l.is_archived) return '🗄️ بایگانی شده';
+  if (l.status === 'draft') return '✏️ پیش‌نویس';
+  if (l.status === 'pending_action') return '📤 ثبت شده — نیاز به ارسال به امضا';
+  if (l.status === 'approved_for_sign') {
+    const pending = (l.signers || []).filter(s => s.status !== 'signed');
+    if (canSignLetter(l)) return '✍️ منتظر امضای شما';
+    if (pending.length) return `✍️ منتظر امضا (${pending.length} نفر)`;
+    return '✍️ در میز کار امضا';
+  }
+  if (l.status === 'in_referral') return '📨 در پیگیری';
+  if (l.status === 'registered') {
+    const openRefs = referrals.value.filter(r => r.letter_id === l.id && !r.is_completed);
+    if (openRefs.length) return '📨 در پیگیری';
+    return '🔢 صادر شده';
+  }
+  return l.status;
+}
+
+function workflowStepsFor(l: Letter): WorkflowStep[] {
+  const openFollowups = referrals.value.filter(r => r.letter_id === l.id && !r.is_completed && r.action_type === 'for_action').length;
+  const myPendingSign = canSignLetter(l);
+  const stage = workflowStageKey(l);
+  const isOutgoing = l.type === 'outgoing';
+
+  if (isOutgoing) {
+    return [
+      { key: 'draft', label: 'پیش‌نویس', icon: '1', active: stage === 'draft', done: stage !== 'draft' },
+      { key: 'sign', label: 'میز امضا', icon: '2', active: stage === 'sign', done: ['registered', 'followup', 'done', 'archived'].includes(stage), badge: myPendingSign ? 1 : undefined },
+      { key: 'registered', label: 'صدور شماره', icon: '3', active: stage === 'registered', done: ['followup', 'done', 'archived'].includes(stage) },
+      { key: 'followup', label: 'پیگیری', icon: '4', active: stage === 'followup', done: ['done', 'archived'].includes(stage), badge: openFollowups || undefined },
+      { key: 'done', label: 'تکمیل', icon: '5', active: stage === 'done', done: stage === 'archived' },
+      { key: 'archived', label: 'بایگانی', icon: '6', active: stage === 'archived', done: stage === 'archived' },
+    ];
+  }
+
+  return [
+    { key: 'draft', label: 'پیش‌نویس', icon: '1', active: stage === 'draft', done: stage !== 'draft' },
+    { key: 'registered', label: 'ثبت و شماره', icon: '2', active: stage === 'registered', done: ['followup', 'done', 'archived'].includes(stage) },
+    { key: 'followup', label: 'پیگیری', icon: '3', active: stage === 'followup', done: ['done', 'archived'].includes(stage), badge: openFollowups || undefined },
+    { key: 'done', label: 'تکمیل', icon: '4', active: stage === 'done', done: stage === 'archived' },
+    { key: 'archived', label: 'بایگانی', icon: '5', active: stage === 'archived', done: stage === 'archived' },
+  ];
 }
 
 // Label Helpers
@@ -1245,83 +2081,6 @@ function formatPersianDate(dateStr: string): string {
   }
 }
 
-// ── TinyMCE rich-text editor (نامه اداری — شبیه Word) ─────────────────────
-const TINYMCE_FA_URL = 'https://cdn.jsdelivr.net/npm/tinymce-i18n@24.12.30/langs6/fa.js';
-
-function syncEditorBody() {
-  const tinymce = (window as any).tinymce;
-  if (!tinymce) return;
-  const editor = tinymce.get('letter-body-editor');
-  if (editor) newForm.body = editor.getContent();
-}
-
-function setEditorContent(html: string) {
-  newForm.body = html || '';
-  const tinymce = (window as any).tinymce;
-  if (!tinymce) return;
-  const editor = tinymce.get('letter-body-editor');
-  if (editor) editor.setContent(newForm.body);
-}
-
-function initLetterEditor() {
-  const tinymce = (window as any).tinymce;
-  if (!tinymce) {
-    console.warn('[letters] TinyMCE بارگذاری نشده — textarea ساده فعال است');
-    return;
-  }
-  tinymce.remove('#letter-body-editor');
-  tinymce.init({
-    selector: '#letter-body-editor',
-    base_url: 'https://cdn.jsdelivr.net/npm/tinymce@6.8.5',
-    suffix: '.min',
-    height: 380,
-    min_height: 280,
-    resize: true,
-    directionality: 'rtl',
-    language: 'fa',
-    language_url: TINYMCE_FA_URL,
-    menubar: 'edit view insert format table',
-    plugins: 'directionality link table lists code autoresize wordcount searchreplace charmap',
-    toolbar:
-      'undo redo | blocks fontsize | bold italic underline strikethrough | forecolor backcolor | ' +
-      'alignright aligncenter alignleft alignjustify | bullist numlist outdent indent | ' +
-      'table link charmap | ltr rtl | removeformat code',
-    font_family_formats:
-      'وزیرمتن=Vazirmatn,Tahoma,sans-serif;Tahoma=Tahoma,sans-serif;Arial=Arial,Helvetica,sans-serif',
-    font_size_formats: '11px 12px 14px 16px 18px 20px 24px',
-    content_style:
-      'body { font-family: Vazirmatn, Tahoma, sans-serif; font-size: 14px; direction: rtl; line-height: 1.9; }',
-    branding: false,
-    promotion: false,
-    statusbar: true,
-    setup: (editor: any) => {
-      editor.on('change keyup undo redo', () => {
-        newForm.body = editor.getContent();
-      });
-    },
-    init_instance_callback: (editor: any) => {
-      editor.setContent(newForm.body || '');
-    },
-  });
-}
-
-function destroyLetterEditor() {
-  const tinymce = (window as any).tinymce;
-  if (tinymce) tinymce.remove('#letter-body-editor');
-}
-
-watch(showNewModal, (newVal) => {
-  if (newVal) {
-    nextTick(() => initLetterEditor());
-  } else {
-    destroyLetterEditor();
-  }
-});
-
-onBeforeUnmount(() => {
-  destroyLetterEditor();
-});
-
 onMounted(() => {
   load();
 });
@@ -1365,9 +2124,16 @@ defineExpose({ load });
   background: #fdfdfd;
 }
 .border-action { border-right-color: #6366f1; }
+.border-followup { border-right-color: #2563eb; }
 .border-sign { border-right-color: #f59e0b; }
 .border-drafts { border-right-color: #64748b; }
-.border-pin { border-right-color: #10b981; }
+
+.lt-stat-hint {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+.text-followup { color: #2563eb; }
 
 .lt-stat-val {
   font-size: 26px;
@@ -1412,10 +2178,13 @@ defineExpose({ load });
 
 .lt-toolbar {
   display: flex;
-  flex-direction: column;
   gap: 10px;
+  align-items: stretch;
+  flex-wrap: wrap;
 }
 .lt-search-wrap {
+  flex: 1;
+  min-width: 200px;
   position: relative;
   display: flex;
   align-items: center;
@@ -1443,10 +2212,354 @@ defineExpose({ load });
   font-size: 14px;
   transition: all 0.2s;
   box-shadow: 0 4px 10px rgba(79, 70, 229, 0.2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 18px;
+  min-width: 148px;
+  white-space: nowrap;
+  text-align: center;
 }
 .lt-new-btn:hover {
   background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%);
   box-shadow: 0 6px 15px rgba(79, 70, 229, 0.3);
+}
+
+.lt-toolbar-actions {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  flex-shrink: 0;
+}
+.lt-pin-btn {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  color: #64748b;
+  height: 42px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  text-align: center;
+}
+.lt-btn-icon {
+  line-height: 1;
+  flex-shrink: 0;
+}
+.lt-btn-text {
+  line-height: 1.2;
+}
+.lt-pin-btn:hover {
+  border-color: #6366f1;
+  color: #6366f1;
+}
+
+.lt-nav-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.lt-nav-group-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.lt-nav-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.lt-chip-btn {
+  padding: 8px 14px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #64748b;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s;
+}
+.lt-chip-btn:hover {
+  border-color: #cbd5e1;
+  color: #475569;
+}
+.lt-chip-btn.active {
+  background: #eef2ff;
+  border-color: #6366f1;
+  color: #6366f1;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.15);
+}
+
+.lt-tab-help {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #1e40af;
+  line-height: 1.6;
+}
+
+.lt-tab-help {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #1e40af;
+  line-height: 1.6;
+}
+.lt-help-steps {
+  margin: 8px 20px 0 0;
+  padding: 0;
+  line-height: 1.8;
+}
+
+.lt-card-action-hint {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: #fef3c7;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #92400e;
+  text-align: center;
+}
+
+.lt-completion-guide {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.lt-guide-title {
+  font-weight: 800;
+  font-size: 14px;
+  color: #334155;
+  margin-bottom: 12px;
+}
+.lt-guide-steps-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+@media (max-width: 900px) {
+  .lt-guide-steps-row { grid-template-columns: repeat(2, 1fr); }
+}
+.lt-guide-step {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 8px;
+  text-align: center;
+  opacity: 0.55;
+}
+.lt-guide-step.active {
+  opacity: 1;
+  border-color: #6366f1;
+  background: #eef2ff;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.12);
+}
+.lt-guide-step.done {
+  opacity: 1;
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+.lt-guide-num {
+  display: block;
+  font-size: 16px;
+  font-weight: 800;
+  color: #6366f1;
+  margin-bottom: 4px;
+}
+.lt-guide-step.done .lt-guide-num { color: #16a34a; }
+.lt-guide-lbl {
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  line-height: 1.4;
+}
+.lt-open-refs-box {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #9a3412;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.lt-open-ref-tag {
+  background: #ffedd5;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.lt-ready-archive-box {
+  margin-top: 12px;
+  padding: 12px;
+  background: #ecfdf5;
+  border: 1px solid #86efac;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #166534;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.lt-btn-archive-inline {
+  margin-right: auto;
+}
+
+.lt-my-action-badge {
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.lt-followup-panel {
+  background: linear-gradient(180deg, #eff6ff 0%, #fff 100%);
+  border: 2px solid #93c5fd;
+  border-radius: 14px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.08);
+}
+.lt-followup-panel-head h3 {
+  margin: 0 0 6px;
+  font-size: 17px;
+  color: #1e3a8a;
+}
+.lt-followup-help {
+  margin: 0;
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.6;
+}
+.lt-my-actions-block {
+  margin-top: 16px;
+}
+.lt-my-action-card {
+  background: #fff;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  padding: 14px;
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lt-my-action-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.lt-my-action-type {
+  font-weight: 800;
+  color: #1d4ed8;
+  font-size: 14px;
+}
+.lt-my-action-from {
+  font-size: 12px;
+  color: #64748b;
+}
+.lt-my-action-note {
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #334155;
+}
+.lt-refer-form-prominent {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed #93c5fd;
+}
+.lt-refer-form-hint {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #64748b;
+  background: #f8fafc;
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
+.lt-btn-refer {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.25);
+}
+.lt-btn-refer:hover {
+  filter: brightness(1.05);
+}
+
+.modal-print-tpl {
+  width: min(920px, 96vw);
+  max-height: 92vh;
+}
+.print-tpl-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.print-tpl-placeholders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.print-tpl-ph {
+  background: #eef2ff;
+  color: #4338ca;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-family: monospace;
+  cursor: pointer;
+  user-select: none;
+}
+.print-tpl-ph:hover {
+  background: #e0e7ff;
+}
+.print-tpl-editor {
+  min-height: 360px;
+  font-family: 'Courier New', Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  direction: ltr;
+  text-align: left;
+  resize: vertical;
 }
 
 .lt-tabs-nav {
@@ -1602,6 +2715,9 @@ defineExpose({ load });
   display: flex;
   flex-direction: column;
   gap: 20px;
+  overflow-y: auto;
+  max-height: calc(100vh - 220px);
+  padding-left: 4px;
 }
 
 .lt-details-header {
@@ -1640,7 +2756,7 @@ defineExpose({ load });
   gap: 6px;
 }
 
-.lt-btn-approve, .lt-btn-sign, .lt-btn-unsign, .lt-btn-archive, .lt-btn-restore, .lt-btn-delete {
+.lt-btn-approve, .lt-btn-sign, .lt-btn-unsign, .lt-btn-archive, .lt-btn-restore, .lt-btn-delete, .lt-btn-print {
   border: none;
   padding: 8px 14px;
   border-radius: 8px;
@@ -1669,11 +2785,186 @@ defineExpose({ load });
 .lt-btn-delete { background: #fff5f5; color: #e11d48; border: 1px solid #ffe4e6; }
 .lt-btn-delete:hover { background: #ffe4e6; }
 
+.lt-btn-print { background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; }
+.lt-btn-print:hover { background: #e2e8f0; }
+
+/* Status banner */
+.lt-status-banner {
+  padding: 14px 18px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.lt-status-banner.stage-draft { background: #f9fafb; border-color: #d1d5db; }
+.lt-status-banner.stage-sign { background: #fffbeb; border-color: #fde68a; }
+.lt-status-banner.stage-registered { background: #ecfdf5; border-color: #a7f3d0; }
+.lt-status-banner.stage-followup { background: #eff6ff; border-color: #bfdbfe; }
+.lt-status-banner.stage-done { background: #f0fdf4; border-color: #bbf7d0; }
+.lt-status-banner.stage-archived { background: #f1f5f9; border-color: #cbd5e1; }
+.lt-status-chip {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 800;
+  color: #1e293b;
+  margin-bottom: 4px;
+}
+.lt-status-desc {
+  margin: 0;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.6;
+}
+.lt-status-waiting {
+  font-size: 12px;
+  color: #b45309;
+  background: #fef3c7;
+  padding: 6px 12px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+/* Workflow tracker v2 */
+.lt-workflow-tracker {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+  padding: 20px 12px 12px;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  position: relative;
+}
+.lt-workflow-tracker:has(.wf-step:nth-child(5):last-child) {
+  grid-template-columns: repeat(5, 1fr);
+}
+.lt-workflow-tracker::before {
+  content: '';
+  position: absolute;
+  top: 34px;
+  right: 10%;
+  left: 10%;
+  height: 3px;
+  background: #e2e8f0;
+  border-radius: 2px;
+  z-index: 0;
+}
+.lt-workflow-tracker::after {
+  content: '';
+  position: absolute;
+  top: 34px;
+  right: 10%;
+  width: var(--wf-pct, 0%);
+  max-width: 80%;
+  height: 3px;
+  background: linear-gradient(270deg, #6366f1, #22c55e);
+  border-radius: 2px;
+  z-index: 0;
+  transition: width 0.4s ease;
+}
+.wf-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+.wf-dot {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #cbd5e1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  margin-bottom: 8px;
+}
+.wf-num {
+  font-size: 12px;
+  font-weight: 800;
+  color: #94a3b8;
+}
+.wf-step.active .wf-dot {
+  border-color: #6366f1;
+  background: #6366f1;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15);
+}
+.wf-step.active .wf-num { color: #fff; }
+.wf-step.done .wf-dot {
+  border-color: #22c55e;
+  background: #22c55e;
+}
+.wf-step.done .wf-num { color: #fff; }
+.wf-step.pending .wf-dot { background: #f8fafc; }
+.wf-badge {
+  position: absolute;
+  top: -6px;
+  left: -6px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+.wf-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-align: center;
+  line-height: 1.3;
+  max-width: 72px;
+}
+.wf-step.active .wf-label { color: #6366f1; font-weight: 800; }
+.wf-step.done .wf-label { color: #16a34a; }
+
+.wf-stage-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #eef2ff;
+  color: #4338ca;
+}
+.wf-stage-badge.sign, .wf-stage-badge.approved_for_sign { background: #fef3c7; color: #b45309; }
+.wf-stage-badge.followup, .wf-stage-badge.in_referral { background: #dbeafe; color: #1d4ed8; }
+.wf-stage-badge.done { background: #dcfce7; color: #15803d; }
+.wf-stage-badge.archived { background: #f1f5f9; color: #64748b; }
+.wf-stage-badge.draft { background: #f3f4f6; color: #6b7280; }
+
 .lt-details-body {
   background: #f8fafc;
   border-radius: 10px;
   padding: 20px;
   border: 1px solid #e2e8f0;
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+}
+.lt-editor-wrap {
+  position: relative;
+  overflow: hidden;
+  min-height: 200px;
+  max-height: 540px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  margin-bottom: 12px;
+}
+.lt-editor-wrap :deep(.letter-body-editor) {
+  overflow: hidden !important;
 }
 .body-content-html {
   font-size: 14px;
@@ -1754,6 +3045,11 @@ defineExpose({ load });
 .lt-details-files {
   border-bottom: 1px solid #f1f5f9;
   padding-bottom: 20px;
+  position: relative;
+  z-index: 2;
+  background: #fff;
+  clear: both;
+  margin-top: 4px;
 }
 .no-files {
   font-size: 12px;
@@ -2059,14 +3355,63 @@ defineExpose({ load });
   min-height: 120px;
   resize: vertical;
 }
-/* TinyMCE inside letter modal */
-:deep(.tox-tinymce) {
-  border-radius: 8px !important;
-  border-color: #cbd5e1 !important;
-  font-family: Vazirmatn, Tahoma, sans-serif !important;
+.body-content-loading {
+  padding: 24px;
+  text-align: center;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px dashed #cbd5e1;
 }
-:deep(.tox .tox-edit-area__iframe) {
-  background: #fff;
+.letter-editor-row {
+  min-height: 500px;
+}
+.lt-modal-overlay--compose {
+  backdrop-filter: none;
+  background: rgba(15, 23, 42, 0.72);
+}
+.lt-modal.modal-compose {
+  max-width: min(1100px, 96vw);
+  width: 1100px;
+  max-height: 94vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.compose-modal-layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.compose-form-scroll {
+  flex: 0 1 auto;
+  max-height: min(38vh, 320px);
+  overflow-y: auto;
+  border-bottom: 1px solid #e2e8f0;
+}
+.compose-editor-panel {
+  flex: 1;
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  overflow: visible;
+  background: #f8fafc;
+}
+.compose-editor-label {
+  font-size: 12px;
+  font-weight: 800;
+  color: #475569;
+  flex-shrink: 0;
+}
+.compose-editor-panel .letter-body-editor {
+  flex: 1;
+  min-height: 380px;
 }
 
 .multi-select-wrap {
@@ -2186,6 +3531,80 @@ defineExpose({ load });
   border-radius: 8px;
   font-size: 12px;
   line-height: 1.6;
+}
+
+/* Center picker */
+.center-picker {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.center-picked {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+.center-picked small {
+  color: #64748b;
+}
+.center-clear {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #64748b;
+  font-size: 14px;
+  padding: 2px 6px;
+}
+.center-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  max-height: 220px;
+  overflow-y: auto;
+}
+.center-result-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: right;
+  font-family: inherit;
+  border-bottom: 1px solid #f1f5f9;
+}
+.center-result-item:hover {
+  background: #f8fafc;
+}
+.center-result-item small {
+  color: #64748b;
+  font-size: 11px;
+}
+
+/* Change history */
+.lt-history-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px dashed #e2e8f0;
+}
+.timeline-badge.history {
+  background: #f1f5f9;
+  color: #475569;
 }
 
 .text-center { text-align: center; }

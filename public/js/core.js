@@ -54,6 +54,14 @@ var _provView='grid'; // 'grid' | 'list' | 'kanban'
 var _compactTable=false;
 var _nextTagId=1;var _nextWkId=1;var _nextEvId=1;
 
+function initEvents(){
+  if(!DB.events)DB.events=[];
+  if(DB.events.length){
+    var _ids=DB.events.map(function(e){return typeof e.id==='number'&&!isNaN(e.id)?e.id:0;});
+    _nextEvId=Math.max.apply(null,_ids)+1;
+  }
+}
+
 // ════════════════════════ JALALI ════════════════════════
 function g2j(gy,gm,gd){var g_d_m=[0,31,59,90,120,151,181,212,243,273,304,334];var gy2=(gm>2)?(gy+1):gy;var days=355666+(365*gy)+Math.floor((gy2+3)/4)-Math.floor((gy2+99)/100)+Math.floor((gy2+399)/400)+gd+g_d_m[gm-1];var jy=-1595+(33*Math.floor(days/12053));days%=12053;jy+=4*Math.floor(days/1461);days%=1461;if(days>365){jy+=Math.floor((days-1)/365);days=(days-1)%365;}var jm=(days<186)?1+Math.floor(days/31):7+Math.floor((days-186)/30);var jd=1+((days<186)?(days%31):((days-186)%30));return[jy,jm,jd];}
 function toJalali(d){var r=g2j(d.getFullYear(),d.getMonth()+1,d.getDate());return r[0]+'-'+String(r[1]).padStart(2,'0')+'-'+String(r[2]).padStart(2,'0');}
@@ -92,13 +100,21 @@ var _sse = null;
 var _sseReconnectTimer = null;
 var _sseReloadTimer = null;
 var _ssePendingBy = null;
+var _sseRetryMs = 2000;
 
 function initSSE() {
-  if (_sse) return;
-  _sse = new EventSource('/api/events/stream?cid='+_sseClientId);
+  if (_sse) {
+    try { _sse.close(); } catch (e) {}
+    _sse = null;
+  }
+  _sse = new EventSource('/api/events/stream?cid=' + _sseClientId);
+  _sse.onopen = function () {
+    _sseRetryMs = 2000;
+  };
   _sse.onmessage = function(e) {
     try {
       var data = JSON.parse(e.data);
+      if (data.type === 'connected') return;
       if (data.type === 'db-updated') {
         _sseReloadDB(data.by);
       } else if (data.type === 'app-reload') {
@@ -111,12 +127,22 @@ function initSSE() {
     } catch(err) {}
   };
   _sse.onerror = function() {
-    _sse.close(); _sse = null;
+    try { _sse.close(); } catch (e) {}
+    _sse = null;
     clearTimeout(_sseReconnectTimer);
-    _sseReconnectTimer = setTimeout(initSSE, 8000);
+    _sseReconnectTimer = setTimeout(function () {
+      initSSE();
+      _sseRetryMs = Math.min(_sseRetryMs * 2, 30000);
+    }, _sseRetryMs);
   };
 }
 window.initSSE = initSSE;
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && !_sse) initSSE();
+  });
+}
 
 function _sseReloadDB(byUser) {
   if (!byUser) return;
@@ -221,7 +247,7 @@ function hideLoginOverlay(){
   if(o)o.style.display='none';
 }
 async function doLogin(){
-  var u=(document.getElementById('loginUser')||{}).value||'';
+  var u=((document.getElementById('loginUser')||{}).value||'').trim();
   var p=(document.getElementById('loginPass')||{}).value||'';
   var errEl=document.getElementById('loginErr');
   if(errEl)errEl.style.display='none';
@@ -259,8 +285,16 @@ async function loadDB(){
   var _spinner=document.getElementById('loadingSpinner');
   if(_spinner)_spinner.style.display='flex';
   try{
-    var r=await fetch('/api/data/db');
+    var r=await fetch('/api/data/db',{credentials:'same-origin'});
     if(r.status===401){if(_spinner)_spinner.style.display='none';showLoginOverlay();return;}
+    if(!r.ok){
+      var errMsg='خطا در بارگذاری دیتابیس ('+r.status+')';
+      try{var errJ=await r.json();if(errJ&&errJ.error)errMsg=errJ.error;}catch(_e){}
+      console.error('[loadDB]', errMsg);
+      if(typeof showToast==='function')showToast('⚠️ '+errMsg+' — دوباره وارد شوید',6000,'e');
+      if(r.status===401)showLoginOverlay();
+      return;
+    }
     var d=await r.json();
 
     // Check if there is an unsynced local backup in localStorage
@@ -313,6 +347,7 @@ async function loadDB(){
     await loadTasksFromSQL();
   }catch(e){
     console.warn('Server fetch failed, using empty DB:',e.message);
+    if(typeof showToast==='function')showToast('⚠️ اتصال به دیتابیس برقرار نشد — سرور یا PostgreSQL را بررسی کنید',6000,'e');
   }finally{
     var _sp2=document.getElementById('loadingSpinner');if(_sp2)_sp2.style.display='none';
   }
@@ -437,6 +472,89 @@ function patchCrmSetting(key, value) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ value: value }),
   }).catch(function (e) { console.warn('[patchCrmSetting]', key, e.message); });
+}
+
+function saveGlobalTagsApi(tags) {
+  return fetch('/api/tags', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(tags),
+  }).catch(function (e) { console.warn('[saveGlobalTagsApi]', e.message); });
+}
+
+function saveCenterExtraApi(c) {
+  if (!c || !c.id) return;
+  return fetch('/api/center-extras', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(c),
+  }).catch(function (e) { console.warn('[saveCenterExtraApi]', e.message); });
+}
+
+function deleteCenterExtraApi(id) {
+  if (!id) return;
+  return fetch('/api/center-extras/' + encodeURIComponent(id), { method: 'DELETE' })
+    .catch(function (e) { console.warn('[deleteCenterExtraApi]', e.message); });
+}
+
+function saveWeekEntryApi(eKey, we) {
+  if (!eKey || !we) return;
+  var pts = eKey.split(':::');
+  var weekId = pts[0];
+  var rtype = pts.length >= 3 ? pts[1] : we.rtype;
+  var rid = pts.length >= 3 ? pts.slice(2).join(':::') : we.rid;
+  if (we.sqlId) {
+    return fetch('/api/week-entries/' + encodeURIComponent(we.sqlId), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scheduledDate: we.scheduledDate || null,
+        actionType: we.actionType || 'call',
+        done: !!we.done,
+        doneDate: we.doneDate || null,
+      }),
+    }).catch(function () {});
+  }
+  return fetch('/api/week-entries', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id: 'we_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+      weekId: weekId,
+      recKey: we.recKey || (we.rtype + '_' + we.rid),
+      rtype: we.rtype || rtype,
+      rid: we.rid || rid,
+      scheduledDate: we.scheduledDate || null,
+      actionType: we.actionType || 'call',
+      done: !!we.done,
+      doneDate: we.doneDate || null,
+      addedBy: we.addedBy || currentUser,
+      centerName: we.centerName || '',
+    }),
+  }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+    if (d && d.id && DB.weekEntries[eKey]) DB.weekEntries[eKey].sqlId = d.id;
+  }).catch(function () {});
+}
+
+function wpRemoveFromOtherWeeks(recKey, keepWeekId) {
+  Object.keys(DB.weekEntries || {}).forEach(function (k) {
+    if (keepWeekId && k.startsWith(keepWeekId + ':::')) return;
+    var we = DB.weekEntries[k];
+    if (!we || typeof we !== 'object') return;
+    if (we.done) return;
+    var rk = we.recKey || (we.rtype + '_' + we.rid);
+    if (rk === recKey) _weRemove(k);
+  });
+}
+
+function _cleanCenterData(rtype, id) {
+  var recKey = rtype + '_' + id;
+  Object.keys(DB.weekEntries || {}).forEach(function (k) {
+    var we = DB.weekEntries[k];
+    if (we.recKey === recKey || (we.rtype === rtype && we.rid === id)) _weRemove(k);
+  });
+  if (DB.edits[recKey]) delete DB.edits[recKey].followupDate;
+  saveDB();
 }
 
 function patchCenterField(centerKey, field, val, opts) {
@@ -861,6 +979,21 @@ function getYearWeeks(jYear){
 // ساخت کلید weekEntries
 function wpEntryKey(weekId,rtype,rid){return weekId+':::'+rtype+':::'+rid;}
 function wpGetWeeks(){return getYearWeeks(typeof _wpYear !== 'undefined' && _wpYear ? _wpYear : todayJ()[0]);}
+function getWeekId(dateStr){
+  if(!dateStr)return null;
+  var p=dateStr.split('/').map(Number);
+  if(p.length!==3||isNaN(p[0]))return null;
+  var ms=jMs(p[0],p[1],p[2]);
+  var yrs=[p[0]-1,p[0],p[0]+1];
+  for(var yi=0;yi<yrs.length;yi++){
+    var wks=getYearWeeks(yrs[yi]);
+    var w=wks.find(function(wk){
+      return jMs(wk.wsArr[0],wk.wsArr[1],wk.wsArr[2])<=ms&&jMs(wk.weArr[0],wk.weArr[1],wk.weArr[2])>=ms;
+    });
+    if(w)return w.id;
+  }
+  return null;
+}
 
 // تطبیق خودکار تاریخ‌های پیگیری و ساخت ورودی‌های هفته گم‌شده
 function wpReconcileFollowupDates(){

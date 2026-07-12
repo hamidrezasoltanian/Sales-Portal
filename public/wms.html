@@ -6,7 +6,7 @@
 <title>WMS — آتنا زیست درمان</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css">
 <style>
 :root{
   --bg:#eef2f7;--surface:#fff;--surface2:#f8fafc;--surface3:#f1f5f9;
@@ -397,15 +397,23 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
 .print-preview-wrap table{font-size:9px!important;}
 
 /* ── SEARCHABLE SELECT ── */
-.ss-wrap{position:relative;}
+.ss-wrap{position:relative;overflow:visible;z-index:1;}
+.ss-wrap:focus-within{z-index:320;}
 .ss-input{width:100%;background:var(--surface);border:1px solid var(--border2);border-radius:var(--r);padding:8px 11px;color:var(--text);font-family:inherit;font-size:13px;outline:none;}
 .ss-input:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(2,132,199,.1);}
-.ss-dropdown{position:absolute;top:100%;right:0;left:0;background:var(--surface);border:1px solid var(--border2);border-radius:var(--r);box-shadow:var(--shadow2);z-index:300;max-height:220px;overflow-y:auto;display:none;}
+.ss-dropdown{position:absolute;top:calc(100% + 4px);right:0;left:auto;width:min(440px,calc(100vw - 32px));min-width:100%;background:var(--surface);border:1px solid var(--border2);border-radius:var(--r);box-shadow:var(--shadow2);z-index:300;max-height:280px;overflow-x:hidden;overflow-y:auto;display:none;}
 .ss-dropdown.open{display:block;}
-.ss-opt{padding:8px 12px;cursor:pointer;font-size:13px;display:flex;flex-direction:column;gap:2px;}
+.ss-opt{padding:10px 12px;cursor:pointer;display:flex;flex-direction:column;gap:5px;border-bottom:1px solid var(--border);}
+.ss-opt:last-child{border-bottom:none;}
 .ss-opt:hover,.ss-opt.focused{background:var(--surface2);}
-.ss-opt-name{font-weight:600;}
-.ss-opt-sub{font-size:11px;color:var(--text3);}
+.ss-opt-name{font-weight:600;font-size:13px;line-height:1.5;display:flex;flex-wrap:wrap;align-items:center;gap:6px;word-break:break-word;}
+.ss-opt-sub{font-size:11px;color:var(--text3);display:flex;flex-direction:column;gap:3px;line-height:1.45;}
+.ss-opt-line{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;}
+.ss-opt-irc{font-family:monospace;font-size:10px;color:var(--text2);word-break:break-all;direction:ltr;text-align:right;unicode-bidi:plaintext;}
+.ss-chip{font-size:10px;background:#eff6ff;color:#1d4ed8;padding:1px 6px;border-radius:4px;white-space:nowrap;flex-shrink:0;}
+.ss-stock-ok{color:#15803d;font-weight:600;}
+.ss-stock-warn{color:#d97706;font-weight:600;}
+.ss-stock-err{color:#dc2626;font-weight:600;}
 .ss-empty{padding:12px;text-align:center;color:var(--text3);font-size:12px;}
 
 /* ── DATE PICKER ── */
@@ -519,7 +527,7 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
     <div class="sb-lbl">مدیریت</div>
     <div class="nav" onclick="go('prods')"><span class="ico">💊</span><span class="lbl">کالاها</span></div>
     <div class="nav" onclick="go('whs')"><span class="ico">🏭</span><span class="lbl">انبارها</span></div>
-    <div class="nav" onclick="go('cp')"><span class="ico">🤝</span><span class="lbl">طرف‌حساب‌ها</span></div>
+    <div class="nav" onclick="go('cp')" style="display:none" title="غیرفعال — از پروفایل مرکز استفاده کنید"><span class="ico">🤝</span><span class="lbl">طرف‌حساب‌ها</span></div>
     <div class="nav" onclick="go('users')"><span class="ico">👥</span><span class="lbl">کاربران</span></div>
     <div class="nav" onclick="go('customers')"><span class="ico">🏥</span><span class="lbl">پروفایل مشتریان</span></div>
   </div>
@@ -619,10 +627,10 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
             <select class="fs" id="entWh"><option value="">انتخاب کنید</option></select>
           </div>
           <div class="fg" id="entCpWrap">
-            <label class="fl" id="entCpLbl">تأمین‌کننده <span class="req">*</span></label>
+            <label class="fl" id="entCpLbl">مرکز / شرکت</label>
             <input type="hidden" id="entCp"/>
             <div class="ss-wrap">
-              <input class="ss-input" id="entCpSearch" placeholder="جستجو..." autocomplete="off"
+              <input class="ss-input" id="entCpSearch" placeholder="جستجوی مرکز CRM (اختیاری)..." autocomplete="off"
                 oninput="filterSS('entCp',this.value,'supplier')"
                 onfocus="openSS('entCp')" onblur="closeSS('entCp',300)"/>
               <div class="ss-dropdown" id="entCpDrop"></div>
@@ -695,10 +703,10 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
             <div id="exStockHint" style="display:none"></div>
           </div>
           <div class="fg" id="exCpWrap">
-            <label class="fl" id="exCpLbl">مشتری <span class="req">*</span></label>
+            <label class="fl" id="exCpLbl">مرکز / شرکت</label>
             <input type="hidden" id="exCp"/>
             <div class="ss-wrap">
-              <input class="ss-input" id="exCpSearch" placeholder="جستجو..." autocomplete="off"
+              <input class="ss-input" id="exCpSearch" placeholder="جستجوی مرکز CRM (اختیاری)..." autocomplete="off"
                 oninput="filterSS('exCp',this.value,'customer')"
                 onfocus="openSS('exCp')" onblur="closeSS('exCp',300)"/>
               <div class="ss-dropdown" id="exCpDrop"></div>
@@ -1238,6 +1246,15 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
   </div>
 </div>
 
+<!-- Warehouse Transfer Modal -->
+<div class="mo" id="mTransfer">
+  <div class="md">
+    <div class="mh"><span class="mt" id="mTransferTitle">🔁 انتقال بین انبار</span><button class="mx" onclick="closeModal('mTransfer')">✕</button></div>
+    <div class="mb" id="mTransferBody"></div>
+    <div class="mf" id="mTransferFoot"></div>
+  </div>
+</div>
+
 <!-- Duplicate Lot Modal -->
 <div class="mo" id="mDupLot">
   <div class="md">
@@ -1698,7 +1715,8 @@ async function loadS(){
     if(whRes.ok)  S.warehouses     = await whRes.json();
     if(cpRes.ok)  S.counterparties = await cpRes.json();
     if(lotRes.ok) S.lots           = await lotRes.json();
-    if(txnRes.ok){ const txnData=await txnRes.json(); S.transactions=txnData.rows||txnData; }
+    if(txnRes.ok){ const txnData=await txnRes.json(); S.transactions=Array.isArray(txnData)?txnData:(txnData.rows||[]); }
+    if(!Array.isArray(S.transactions)) S.transactions=[];
     if(poRes.ok)  S.purchaseOrders = await poRes.json();
     if(stRes.ok){
       const settings=await stRes.json();
@@ -1713,6 +1731,9 @@ async function loadS(){
     }
     // Migration: ensure new structures if missing
     const seed=seedState();
+    if(!Array.isArray(S.auditLog)) S.auditLog=(S.auditLog&&typeof S.auditLog==='object')?Object.values(S.auditLog):[];
+    if(!Array.isArray(S.stockCounts)) S.stockCounts=(S.stockCounts&&typeof S.stockCounts==='object')?Object.values(S.stockCounts):[];
+    if(!S.stockCounts) S.stockCounts=[];
     if(!S.priceLists||S.priceLists.length===0) S.priceLists=seed.priceLists;
     if(!S.priceItems||S.priceItems.length===0) S.priceItems=seed.priceItems;
     if(!S.priceHistory) S.priceHistory=seed.priceHistory;
@@ -1781,6 +1802,9 @@ const cp=(id)=>S.counterparties.find(c=>c.id===id)||{name:'?'};
 const lot=(id)=>S.lots.find(l=>l.id===id)||null;
 
 const ROLES={admin:'مدیرعامل',sales_manager:'مدیر فروش',sales:'کارشناس فروش',commercial:'بازرگانی',warehouse:'انبار',finance:'مالی',support:'پشتیبان فروش',it:'IT'};
+function _canApproveWmsTxn(){
+  return currentRole==='admin'||currentRole==='sales_manager';
+}
 const TXNT_ENTRY={purchase:'خرید',sales_return:'برگشت از فروش',consignment_in:'امانی دریافتی',transfer_in:'انتقال ورودی',initial:'ورود اولیه'};
 const TXNT_EXIT={sale:'فروش',consignment_out:'حواله امانی',supplier_return:'برگشت به تأمین',transfer_out:'انتقال خروجی',internal:'مصرف داخلی',sample:'نمونه'};
 
@@ -1820,8 +1844,16 @@ function toast(msg,type='s'){
   c.appendChild(el);
   setTimeout(dismiss,3200);
 }
-function openModal(id){document.getElementById(id).classList.add('open');}
-function closeModal(id){document.getElementById(id).classList.remove('open');}
+function openModal(id){
+  const el=document.getElementById(id);
+  if(!el){ console.warn('[wms] modal not found:', id); return; }
+  el.classList.add('open');
+}
+function closeModal(id){
+  const el=document.getElementById(id);
+  if(!el) return;
+  el.classList.remove('open');
+}
 function emptyRow(cols,msg='موردی یافت نشد'){return `<tr><td colspan="${cols}" style="text-align:center;color:var(--text3);padding:36px">${msg}</td></tr>`;}
 
 // ══════════════════════════════════════════
@@ -1902,7 +1934,7 @@ function getAlerts(){
   // Pending unapproved lots
   S.lots.filter(l=>!l.approvedBy).forEach(l=>{
     const hrs=Math.round((new Date()-new Date(l.date))/3600000);
-    if(hrs>24) a.push({type:'orange',icon:'📋',title:`Lot بدون تأیید: ${l.lotNo}`,sub:`${pn(l.productId)} | ${hrs} ساعت در انتظار رویا`});
+    if(hrs>24) a.push({type:'orange',icon:'📋',title:`Lot بدون تأیید: ${l.lotNo}`,sub:`${pn(l.productId)} | ${hrs} ساعت در انتظار تأیید مدیر`});
   });
   return a;
 }
@@ -2094,6 +2126,7 @@ function openNewCount(){
   openModal('mCount');
 }
 function startCount(){
+  if(!Array.isArray(S.stockCounts)) S.stockCounts=[];
   const whId=document.getElementById('cntWh').value;
   const lots=S.lots.filter(l=>l.warehouseId===whId);
   if(!lots.length){ toast('این انبار Lot فعالی ندارد','w'); return; }
@@ -2166,7 +2199,7 @@ function populateEntrySelects(){
   const ws=document.getElementById('entWh');
   if(ws) ws.innerHTML='<option value="">انتخاب کنید</option>'+S.warehouses.filter(w=>w.active).map(w=>`<option value="${w.id}">${w.name}</option>`).join('');
   // entCp: SS searchable
-  initSS('entCp','supplier');
+  initSS('entCp','all');
   // entFromWh: regular select
   const fw=document.getElementById('entFromWh');
   if(fw) fw.innerHTML='<option value="">انتخاب کنید</option>'+S.warehouses.filter(w=>w.active).map(w=>`<option value="${w.id}">${w.name}</option>`).join('');
@@ -2180,10 +2213,8 @@ function onEntTypeChange(){
   else if(t==='initial'){cpW.style.display='none';fwW.style.display='none';}
   else{
     cpW.style.display=''; fwW.style.display='none';
-    const labels={purchase:'تأمین‌کننده <span class="req">*</span>',sales_return:'مشتری (برگشت) <span class="req">*</span>',consignment_in:'طرف‌حساب امانی <span class="req">*</span>'};
-    if(cpL) cpL.innerHTML=labels[t]||'طرف‌حساب';
-    const cpType=t==='purchase'?'supplier':t==='sales_return'?'customer':'both';
-    initSS('entCp',cpType);
+    if(cpL) cpL.textContent='مرکز / شرکت (اختیاری)';
+    initSS('entCp','all');
   }
 }
 function onEntProdChange(){
@@ -2235,7 +2266,6 @@ function submitEntry(skipDupCheck=false){
   if(!qty||qty<=0){toast('تعداد را وارد کنید','e');return;}
   if(!exp){toast('تاریخ انقضا را انتخاب کنید','e');return;}
   if(!price||price<=0){toast('قیمت خرید را وارد کنید','e');return;}
-  if((type==='purchase'||type==='sales_return'||type==='consignment_in')&&!cpId){toast('طرف‌حساب را از لیست انتخاب کنید','e');return;}
   if(type==='transfer_in'&&!fromWh){toast('انبار مبدأ را انتخاب کنید','e');return;}
   // Duplicate Lot check
   if(!skipDupCheck){
@@ -2251,7 +2281,7 @@ function submitEntry(skipDupCheck=false){
     id:uid(),productId:pid,warehouseId:whId,lotNo,qty,expiry:exp,
     purchasePrice:price,counterpartyId:cpId||'',txnId:'',
     date:new Date().toISOString(),enteredBy:currentUserId,
-    approvedBy:(currentRole==='commercial'||currentRole==='admin')?currentUserId:null,
+    approvedBy:_canApproveWmsTxn()?currentUserId:null,
     ttacNo
   };
   const txn={
@@ -2267,15 +2297,25 @@ function submitEntry(skipDupCheck=false){
   lotObj.txnId=txn.id;
   S.lots.push(lotObj);
   S.transactions.push(txn);
-  fetch('/api/wms/lots',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(lotObj)}).catch(()=>{});
-  fetch('/api/wms/transactions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(txn)}).catch(()=>{});
-  saveS();
-  logAudit('entry_created','transaction',txn.id,`ورود ${pn(pid)} — ${lotNo} — ${qty} عدد`);
-  clearEntry();
-  renderTodayEntry();
-  updateBadges();
-  toast(`✅ ورود ثبت شد — ${txnNo}`);
-  setTimeout(()=>openQRLabel(lotObj.id),200);
+  fetch('/api/wms/lots',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(lotObj)})
+    .then(function(r){ if(!r.ok) return r.json().then(function(e){ throw new Error(e.error||'خطا در ثبت لات'); }); })
+    .then(function(){
+      return fetch('/api/wms/transactions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(txn)});
+    })
+    .then(function(r){ if(!r.ok) return r.json().then(function(e){ throw new Error(e.error||'خطا در ثبت تراکنش'); }); })
+    .then(function(){
+      saveS();
+      logAudit('entry_created','transaction',txn.id,'ورود '+pn(pid)+' — '+lotNo+' — '+qty+' عدد');
+      clearEntry();
+      renderTodayEntry();
+      updateBadges();
+      toast('✅ ورود ثبت شد — '+txnNo);
+      setTimeout(function(){ openQRLabel(lotObj.id); },200);
+    })
+    .catch(function(err){
+      console.error('[wms submitEntry]', err);
+      toast('❌ '+ (err.message||'خطا در ثبت ورود'),'e');
+    });
 }
 
 function populateExitSelects(){
@@ -2287,7 +2327,7 @@ function populateExitSelects(){
     if(el) el.innerHTML='<option value="">انتخاب کنید</option>'+S.warehouses.filter(w=>w.active).map(w=>`<option value="${w.id}">${w.name}</option>`).join('');
   });
   // exCp: SS searchable
-  initSS('exCp','customer');
+  initSS('exCp','all');
 }
 function onExTypeChange(){
   const t=document.getElementById('exType').value;
@@ -2298,7 +2338,8 @@ function onExTypeChange(){
   else if(t==='internal'){cpW.style.display='none';twW.style.display='none';}
   else{
     cpW.style.display=''; twW.style.display='none';
-    cpL.innerHTML={sale:'مشتری <span class="req">*</span>',consignment_out:'گیرنده امانی <span class="req">*</span>',supplier_return:'تأمین‌کننده <span class="req">*</span>',sample:'گیرنده (پزشک) <span class="req">*</span>'}[t]||'طرف‌حساب';
+    if(cpL) cpL.textContent='مرکز / شرکت (اختیاری)';
+    initSS('exCp','all');
   }
 }
 function renderExit(){ populateExitSelects(); renderPendExits(); }
@@ -2384,7 +2425,6 @@ async function submitExit(){
   if(!pid){toast('کالا را انتخاب کنید','e');return;}
   if(!whId){toast('انبار مبدأ را انتخاب کنید','e');return;}
   if(!qty||qty<=0){toast('تعداد را وارد کنید','e');return;}
-  if((type==='sale'||type==='consignment_out'||type==='supplier_return'||type==='sample')&&!cpId){toast('مشتری / طرف‌حساب را انتخاب کنید','e');return;}
   if(type==='transfer_out'&&!document.getElementById('exToWh')?.value){toast('انبار مقصد را انتخاب کنید','e');return;}
   const lots=S.lots.filter(l=>l.productId===pid&&l.qty>0&&l.warehouseId===whId).sort((a,b)=>new Date(a.expiry)-new Date(b.expiry));
   const total=lots.reduce((s,l)=>s+l.qty,0);
@@ -2418,39 +2458,77 @@ async function submitExit(){
 // ══════════════════════════════════════════
 // HISTORY
 // ══════════════════════════════════════════
-function populateHistFilters(){
+let _histFiltersReady=false;
+function populateHistFilters(force){
+  if(_histFiltersReady&&!force) return;
   const pp=document.getElementById('hProd');
   const pw=document.getElementById('hWh');
+  const prevP=pp?pp.value:'all';
+  const prevW=pw?pw.value:'all';
   if(pp) pp.innerHTML='<option value="all">همه</option>'+S.products.map(p=>`<option value="${p.id}">${p.fullName||p.name}</option>`).join('');
   if(pw) pw.innerHTML='<option value="all">همه</option>'+S.warehouses.map(w=>`<option value="${w.id}">${w.name}</option>`).join('');
+  if(pp&&prevP&&[...pp.options].some(o=>o.value===prevP)) pp.value=prevP;
+  if(pw&&prevW&&[...pw.options].some(o=>o.value===prevW)) pw.value=prevW;
+  _histFiltersReady=true;
 }
-function renderHist(){
+function _txnDay(t){
+  if(!t||!t.date) return '';
+  const d=new Date(t.date);
+  return isNaN(d)?'':d.toISOString().slice(0,10);
+}
+function _histCpName(t){
+  if(t.counterpartyName) return t.counterpartyName;
+  const c=cp(t.counterpartyId);
+  return c&&c.name!=='?'?c.name:(t.counterpartyId||'—');
+}
+async function renderHist(){
   populateHistFilters();
+  const histBody=document.getElementById('histBody');
+  if(histBody) histBody.innerHTML=emptyRow(13,'در حال بارگذاری...');
   const type=document.getElementById('hType')?.value||'all';
   const pid=document.getElementById('hProd')?.value||'all';
   const whId=document.getElementById('hWh')?.value||'all';
   const from=document.getElementById('hFrom')?.value;
   const to=document.getElementById('hTo')?.value;
-  let rows=[...S.transactions];
+  let rows=[];
+  try{
+    const params=new URLSearchParams();
+    if(type!=='all') params.set('type',type);
+    if(pid!=='all') params.set('product',pid);
+    if(whId!=='all') params.set('warehouse',whId);
+    if(from) params.set('from',from);
+    if(to) params.set('to',to);
+    params.set('limit','2000');
+    const r=await fetch('/api/wms/transactions?'+params.toString());
+    if(r.ok){
+      const data=await r.json();
+      rows=Array.isArray(data)?data:(data.rows||[]);
+      S.transactions=rows.slice();
+    }else{
+      rows=Array.isArray(S.transactions)?S.transactions.slice():[];
+    }
+  }catch(e){
+    rows=Array.isArray(S.transactions)?S.transactions.slice():[];
+  }
   if(type!=='all') rows=rows.filter(t=>t.type===type);
   if(pid!=='all') rows=rows.filter(t=>t.productId===pid);
   if(whId!=='all') rows=rows.filter(t=>t.warehouseId===whId);
-  if(from) rows=rows.filter(t=>t.date>=from);
-  if(to) rows=rows.filter(t=>t.date<=to+'T23:59');
+  if(from) rows=rows.filter(t=>_txnDay(t)>=from);
+  if(to) rows=rows.filter(t=>_txnDay(t)<=to);
   rows.sort((a,b)=>new Date(b.date)-new Date(a.date));
   const allTypes={...TXNT_ENTRY,...TXNT_EXIT};
-  document.getElementById('histBody').innerHTML=rows.length?rows.map(t=>`<tr>
+  if(histBody) histBody.innerHTML=rows.length?rows.map(t=>`<tr>
     <td><code>${t.txnNo}</code></td>
     <td>${t.type==='entry'?'<span class="badge bg">ورود</span>':'<span class="badge bb">خروج</span>'}</td>
     <td><span class="chip">${allTypes[t.txnType]||t.txnType}</span></td>
-    <td>${pn(t.productId)}</td>
+    <td>${t.productName||t.productFullName||pn(t.productId)}</td>
     <td><code>${lot(t.lotId)?lot(t.lotId).lotNo:'?'}</code></td>
-    <td>${wh(t.warehouseId).name}</td>
+    <td>${t.warehouseName||wh(t.warehouseId).name}</td>
     <td>${fmt(t.qty)}</td>
     <td>${fmt(t.unitPrice)}</td>
-    <td>${cp(t.counterpartyId).name}</td>
+    <td>${_histCpName(t)}</td>
     <td>${usr(t.by).name}</td>
-    <td>${fmtDate(t.date)}</td>
+    <td>${t.txnDateJalali||fmtDate(t.date)}</td>
     <td>${sbadge(t.status)}</td>
     <td>${imedBadge(t)}</td><td><button class="btn btn-link" onclick="openPrint('${t.id}')">🖨️</button></td></tr>`).join(''):emptyRow(13);
 }
@@ -2460,7 +2538,7 @@ function exportHist(){ exportTransactionsCSV(); }
 // APPROVAL
 // ══════════════════════════════════════════
 function renderAppr(){
-  const canApprove=currentRole==='commercial'||currentRole==='admin';
+  const canApprove=_canApproveWmsTxn();
   const pend=S.transactions.filter(t=>t.status==='pending');
   document.getElementById('apprContainer').innerHTML=pend.length?pend.map(t=>{
     const p=prod(t.productId);
@@ -2480,13 +2558,14 @@ function renderAppr(){
         <div style="display:flex;gap:8px;align-items:center">
           ${sbadge('pending')}
           <button class="btn btn-link" onclick="openPrint('${t.id}')">🖨️ چاپ</button>
-          ${canApprove?`<button class="btn btn-success btn-sm" onclick="approveTxn('${t.id}')">✅ تأیید</button><button class="btn btn-danger btn-sm" onclick="rejectTxn('${t.id}')">❌ رد</button>`:'<span style="font-size:12px;color:var(--text3)">فقط رویا تأیید می‌کند</span>'}
+          ${canApprove?`<button class="btn btn-success btn-sm" onclick="approveTxn('${t.id}')">✅ تأیید</button><button class="btn btn-danger btn-sm" onclick="rejectTxn('${t.id}')">❌ رد</button>`:'<span style="font-size:12px;color:var(--text3)">فقط مدیر می‌تواند تأیید کند</span>'}
         </div>
       </div>
     </div>`;
   }).join(''):`<div class="card"><div class="empty"><div class="ei">✅</div><p>هیچ تأییدیه معلقی وجود ندارد</p></div></div>`;
 }
 function approveTxn(id){
+  if(!_canApproveWmsTxn()){toast('فقط مدیر می‌تواند تأیید کند','e');return;}
   const t=S.transactions.find(x=>x.id===id); if(!t) return;
   if(t.type==='exit'&&!confirm(`تأیید خروج ${t.txnNo}؟\nموجودی ${t.qty} عدد از انبار کسر می‌شود.`))return;
   t.status='approved';
@@ -2507,6 +2586,7 @@ function approveTxn(id){
   toast(`تأیید شد — ${t.txnNo}`);
 }
 function rejectTxn(id){
+  if(!_canApproveWmsTxn()){toast('فقط مدیر می‌تواند رد کند','e');return;}
   const t=S.transactions.find(x=>x.id===id); if(!t) return;
   if(!confirm(`رد کردن ${t.txnNo}؟`))return;
   t.status='rejected'; fetch(`/api/wms/transactions/${id}/cancel`,{method:'PUT'}).catch(()=>{}); saveS(); renderAppr(); updateBadges();
@@ -3362,7 +3442,7 @@ function printPriceList(plId){
   const w=window.open('','_blank','width=800,height=600');
   if(!w){toast('پاپ‌آپ مسدود شده — دسترسی به Popup را در مرورگر فعال کنید','w');return;}
   w.document.write(`<html><head><style>
-    @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700;800&display=swap');
+    @import url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css');
     body{font-family:'Vazirmatn',sans-serif;direction:rtl;margin:30px;color:#000;}
     h1{font-size:18px;font-weight:800;margin-bottom:4px;}
     .sub{font-size:12px;color:#555;margin-bottom:20px;}
@@ -4271,7 +4351,9 @@ document.addEventListener('DOMContentLoaded',async()=>{
   document.getElementById('mUser').querySelector('.sb-user')?.addEventListener('click',()=>{});
   document.querySelector('.sb-user').addEventListener('click',()=>{renderSwitchUsers();openModal('mUser');});
   populateInvFilters();
-  renderDash();
+  const _hash=(location.hash||'').replace('#','').trim();
+  if(_hash&&document.getElementById('p-'+_hash)) go(_hash);
+  else renderDash();
   updateBadges();
   const today=new Date().toISOString().split('T')[0];
   ['entExp'].forEach(id=>{const el=document.getElementById(id);if(el)el.min=today;});
@@ -4463,7 +4545,8 @@ function renderAudit(){
   if(aSel&&aSel.options.length<=1){
     Object.entries(ACTION_LABELS).forEach(([k,v])=>aSel.add(new Option(v,k)));
   }
-  let logs=(S.auditLog||[]).filter(l=>{
+  let logs=Array.isArray(S.auditLog)?S.auditLog:[];
+  logs=logs.filter(l=>{
     if(uF!=='all'&&l.userId!==uF) return false;
     if(aF!=='all'&&l.action!==aF) return false;
     if(from&&l.ts<from) return false;
@@ -5688,7 +5771,7 @@ async function openPrint(txnId){
   const html=`
 <div class="prt" style="max-width:740px;margin:0 auto;padding:16px;font-family:'Vazirmatn',sans-serif;direction:rtl;font-size:12px;color:#000">
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700;800&display=swap');
+    @import url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css');
     @media print{body{margin:0;}.no-print{display:none!important;}}
     [contenteditable]{outline:1px dashed #aaa;padding:1px 3px;border-radius:2px;min-width:20px;display:inline-block;}
     [contenteditable]:focus{outline:1px solid #0284c7;background:#f0f9ff;}
@@ -6076,11 +6159,12 @@ function renderSSDropdown(fieldId, query){
     return;
   }
   drop.innerHTML=list.map(c=>{
-    const sub=[c.phone,c.address].filter(Boolean).join(' | ');
-    const typeBadge=c.type==='supplier'?'<span style="font-size:9px;color:#1d4ed8;background:#eff6ff;padding:1px 4px;border-radius:3px">تأمین</span>':c.type==='customer'?'<span style="font-size:9px;color:#15803d;background:#f0fdf4;padding:1px 4px;border-radius:3px">مشتری</span>':'<span style="font-size:9px;color:#6d28d9;background:#f5f3ff;padding:1px 4px;border-radius:3px">هر دو</span>';
-    return `<div class="ss-opt" onmousedown="selectSS('${fieldId}','${c.id}','${c.name.replace(/'/g,"\\'")}')">
-      <div class="ss-opt-name">${c.name} ${typeBadge}</div>
-      ${sub?`<div class="ss-opt-sub">${sub}</div>`:''}
+    const nm=_ssEsc(c.name||c.id||'?');
+    const sub=[c.phone,c.address].filter(Boolean).map(_ssEsc).join(' | ');
+    const typeBadge=c.type==='supplier'?'<span class="ss-chip">تأمین</span>':c.type==='customer'?'<span class="ss-chip" style="background:#f0fdf4;color:#15803d">مشتری</span>':'<span class="ss-chip" style="background:#f5f3ff;color:#6d28d9">هر دو</span>';
+    return `<div class="ss-opt" onmousedown="selectSS('${fieldId}','${_ssJsStr(c.id)}','${_ssJsStr(c.name||c.id||'?')}')">
+      <div class="ss-opt-name"><span>${nm}</span>${typeBadge}</div>
+      ${sub?`<div class="ss-opt-sub"><div class="ss-opt-line">${sub}</div></div>`:''}
     </div>`;
   }).join('');
 }
@@ -6092,6 +6176,13 @@ function selectSS(fieldId, id, name){
   if(hidden) hidden.value=id;
   if(searchEl) searchEl.value=name;
   closeSS(fieldId);
+}
+
+function _ssEsc(s){
+  return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+}
+function _ssJsStr(s){
+  return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
 }
 
 // Also add search to PO supplier select → make it searchable too
@@ -6378,7 +6469,7 @@ function printInv(){
   const html=`<!DOCTYPE html><html dir="rtl"><head>
   <meta charset="UTF-8">
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700;800&display=swap');
+    @import url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css');
     *{margin:0;padding:0;box-sizing:border-box;}
     body{font-family:'Vazirmatn',sans-serif;font-size:11px;color:#000;padding:16px;}
     h1{font-size:16px;font-weight:800;margin-bottom:2px;}
@@ -6494,20 +6585,25 @@ function renderSSProdDrop(fieldId, q){
     drop.innerHTML='<div class="ss-empty">کالایی یافت نشد</div>';
     return;
   }
-  drop.innerHTML=list.map(p=>{
+  drop.innerHTML=list.slice(0,60).map(p=>{
+    const nm=p.fullName||p.name||'?';
     const lots=S.lots.filter(l=>l.productId===p.id&&l.qty>0);
     const totalQty=lots.reduce((s,l)=>s+l.qty,0);
     const minExpiry=lots.length?Math.min(...lots.map(l=>daysLeft(l.expiry))):null;
-    const expiryColor=minExpiry===null?'var(--text3)':minExpiry<90?'#dc2626':minExpiry<180?'#d97706':'#16a34a';
-    return `<div class="ss-opt" onmousedown="selectSSProd('${fieldId}','${p.id}','${(p.fullName||p.name).replace(/'/g,"\\'")}')">
+    const stockCls=totalQty<=0?'ss-stock-err':minExpiry!==null&&minExpiry<90?'ss-stock-warn':'ss-stock-ok';
+    const stockTxt=totalQty>0
+      ?`موجودی: ${fmt(totalQty)} ${p.unit||'عدد'} (${lots.length} Lot)`
+      :'موجودی صفر';
+    const brandLine=[p.brand,p.size].filter(Boolean).join(' | ');
+    return `<div class="ss-opt" onmousedown="selectSSProd('${fieldId}','${_ssJsStr(p.id)}','${_ssJsStr(nm)}')">
       <div class="ss-opt-name">
-        ${p.fullName||p.name}
-        <span style="font-size:9px;background:#eff6ff;color:#1d4ed8;padding:1px 4px;border-radius:3px;margin-right:4px">${p.catalogCode}</span>
+        <span>${_ssEsc(nm)}</span>
+        ${p.catalogCode?`<span class="ss-chip">${_ssEsc(p.catalogCode)}</span>`:''}
       </div>
-      <div class="ss-opt-sub" style="display:flex;gap:8px;align-items:center">
-        <span>${p.brand} | ${p.size}</span>
-        <span style="color:var(--text3)">IRC: ${p.ircCode}</span>
-        ${totalQty>0?`<span style="color:${expiryColor};font-weight:600">موجودی: ${fmt(totalQty)} ${p.unit} (${lots.length} Lot)</span>`:'<span style="color:#dc2626">موجودی صفر</span>'}
+      <div class="ss-opt-sub">
+        ${brandLine?`<div class="ss-opt-line">${_ssEsc(brandLine)}</div>`:''}
+        ${p.ircCode?`<div class="ss-opt-irc">IRC: ${_ssEsc(p.ircCode)}</div>`:''}
+        <div class="ss-opt-line"><span class="${stockCls}">${stockTxt}</span></div>
       </div>
     </div>`;
   }).join('');

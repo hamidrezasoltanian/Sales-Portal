@@ -542,7 +542,9 @@ function renderManagerPanel(){
           byExpertProgress[owner].done++;
         }
       } else if(we.scheduledDate && we.scheduledDate < todayW && !we.done){
-        var actOnDay = _getActivitiesOnDate(we.rtype||'center', we.rid||'', we.scheduledDate);
+        var actOnDay = typeof _getActivitiesOnDate === 'function'
+          ? _getActivitiesOnDate(we.rtype||'center', we.rid||'', we.scheduledDate)
+          : [];
         if(actOnDay.length===0) overdueTotal++;
       }
     });
@@ -2272,7 +2274,7 @@ async function init(){
   applyStoredTheme(); // early so no flash
   try{
     // Check auth first
-    var authR=await fetch('/api/auth/me');
+    var authR=await fetch('/api/auth/me',{credentials:'same-origin'});
     if(authR.status===401){showLoginOverlay();return;}
     var authData=await authR.json();
     currentUser=authData.username||currentUser;
@@ -2280,6 +2282,7 @@ async function init(){
     window._myPermissions=authData.permissions||{};
     window._myDepartment=authData.department||'';
     window._myDirectManager=authData.direct_manager||'';
+    hideLoginOverlay();
   }catch(e){
     showLoginOverlay();return;
   }
@@ -2288,7 +2291,7 @@ async function init(){
   _initBrowserNotif();
   setTimeout(_sendWeeklyDigest,3000);
   buildUSERS();updateNotifBadge();
-  setTimeout(_setupAutoReminder,5000);
+  setTimeout(function(){if(typeof _setupAutoReminder==='function')_setupAutoReminder();},5000);
   // Restore tab BEFORE loadMasterCenters so that even if centers fail to load,
   // currentTab is always the right value (default was 'provinces' which was wrong).
   try{
@@ -2364,10 +2367,14 @@ async function init(){
       });
       if(dueCnt>0){
         showToast('⚠ '+dueCnt+' مرکز با پیگیری سررسیده دارید',5000);
-        var tb=document.getElementById('tab_weekplan');
-        if(tb&&tb.innerHTML.indexOf('badge-due')<0){
-          tb.innerHTML='📋 برنامه هفته <span class="badge-due" style="background:#ef4444;color:#fff;border-radius:10px;padding:1px 6px;font-size:10px;vertical-align:middle">'+dueCnt+'</span>';
+        var badge=document.getElementById('wpDueBadge');
+        if(badge){
+          badge.textContent=String(dueCnt);
+          badge.style.display='inline-flex';
         }
+      }else{
+        var badge0=document.getElementById('wpDueBadge');
+        if(badge0){badge0.textContent='';badge0.style.display='none';}
       }
     }catch(e2){}
   },1500);
@@ -2412,3 +2419,7 @@ async function init(){
   initSSE();
 }
 
+document.addEventListener('DOMContentLoaded', function () {
+  applyStoredTheme();
+  init().catch(function () { showLoginOverlay(); });
+});

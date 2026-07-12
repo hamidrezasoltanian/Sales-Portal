@@ -155,6 +155,15 @@ function getCenterOwnerFromKey(centerKey) {
   return getCenterOwner(centerKey.slice(0, us), centerKey.slice(us + 1));
 }
 
+/** Week-entry owner: canonical getCenterOwner + addedBy fallback */
+function _wpGetOwner(we) {
+  if (!we) return '';
+  var rtype = we.rtype || 'center';
+  var rid = we.rid != null ? we.rid : '';
+  var owner = typeof getCenterOwner === 'function' ? getCenterOwner(rtype, rid) : '';
+  return owner || we.addedBy || '';
+}
+
 function clearPCCache(){_PC_CACHE=null;}
 function isStalled(type,id){
   var e=getE(type,id);var st=e.status||'بدون تماس';

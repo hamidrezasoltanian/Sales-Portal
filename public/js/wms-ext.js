@@ -333,9 +333,17 @@
       '<div class="fg"><label class="fl">انبار مقصد *</label><select class="fs" id="trfTo">' + wOpts + '</select></div>' +
       '<div class="fg"><label class="fl">تعداد *</label><input class="fi" type="number" id="trfQty" min="1" value="' + (prefill.qty || 1) + '"/></div>' +
       '<div class="fg full"><label class="fl">یادداشت</label><input class="fi" id="trfNote" placeholder="اختیاری"/></div></div>';
-    openModal('mTransfer', '🔁 انتقال بین انبار', body,
+    if (!lots.length) { toast('Lot با موجودی برای انتقال یافت نشد', 'w'); return; }
+    var titleEl = document.getElementById('mTransferTitle');
+    var bodyEl = document.getElementById('mTransferBody');
+    var footEl = document.getElementById('mTransferFoot');
+    if (!titleEl || !bodyEl || !footEl) { toast('مودال انتقال در صفحه یافت نشد', 'e'); return; }
+    titleEl.textContent = '🔁 انتقال بین انبار';
+    bodyEl.innerHTML = body;
+    footEl.innerHTML =
       '<button class="btn btn-ghost" onclick="closeModal(\'mTransfer\')">انصراف</button>' +
-      '<button class="btn btn-primary" onclick="saveTransfer()">ثبت انتقال</button>');
+      '<button class="btn btn-primary" onclick="saveTransfer()">ثبت انتقال</button>';
+    openModal('mTransfer');
     onTrfLotChange();
   };
 

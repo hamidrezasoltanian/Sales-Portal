@@ -5,6 +5,7 @@ const multer  = require('multer');
 const { query } = require('../db');
 const { requirePermission } = require('../permissions');
 const { requireAuth } = require('../auth');
+const { searchLetterCenters, resolveCenterName } = require('../lib/letterCenters');
 
 const router = express.Router();
 const DEFAULT_LETTERS_PIN = process.env.LETTERS_DEFAULT_PIN || '1234';
@@ -113,6 +114,97 @@ async function generateIndicatorNumber(type, departmentPrefix) {
   return `${fullPrefix}-${seqPart}-${datePart}`;
 }
 
+async function logLetterChange(letterId, username, field, oldVal, newVal, extra) {
+  const oldStr = oldVal == null ? '' : String(oldVal);
+  const newStr = newVal == null ? '' : String(newVal);
+  if (oldStr === newStr) return;
+  await query(
+    `INSERT INTO change_log (at, "by", rkey, field, val) VALUES (NOW(), $1, $2, $3, $4::jsonb)`,
+    [username, `letter_${letterId}`, field, JSON.stringify({ action: 'update', old: oldVal, new: newVal, ...(extra || {}) })]
+  );
+}
+
+function isManagerUser(user) {
+  return user.role === 'مدیر' || user.role === 'سوپر ادمین';
+}
+
+/** ارسال نامه صادره به میز کار امضا — ارجاع + نوتیفیکیشن */
+async function sendLetterToSignDesk(letterId, senderUser, subject) {
+  await query('UPDATE letters SET status = \'approved_for_sign\', updated_at = NOW() WHERE id = $1', [letterId]);
+  const signersRes = await query('SELECT user_id FROM letter_signers WHERE letter_id = $1', [letterId]);
+  const senderName = senderUser.display_name || senderUser.username;
+  for (const s of signersRes.rows) {
+    const dup = await query(
+      'SELECT 1 FROM letter_referrals WHERE letter_id = $1 AND receiver_id = $2 AND action_type = \'for_signature\' AND is_completed = FALSE',
+      [letterId, s.user_id]
+    );
+    if (dup.rows.length) continue;
+    await query(`
+      INSERT INTO letter_referrals (letter_id, sender_id, receiver_id, action_type, note, is_completed)
+      VALUES ($1, $2, $3, 'for_signature', 'ارجاع سیستمی جهت بررسی و تایید امضا', FALSE)
+    `, [letterId, senderUser.username, s.user_id]);
+    const notifId = `sig_req_${Date.now()}_${letterId}_${s.user_id}`;
+    await query(`
+      INSERT INTO notifications (id, to_user, msg, at, read)
+      VALUES ($1, $2, $3, NOW(), FALSE)
+    `, [notifId, s.user_id, `✍️ درخواست امضای نامه «${subject}» از طرف ${senderName} ارجاع شد.`]).catch(() => {});
+  }
+}
+
+function he(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+const DEFAULT_PRINT_TEMPLATE = `<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="utf-8">
+<title>چاپ نامه — {{subject}}</title>
+<style>
+  @page { size: A4; margin: 18mm 15mm; }
+  body { font-family: Vazirmatn, Tahoma, sans-serif; font-size: 13px; color: #1e293b; line-height: 1.9; margin: 0; padding: 24px; }
+  .lh { text-align: center; border-bottom: 2px solid #6366f1; padding-bottom: 12px; margin-bottom: 20px; }
+  .lh-title { font-size: 18px; font-weight: 800; color: #312e81; }
+  .lh-sub { font-size: 11px; color: #64748b; letter-spacing: 2px; }
+  .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px; margin-bottom: 18px; background: #f8fafc; padding: 12px; border-radius: 8px; }
+  .meta b { color: #475569; }
+  h1 { font-size: 16px; margin: 0 0 16px; text-align: center; }
+  .body { min-height: 200px; padding: 16px; border: 1px solid #e2e8f0; border-radius: 8px; }
+  .signers { margin-top: 24px; font-size: 12px; }
+  .sig-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed #e2e8f0; }
+  @media print { .no-print { display: none; } }
+</style></head><body>
+{{letterhead}}
+<div class="meta">
+  <div><b>شماره اندیکاتور:</b> {{indicator_number}}</div>
+  <div><b>نوع:</b> {{type}}</div>
+  <div><b>تاریخ:</b> {{date}}</div>
+  <div><b>ثبت\u200cکننده:</b> {{creator}}</div>
+  {{sender_block}}
+  {{receiver_block}}
+</div>
+<h1>موضوع: {{subject}}</h1>
+<div class="body">{{body}}</div>
+{{signers_block}}
+<button class="no-print" onclick="window.print()" style="margin-top:20px;padding:10px 20px;background:#6366f1;color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:inherit">\uD83D\uDDA8 \u0686\u0627\u067E</button>
+</body></html>`;
+
+async function getPrintTemplateHtml() {
+  try {
+    const r = await query(`SELECT value FROM letter_settings WHERE key = 'print_template'`);
+    if (r.rows.length && r.rows[0].value && String(r.rows[0].value).trim()) {
+      return r.rows[0].value;
+    }
+  } catch (_) { /* table may not exist yet on first boot */ }
+  return DEFAULT_PRINT_TEMPLATE;
+}
+
+function applyPrintTemplate(template, vars) {
+  let html = template;
+  Object.keys(vars).forEach((k) => {
+    html = html.split(`{{${k}}}`).join(vars[k] == null ? '' : String(vars[k]));
+  });
+  return html;
+}
+
 // ─────────────────────────────────────────────
 // GET / — دریافت لیست نامه‌ها بر اساس تب و فیلترها
 // ─────────────────────────────────────────────
@@ -150,11 +242,20 @@ router.get('/', requireAuth, async (req, res) => {
         ))`;
       }
     } else if (tab === 'sign_desk') {
-      whereClause += ` AND l.status NOT IN ('draft', 'terminated') AND EXISTS(
-        SELECT 1 FROM letter_signers ls 
-        WHERE ls.letter_id = l.id AND ls.user_id = $${queryParams.length + 1} AND ls.status IN ('accepted', 'signed')
+      whereClause += ` AND l.status = 'approved_for_sign' AND EXISTS(
+        SELECT 1 FROM letter_signers ls
+        WHERE ls.letter_id = l.id AND ls.user_id = $${queryParams.length + 1} AND ls.status = 'pending'
       )`;
       queryParams.push(username);
+    } else if (tab === 'followup') {
+      whereClause += ` AND l.status IN ('registered', 'in_referral') AND EXISTS(
+        SELECT 1 FROM letter_referrals r2
+        WHERE r2.letter_id = l.id AND r2.is_completed = FALSE AND r2.action_type = 'for_action'`;
+      if (!isAdmin) {
+        queryParams.push(username);
+        whereClause += ` AND r2.receiver_id = $${queryParams.length}`;
+      }
+      whereClause += ')';
     } else if (tab === 'incoming') {
       whereClause += ` AND l.type = 'incoming' AND l.status = 'registered'`;
       if (!isAdmin) {
@@ -238,6 +339,25 @@ router.get('/', requireAuth, async (req, res) => {
 
     const lettersResult = await query(queryStr, queryParams);
 
+    const letters = lettersResult.rows.map((row) => {
+      const hasDocx = !!(row.body_docx && row.body_docx.length);
+      const { body_docx, ...rest } = row;
+      return { ...rest, has_docx: hasDocx };
+    });
+
+    // تعمیر خودکار نامه‌های صادره گیرکرده در pending_action
+    for (const letter of letters) {
+      if (letter.type === 'outgoing' && letter.status === 'pending_action') {
+        try {
+          const sigRes = await query('SELECT COUNT(*) FROM letter_signers WHERE letter_id = $1', [letter.id]);
+          if (parseInt(sigRes.rows[0].count, 10) > 0) {
+            await sendLetterToSignDesk(letter.id, { username: letter.created_by, display_name: letter.creator_name }, letter.subject);
+            letter.status = 'approved_for_sign';
+          }
+        } catch (_) { /* ignore repair errors */ }
+      }
+    }
+
     // واکشی تمام ارجاعات مرتبط با کاربر
     const referralsResult = await query(`
       SELECT r.*,
@@ -250,7 +370,7 @@ router.get('/', requireAuth, async (req, res) => {
     `, [username]);
 
     res.json({
-      letters: lettersResult.rows,
+      letters,
       referrals: referralsResult.rows,
     });
   } catch (e) {
@@ -283,6 +403,21 @@ router.get('/customers', requireAuth, async (req, res) => {
       return res.json({ customers: [] });
     }
     console.error('[letters GET /customers]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET /centers — جستجو در مراکز CRM
+// ─────────────────────────────────────────────
+router.get('/centers', requireAuth, async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const limit = parseInt(req.query.limit, 10) || 30;
+    const centers = await searchLetterCenters(q, limit);
+    res.json({ centers });
+  } catch (e) {
+    console.error('[letters GET /centers]', e.message);
     res.status(500).json({ error: 'خطای سرور' });
   }
 });
@@ -327,10 +462,194 @@ router.delete('/templates/:id', requireAuth, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
+// GET /print-template — قالب HTML چاپ نامه
+// PUT /print-template — ذخیره قالب (مدیر)
+// ─────────────────────────────────────────────
+router.get('/print-template', requireAuth, async (req, res) => {
+  try {
+    const template = await getPrintTemplateHtml();
+    res.json({
+      template,
+      default_template: DEFAULT_PRINT_TEMPLATE,
+      placeholders: [
+        'letterhead', 'indicator_number', 'type', 'date', 'creator',
+        'sender_block', 'receiver_block', 'subject', 'body', 'signers_block',
+      ],
+    });
+  } catch (e) {
+    console.error('[letters GET /print-template]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+router.put('/print-template', requireAuth, async (req, res) => {
+  if (!isManagerUser(req.user)) {
+    return res.status(403).json({ error: 'فقط مدیر می‌تواند قالب چاپ را ویرایش کند' });
+  }
+  const { template } = req.body;
+  if (!template || !String(template).trim()) {
+    return res.status(400).json({ error: 'قالب HTML الزامی است' });
+  }
+  try {
+    await query(`
+      INSERT INTO letter_settings (key, value, updated_at, updated_by)
+      VALUES ('print_template', $1, NOW(), $2)
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW(), updated_by = EXCLUDED.updated_by
+    `, [String(template), req.user.username]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[letters PUT /print-template]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET /by-center/:centerKey — نامه‌های مرتبط با یک مرکز
+// ─────────────────────────────────────────────
+router.get('/by-center/:centerKey', requireAuth, async (req, res) => {
+  const centerKey = decodeURIComponent(req.params.centerKey || '').trim();
+  if (!centerKey) return res.status(400).json({ error: 'کلید مرکز الزامی است' });
+  try {
+    const r = await query(`
+      SELECT l.id, l.indicator_number, l.subject, l.type, l.status, l.priority,
+             l.created_at, l.sender_external, l.receiver_external, l.body,
+             (l.body_docx IS NOT NULL AND length(l.body_docx) > 0) AS has_docx,
+             u.display_name AS creator_name
+      FROM letters l
+      LEFT JOIN app_users u ON l.created_by = u.username
+      WHERE l.is_deleted = FALSE
+        AND (
+          l.sender_center_key = $1 OR l.receiver_center_key = $1
+          OR EXISTS (
+            SELECT 1 FROM letter_receivers lr
+            WHERE lr.letter_id = l.id AND lr.receiver_type = 'center' AND lr.receiver_id = $1
+          )
+        )
+      ORDER BY l.created_at DESC
+      LIMIT 50
+    `, [centerKey]);
+    res.json({ letters: r.rows });
+  } catch (e) {
+    console.error('[letters GET /by-center]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+// ─────────────────────────────────────────────
+router.get('/:id/history', requireAuth, async (req, res) => {
+  const letterId = parseInt(req.params.id, 10);
+  if (isNaN(letterId)) return res.status(400).json({ error: 'شناسه نامعتبر' });
+  try {
+    const check = await query('SELECT id, created_by FROM letters WHERE id = $1 AND is_deleted = FALSE', [letterId]);
+    if (!check.rows.length) return res.status(404).json({ error: 'نامه یافت نشد' });
+    const letter = check.rows[0];
+    const isOwner = letter.created_by === req.user.username;
+    const isMgr = isManagerUser(req.user);
+    if (!isOwner && !isMgr) {
+      const ref = await query(
+        'SELECT 1 FROM letter_referrals WHERE letter_id = $1 AND (sender_id = $2 OR receiver_id = $2) LIMIT 1',
+        [letterId, req.user.username]
+      );
+      const sig = await query(
+        'SELECT 1 FROM letter_signers WHERE letter_id = $1 AND user_id = $2 LIMIT 1',
+        [letterId, req.user.username]
+      );
+      if (!ref.rows.length && !sig.rows.length) {
+        return res.status(403).json({ error: 'دسترسی غیرمجاز' });
+      }
+    }
+    const r = await query(
+      `SELECT id, at, "by", field, val FROM change_log WHERE rkey = $1 ORDER BY at ASC`,
+      [`letter_${letterId}`]
+    );
+    res.json({ history: r.rows });
+  } catch (e) {
+    console.error('[letters GET /:id/history]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET /:id/docx — دریافت فایل DOCX نامه
+// ─────────────────────────────────────────────
+router.get('/:id/docx', requireAuth, async (req, res) => {
+  const letterId = parseInt(req.params.id, 10);
+  if (isNaN(letterId)) return res.status(400).json({ error: 'شناسه نامعتبر' });
+  try {
+    const r = await query(
+      'SELECT body_docx FROM letters WHERE id = $1 AND is_deleted = FALSE',
+      [letterId]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'نامه یافت نشد' });
+    const buf = r.rows[0].body_docx;
+    if (!buf || !buf.length) return res.status(404).json({ error: 'سند Word موجود نیست' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `inline; filename="letter-${letterId}.docx"`);
+    res.send(buf);
+  } catch (e) {
+    console.error('[letters GET /:id/docx]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET /:id/print — قالب چاپ نامه
+// ─────────────────────────────────────────────
+router.get('/:id/print', requireAuth, async (req, res) => {
+  const letterId = parseInt(req.params.id, 10);
+  if (isNaN(letterId)) return res.status(400).json({ error: 'شناسه نامعتبر' });
+  try {
+    const r = await query(`
+      SELECT l.*, u.display_name AS creator_name,
+        (SELECT json_agg(json_build_object('username', us.username, 'display_name', us.display_name, 'status', ls.status, 'signed_at', ls.signed_at))
+         FROM letter_signers ls JOIN app_users us ON ls.user_id = us.username WHERE ls.letter_id = l.id) AS signers
+      FROM letters l
+      LEFT JOIN app_users u ON l.created_by = u.username
+      WHERE l.id = $1 AND l.is_deleted = FALSE
+    `, [letterId]);
+    if (!r.rows.length) return res.status(404).send('نامه یافت نشد');
+    const L = r.rows[0];
+    const typeFa = L.type === 'outgoing' ? 'صادره' : (L.type === 'incoming' ? 'وارده' : 'داخلی');
+    const ind = L.indicator_number || '— (پیش از صدور نهایی)';
+    const bodyHtml = he(L.body || '').replace(/\n/g, '<br>');
+    const letterhead = L.use_letterhead ? `
+      <div class="lh">
+        <div class="lh-title">آتنا زیست درمان</div>
+        <div class="lh-sub">ATENA BIOMEDICAL</div>
+      </div>` : '';
+    const signersHtml = (L.signers || []).map((s) =>
+      `<div class="sig-row"><span>${he(s.display_name)}</span><span>${s.status === 'signed' ? '✅ امضا شده' : '⏳ در انتظار'}</span></div>`
+    ).join('');
+    const template = await getPrintTemplateHtml();
+    const html = applyPrintTemplate(template, {
+      letterhead,
+      indicator_number: he(ind),
+      type: typeFa,
+      date: he(new Date(L.created_at).toLocaleDateString('fa-IR')),
+      creator: he(L.creator_name || L.created_by),
+      sender_block: L.sender_external ? `<div><b>فرستنده:</b> ${he(L.sender_external)}</div>` : '',
+      receiver_block: L.receiver_external ? `<div><b>گیرنده:</b> ${he(L.receiver_external)}</div>` : '',
+      subject: he(L.subject),
+      body: bodyHtml,
+      signers_block: signersHtml ? `<div class="signers"><strong>امضاکنندگان:</strong>${signersHtml}</div>` : '',
+    });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (e) {
+    console.error('[letters GET /:id/print]', e.message);
+    res.status(500).send('خطای سرور');
+  }
+});
+
+// ─────────────────────────────────────────────
 // POST / — ثبت نامه جدید
 // ─────────────────────────────────────────────
 router.post('/', requireAuth, async (req, res) => {
-  const { type, subject, body, priority, classification, department_prefix, sender_external, receiver_external, receivers, signers, status } = req.body;
+  const {
+    type, subject, body, body_docx, priority, classification, department_prefix,
+    sender_external, receiver_external, sender_center_key, receiver_center_key,
+    receivers, signers, status,
+  } = req.body;
 
   if (!type || !subject) {
     return res.status(400).json({ error: 'نوع نامه و موضوع الزامی است' });
@@ -349,18 +668,42 @@ router.post('/', requireAuth, async (req, res) => {
         indicator = await generateIndicatorNumber(type, department_prefix);
         registeredAt = new Date();
       } else {
-        finalStatus = 'pending_action';
+        finalStatus = 'approved_for_sign';
       }
     }
 
+    let bodyDocxBuf = null;
+    if (body_docx && typeof body_docx === 'string') {
+      try {
+        bodyDocxBuf = Buffer.from(body_docx, 'base64');
+      } catch (_) {
+        return res.status(400).json({ error: 'فرمت body_docx نامعتبر است' });
+      }
+    }
+
+    let senderExt = sender_external || '';
+    let receiverExt = receiver_external || '';
+    const senderKey = String(sender_center_key || '').trim();
+    const receiverKey = String(receiver_center_key || '').trim();
+    if (senderKey) {
+      senderExt = (await resolveCenterName(senderKey)) || senderExt;
+    }
+    if (receiverKey) {
+      receiverExt = (await resolveCenterName(receiverKey)) || receiverExt;
+    }
+
     const lRes = await query(`
-      INSERT INTO letters (type, subject, body, priority, classification, department_prefix, status, indicator_number, registered_at, sender_external, receiver_external, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      INSERT INTO letters (type, subject, body, body_docx, priority, classification, department_prefix, status, indicator_number, registered_at, sender_external, receiver_external, sender_center_key, receiver_center_key, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       RETURNING *
     `, [
-      type, subject, body || '', priority || 'normal', classification || 'normal', department_prefix || 'الف',
-      finalStatus, indicator, registeredAt, sender_external || '', receiver_external || '', req.user.username
+      type, subject, body || '', bodyDocxBuf, priority || 'normal', classification || 'normal', department_prefix || 'الف',
+      finalStatus, indicator, registeredAt, senderExt, receiverExt, senderKey, receiverKey, req.user.username
     ]);
+
+    const letterRow = lRes.rows[0];
+    if (letterRow && letterRow.body_docx) delete letterRow.body_docx;
+    if (letterRow) letterRow.has_docx = !!bodyDocxBuf;
 
     const letterId = lRes.rows[0].id;
 
@@ -370,6 +713,8 @@ router.post('/', requireAuth, async (req, res) => {
         const recType = (type === 'outgoing') ? 'external' : 'user';
         await query('INSERT INTO letter_receivers (letter_id, receiver_type, receiver_id) VALUES ($1, $2, $3)', [letterId, recType, String(rec)]);
       }
+    } else if (type === 'outgoing' && receiverKey) {
+      await query('INSERT INTO letter_receivers (letter_id, receiver_type, receiver_id) VALUES ($1, $2, $3)', [letterId, 'center', receiverKey]);
     }
 
     // ثبت امضاکنندگان (فقط برای نامه‌های صادره)
@@ -377,6 +722,11 @@ router.post('/', requireAuth, async (req, res) => {
       for (const sig of signers) {
         await query('INSERT INTO letter_signers (letter_id, user_id, status) VALUES ($1, $2, \'pending\')', [letterId, String(sig)]);
       }
+    }
+
+    // ارسال خودکار به میز کار امضا (نامه صادره)
+    if (type === 'outgoing' && finalStatus === 'approved_for_sign') {
+      await sendLetterToSignDesk(letterId, req.user, subject);
     }
 
     // ارجاع خودکار برای نامه‌های وارده و داخلی پس از ثبت نهایی
@@ -399,12 +749,12 @@ router.post('/', requireAuth, async (req, res) => {
 
     // لاگ سیستم
     await query(`
-      INSERT INTO change_log (at, by, rkey, field, val)
-      VALUES (NOW(), $1, $2, 'letters', $3)
-    `, [req.user.username, `letter_${letterId}`, JSON.stringify({ action: 'create', type, subject, indicator })]).catch(() => {});
+      INSERT INTO change_log (at, "by", rkey, field, val)
+      VALUES (NOW(), $1, $2, 'letters', $3::jsonb)
+    `, [req.user.username, `letter_${letterId}`, JSON.stringify({ action: 'create', type, subject, indicator })]);
 
     await query('COMMIT');
-    res.status(201).json({ ok: true, letter: lRes.rows[0] });
+    res.status(201).json({ ok: true, letter: letterRow });
   } catch (e) {
     await query('ROLLBACK');
     console.error('[letters POST /]', e.message);
@@ -417,15 +767,26 @@ router.post('/', requireAuth, async (req, res) => {
 // ─────────────────────────────────────────────
 router.put('/:id', requireAuth, async (req, res) => {
   const letterId = parseInt(req.params.id);
-  const { type, subject, body, priority, classification, department_prefix, sender_external, receiver_external, receivers, signers, status } = req.body;
+  const {
+    type, subject, body, body_docx, priority, classification, department_prefix,
+    sender_external, receiver_external, sender_center_key, receiver_center_key,
+    receivers, signers, status,
+  } = req.body;
 
   try {
     const check = await query('SELECT * FROM letters WHERE id = $1', [letterId]);
     if (!check.rows.length) return res.status(404).json({ error: 'نامه یافت نشد' });
     const letter = check.rows[0];
 
-    if (letter.created_by !== req.user.username && req.user.role !== 'مدیر' && req.user.role !== 'سوپر ادمین') {
+    if (letter.created_by !== req.user.username && !isManagerUser(req.user)) {
       return res.status(403).json({ error: 'دسترسی غیرمجاز' });
+    }
+
+    if (letter.status !== 'draft') {
+      const contentChanged = subject !== undefined || body !== undefined || body_docx !== undefined;
+      if (contentChanged) {
+        return res.status(400).json({ error: 'فقط پیش‌نویس‌ها قابل ویرایش متن هستند' });
+      }
     }
 
     await query('BEGIN');
@@ -440,38 +801,107 @@ router.put('/:id', requireAuth, async (req, res) => {
         indicator = await generateIndicatorNumber(letter.type, department_prefix || letter.department_prefix);
         registeredAt = new Date();
       } else {
-        finalStatus = 'pending_action';
+        finalStatus = 'approved_for_sign';
       }
+    }
+
+    let bodyDocxBuf = undefined;
+    if (body_docx !== undefined) {
+      if (body_docx && typeof body_docx === 'string') {
+        try {
+          bodyDocxBuf = Buffer.from(body_docx, 'base64');
+        } catch (_) {
+          return res.status(400).json({ error: 'فرمت body_docx نامعتبر است' });
+        }
+      } else {
+        bodyDocxBuf = null;
+      }
+    }
+
+    const bodyDocxParam = bodyDocxBuf !== undefined ? bodyDocxBuf : letter.body_docx;
+
+    const nextType = type || letter.type;
+    const nextSubject = subject !== undefined ? subject : letter.subject;
+    const nextBody = body !== undefined ? body : letter.body;
+    const nextPriority = priority || letter.priority;
+    const nextClassification = classification || letter.classification;
+    const nextDept = department_prefix || letter.department_prefix;
+
+    let nextSenderExt = sender_external !== undefined ? sender_external : letter.sender_external;
+    let nextReceiverExt = receiver_external !== undefined ? receiver_external : letter.receiver_external;
+    const nextSenderKey = sender_center_key !== undefined ? String(sender_center_key || '').trim() : (letter.sender_center_key || '');
+    const nextReceiverKey = receiver_center_key !== undefined ? String(receiver_center_key || '').trim() : (letter.receiver_center_key || '');
+    if (sender_center_key !== undefined && nextSenderKey) {
+      nextSenderExt = (await resolveCenterName(nextSenderKey)) || nextSenderExt;
+    }
+    if (receiver_center_key !== undefined && nextReceiverKey) {
+      nextReceiverExt = (await resolveCenterName(nextReceiverKey)) || nextReceiverExt;
     }
 
     const updRes = await query(`
       UPDATE letters
-      SET type = $1, subject = $2, body = $3, priority = $4, classification = $5,
-          department_prefix = $6, status = $7, indicator_number = $8, registered_at = $9,
-          sender_external = $10, receiver_external = $11, updated_at = NOW()
-      WHERE id = $12
+      SET type = $1, subject = $2, body = $3,
+          body_docx = $4,
+          priority = $5, classification = $6,
+          department_prefix = $7, status = $8, indicator_number = $9, registered_at = $10,
+          sender_external = $11, receiver_external = $12,
+          sender_center_key = $13, receiver_center_key = $14,
+          updated_at = NOW()
+      WHERE id = $15
       RETURNING *
     `, [
-      type || letter.type,
-      subject || letter.subject,
-      body || letter.body,
-      priority || letter.priority,
-      classification || letter.classification,
-      department_prefix || letter.department_prefix,
+      nextType,
+      nextSubject,
+      nextBody,
+      bodyDocxParam,
+      nextPriority,
+      nextClassification,
+      nextDept,
       finalStatus,
       indicator,
       registeredAt,
-      sender_external !== undefined ? sender_external : letter.sender_external,
-      receiver_external !== undefined ? receiver_external : letter.receiver_external,
+      nextSenderExt,
+      nextReceiverExt,
+      nextSenderKey,
+      nextReceiverKey,
       letterId
     ]);
+
+    const username = req.user.username;
+    await logLetterChange(letterId, username, 'subject', letter.subject, nextSubject);
+    await logLetterChange(letterId, username, 'body', letter.body, nextBody);
+    await logLetterChange(letterId, username, 'type', letter.type, nextType);
+    await logLetterChange(letterId, username, 'priority', letter.priority, nextPriority);
+    await logLetterChange(letterId, username, 'classification', letter.classification, nextClassification);
+    await logLetterChange(letterId, username, 'sender_external', letter.sender_external, nextSenderExt);
+    await logLetterChange(letterId, username, 'receiver_external', letter.receiver_external, nextReceiverExt);
+    await logLetterChange(letterId, username, 'sender_center_key', letter.sender_center_key, nextSenderKey);
+    await logLetterChange(letterId, username, 'receiver_center_key', letter.receiver_center_key, nextReceiverKey);
+    if (body_docx !== undefined) {
+      await logLetterChange(letterId, username, 'body_docx', !!(letter.body_docx && letter.body_docx.length), !!(bodyDocxParam && bodyDocxParam.length), { note: 'DOCX updated' });
+    }
+    if (letter.status !== finalStatus) {
+      await logLetterChange(letterId, username, 'status', letter.status, finalStatus);
+    }
+
+    const updatedRow = updRes.rows[0];
+    if (updatedRow) {
+      const hasDocx = !!(updatedRow.body_docx && updatedRow.body_docx.length);
+      delete updatedRow.body_docx;
+      updatedRow.has_docx = hasDocx;
+    }
 
     // بروزرسانی گیرندگان
     if (receivers) {
       await query('DELETE FROM letter_receivers WHERE letter_id = $1', [letterId]);
       for (const rec of receivers) {
-        const recType = ((type || letter.type) === 'outgoing') ? 'external' : 'user';
+        const recType = (nextType === 'outgoing') ? 'external' : 'user';
         await query('INSERT INTO letter_receivers (letter_id, receiver_type, receiver_id) VALUES ($1, $2, $3)', [letterId, recType, String(rec)]);
+      }
+    } else if (nextType === 'outgoing' && receiver_center_key !== undefined) {
+      await query('DELETE FROM letter_receivers WHERE letter_id = $1', [letterId]);
+      if (nextReceiverKey) {
+        await query('INSERT INTO letter_receivers (letter_id, receiver_type, receiver_id) VALUES ($1, $2, $3)', [letterId, 'center', nextReceiverKey]);
       }
     }
 
@@ -481,6 +911,11 @@ router.put('/:id', requireAuth, async (req, res) => {
       for (const sig of signers) {
         await query('INSERT INTO letter_signers (letter_id, user_id, status) VALUES ($1, $2, \'pending\')', [letterId, String(sig)]);
       }
+    }
+
+    // ارسال خودکار به میز کار امضا (نامه صادره از پیش‌نویس)
+    if (letter.status === 'draft' && finalStatus === 'approved_for_sign' && nextType === 'outgoing') {
+      await sendLetterToSignDesk(letterId, req.user, nextSubject);
     }
 
     // ارجاع خودکار برای نامه‌های وارده و داخلی در صورتی که الان ثبت نهایی شوند
@@ -503,7 +938,7 @@ router.put('/:id', requireAuth, async (req, res) => {
     }
 
     await query('COMMIT');
-    res.json({ ok: true, letter: updRes.rows[0] });
+    res.json({ ok: true, letter: updatedRow });
   } catch (e) {
     await query('ROLLBACK');
     console.error('[letters PUT /:id]', e);
@@ -569,34 +1004,46 @@ router.post('/:id/approve-outgoing', requireAuth, async (req, res) => {
   const letterId = parseInt(req.params.id);
   try {
     await query('BEGIN');
-    const check = await query('SELECT * FROM letters WHERE id = $1', [letterId]);
+    const check = await query('SELECT * FROM letters WHERE id = $1 AND is_deleted = FALSE', [letterId]);
     if (!check.rows.length) return res.status(404).json({ error: 'نامه یافت نشد' });
     const letter = check.rows[0];
 
-    await query('UPDATE letters SET status = \'approved_for_sign\', updated_at = NOW() WHERE id = $1', [letterId]);
-
-    // ایجاد ارجاع برای امضا کنندگان
-    const signersRes = await query('SELECT user_id FROM letter_signers WHERE letter_id = $1', [letterId]);
-    for (const s of signersRes.rows) {
-      const dup = await query('SELECT 1 FROM letter_referrals WHERE letter_id = $1 AND receiver_id = $2 AND action_type = \'for_signature\' AND is_completed = FALSE', [letterId, s.user_id]);
-      if (dup.rows.length === 0) {
-        await query(`
-          INSERT INTO letter_referrals (letter_id, sender_id, receiver_id, action_type, note, is_completed)
-          VALUES ($1, $2, $3, 'for_signature', 'ارجاع سیستمی جهت بررسی و تایید امضا', FALSE)
-        `, [letterId, req.user.username, s.user_id]);
-
-        // ایجاد نوتیفیکیشن
-        const notifId = `sig_req_${Date.now()}_${letterId}_${s.user_id}`;
-        const senderName = req.user.display_name || req.user.username;
-        await query(`
-          INSERT INTO notifications (id, to_user, msg, at, read)
-          VALUES ($1, $2, $3, NOW(), FALSE)
-        `, [notifId, s.user_id, `✍️ درخواست امضای نامه «${letter.subject}» از طرف ${senderName} ارجاع شد.`]).catch(()=>{});
-      }
+    if (letter.type !== 'outgoing') {
+      await query('ROLLBACK');
+      return res.status(400).json({ error: 'فقط نامه‌های صادره قابل ارسال به میز امضا هستند' });
+    }
+    const allowed = ['draft', 'pending_action', 'approved_for_sign'];
+    if (!allowed.includes(letter.status)) {
+      await query('ROLLBACK');
+      return res.status(400).json({ error: 'نامه در وضعیت فعلی قابل ارسال به میز امضا نیست' });
+    }
+    const sigCount = await query('SELECT COUNT(*) FROM letter_signers WHERE letter_id = $1', [letterId]);
+    if (parseInt(sigCount.rows[0].count, 10) === 0) {
+      await query('ROLLBACK');
+      return res.status(400).json({ error: 'حداقل یک امضاکننده باید انتخاب شده باشد' });
+    }
+    const signedCount = await query('SELECT COUNT(*) FROM letter_signers WHERE letter_id = $1 AND status = \'signed\'', [letterId]);
+    if (parseInt(signedCount.rows[0].count, 10) > 0) {
+      await query('ROLLBACK');
+      return res.status(400).json({ error: 'پس از شروع امضا، ارسال مجدد به میز امضا امکان‌پذیر نیست' });
     }
 
+    await sendLetterToSignDesk(letterId, req.user, letter.subject);
+    await logLetterChange(letterId, req.user.username, 'status', letter.status, 'approved_for_sign', { action: 'send_to_sign_desk' });
+
     await query('COMMIT');
-    res.json({ ok: true });
+    const updated = await query(`
+      SELECT l.*, u.display_name as creator_name,
+        (SELECT json_agg(json_build_object('username', us.username, 'display_name', us.display_name, 'status', ls.status))
+         FROM letter_signers ls JOIN app_users us ON ls.user_id = us.username WHERE ls.letter_id = l.id) as signers
+      FROM letters l LEFT JOIN app_users u ON l.created_by = u.username WHERE l.id = $1
+    `, [letterId]);
+    const row = updated.rows[0];
+    if (row) {
+      row.has_docx = !!(row.body_docx && row.body_docx.length);
+      delete row.body_docx;
+    }
+    res.json({ ok: true, letter: row });
   } catch (e) {
     await query('ROLLBACK');
     res.status(500).json({ error: e.message || 'خطای سرور' });
@@ -630,6 +1077,24 @@ router.post('/:id/sign', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'نامه یافت نشد' });
     }
     const letter = letterRes.rows[0];
+
+    if (letter.status !== 'approved_for_sign') {
+      await query('ROLLBACK');
+      return res.status(400).json({ error: 'این نامه در مرحله امضا نیست' });
+    }
+
+    const signerCheck = await query(
+      'SELECT status FROM letter_signers WHERE letter_id = $1 AND user_id = $2',
+      [letterId, username]
+    );
+    if (!signerCheck.rows.length) {
+      await query('ROLLBACK');
+      return res.status(403).json({ error: 'شما امضاکننده این نامه نیستید' });
+    }
+    if (signerCheck.rows[0].status === 'signed') {
+      await query('ROLLBACK');
+      return res.status(400).json({ error: 'شما قبلاً این نامه را امضا کرده‌اید' });
+    }
 
     // ثبت وضعیت امضا برای این کاربر
     await query(`
@@ -686,6 +1151,10 @@ router.post('/:id/sign', requireAuth, async (req, res) => {
             VALUES ($1, $2, $3, NOW(), FALSE)
           `, [notifId, r.receiver_id, `📥 نامه‌ای با موضوع «${letter.subject}» و شماره اندیکاتور ${indicator} به کارتابل شما ارجاع شد.`]).catch(()=>{});
         }
+      }
+
+      if (recsRes.rows.length > 0) {
+        await query(`UPDATE letters SET status = 'in_referral', updated_at = NOW() WHERE id = $1`, [letterId]);
       }
 
       await query('COMMIT');
@@ -814,6 +1283,8 @@ router.post('/:id/refer', requireAuth, async (req, res) => {
       console.warn('[letters referral notif]', e.message);
     });
 
+    await query(`UPDATE letters SET status = 'in_referral', updated_at = NOW() WHERE id = $1 AND status = 'registered'`, [letterId]).catch(() => {});
+
     res.json({ ok: true, referral: referralResult.rows[0] });
   } catch (e) {
     console.error('[letters POST /:id/refer]', e.message);
@@ -871,6 +1342,27 @@ router.post('/referrals/:refId/complete', requireAuth, async (req, res) => {
       SET is_completed = TRUE, completed_at = NOW(), completion_note = $1
       WHERE id = $2
     `, [completion_note || '', refId]);
+
+    const ref = check.rows[0];
+    const openCheck = await query(
+      'SELECT COUNT(*) FROM letter_referrals WHERE letter_id = $1 AND is_completed = FALSE',
+      [ref.letter_id]
+    );
+    if (parseInt(openCheck.rows[0].count, 10) === 0) {
+      await query(
+        `UPDATE letters SET status = 'registered', updated_at = NOW() WHERE id = $1 AND status = 'in_referral'`,
+        [ref.letter_id]
+      );
+    }
+
+    const letterRow = await query('SELECT subject FROM letters WHERE id = $1', [ref.letter_id]);
+    const subject = letterRow.rows[0]?.subject || '';
+    const receiverName = req.user.display_name || req.user.username;
+    const notifId = `ref_done_${Date.now()}_${refId}`;
+    await query(`
+      INSERT INTO notifications (id, to_user, msg, at, read)
+      VALUES ($1, $2, $3, NOW(), FALSE)
+    `, [notifId, ref.sender_id, `✅ ارجاع نامه «${subject}» توسط ${receiverName} تکمیل شد.`]).catch(() => {});
 
     res.json({ ok: true });
   } catch (e) {

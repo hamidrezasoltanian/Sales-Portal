@@ -7,7 +7,7 @@
 <!-- cache-bust: v2.1 -->
 <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(function(){});}</script>
 <!-- Vazirmatn از jsDelivr — npm package، بدون Google dependency -->
-<link rel="stylesheet" href="/css/app.css?v=20260712b">
+<link rel="stylesheet" href="/css/app.css?v=20260712m">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" onerror="console.warn('XLSX CDN failed - only TSV format supported offline')"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
 </head>
@@ -56,7 +56,7 @@
   <div class="sb-nav">
     <button class="tab-btn" id="tab_home" onclick="switchTab('home')" title="خانه"><span class="sb-icon">🏠</span><span class="sb-label">خانه</span></button>
     <button class="tab-btn active" id="tab_provinces" onclick="switchTab('provinces')" title="استان‌ها"><span class="sb-icon">🗺</span><span class="sb-label">استان‌ها</span></button>
-    <button class="tab-btn" id="tab_weekplan" onclick="switchTab('weekplan')" title="برنامه هفته"><span class="sb-icon">📋</span><span class="sb-label">برنامه هفته</span></button>
+    <button class="tab-btn" id="tab_weekplan" onclick="switchTab('weekplan')" title="برنامه هفته"><span class="sb-icon">📋</span><span class="sb-label">برنامه هفته<span id="wpDueBadge" class="sb-tab-badge"></span></span></button>
     <button class="tab-btn" id="tab_calendar" onclick="switchTab('calendar')" title="تقویم"><span class="sb-icon">📅</span><span class="sb-label">تقویم</span></button>
     <button class="tab-btn" id="tab_tasks" onclick="switchTab('tasks')" title="وظایف"><span class="sb-icon">📌</span><span class="sb-label">وظایف</span></button>
     <button class="tab-btn" id="tab_workflows" onclick="switchTab('workflows')" title="گردش‌کار"><span class="sb-icon">🔄</span><span class="sb-label">گردش‌کار</span></button>
@@ -324,23 +324,24 @@
 
 <!-- DATA — core modules; tab-specific scripts load on demand via tab-loader.js -->
 <script src="/js/safe-dom.js?v=20260710c"></script>
-<script src="/js/tab-loader.js?v=20260710c"></script>
+<script src="/js/tab-loader.js?v=20260712j"></script>
 <script src="/js/roles.js?v=20260710c"></script>
-<script src="/js/core.js?v=20260710g"></script>
-<script src="/js/settings.js?v=20260710g"></script>
-<script src="/js/data.js?v=20260710c"></script>
+<script src="/js/core.js?v=20260712k"></script>
+<script src="/js/settings.js?v=20260712d"></script>
+<script src="/js/data.js?v=20260712c"></script>
 <script src="/js/ui-core.js?v=20260710c"></script>
 <script src="/js/kpi.js?v=20260712b"></script>
 <script src="/js/dashboard.js?v=20260712b"></script>
-<script src="/js/provinces.js?v=20260710c"></script>
+<script src="/js/provinces.js?v=20260712h"></script>
 <script src="/js/center-modal.js?v=20260710c"></script>
 <script src="/js/global-search.js?v=20260710c"></script>
 <script src="/js/center-deals.js?v=20260710a"></script>
 <script src="/js/center-files.js?v=20260710a"></script>
 <script src="/js/workflows.js?v=20260710b"></script>
-<script src="/js/pricing.js?v=20260711a"></script>
+<script src="/js/pricing.js?v=20260712m"></script>
 <script src="/js/weekplan.js?v=20260711a"></script>
-<script src="/js/manager.js?v=20260711a"></script>
+<script src="/js/tasks.js?v=20260712j"></script>
+<script src="/js/manager.js?v=20260712h"></script>
 <script src="/js/crm-complete.js?v=20260711a"></script>
 <script src="/js/onboarding.js?v=20260710c"></script>
 <script src="/js/backup.js?v=20260711a"></script>
@@ -767,8 +768,7 @@
   <button class="mob-tab sb-manager-wrap" onclick="switchTab('kpi')"><span class="mob-icon">🎯</span>KPI</button>
   <button class="mob-tab" onclick="switchTab('mtr')"><span class="mob-icon">💰</span>مطالبات</button>
 </nav>
-  <link rel="stylesheet" href="/dist/assets/main.css?v=20260710a">
-  <script src="https://cdn.jsdelivr.net/npm/tinymce@6.8.5/tinymce.min.js" crossorigin="anonymous"></script>
-  <script type="module" src="/dist/assets/main.js?v=20260710a"></script>
+  <link rel="stylesheet" href="/dist/assets/main.css?v=20260712o">
+  <script type="module" src="/dist/assets/main.js?v=20260712w"></script>
 </body>
 </html>

@@ -7,7 +7,7 @@ function _isMgrFollowupTask(t){
 }
 
 function _mgrFindTaskByCenter(recKey, includeDone){
-  _ensureTasks();
+  if(typeof _ensureTasks==='function') _ensureTasks();
   return (DB.tasks||[]).find(function(t){
     if(t.centerKey!==recKey)return false;
     if(!_isMgrFollowupTask(t))return false;
@@ -17,7 +17,7 @@ function _mgrFindTaskByCenter(recKey, includeDone){
 }
 
 function _mgrGetTasks(includeDone){
-  _ensureTasks();
+  if(typeof _ensureTasks==='function') _ensureTasks();
   return (DB.tasks||[]).filter(function(t){
     if(!_isMgrFollowupTask(t))return false;
     if(!includeDone&&(t.done||t.status==='done'))return false;
@@ -27,7 +27,7 @@ function _mgrGetTasks(includeDone){
 
 function _migrateManagerTasksBlob(){
   if(!DB.managerTasks||!Object.keys(DB.managerTasks).length)return;
-  _ensureTasks();
+  if(typeof _ensureTasks==='function') _ensureTasks();
   Object.keys(DB.managerTasks).forEach(function(recKey){
     var mt=DB.managerTasks[recKey];
     if(!mt||_mgrFindTaskByCenter(recKey,true))return;
@@ -87,7 +87,7 @@ function mgrSaveTask(recKey, rtype, id, name){
   var assignedTo=((document.getElementById('mgrAssignTo')||{}).value||'').trim();
   var note=((document.getElementById('mgrAssignNote')||{}).value||'').trim();
   if(!assignedTo){showToast('کارشناس را انتخاب کنید');return;}
-  _ensureTasks();
+  if(typeof _ensureTasks==='function') _ensureTasks();
   var existing=_mgrFindTaskByCenter(recKey);
   var title='پیگیری ویژه: '+name;
   var payload;
@@ -833,7 +833,7 @@ function _doSaveKPITargets(userId,month){
   renderKPIPanel();
 }
 
-document.addEventListener('DOMContentLoaded',function(){applyStoredTheme();init().catch(function(){showLoginOverlay();});});
+// init bootstrap lives in manager.js (always loaded)
 
 // ════════════════════════ CENTER DISTRIBUTION WIZARD ══════════════
 function openDistributionWizard(){

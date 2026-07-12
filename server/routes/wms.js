@@ -4,6 +4,7 @@ const express   = require('express');
 const { query } = require('../db');
 const { requirePermission } = require('../permissions');
 const { requireAuth } = require('../auth');
+const { isManagerRole } = require('../lib/roles');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -123,7 +124,7 @@ function rowToLot(r) {
            ttacNo:r.ttac_no, imedStatus:r.imed_status, imedRefNo:r.imed_ref_no };
 }
 function rowToTransaction(r) {
-  return { id:r.id, txnNo:r.txn_no, type:r.type, txnType:r.txn_type,
+  const base = { id:r.id, txnNo:r.txn_no, type:r.type, txnType:r.txn_type,
            productId:r.product_id, lotId:r.lot_id, warehouseId:r.warehouse_id,
            qty:Number(r.qty), unitPrice:Number(r.unit_price), salePrice:Number(r.sale_price),
            counterpartyId:r.counterparty_id, fromWarehouseId:r.from_warehouse_id,
@@ -137,6 +138,14 @@ function rowToTransaction(r) {
            delivStatus:r.delivery_status || 'pending', deliveryStatus:r.delivery_status || 'pending',
            delivDate:r.delivery_date || null, deliveryDate:r.delivery_date || null,
            delivPhone:r.delivery_phone || '', smsStatus:r.sms_status || '', smsSentAt:r.sms_sent_at || null };
+  if (r.product_name != null) base.productName = r.product_name;
+  if (r.product_full_name != null) base.productFullName = r.product_full_name;
+  if (r.warehouse_name != null) base.warehouseName = r.warehouse_name;
+  if (r.counterparty_name != null) base.counterpartyName = r.counterparty_name;
+  if (r.proforma_no != null) base.proformaNo = r.proforma_no;
+  if (r.paired_txn_no != null) base.pairedTxnNo = r.paired_txn_no;
+  if (r.paired_type != null) base.pairedType = r.paired_type;
+  return base;
 }
 function rowToPO(r) {
   return { id:r.id, poNo:r.po_no, supplierId:r.supplier_id, warehouseId:r.warehouse_id,
@@ -655,11 +664,15 @@ router.post('/lots', requireAuth, async (req, res) => {
     const b = req.body;
     if (!b.productId) return res.status(400).json({ error: 'product_id الزامی است' });
     if (b.qty == null || isNaN(Number(b.qty))) return res.status(400).json({ error: 'qty الزامی است' });
-    const id = _genId();
+    const id = b.id || _genId();
     const r = await query(
       `INSERT INTO wms_lots (id,product_id,warehouse_id,lot_no,qty,expiry,purchase_price,
          counterparty_id,txn_id,lot_date,entered_by,approved_by,ttac_no,imed_status,imed_ref_no)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       ON CONFLICT (id) DO UPDATE SET
+         qty=EXCLUDED.qty, expiry=EXCLUDED.expiry, purchase_price=EXCLUDED.purchase_price,
+         warehouse_id=EXCLUDED.warehouse_id, approved_by=EXCLUDED.approved_by
+       RETURNING *`,
       [id, b.productId, b.warehouseId||null, b.lotNo||'', Number(b.qty),
        b.expiry||null, b.purchasePrice||0, b.counterpartyId||null, b.txnId||null,
        b.date||null, b.enteredBy||null, b.approvedBy||null,
@@ -668,7 +681,7 @@ router.post('/lots', requireAuth, async (req, res) => {
     res.status(201).json(rowToLot(r.rows[0]));
   } catch(e) {
     console.error('[wms/lots POST]', e.message);
-    res.status(500).json({ error: 'خطای سرور' });
+    res.status(500).json({ error: e.message || 'خطای سرور' });
   }
 });
 
@@ -710,9 +723,14 @@ router.get('/transactions', requireAuth, async (req, res) => {
 
     if (type)    { conditions.push(`t.type = $${idx++}`);       params.push(type); }
     if (product) { conditions.push(`t.product_id = $${idx++}`); params.push(product); }
+    if (req.query.warehouse) { conditions.push(`t.warehouse_id = $${idx++}`); params.push(req.query.warehouse); }
     if (status)  { conditions.push(`t.status = $${idx++}`);     params.push(status); }
     if (from)    { conditions.push(`t.txn_date >= $${idx++}`);  params.push(from); }
     if (to)      { conditions.push(`t.txn_date <= $${idx++}`);  params.push(to + ' 23:59:59'); }
+    if (req.query.counterpartyId) {
+      conditions.push(`t.counterparty_id = $${idx++}`);
+      params.push(req.query.counterpartyId);
+    }
 
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
     params.push(Math.min(parseInt(limit)||50, 5000));
@@ -736,6 +754,48 @@ router.get('/transactions', requireAuth, async (req, res) => {
   }
 });
 
+router.get('/transactions/by-center/:centerKey', requireAuth, async (req, res) => {
+  const centerKey = decodeURIComponent(req.params.centerKey || '').trim();
+  if (!centerKey) return res.status(400).json({ error: 'کلید مرکز الزامی است' });
+  try {
+    const rows = await query(
+      `SELECT t.*,
+              p.name AS product_name,
+              COALESCE(NULLIF(p.full_name, ''), p.name) AS product_full_name,
+              w.name AS warehouse_name,
+              pf.no AS proforma_no,
+              tp.txn_no AS paired_txn_no,
+              tp.type AS paired_type
+       FROM wms_transactions t
+       LEFT JOIN wms_products p ON p.id = t.product_id
+       LEFT JOIN wms_warehouses w ON w.id = t.warehouse_id
+       LEFT JOIN proformas pf ON pf.id = t.proforma_id
+       LEFT JOIN wms_transactions tp
+         ON tp.transfer_pair_id IS NOT NULL
+        AND tp.transfer_pair_id != ''
+        AND tp.transfer_pair_id = t.transfer_pair_id
+        AND tp.id != t.id
+       WHERE t.counterparty_id = $1
+          OR t.proforma_id IN (SELECT id FROM proformas WHERE center_key = $1)
+       ORDER BY t.txn_date DESC
+       LIMIT 100`,
+      [centerKey]
+    );
+    const allCps = await loadAllCounterparties();
+    const cpMap = Object.fromEntries(allCps.map((c) => [c.id, c.name]));
+    const transactions = rows.rows.map((r) => {
+      const t = rowToTransaction(r);
+      t.productName = r.product_full_name || r.product_name || '';
+      t.centerName = cpMap[t.counterpartyId] || '';
+      return t;
+    });
+    res.json({ centerKey, transactions });
+  } catch (e) {
+    console.error('[wms/transactions/by-center GET]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
 router.post('/transactions', requireAuth, async (req, res) => {
   try {
     const b = req.body;
@@ -751,8 +811,8 @@ router.post('/transactions', requireAuth, async (req, res) => {
     try {
       await client.query('BEGIN');
 
-      const id = _genId();
-      const txnNo = await _nextTxnNo(client, b.type);
+      const id = b.id || _genId();
+      const txnNo = b.txnNo || await _nextTxnNo(client, b.type);
       const qty = Number(b.qty);
       const fyId = b.fiscalYearId || await _activeFyId(client);
       let txnDateJalali = b.txnDateJalali || null;
@@ -777,11 +837,11 @@ router.post('/transactions', requireAuth, async (req, res) => {
          b.proformaId || null, fyId, txnDateJalali]
       );
 
-      // If approved immediately, update lot qty atomically
-      if (b.status === 'approved' && b.lotId) {
-        const delta = b.type === 'entry' ? qty : -qty;
+      // lot qty is set on lot creation; only adjust on approve for pending txns
+      if (b.status === 'approved' && b.lotId && b.type === 'exit') {
+        const delta = -qty;
         await client.query(
-          `UPDATE wms_lots SET qty = qty + $1 WHERE id = $2`,
+          `UPDATE wms_lots SET qty = GREATEST(0, qty + $1) WHERE id = $2`,
           [delta, b.lotId]
         );
       }
@@ -796,11 +856,14 @@ router.post('/transactions', requireAuth, async (req, res) => {
     }
   } catch(e) {
     console.error('[wms/transactions POST]', e.message);
-    res.status(500).json({ error: 'خطای سرور' });
+    res.status(500).json({ error: e.message || 'خطای سرور' });
   }
 });
 
 router.put('/transactions/:id/approve', requireAuth, async (req, res) => {
+  if (!isManagerRole(req.user.role)) {
+    return res.status(403).json({ error: 'فقط مدیر می‌تواند تأیید کند' });
+  }
   try {
     const client = await require('../db').pool.connect();
     try {
@@ -822,11 +885,22 @@ router.put('/transactions/:id/approve', requireAuth, async (req, res) => {
       );
 
       if (t.lot_id) {
-        const delta = t.type === 'entry' ? Number(t.qty) : -Number(t.qty);
-        await client.query(
-          `UPDATE wms_lots SET qty = qty + $1 WHERE id = $2`,
-          [delta, t.lot_id]
-        );
+        const lotR = await client.query('SELECT qty FROM wms_lots WHERE id=$1', [t.lot_id]);
+        const lotQty = lotR.rows.length ? Number(lotR.rows[0].qty) : 0;
+        if (t.type === 'entry') {
+          // lot already created with qty on entry — only bump if still zero
+          if (lotQty === 0) {
+            await client.query(
+              `UPDATE wms_lots SET qty = qty + $1 WHERE id = $2`,
+              [Number(t.qty), t.lot_id]
+            );
+          }
+        } else if (t.type === 'exit') {
+          await client.query(
+            `UPDATE wms_lots SET qty = GREATEST(0, qty - $1) WHERE id = $2`,
+            [Number(t.qty), t.lot_id]
+          );
+        }
       }
 
       await client.query('COMMIT');
@@ -844,6 +918,9 @@ router.put('/transactions/:id/approve', requireAuth, async (req, res) => {
 });
 
 router.put('/transactions/:id/cancel', requireAuth, async (req, res) => {
+  if (!isManagerRole(req.user.role)) {
+    return res.status(403).json({ error: 'فقط مدیر می‌تواند رد/لغو کند' });
+  }
   try {
     const client = await require('../db').pool.connect();
     try {

@@ -223,6 +223,8 @@ async function initSchema() {
   `);
 
   // Per-center pricing configuration
+  await query(`ALTER TABLE center_pricing_config ADD COLUMN IF NOT EXISTS product_commissions JSONB DEFAULT '{}'::jsonb`);
+
   await query(`
     CREATE TABLE IF NOT EXISTS center_pricing_config (
       id SERIAL PRIMARY KEY,
@@ -234,7 +236,8 @@ async function initSchema() {
       discount_ceiling_pct DECIMAL(5,2) DEFAULT 5,
       notes TEXT,
       updated_by VARCHAR(100),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      product_commissions JSONB DEFAULT '{}'::jsonb
     )
   `);
 
@@ -862,6 +865,9 @@ async function initSchema() {
   await query(`ALTER TABLE letters ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ`);
   await query(`ALTER TABLE letters ADD COLUMN IF NOT EXISTS use_letterhead BOOLEAN DEFAULT FALSE`);
   await query(`ALTER TABLE letters ADD COLUMN IF NOT EXISTS signature_status CHARACTER VARYING(50) DEFAULT 'none'`);
+  await query(`ALTER TABLE letters ADD COLUMN IF NOT EXISTS body_docx BYTEA`);
+  await query(`ALTER TABLE letters ADD COLUMN IF NOT EXISTS sender_center_key CHARACTER VARYING(120) DEFAULT ''`);
+  await query(`ALTER TABLE letters ADD COLUMN IF NOT EXISTS receiver_center_key CHARACTER VARYING(120) DEFAULT ''`);
   // Drop constraint check if exists to allow new statuses
   await query(`ALTER TABLE letters DROP CONSTRAINT IF EXISTS letters_status_check`);
   await query(`ALTER TABLE letters DROP CONSTRAINT IF EXISTS letters_type_check`);
@@ -955,6 +961,15 @@ async function initSchema() {
       content TEXT NOT NULL,
       created_by VARCHAR(100) REFERENCES app_users(username) ON DELETE SET NULL,
       created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS letter_settings (
+      key VARCHAR(100) PRIMARY KEY,
+      value TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_by VARCHAR(100)
     )
   `);
   // ════════════════════════════════════════

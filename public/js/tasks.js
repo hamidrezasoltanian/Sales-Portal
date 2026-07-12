@@ -936,12 +936,7 @@ if (typeof convertFollowupToTask !== 'function') {
   }
 }
 
-// کمکی: پیدا کردن مسئول یک weekEntry
-function _wpGetOwner(we){
-  var rtype = we.rtype||'center', rid = we.rid||'';
-  var owner = typeof getCenterOwner === 'function' ? getCenterOwner(rtype, rid) : '';
-  return owner || we.addedBy || '';
-}
+// _wpGetOwner → data.js (canonical)
 
 // کمکی: فعالیت‌های یک مرکز در یک تاریخ جلالی مشخص
 function _getActivitiesOnDate(rtype, rid, jDateStr){

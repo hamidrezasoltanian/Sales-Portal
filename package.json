@@ -17,6 +17,8 @@
     "rotate-secrets": "node scripts/rotate-secrets-checklist.js"
   },
   "dependencies": {
+    "@stll/folio-core": "0.4.0",
+    "@stll/folio-vue": "0.4.0",
     "bcryptjs": "^2.4.3",
     "compression": "^1.8.1",
     "cookie-parser": "^1.4.6",
@@ -29,6 +31,11 @@
     "mssql": "^12.5.5",
     "multer": "^2.1.1",
     "pg": "^8.11.3",
+    "prosemirror-history": "^1.5.0",
+    "prosemirror-model": "^1.25.11",
+    "prosemirror-state": "^1.4.4",
+    "prosemirror-tables": "^1.8.5",
+    "prosemirror-view": "^1.42.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -36,5 +43,10 @@
     "typescript": "^6.0.3",
     "vite": "^8.0.16",
     "vue": "^3.5.38"
+  },
+  "overrides": {
+    "@stll/folio-vue": {
+      "@stll/folio-core": "0.4.0"
+    }
   }
 }
