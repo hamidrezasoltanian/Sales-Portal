@@ -28,29 +28,34 @@ body{font-family:'Vazirmatn',sans-serif;background:var(--bg);color:var(--text);f
 
 /* ── LAYOUT ── */
 .app{display:flex;height:100vh;overflow:hidden;}
-.sidebar{width:230px;min-width:230px;background:var(--sb);display:flex;flex-direction:column;overflow-y:auto;z-index:10;}
+.sidebar{width:236px;min-width:236px;max-width:236px;flex-shrink:0;background:var(--sb);display:flex;flex-direction:column;height:100vh;overflow:hidden;z-index:10;border-left:1px solid rgba(255,255,255,.06);}
+.sb-top{flex-shrink:0;}
+.sb-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;padding-bottom:10px;scrollbar-width:thin;scrollbar-color:rgba(148,163,184,.35) transparent;}
+.sb-scroll::-webkit-scrollbar{width:6px;}
+.sb-scroll::-webkit-scrollbar-track{background:transparent;}
+.sb-scroll::-webkit-scrollbar-thumb{background:rgba(148,163,184,.22);border-radius:999px;}
+.sb-scroll::-webkit-scrollbar-thumb:hover{background:rgba(148,163,184,.38);}
 .content-wrap{flex:1;display:flex;flex-direction:column;overflow:hidden;}
 .topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;box-shadow:var(--shadow);}
-.main{flex:1;overflow-y:auto;padding:24px;}
+.main{flex:1;overflow-y:auto;padding:24px;scrollbar-gutter:stable;}
 
 /* ── SIDEBAR ── */
 .sb-logo{padding:20px 16px 14px;border-bottom:1px solid rgba(255,255,255,.07);}
 .sb-logo .brand{font-size:13px;font-weight:800;color:#fff;letter-spacing:.3px;}
 .sb-logo .ver{font-size:10px;color:var(--sb-text);margin-top:2px;}
-.sb-user{padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.07);display:flex;align-items:center;gap:10px;cursor:pointer;}
-.sb-user:hover{background:rgba(255,255,255,.04);}
+.sb-user{padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.07);display:flex;align-items:center;gap:10px;cursor:default;}
 .av{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;color:#fff;}
 .sb-uname{font-size:12px;font-weight:600;color:#fff;}
 .sb-urole{font-size:10px;color:var(--sb-text);}
 .sb-sect{padding:12px 0 4px;}
 .sb-lbl{font-size:9px;font-weight:700;color:rgba(148,163,184,.5);padding:4px 16px;letter-spacing:1px;text-transform:uppercase;}
-.nav{display:flex;align-items:center;gap:9px;padding:7px 14px;cursor:pointer;font-size:12.5px;color:var(--sb-text);border-right:3px solid transparent;transition:all .15s;margin:1px 0;border-radius:0;}
-.nav:hover{background:rgba(255,255,255,.05);color:#e2e8f0;transform:translateX(-2px);}
+.nav{display:flex;align-items:center;gap:9px;padding:7px 14px;cursor:pointer;font-size:12.5px;color:var(--sb-text);border-right:3px solid transparent;transition:background .15s,color .15s;margin:1px 0;border-radius:0;}
+.nav:hover{background:rgba(255,255,255,.05);color:#e2e8f0;}
 .nav.act{background:linear-gradient(90deg,var(--sb-act-bg),transparent 130%);color:var(--sb-act);border-right-color:var(--sb-act);border-right-width:3.5px;font-weight:700;box-shadow:inset 0 0 12px rgba(56,189,248,.06);}
 .nav.act .ico{transform:scale(1.15);}
 .nav .ico{font-size:14px;width:18px;text-align:center;flex-shrink:0;transition:transform .18s ease;}
-.nav .lbl{flex:1;}
-.nb{margin-right:auto;background:var(--danger);color:#fff;font-size:9px;font-weight:800;padding:1px 5px;border-radius:20px;min-width:16px;text-align:center;}
+.nav .lbl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.nb{margin-right:auto;background:var(--danger);color:#fff;font-size:9px;font-weight:800;padding:1px 5px;border-radius:20px;min-width:16px;text-align:center;flex-shrink:0;line-height:1.35;}
 .nb.y{background:var(--warn);}
 .nb.b{background:var(--primary);}
 
@@ -227,20 +232,44 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
 .scan-line{position:absolute;width:50%;height:2px;background:linear-gradient(90deg,transparent,#38bdf8,transparent);animation:sl 2s ease-in-out infinite;}
 @keyframes sl{0%,100%{top:22%}50%{top:76%}}
 .scan-result{padding:12px 16px;background:var(--surface2);border-radius:var(--r);font-size:13px;margin-top:10px;min-height:36px;text-align:center;color:var(--text3);}
-/* Label */
-.label-wrap{display:flex;justify-content:center;padding:12px;}
-.label-card{width:230px;border:2px solid #1a2744;border-radius:8px;padding:12px;background:#fff;font-family:'Vazirmatn',sans-serif;direction:rtl;box-shadow:0 2px 8px rgba(0,0,0,.15);}
-.label-header{background:#1a2744;color:#fff;padding:5px 8px;border-radius:4px;margin:-12px -12px 10px;font-size:11px;font-weight:700;text-align:center;letter-spacing:.5px;}
-.label-prod{font-size:14px;font-weight:800;color:#0f172a;margin-bottom:2px;}
-.label-lot{font-size:11px;font-weight:700;color:#0284c7;font-family:monospace;margin-bottom:4px;}
-.label-row{display:flex;justify-content:space-between;font-size:10px;color:#475569;border-top:1px dashed #e2e8f0;padding-top:3px;margin-top:3px;}
-.label-qr{display:flex;justify-content:center;margin:8px 0 4px;}
+/* QR Label Sticker */
+.label-wrap{display:flex;justify-content:center;padding:16px;background:var(--surface2);border-radius:var(--r2);}
+.wms-sticker{width:80mm;min-height:50mm;background:#fff;border:1px solid #cbd5e1;border-radius:6px;overflow:hidden;font-family:'Vazirmatn',sans-serif;direction:rtl;color:#0f172a;box-shadow:0 4px 18px rgba(15,23,42,.12);}
+.wms-sticker-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 10px;background:linear-gradient(135deg,#1e1b4b 0%,#4338ca 100%);color:#fff;}
+.wms-sticker-co{font-size:10px;font-weight:800;letter-spacing:.2px;}
+.wms-sticker-sub{font-size:8px;opacity:.85;font-weight:500;}
+.wms-sticker-body{display:flex;gap:8px;padding:8px 10px 6px;align-items:stretch;}
+.wms-sticker-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
+.wms-sticker-name{font-size:11px;font-weight:800;line-height:1.35;color:#0f172a;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.wms-sticker-lot{font-family:ui-monospace,'Courier New',monospace;font-size:12px;font-weight:800;color:#4338ca;letter-spacing:.3px;padding:2px 0;border-bottom:1px dashed #e2e8f0;margin-bottom:2px;}
+.wms-sticker-grid{display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:8.5px;color:#475569;}
+.wms-sticker-grid span{display:flex;gap:3px;align-items:baseline;min-width:0;}
+.wms-sticker-grid strong,.wms-sticker-grid code{font-weight:700;color:#1e293b;font-family:ui-monospace,'Courier New',monospace;font-size:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.wms-sticker-grid .exp-ok{color:#15803d;}
+.wms-sticker-grid .exp-warn{color:#dc2626;font-weight:800;}
+.wms-sticker-qr{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;flex-shrink:0;}
+.wms-sticker-qr img{width:22mm;height:22mm;display:block;border:1px solid #e2e8f0;border-radius:4px;background:#fff;padding:2px;}
+.wms-sticker-qr span{font-size:7px;color:#94a3b8;font-weight:600;}
+.wms-sticker-foot{padding:3px 10px 5px;border-top:1px solid #f1f5f9;font-size:7px;color:#94a3b8;text-align:center;letter-spacing:.2px;}
+.wms-sticker-preview-note{text-align:center;margin-top:10px;font-size:11px;color:var(--text3);}
 /* Print page */
 @media print{
   .app{display:none!important;}
   #pz{display:block!important;}
   body{background:#fff!important;margin:0;padding:0;}
+  body.printing-wms-label .app,
+  body.printing-wms-label .mo,
+  body.printing-wms-label .toast-c,
+  body.printing-wms-label #dp-portal,
+  body.printing-wms-label #pz{display:none!important;}
+  body.printing-wms-label #label-pz{display:flex!important;align-items:center;justify-content:center;position:fixed;inset:0;background:#fff;}
+  body.printing-wms-label #label-pz .label-wrap{background:none;padding:0;border-radius:0;box-shadow:none;}
+  body.printing-wms-label .wms-sticker{box-shadow:none;border:1px solid #000;margin:0 auto;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  body.printing-wms-label .wms-sticker-head{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
 }
+@page wms-sticker{size:80mm 50mm;margin:0;}
+body.printing-wms-label .wms-sticker{page:wms-sticker;}
+#label-pz{display:none;}
 #pz{display:none;}
 .prt{font-family:'Vazirmatn',sans-serif;direction:rtl;max-width:800px;margin:0 auto;padding:24px;color:#0a0a0a;font-size:13px;line-height:1.6;}
 .prt-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0;}
@@ -280,8 +309,9 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
 @media(max-width:820px){
   .ham-btn{display:flex;align-items:center;justify-content:center;}
   .app{display:block!important;}
-  .sidebar{position:fixed!important;right:-240px!important;top:0!important;height:100%!important;z-index:500!important;transition:right .25s ease!important;width:230px!important;overflow-y:auto!important;}
+  .sidebar{position:fixed!important;right:-250px!important;top:0!important;height:100%!important;z-index:500!important;transition:right .25s ease!important;width:236px!important;min-width:236px!important;max-width:236px!important;overflow:hidden!important;}
   .sidebar.mob-open{right:0!important;}
+  .sb-scroll{overflow-y:auto!important;-webkit-overflow-scrolling:touch;}
   .content-wrap{width:100%;display:flex;flex-direction:column;height:100vh;overflow:hidden;}
   .topbar{padding:0 14px!important;height:52px!important;}
   .tb-sub{display:none!important;}
@@ -309,12 +339,10 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
   .prt-table{font-size:10px!important;}
   .prt-sigs{grid-template-columns:1fr 1fr!important;}
   .prt-table th,.prt-table td{padding:5px 6px!important;}
-  .label-card{width:100%;max-width:260px;}
-  /* Tab scroll */
+  .label-wrap{padding:8px!important;}
+  .wms-sticker{transform:scale(.92);transform-origin:top center;}
   .tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap!important;}
   .tab{white-space:nowrap!important;}
-  /* QR label responsive */
-  .label-wrap{padding:6px!important;}
 }
 @media(max-width:400px){
   .stat-grid{grid-template-columns:1fr!important;}
@@ -471,6 +499,21 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
 .stock-hint{font-size:11px;font-weight:700;padding:3px 9px;border-radius:10px;margin-top:4px;display:inline-block;}
 .stock-hint.ok{background:#dcfce7;color:#15803d;}.stock-hint.warn{background:#fffbeb;color:#92400e;}.stock-hint.err{background:#fef2f2;color:#991b1b;}
 .price-hint{font-size:11px;color:var(--text3);margin-top:3px;font-style:italic;}
+/* WMS pricing matrix (CRM logic per product row) */
+.wms-pr-wrap{margin-top:6px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);}
+.wms-pr-grid{width:100%;border-collapse:collapse;font-size:11px;min-width:420px}
+.wms-pr-grid th{background:#1e1b4b;color:#fff;padding:6px 8px;text-align:center;font-weight:700;white-space:nowrap}
+.wms-pr-grid td{padding:5px 6px;border-bottom:1px solid var(--border);text-align:center;vertical-align:middle}
+.wms-pr-grid td.wms-pr-tier{font-weight:700;color:var(--text2);text-align:right;white-space:nowrap;background:var(--surface3)}
+.wms-pr-grid td.tr{text-align:left;direction:ltr;font-variant-numeric:tabular-nums;font-weight:600}
+.wms-pr-cell{width:100%;max-width:110px;padding:4px 6px;border:1px solid var(--border);border-radius:5px;font-size:11px;font-family:inherit;text-align:center;direction:ltr;background:#fff}
+.wms-pr-cell:focus{border-color:var(--primary);outline:none;box-shadow:0 0 0 2px rgba(99,102,241,.15)}
+.wms-pr-meta{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--text2);margin-bottom:8px}
+.wms-pr-meta strong{color:var(--text)}
+.wms-pr-comm{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;font-size:11px}
+.wms-pr-comm span{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:3px 8px}
+.wms-pr-row-toggle{cursor:pointer;user-select:none;color:var(--primary);font-size:14px;width:28px;text-align:center}
+.wms-pr-unlinked{background:#fffbeb;color:#92400e;font-size:10px;padding:2px 8px;border-radius:10px;display:inline-block}
 /* Mobile bottom nav */
 @media(max-width:820px){
   .mob-bnav{display:flex;position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);z-index:499;padding:6px 4px env(safe-area-inset-bottom,8px);}
@@ -488,14 +531,17 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
 <!-- ══ SIDEBAR ══ -->
 <div class="sb-overlay" id="sbOverlay" onclick="closeSb()"></div>
 <nav class="sidebar">
-  <div class="sb-logo">
-    <div class="brand">آتنا زیست درمان</div>
-    <div class="ver">سیستم مدیریت انبار — v2.0</div>
+  <div class="sb-top">
+    <div class="sb-logo">
+      <div class="brand">آتنا زیست درمان</div>
+      <div class="ver">سیستم مدیریت انبار — v2.0</div>
+    </div>
+    <div class="sb-user" title="کاربر از لاگین Click CRM">
+      <div class="av" id="avEl" style="background:var(--primary)">ح</div>
+      <div><div class="sb-uname" id="unEl">حمیدرضا</div><div class="sb-urole" id="urEl">مدیرعامل</div></div>
+    </div>
   </div>
-  <div class="sb-user" onclick="openModal('mUser')">
-    <div class="av" id="avEl" style="background:var(--primary)">ح</div>
-    <div><div class="sb-uname" id="unEl">حمیدرضا</div><div class="sb-urole" id="urEl">مدیرعامل</div></div>
-  </div>
+  <div class="sb-scroll">
   <div class="sb-sect">
     <div class="nav act" onclick="go('dash')"><span class="ico">📊</span><span class="lbl">داشبورد</span></div>
   </div>
@@ -511,8 +557,6 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
     <div class="nav" onclick="go('exit')"><span class="ico">📤</span><span class="lbl">خروج کالا</span></div>
     <div class="nav" onclick="go('hist')"><span class="ico">📋</span><span class="lbl">تاریخچه</span></div>
     <div class="nav" onclick="go('delivery')" id="nav-delivery"><span class="ico">🚚</span><span class="lbl">ارسال و رهگیری</span><span class="nb b" id="delivB">0</span></div>
-  </div>
-  <div class="sb-sect">
   </div>
   <div class="sb-sect">
     <div class="sb-lbl">خرید</div>
@@ -548,6 +592,7 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
     <div class="nav" onclick="go('system')"><span class="ico">⚙️</span><span class="lbl">بک‌آپ و تنظیمات</span></div>
     <div class="nav" onclick="go('audit')"><span class="ico">📝</span><span class="lbl">لاگ فعالیت</span></div>
     <div class="nav" onclick="openConsignment()"><span class="ico">🔁</span><span class="lbl">امانی‌های فعال</span></div>
+  </div>
   </div>
 </nav>
 
@@ -650,7 +695,7 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
             </div>
             <div class="jalali-hint" id="entExp__hint"></div>
           </div>
-          <div class="fg"><label class="fl">قیمت خرید (تومان) <span class="req">*</span></label><input class="fi" type="number" id="entPrice" placeholder="0" inputmode="numeric"/><div id="entLastPriceHint" class="price-hint" style="display:none"></div></div>
+          <div class="fg"><label class="fl">قیمت خرید (ریال) <span class="req">*</span></label><input class="fi" type="number" id="entPrice" placeholder="0" inputmode="numeric"/><div id="entLastPriceHint" class="price-hint" style="display:none"></div></div>
           <div class="fg"><label class="fl">شماره فاکتور / مرجع</label><input class="fi" id="entRef" placeholder="شماره فاکتور ورودی"/></div>
           <div class="fg"><label class="fl">یادداشت</label><input class="fi" id="entNote" placeholder="توضیحات اختیاری"/></div>
           <div class="fg"><label class="fl">وضعیت انبار مجازی IMED</label>
@@ -675,8 +720,10 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
     <!-- EXIT -->
     <div class="page" id="p-exit">
       <div class="ph"><div><div class="pt">خروج کالا</div><div class="ps">ثبت حواله خروج — FEFO خودکار</div></div></div>
+      <div id="pfExitBanner" class="card" style="display:none;margin-bottom:14px;border:1px solid #ddd6fe;background:linear-gradient(135deg,#faf5ff,#f5f3ff)"></div>
       <div class="card" style="margin-bottom:16px">
         <div class="form-grid" style="margin-bottom:14px">
+          <input type="hidden" id="exProformaId"/>
           <div class="fg"><label class="fl">نوع خروج <span class="req">*</span></label>
             <select class="fs" id="exType" onchange="onExTypeChange()">
               <option value="sale">فروش</option>
@@ -716,7 +763,7 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
             <select class="fs" id="exToWh"><option value="">انتخاب کنید</option></select>
           </div>
           <div class="fg"><label class="fl">تعداد <span class="req">*</span></label><input class="fi" type="number" id="exQty" placeholder="0" min="1" inputmode="numeric" oninput="suggestFEFO();updateStockHint()"/></div>
-          <div class="fg"><label class="fl">قیمت فروش (تومان)</label><input class="fi" type="number" id="exSalePrice" placeholder="0" inputmode="numeric"/></div>
+          <div class="fg"><label class="fl">قیمت فروش (ریال)</label><input class="fi" type="number" id="exSalePrice" placeholder="0" inputmode="numeric"/></div>
           <div class="fg"><label class="fl">شماره پیش‌فاکتور / مرجع</label><input class="fi" id="exRef" placeholder="شماره پیش‌فاکتور"/></div>
           <div class="fg"><label class="fl">یادداشت</label><input class="fi" id="exNote" placeholder="توضیحات اختیاری"/></div>
         </div>
@@ -851,12 +898,12 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
     <!-- PRICES -->
     <div class="page" id="p-prices">
       <div class="ph">
-        <div><div class="pt">مدیریت قیمت‌ها</div><div class="ps">لیست‌های قیمت، قیمت‌گذاری، مقایسه و تاریخچه</div></div>
-        <div class="pa"><button class="btn btn-primary btn-sm" onclick="openPLModal()">➕ لیست قیمت جدید</button></div>
+        <div><div class="pt">مدیریت قیمت‌ها</div><div class="ps">ماتریس قیمت CRM — ۴ پله × ۳ نوع پرداخت — برای هر کالای انبار</div></div>
+        <div class="pa"><button class="btn btn-ghost btn-sm" onclick="renderPrMatrix()">🔄 بروزرسانی</button></div>
       </div>
       <div class="tabs" id="priceTabs">
-        <button class="tab act" onclick="switchPrTab('lists',this)">📋 لیست‌های قیمت</button>
-        <button class="tab" onclick="switchPrTab('matrix',this)">💰 قیمت‌گذاری</button>
+        <button class="tab" onclick="switchPrTab('lists',this)">📋 لیست‌های قیمت</button>
+        <button class="tab act" onclick="switchPrTab('matrix',this)">💰 قیمت‌گذاری</button>
         <button class="tab" onclick="switchPrTab('compare',this)">🔄 مقایسه</button>
         <button class="tab" onclick="switchPrTab('purchase',this)">📦 قیمت خرید</button>
         <button class="tab" onclick="switchPrTab('history',this)">📜 تاریخچه کامل</button>
@@ -1219,15 +1266,6 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
   </div>
 </div>
 
-<!-- Switch User Modal (sidebar click) -->
-<div class="mo" id="mUser">
-  <div class="md narrow">
-    <div class="mh"><span class="mt">تغییر کاربر فعال</span><button class="mx" onclick="closeModal('mUser')">✕</button></div>
-    <div class="mb" id="mUserSwitchBody"></div>
-    <div class="mf"><button class="btn btn-ghost" onclick="closeModal('mUser')">بستن</button></div>
-  </div>
-</div>
-
 <!-- Lot Detail Modal -->
 <div class="mo" id="mLot">
   <div class="md wide">
@@ -1480,10 +1518,10 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
 <!-- QR Label Modal -->
 <div class="mo" id="mLabel">
   <div class="md narrow">
-    <div class="mh"><span class="mt">🏷️ برچسب QR کالا</span><button class="mx" onclick="closeModal('mLabel')">✕</button></div>
+    <div class="mh"><span class="mt">🏷️ برچسب QR — Lot</span><button class="mx" onclick="closeModal('mLabel')">✕</button></div>
     <div class="mb" id="mLabelBody"></div>
     <div class="mf">
-      <button class="btn btn-primary" onclick="printLabel()">🖨️ چاپ برچسب</button>
+      <button class="btn btn-primary" onclick="printLabel()">🖨️ چاپ برچسب (۸۰×۵۰mm)</button>
       <button class="btn btn-ghost" onclick="closeModal('mLabel')">بستن</button>
     </div>
   </div>
@@ -1500,6 +1538,7 @@ code{font-family:monospace;font-size:12px;background:var(--surface3);padding:1px
 
 <!-- Print Zone -->
 <div id="pz"></div>
+<div id="label-pz"></div>
 
 <!-- Date Picker Portal -->
 <div id="dp-portal" class="dp-portal">
@@ -1720,23 +1759,28 @@ async function loadS(){
     if(poRes.ok)  S.purchaseOrders = await poRes.json();
     if(stRes.ok){
       const settings=await stRes.json();
-      S.seq          = settings.seq          || S.seq;
-      S.printConfig  = settings.printConfig  || S.printConfig;
-      S.priceLists   = settings.priceLists   || S.priceLists;
-      S.priceItems   = settings.priceItems   || S.priceItems;
-      S.priceHistory = settings.priceHistory || S.priceHistory;
-      S.stockCounts  = settings.stockCounts  || S.stockCounts;
-      S.reconciliations = settings.reconciliations || S.reconciliations;
-      S.auditLog     = settings.auditLog     || S.auditLog;
+      S.seq          = _unwrapWmsSetting(settings.seq, S.seq);
+      S.printConfig  = _unwrapWmsSetting(settings.printConfig, S.printConfig);
+      S.priceLists   = _ensureArray(_unwrapWmsSetting(settings.priceLists, S.priceLists));
+      S.priceItems   = _ensureArray(_unwrapWmsSetting(settings.priceItems, S.priceItems));
+      S.priceHistory = _ensureArray(_unwrapWmsSetting(settings.priceHistory, S.priceHistory));
+      S.stockCounts  = _ensureArray(_unwrapWmsSetting(settings.stockCounts, S.stockCounts));
+      S.reconciliations = _ensureArray(_unwrapWmsSetting(settings.reconciliations, S.reconciliations));
+      S.auditLog     = _ensureArray(_unwrapWmsSetting(settings.auditLog, S.auditLog));
     }
     // Migration: ensure new structures if missing
     const seed=seedState();
     if(!Array.isArray(S.auditLog)) S.auditLog=(S.auditLog&&typeof S.auditLog==='object')?Object.values(S.auditLog):[];
     if(!Array.isArray(S.stockCounts)) S.stockCounts=(S.stockCounts&&typeof S.stockCounts==='object')?Object.values(S.stockCounts):[];
     if(!S.stockCounts) S.stockCounts=[];
-    if(!S.priceLists||S.priceLists.length===0) S.priceLists=seed.priceLists;
-    if(!S.priceItems||S.priceItems.length===0) S.priceItems=seed.priceItems;
+    S.stockCounts=S.stockCounts.map(sc=>({
+      ...sc,
+      items:Array.isArray(sc.items)?sc.items:(sc.items&&typeof sc.items==='object'?Object.values(sc.items):[])
+    }));
+    if(!Array.isArray(S.priceHistory)) S.priceHistory=(S.priceHistory&&typeof S.priceHistory==='object')?Object.values(S.priceHistory):[];
     if(!S.priceHistory) S.priceHistory=seed.priceHistory;
+    if(!S.priceLists||!S.priceLists.length) S.priceLists=seed.priceLists;
+    if(!S.priceItems||!S.priceItems.length) S.priceItems=seed.priceItems;
     // Ensure IMED fields on all transactions
     S.transactions.forEach(t=>{if(!t.imedStatus)t.imedStatus='not_registered';if(!t.imedRefNo)t.imedRefNo='';});
     // Migrate: add priceLists/priceItems to seq if missing
@@ -1761,12 +1805,13 @@ async function loadS(){
     const ur=await fetch('/api/users');
     if(ur.ok){
       const crmUsers=await ur.json();
-      const roleMap={'مدیر':'sales_manager','کارشناس فروش':'sales','سوپر ادمین':'admin','مهمان':'support'};
+      const roleMap={'مدیر':'sales_manager','سوپر ادمین':'admin','کارشناس فروش':'sales','بازرگانی':'commercial','مالی':'finance','IT':'it','مهمان':'support'};
       S.users=crmUsers.filter(u=>u.active).map(u=>({
         id:u.username, name:u.display_name||u.username,
-        role:roleMap[u.role]||'sales', phone:u.phone||'', email:'',
-        note:u.role, active:true
+        role:crmRoleToWms(u.role), phone:u.phone||'', email:'',
+        note:u.role, active:true, crmRole:u.role
       }));
+      if(_authMe) applyAuthUser(_authMe);
     }
   }catch(e){}
 }
@@ -1775,7 +1820,7 @@ async function saveS(){
   try{
     const cfg={seq:S.seq,printConfig:S.printConfig,priceLists:S.priceLists,priceItems:S.priceItems,priceHistory:S.priceHistory,stockCounts:S.stockCounts,reconciliations:S.reconciliations,auditLog:S.auditLog};
     for(const[k,v]of Object.entries(cfg)){
-      await fetch(`/api/wms/settings/${k}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:v})});
+      await fetch(`/api/wms/settings/${k}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(v)});
     }
   }catch(e){}
 }
@@ -1783,8 +1828,39 @@ async function saveS(){
 // ══════════════════════════════════════════
 // HELPERS
 // ══════════════════════════════════════════
-let currentRole='admin';
-let currentUserId='u1';
+function _unwrapWmsSetting(val,fallback){
+  if(val===undefined||val===null) return fallback;
+  if(typeof val==='object'&&!Array.isArray(val)&&val.value!==undefined) val=val.value;
+  return val!==undefined&&val!==null?val:fallback;
+}
+function _ensureArray(val){
+  if(Array.isArray(val)) return val;
+  if(val&&typeof val==='object') return Object.values(val);
+  return [];
+}
+let currentRole='sales';
+let currentUserId='';
+let _authMe=null;
+
+function crmRoleToWms(crmRole){
+  const map={'مدیر':'sales_manager','سوپر ادمین':'admin','کارشناس فروش':'sales','بازرگانی':'commercial','مالی':'finance','IT':'it','مهمان':'support'};
+  return map[crmRole]||'sales';
+}
+function applyAuthUser(me){
+  if(!me||!me.username) return;
+  _authMe=me;
+  currentUserId=me.username;
+  currentRole=crmRoleToWms(me.role);
+  const unEl=document.getElementById('unEl');
+  const urEl=document.getElementById('urEl');
+  const av=document.getElementById('avEl');
+  if(unEl) unEl.textContent=me.name||me.username;
+  if(urEl) urEl.textContent=me.role||'';
+  if(av){
+    av.style.background=me.color||'#6366f1';
+    av.textContent=(me.name||me.username||'?')[0];
+  }
+}
 let cpFilterVal='all';
 let invFilterProd='all';
 
@@ -1797,13 +1873,87 @@ const prod=(id)=>S.products.find(p=>p.id===id)||{name:'?',fullName:'?',unit:'ع�
 const pn=(id)=>{const p=prod(id);return p.fullName&&p.fullName!=='?'?p.fullName:p.name;};
 
 const wh=(id)=>S.warehouses.find(w=>w.id===id)||{name:'?'};
-const usr=(id)=>S.users.find(u=>u.id===id)||{name:'?'};
+const usr=(id)=>{
+  if(!id) return {name:'?'};
+  const u=S.users.find(x=>x.id===id);
+  if(u) return u;
+  if(_authMe&&id===_authMe.username) return {id:_authMe.username,name:_authMe.name||_authMe.username};
+  return {id,name:id};
+};
 const cp=(id)=>S.counterparties.find(c=>c.id===id)||{name:'?'};
 const lot=(id)=>S.lots.find(l=>l.id===id)||null;
 
 const ROLES={admin:'مدیرعامل',sales_manager:'مدیر فروش',sales:'کارشناس فروش',commercial:'بازرگانی',warehouse:'انبار',finance:'مالی',support:'پشتیبان فروش',it:'IT'};
 function _canApproveWmsTxn(){
   return currentRole==='admin'||currentRole==='sales_manager';
+}
+function _canEditWmsPricing(){
+  return currentRole==='admin'||currentRole==='sales_manager';
+}
+function _wmsMarginPct(buy,sell){
+  if(!buy||!sell||buy<=0) return '—';
+  return Math.round((sell-buy)/buy*100)+'٪';
+}
+function _wmsMarginCls(buy,sell){
+  if(!buy||!sell||buy<=0) return '';
+  const m=(sell-buy)/buy*100;
+  if(m>=25) return 'color:#15803d;font-weight:700';
+  if(m>=10) return 'color:#b45309;font-weight:700';
+  return 'color:#dc2626;font-weight:700';
+}
+function renderWmsPricingGrid(entry,tierLabels,payLabels,buyerType,editableOverride){
+  const crm=entry.crmProduct;
+  const m=(entry.pricing&&entry.pricing.matrix)||{};
+  const pays=['d30','d60','cash'];
+  const editable=(editableOverride!=null?editableOverride:(_canEditWmsPricing()&&!!crm));
+  let html='<div class="tw"><table class="wms-pr-grid"><thead><tr><th>پله تعداد</th>';
+  pays.forEach(pt=>{html+=`<th>${payLabels[pt]||pt}</th>`;});
+  html+='</tr></thead><tbody>';
+  for(let ti=0;ti<4;ti++){
+    html+=`<tr><td class="wms-pr-tier">${tierLabels[ti]||('پله '+(ti+1))}</td>`;
+    pays.forEach(pt=>{
+      const val=m[ti]&&m[ti][pt]!=null?m[ti][pt]:'';
+      if(editable&&crm){
+        html+=`<td><input class="wms-pr-cell" type="number" min="0" data-pid="${crm.id}" data-tier="${ti}" data-pay="${pt}" data-bt="${buyerType}" value="${val!==''?val:''}" placeholder="—" onblur="wmsSavePriceCell(this)"/></td>`;
+      }else{
+        html+=`<td class="tr">${val!==''&&val!=null?fmt(val):'—'}</td>`;
+      }
+    });
+    html+='</tr>';
+  }
+  html+='</tbody></table></div>';
+  const comm=(entry.pricing&&entry.pricing.commissions)||{};
+  const commParts=[1,2,3].map(l=>comm[l]!=null?`<span>سطح ${l}: ${fmt(comm[l])} ریال</span>`:'').filter(Boolean);
+  if(commParts.length) html+=`<div class="wms-pr-comm"><strong style="font-size:10px;color:var(--text3)">پورسانت:</strong> ${commParts.join('')}</div>`;
+  return html;
+}
+async function wmsSavePriceCell(inp){
+  if(!inp||!_canEditWmsPricing()) return;
+  const pid=parseInt(inp.dataset.pid,10);
+  const tier=parseInt(inp.dataset.tier,10);
+  const pay=inp.dataset.pay;
+  const buyerType=inp.dataset.bt||_matrixBuyerType;
+  const raw=inp.value.trim();
+  const price=raw===''?0:(parseInt(raw,10)||0);
+  if(raw!==''&&(isNaN(price)||price<0)){toast('قیمت نامعتبر','e');return;}
+  inp.disabled=true;
+  try{
+    const r=await fetch('/api/pricing/prices/item',{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({buyer_type:buyerType,product_id:pid,qty_tier:tier,pay_type:pay,price})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){toast(j.error||'خطا در ذخیره قیمت','e');return;}
+    if(_matrixCache&&_matrixCache.products){
+      const entry=_matrixCache.products.find(e=>e.crmProduct&&e.crmProduct.id===pid);
+      if(entry){
+        if(!entry.pricing) entry.pricing={matrix:{},commissions:{}};
+        if(!entry.pricing.matrix[tier]) entry.pricing.matrix[tier]={};
+        entry.pricing.matrix[tier][pay]=price||null;
+      }
+    }
+    inp.style.borderColor='#16a34a';
+    toast('قیمت ذخیره شد');
+    setTimeout(()=>{inp.style.borderColor='';},1500);
+  }catch(e){toast('خطا در ارتباط با سرور','e');}
+  finally{inp.disabled=false;}
 }
 const TXNT_ENTRY={purchase:'خرید',sales_return:'برگشت از فروش',consignment_in:'امانی دریافتی',transfer_in:'انتقال ورودی',initial:'ورود اولیه'};
 const TXNT_EXIT={sale:'فروش',consignment_out:'حواله امانی',supplier_return:'برگشت به تأمین',transfer_out:'انتقال خروجی',internal:'مصرف داخلی',sample:'نمونه'};
@@ -1879,40 +2029,6 @@ function renderPage(id){
 }
 
 // ══════════════════════════════════════════
-// ROLE SWITCH
-// ══════════════════════════════════════════
-function setRole(role,name,roleLabel,color,init,el){
-  currentRole=role;
-  const u=S.users.find(x=>x.name===name||x.role===role);
-  currentUserId=u?u.id:'u1';
-  document.getElementById('unEl').textContent=name;
-  document.getElementById('urEl').textContent=roleLabel;
-  const av=document.getElementById('avEl');
-  av.style.background=color; av.textContent=init;
-  document.querySelectorAll('.rb').forEach(b=>b.classList.remove('act'));
-  el.classList.add('act');
-  const cur=document.querySelector('.page.act');
-  if(cur) renderPage(cur.id.replace('p-',''));
-}
-function renderSwitchUsers(){
-  document.getElementById('mUserSwitchBody').innerHTML=S.users.filter(u=>u.active).map(u=>`
-    <div style="display:flex;align-items:center;gap:12px;padding:10px;border-radius:var(--r);cursor:pointer;border:1px solid var(--border);margin-bottom:8px" onclick="quickSwitchUser('${u.id}')">
-      <div class="av" style="background:var(--primary)">${u.name[0]}</div>
-      <div><div style="font-size:13px;font-weight:600">${u.name}</div><div style="font-size:11px;color:var(--text3)">${ROLES[u.role]||u.role}</div></div>
-    </div>`).join('');
-}
-function quickSwitchUser(uid){
-  const u=S.users.find(x=>x.id===uid);
-  if(!u) return;
-  currentUserId=uid; currentRole=u.role;
-  document.getElementById('unEl').textContent=u.name;
-  document.getElementById('urEl').textContent=ROLES[u.role]||u.role;
-  document.getElementById('avEl').textContent=u.name[0];
-  closeModal('mUser');
-  toast(`کاربر: ${u.name}`);
-}
-
-// ══════════════════════════════════════════
 // ALERTS ENGINE
 // ══════════════════════════════════════════
 function getAlerts(){
@@ -1968,7 +2084,7 @@ function renderDash(){
   const imedPend=S.transactions.filter(t=>t.imedStatus!=='registered'&&t.status==='approved').length;
   document.getElementById('dashStats').innerHTML=`
     <div class="stat blue"><div class="stat-ic">📦</div><div class="stat-v">${fmt(total)}</div><div class="stat-l">کل موجودی (عدد)</div></div>
-    <div class="stat green"><div class="stat-ic">💰</div><div class="stat-v">${fmt(Math.round(val/1000000))} م</div><div class="stat-l">ارزش انبار (میلیون تومان)</div></div>
+    <div class="stat green"><div class="stat-ic">💰</div><div class="stat-v">${fmt(Math.round(val/1000000))} م</div><div class="stat-l">ارزش انبار (میلیون ریال)</div></div>
     <div class="stat red"><div class="stat-ic">🔔</div><div class="stat-v">${alrts.length}</div><div class="stat-l">هشدارهای فعال</div></div>
     <div class="stat orange"><div class="stat-ic">⏳</div><div class="stat-v">${pend}</div><div class="stat-l">تأییدیه‌های معلق</div></div>
     <div class="stat purple"><div class="stat-ic">🗂️</div><div class="stat-v">${S.lots.filter(l=>l.qty>0).length}</div><div class="stat-l">Lot های فعال</div></div>
@@ -2069,18 +2185,18 @@ function showLot(id){
       <div class="info-row"><div class="info-label">Lot Number</div><div class="info-val"><code>${l.lotNo}</code></div></div>
       <div class="info-row"><div class="info-label">موجودی</div><div class="info-val"><strong>${fmt(l.qty)} ${p.unit}</strong></div></div>
       <div class="info-row"><div class="info-label">تاریخ انقضا</div><div class="info-val">${fmtExpiry(l.expiry)} ${expBadge(l.expiry)}</div></div>
-      <div class="info-row"><div class="info-label">قیمت خرید</div><div class="info-val">${fmt(l.purchasePrice)} تومان</div></div>
-      <div class="info-row"><div class="info-label">ارزش کل</div><div class="info-val"><strong>${fmt(l.qty*l.purchasePrice)} تومان</strong></div></div>
+      <div class="info-row"><div class="info-label">قیمت خرید</div><div class="info-val">${fmt(l.purchasePrice)} ریال</div></div>
+      <div class="info-row"><div class="info-label">ارزش کل</div><div class="info-val"><strong>${fmt(l.qty*l.purchasePrice)} ریال</strong></div></div>
       <div class="info-row"><div class="info-label">انبار</div><div class="info-val">${wh(l.warehouseId).name}</div></div>
       <div class="info-row"><div class="info-label">تأمین‌کننده</div><div class="info-val">${cp(l.counterpartyId).name}</div></div>
       <div class="info-row"><div class="info-label">ورود توسط</div><div class="info-val">${usr(l.enteredBy).name}</div></div>
       <div class="info-row"><div class="info-label">تأیید توسط</div><div class="info-val">${l.approvedBy?usr(l.approvedBy).name:'<span class="badge by">تأیید نشده</span>'}</div></div>
       <div class="info-row"><div class="info-label">تاریخ ثبت</div><div class="info-val">${fmtDate(l.date)}</div></div>
       <div class="info-row" style="grid-column:1/-1">
-        <div class="info-label">QR Code</div>
-        <div style="display:flex;align-items:center;gap:12px;margin-top:4px">
-          <div id="lotQrDisplay" style="border:1px solid var(--border);padding:6px;border-radius:var(--r);background:#fff"></div>
-          <button class="btn btn-ghost btn-sm" onclick="closeModal('mLot');openQRLabel('${l.id}')">🏷️ چاپ برچسب</button>
+        <div class="info-label">برچسب QR</div>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:4px;flex-wrap:wrap">
+          <div id="lotQrDisplay" style="border:1px solid var(--border);padding:4px;border-radius:var(--r);background:#fff;line-height:0"></div>
+          <button class="btn btn-primary btn-sm" onclick="closeModal('mLot');openQRLabel('${l.id}')">🏷️ پیش‌نمایش و چاپ برچسب</button>
         </div>
       </div>
     </div>
@@ -2094,7 +2210,7 @@ function showLot(id){
     const qrd=document.getElementById('lotQrDisplay');
     if(qrd&&typeof QRCode!=='undefined'){
       qrd.innerHTML='';
-      new QRCode(qrd,{text:qrDataForLot(l),width:100,height:100,colorDark:'#000',colorLight:'#fff'});
+      new QRCode(qrd,{text:qrDataForLot(l),width:88,height:88,colorDark:'#1e1b4b',colorLight:'#fff'});
     }
   },100);
   openModal('mLot');
@@ -2104,15 +2220,19 @@ function showLot(id){
 // STOCK COUNT
 // ══════════════════════════════════════════
 function renderCount(){
-  document.getElementById('countBody').innerHTML=S.stockCounts.length?S.stockCounts.map(sc=>`<tr>
+  if(!Array.isArray(S.stockCounts)) S.stockCounts=[];
+  document.getElementById('countBody').innerHTML=S.stockCounts.length?S.stockCounts.map(sc=>{
+    const items=Array.isArray(sc.items)?sc.items:[];
+    return `<tr>
     <td><code>SC-${sc.id}</code></td>
     <td>${wh(sc.warehouseId).name}</td>
     <td>${fmtDate(sc.date)}</td>
     <td>${usr(sc.conductedBy).name}</td>
-    <td>${sc.items.length}</td>
-    <td>${sc.items.filter(i=>i.countedQty!==i.systemQty).length} مغایرت</td>
+    <td>${items.length}</td>
+    <td>${items.filter(i=>i.countedQty!==i.systemQty).length} مغایرت</td>
     <td>${sbadge(sc.status)}</td>
-    <td><button class="btn btn-link" onclick="viewCount('${sc.id}')">مشاهده</button></td></tr>`).join(''):emptyRow(8,'هنوز انبارگردانی‌ای ثبت نشده');
+    <td><button class="btn btn-link" onclick="viewCount('${sc.id}')">مشاهده</button></td></tr>`;
+  }).join(''):emptyRow(8,'هنوز انبارگردانی‌ای ثبت نشده');
 }
 function openNewCount(){
   document.getElementById('mCountTitle').textContent='انبارگردانی جدید';
@@ -2136,6 +2256,7 @@ function startCount(){
   renderCountForm(sc);
 }
 function renderCountForm(sc){
+  if(!Array.isArray(sc.items)) sc.items=[];
   const rows=sc.items.map(item=>{
     const l=lot(item.lotId); const p=l?prod(l.productId):{name:'?',unit:'عدد'};
     return `<tr>
@@ -2155,7 +2276,9 @@ function renderCountForm(sc){
 }
 function updateCount(scId,lotId,val){
   const sc=S.stockCounts.find(x=>x.id===scId);
+  if(!sc||!Array.isArray(sc.items)) return;
   const item=sc.items.find(i=>i.lotId===lotId);
+  if(!item) return;
   item.countedQty=parseInt(val)||0;
   item.diff=item.countedQty-item.systemQty;
   const el=document.getElementById('diff-'+lotId);
@@ -2164,11 +2287,14 @@ function updateCount(scId,lotId,val){
 }
 function updateCountNote(scId,lotId,val){
   const sc=S.stockCounts.find(x=>x.id===scId);
+  if(!sc||!Array.isArray(sc.items)) return;
   const item=sc.items.find(i=>i.lotId===lotId);
+  if(!item) return;
   item.note=val; saveS();
 }
 function submitCount(scId){
   const sc=S.stockCounts.find(x=>x.id===scId);
+  if(!sc||!Array.isArray(sc.items)) return;
   // Apply differences to actual lots
   sc.items.forEach(item=>{
     const l=S.lots.find(x=>x.id===item.lotId);
@@ -2343,7 +2469,7 @@ function onExTypeChange(){
   }
 }
 function renderExit(){ populateExitSelects(); renderPendExits(); }
-function clearExit(){['exProd','exWh','exQty','exSalePrice','exRef','exNote'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});document.getElementById('fefoBox').style.display='none';}
+function clearExit(){['exProd','exWh','exQty','exSalePrice','exRef','exNote'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});const ps=document.getElementById('exProdSearch');if(ps)ps.value='';const cs=document.getElementById('exCpSearch');if(cs&&!_pfExitQueue)cs.value='';const cpH=document.getElementById('exCp');if(cpH&&!_pfExitQueue)cpH.value='';document.getElementById('fefoBox').style.display='none';if(!_pfExitQueue){const hid=document.getElementById('exProformaId');if(hid)hid.value='';}}
 function suggestFEFO(){
   const pid=document.getElementById('exProd').value;
   const whId=document.getElementById('exWh').value;
@@ -2431,6 +2557,7 @@ async function submitExit(){
   if(total<qty){toast('موجودی کافی نیست','e');return;}
   const imedStEx=document.getElementById('exImed')?.value||'not_registered';
   const imedRefEx=document.getElementById('exImedRef')?.value.trim()||'';
+  const pfId=document.getElementById('exProformaId')?.value||'';
   const useFefo=type==='sale'||type==='consignment_out'||type==='sample';
   const chunks=useFefo?(()=>{let rem=qty;const out=[];for(const l of lots){if(rem<=0)break;const take=Math.min(rem,l.qty);if(take>0){out.push({lot:l,qty:take});rem-=take;}}return out;})():[{lot:lots[0],qty}];
   const created=[];
@@ -2441,7 +2568,8 @@ async function submitExit(){
         unitPrice:ch.lot.purchasePrice||0,salePrice,counterpartyId:cpId||null,
         toWarehouseId:toWh||null,by:currentUserId,date:new Date().toISOString(),
         status:'pending',note,refNo:ref,imedStatus:imedStEx,imedRefNo:imedRefEx,
-        imedDate:imedStEx==='registered'?new Date().toISOString():''
+        imedDate:imedStEx==='registered'?new Date().toISOString():'',
+        proformaId:pfId||null
       };
       const res=await fetch('/api/wms/transactions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
       const data=await res.json();
@@ -2451,7 +2579,8 @@ async function submitExit(){
     }
   }catch(e){toast('خطای شبکه در ثبت حواله','e');return;}
   logAudit('exit_created','transaction',created[0]?.id||'',`خروج ${prod(pid).name} — ${qty} عدد → ${cp(cpId||'').name}`);
-  clearExit(); renderPendExits(); updateBadges();
+  if(_pfExitQueue){advancePfExitQueueAfterSubmit();}else{clearExit();}
+  renderPendExits(); updateBadges();
   toast(`حواله خروج ثبت شد — ${created.map(t=>t.txnNo).join('، ')} — در انتظار تأیید`,'w');
 }
 
@@ -2693,23 +2822,13 @@ function openProdModal(id=null){
 function renderProdPricingPanel(data){
   if(!data.crmProduct)return '<div style="padding:12px;background:#fef9c3;border-radius:8px;font-size:12px;color:#92400e">⚠️ کالای CRM متصل نیست — کد کاتالوگ را با جدول محصولات CRM تطبیق دهید</div>';
   if(!data.list||!data.pricing)return '<div style="padding:12px;color:var(--text3);font-size:12px">لیست قیمت فعال برای این نوع خریدار یافت نشد</div>';
-  const m=data.pricing.matrix;
-  const tiers=data.tier_labels||['تا ۲۰','۲۱-۵۰','۵۱-۱۰۰','بیش از ۱۰۰'];
-  const pays=['d30','d60','cash'];
-  const pl=data.pay_labels||{d30:'۳۰ روزه',d60:'۶۰ روزه',cash:'نقدی'};
-  let rows='';
-  tiers.forEach((tl,i)=>{
-    pays.forEach(pt=>{
-      const price=m[i]&&m[i][pt]!=null?fmt(m[i][pt]):'—';
-      rows+=`<tr><td>${tl}</td><td>${pl[pt]}</td><td style="font-weight:700;text-align:left;direction:ltr">${price}</td></tr>`;
-    });
-  });
-  const comm=data.pricing.commissions||{};
-  const commStr=[1,2,3].map(l=>comm[l]!=null?`سطح ${l}: ${fmt(comm[l])}`:'').filter(Boolean).join(' · ')||'—';
-  return `<div style="font-size:11px;color:var(--text2);margin-bottom:8px">متصل به: <strong>${data.crmProduct.name}</strong> · لیست: ${data.list.name} (v${data.list.version})</div>
-    <div class="tw"><table><thead><tr><th>پله تعداد</th><th>نوع پرداخت</th><th>قیمت (ریال)</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <div style="margin-top:10px;font-size:11px"><strong>پورسانت:</strong> ${commStr}</div>
-    <div style="margin-top:8px;font-size:10px;color:var(--text3)">منبع: سرور CRM — ویرایش از تب قیمت‌گذاری اصلی</div>`;
+  const tierLabels=data.tier_labels||['تا ۲۰','۲۱-۵۰','۵۱-۱۰۰','بیش از ۱۰۰'];
+  const payLabels=data.pay_labels||{d30:'۳۰ روزه',d60:'۶۰ روزه',cash:'نقدی'};
+  const bt=document.getElementById('mProdPricingBuyer')?.value||data.list.buyer_type||'hospital';
+  const entry={crmProduct:data.crmProduct,pricing:data.pricing,linked:true,wmsProduct:{}};
+  return `<div style="font-size:11px;color:var(--text2);margin-bottom:8px">متصل به: <strong>${data.crmProduct.name}</strong> · لیست: ${data.list.name} (v${data.list.version})</div>`
+    +renderWmsPricingGrid(entry,tierLabels,payLabels,bt)
+    +`<div style="margin-top:8px;font-size:10px;color:var(--text3)">${_canEditWmsPricing()?'ویرایش سلول‌ها مستقیماً در SQL CRM ذخیره می‌شود':'فقط مشاهده — ویرایش برای مدیر'}</div>`;
 }
 function loadProdPricing(){
   const id=document.getElementById('mProdId')?.value;
@@ -2761,7 +2880,7 @@ function renderWhs(){
       <td>${w.location}</td>
       <td>${w.managerId?usr(w.managerId).name:'-'}</td>
       <td>${lots.length}</td>
-      <td>${fmt(Math.round(val/1000))} ه‌ت</td>
+      <td>${fmt(Math.round(val/1000))} ه‌ر</td>
       <td><span class="dot ${w.active?'dot-green':'dot-red'}"></span>${w.active?'فعال':'غیرفعال'}</td>
       <td style="white-space:nowrap">
         <button class="btn btn-link" onclick="openWhModal('${w.id}')">ویرایش</button>
@@ -2936,7 +3055,7 @@ function switchPrTab(tab,el){
   el.classList.add('act');
   renderPrTabContent();
 }
-function renderPrices(){ prTab='lists'; renderPrTabContent(); }
+function renderPrices(){ prTab='matrix'; renderPrTabContent(); }
 function renderPrTabContent(){
   const f=document.getElementById('prTabFilters');
   const con=document.getElementById('prContent');
@@ -2985,14 +3104,22 @@ function renderPrLists(){
 }
 
 // ════════════════════════════════════════
-// TAB 2 — PRICING MATRIX
+// TAB 2 — PRICING MATRIX (CRM logic per WMS product row)
 // ════════════════════════════════════════
-let _matrixBuyerType = 'hospital';
+let _matrixBuyerType='hospital';
+let _matrixCache=null;
+let _matrixExpanded={};
+let _matrixSearch='';
 function renderPrMatrixFilter(){
   const f=document.getElementById('prTabFilters');
-  f.innerHTML=`<div class="card" style="padding:12px">
-    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-      <div class="fg" style="min-width:200px">
+  f.innerHTML=`<div class="card" style="padding:12px;margin-bottom:10px;background:#eff6ff;border:1px solid #bfdbfe;font-size:12px;line-height:1.7;color:#1e3a8a">
+    <strong>راهنما:</strong> قیمت <em>فروش</em> از CRM (SQL) می‌آید — هر کالای WMS با «کد کاتالوگ» به محصول CRM وصل می‌شود.
+    ردیف را باز کنید و ماتریس ۴ پله × ۳ پرداخت را ویرایش کنید (ذخیره با خروج از سلول).
+    قیمت <em>خرید</em> جداست: تب «📦 قیمت خرید» → روی Lotها ثبت می‌شود و برای مارجین استفاده می‌شود.
+  </div>
+  <div class="card" style="padding:12px">
+    <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+      <div class="fg" style="min-width:180px">
         <label class="fl">نوع خریدار (CRM)</label>
         <select class="fs" id="matrixBuyerType" onchange="_matrixBuyerType=this.value;renderPrMatrix()">
           <option value="hospital" ${_matrixBuyerType==='hospital'?'selected':''}>بیمارستان</option>
@@ -3001,18 +3128,87 @@ function renderPrMatrixFilter(){
           <option value="patient" ${_matrixBuyerType==='patient'?'selected':''}>بیمار</option>
         </select>
       </div>
-      <button class="btn btn-ghost btn-sm" onclick="renderPrMatrix()" style="margin-top:16px">🔄 بروزرسانی</button>
-      <a class="btn btn-link btn-sm" href="/" target="_blank" style="margin-top:16px">قیمت‌گذاری CRM ↗</a>
+      <div class="fg" style="min-width:220px;flex:1">
+        <label class="fl">جستجو کالا</label>
+        <input class="fi" id="matrixSearch" placeholder="نام، کاتالوگ، IRC..." value="${_matrixSearch.replace(/"/g,'&quot;')}" oninput="_matrixSearch=this.value;renderPrMatrixFromCache()"/>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="renderPrMatrix()">🔄 بارگذاری مجدد</button>
+      ${_canEditWmsPricing()?'<span class="badge bg" style="align-self:center">ویرایش فعال — ذخیره با خروج از سلول</span>':'<span class="badge by" style="align-self:center">فقط مشاهده</span>'}
     </div>
   </div>`;
 }
 function switchPrTabTo(tab, listId){
   _matrixBuyerType=listId||_matrixBuyerType;
   document.querySelectorAll('#priceTabs .tab').forEach(t=>t.classList.remove('act'));
-  document.querySelector('#priceTabs .tab:nth-child(2)').classList.add('act');
-  prTab='matrix';
-  renderPrMatrixFilter();
-  renderPrMatrix();
+  const tabs=document.querySelectorAll('#priceTabs .tab');
+  const idx={lists:0,matrix:1,compare:2,purchase:3,history:4}[tab]||1;
+  if(tabs[idx]) tabs[idx].classList.add('act');
+  prTab=tab;
+  renderPrTabContent();
+}
+function toggleMatrixExpand(wmsId){
+  _matrixExpanded[wmsId]=!_matrixExpanded[wmsId];
+  renderPrMatrixFromCache();
+}
+function renderPrMatrixFromCache(){
+  if(!_matrixCache) return renderPrMatrix();
+  const con=document.getElementById('prContent');
+  if(!con) return;
+  const data=_matrixCache;
+  const tierLabels=data.tier_labels||['تا ۲۰','۲۱-۵۰','۵۱-۱۰۰','بیش از ۱۰۰'];
+  const payLabels=data.pay_labels||{d30:'۳۰ روزه',d60:'۶۰ روزه',cash:'نقدی'};
+  const q=_matrixSearch.trim().toLowerCase();
+  const products=(data.products||[]).filter(entry=>{
+    if(!q) return true;
+    const p=entry.wmsProduct||{};
+    const hay=[p.name,p.fullName,p.catalogCode,p.ircCode,p.brand].join(' ').toLowerCase();
+    return hay.includes(q);
+  });
+  const linkedN=products.filter(x=>x.linked).length;
+  const rows=products.map(entry=>{
+    const p=entry.wmsProduct;
+    const buyPrice=getPurchasePrice(p.id);
+    const m=entry.pricing&&entry.pricing.matrix;
+    const baseSell=m&&m[0]&&m[0].d30!=null?m[0].d30:null;
+    const expanded=!!_matrixExpanded[p.id];
+    const margin=_wmsMarginPct(buyPrice,baseSell);
+    return `<tr class="wms-pr-main-row">
+      <td class="wms-pr-row-toggle" onclick="toggleMatrixExpand('${p.id}')">${expanded?'▼':'▶'}</td>
+      <td><strong>${p.fullName||p.name}</strong>${!entry.linked?'<br><span class="wms-pr-unlinked">⚠ بدون اتصال CRM</span>':''}</td>
+      <td><code style="font-size:11px">${p.catalogCode||'—'}</code></td>
+      <td><code style="font-size:11px">${p.ircCode||'—'}</code></td>
+      <td class="tr">${buyPrice?fmt(buyPrice):'—'}</td>
+      <td class="tr">${baseSell?fmt(baseSell):'—'}</td>
+      <td class="tr" style="${_wmsMarginCls(buyPrice,baseSell)}">${margin}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-link btn-xs" onclick="openProdModal('${p.id}')">ویرایش کالا</button>
+      </td>
+    </tr>
+    ${expanded?`<tr><td colspan="8" style="padding:0 8px 12px;background:var(--surface2)">
+      <div class="wms-pr-wrap">
+        <div class="wms-pr-meta">
+          ${entry.crmProduct?`<span>CRM: <strong>${entry.crmProduct.name}</strong></span>`:'<span style="color:#d97706">کد کاتالوگ را با محصول CRM تطبیق دهید</span>'}
+          <span>لیست: <strong>${data.list.name}</strong> v${data.list.version}</span>
+        </div>
+        ${entry.linked?renderWmsPricingGrid(entry,tierLabels,payLabels,data.buyer_type):'<div style="font-size:12px;color:var(--text3);padding:8px">برای قیمت‌گذاری، ابتدا کد کاتالوگ WMS را با محصول CRM هم‌نام کنید.</div>'}
+      </div>
+    </td></tr>`:''}`;
+  }).join('');
+  con.innerHTML=`<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div class="card-title" style="margin:0">💰 ${data.list.name} <span style="font-size:12px;font-weight:400;color:var(--text2)">v${data.list.version}</span></div>
+      <div style="font-size:11px;color:var(--text2)">${linkedN} / ${products.length} کالا متصل · منبع: SQL CRM</div>
+    </div>
+    <div class="tw"><table>
+      <thead><tr>
+        <th style="width:32px"></th>
+        <th>کالا</th><th>کاتالوگ</th><th>IRC</th>
+        <th>قیمت خرید</th><th>فروش پله ۱ / ۳۰روز</th><th>مارجین</th><th>عملیات</th>
+      </tr></thead>
+      <tbody>${rows||emptyRow(8)}</tbody>
+    </table></div>
+    <div style="font-size:10px;color:var(--text3);margin-top:10px">▶ هر ردیف را باز کنید — ماتریس ۴ پله × ۳ نوع پرداخت (مثل تب قیمت‌گذاری CRM)</div>
+  </div>`;
 }
 async function renderPrMatrix(){
   const buyerType=document.getElementById('matrixBuyerType')?.value||_matrixBuyerType;
@@ -3021,43 +3217,15 @@ async function renderPrMatrix(){
   if(!con)return;
   con.innerHTML='<div class="card"><div style="text-align:center;padding:40px;color:var(--text3)">⏳ بارگذاری قیمت‌ها از سرور CRM...</div></div>';
   try{
-    const res=await fetch(`/api/wms/pricing/matrix?buyer_type=${buyerType}`,{credentials:'include'});
+    const res=await fetch(`/api/wms/pricing/matrix?buyer_type=${encodeURIComponent(buyerType)}`,{credentials:'include'});
     const data=await res.json();
     if(!data.list){
-      con.innerHTML=`<div class="card"><div style="padding:24px;text-align:center;color:var(--text3)">لیست قیمت فعالی برای «${buyerType}» یافت نشد.<br><span style="font-size:11px">از تب قیمت‌گذاری CRM import کنید.</span></div></div>`;
+      _matrixCache=null;
+      con.innerHTML=`<div class="card"><div style="padding:24px;text-align:center;color:var(--text3)">لیست قیمت فعالی برای «${buyerType}» یافت نشد.<br><span style="font-size:11px">از تب قیمت‌گذاری CRM یک لیست import کنید.</span></div></div>`;
       return;
     }
-    const rows=(data.products||[]).map(entry=>{
-      const p=entry.wmsProduct;
-      const linked=entry.linked;
-      const m=entry.pricing?.matrix;
-      const price0=m&&m[0]&&m[0].d30!=null?fmt(m[0].d30):null;
-      const price60=m&&m[0]&&m[0].d60!=null?fmt(m[0].d60):null;
-      const priceCash=m&&m[0]&&m[0].cash!=null?fmt(m[0].cash):null;
-      const buyPrice=getPurchasePrice(p.id);
-      return `<tr>
-        <td><strong>${p.fullName||p.name}</strong>${!linked?'<br><span style="font-size:10px;color:#d97706">⚠ بدون اتصال CRM</span>':''}</td>
-        <td><code style="font-size:11px">${p.catalogCode||'—'}</code></td>
-        <td><code style="font-size:11px">${p.ircCode||'—'}</code></td>
-        <td style="font-size:12px;color:var(--text3)">${fmt(buyPrice)||'—'}</td>
-        <td>${price0?`<strong style="font-size:14px">${price0}</strong>`:'<span style="color:var(--text3);font-size:12px">تعریف نشده</span>'}</td>
-        <td style="font-size:11px;color:var(--text2)">${price60||'—'} / ${priceCash||'—'}</td>
-        <td style="white-space:nowrap">
-          <button class="btn btn-primary btn-xs" onclick="openProdModal('${p.id}')">💰 جزئیات</button>
-        </td>
-      </tr>`;
-    }).join('');
-    const linkedN=(data.products||[]).filter(x=>x.linked).length;
-    con.innerHTML=`<div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-        <div class="card-title" style="margin:0">💰 ${data.list.name} <span style="font-size:12px;font-weight:400;color:var(--text2)">v${data.list.version}</span></div>
-        <div style="font-size:11px;color:var(--text2)">${linkedN} / ${(data.products||[]).length} کالا متصل · منبع: سرور SQL</div>
-      </div>
-      <div class="tw"><table>
-        <thead><tr><th>کالا</th><th>کد کاتالوگ</th><th>کد IRC</th><th>قیمت خرید</th><th>قیمت ۳۰روز (پله ۱)</th><th>۶۰روز / نقد</th><th>عملیات</th></tr></thead>
-        <tbody>${rows||emptyRow(7)}</tbody>
-      </table></div>
-    </div>`;
+    _matrixCache=data;
+    renderPrMatrixFromCache();
   }catch(e){
     con.innerHTML='<div class="card"><div style="padding:24px;color:var(--danger)">خطا در بارگذاری قیمت‌ها</div></div>';
   }
@@ -3117,7 +3285,7 @@ function renderPrPurchaseFilter(){
     <div class="form-grid">
       <div class="fg"><label class="fl">کالا</label><select class="fs" id="ppProd" onchange="renderPrPurchase()"><option value="all">همه</option>${S.products.map(p=>`<option value="${p.id}">${p.fullName||p.name}</option>`).join('')}</select></div>
       <div class="fg"><label class="fl">روش بروزرسانی</label><select class="fs" id="ppMethod" onchange="onPPMethodChange()"><option value="rial">قیمت ریالی مستقیم</option><option value="usd">محاسبه از دلار</option></select></div>
-      <div class="fg" id="ppRialWrap"><label class="fl">قیمت خرید جدید (تومان)</label><input class="fi" type="number" id="ppPrice" placeholder="0"/></div>
+      <div class="fg" id="ppRialWrap"><label class="fl">قیمت خرید جدید (ریال)</label><input class="fi" type="number" id="ppPrice" placeholder="0"/></div>
       <div class="fg" id="ppUsdWrap" style="display:none"><label class="fl">قیمت دلاری</label><input class="fi" type="number" id="ppUsd" placeholder="0" oninput="calcPP()"/></div>
       <div class="fg" id="ppRateWrap" style="display:none"><label class="fl">نرخ دلار</label><input class="fi" type="number" id="ppRate" placeholder="95000" oninput="calcPP()"/></div>
       <div class="fg" id="ppCalcWrap" style="display:none"><label class="fl">نتیجه</label><input class="fi" id="ppCalc" readonly style="background:var(--surface3)"/></div>
@@ -3147,6 +3315,7 @@ function applyPurchasePrice(){
   if(method==='rial') price=parseInt(document.getElementById('ppPrice').value)||0;
   else{const u=parseFloat(document.getElementById('ppUsd').value)||0;const r=parseFloat(document.getElementById('ppRate').value)||0;price=Math.round(u*r);}
   if(!price){toast('قیمت را وارد کنید','e');return;}
+  if(!Array.isArray(S.priceHistory)) S.priceHistory=[];
   S.lots.filter(l=>(pid==='all'||l.productId===pid)&&(!lotNo||l.lotNo===lotNo)).forEach(l=>{
     l.purchasePrice=price;
     S.priceHistory.push({product:l.productId,lot:l.lotNo,price,qty:l.qty,date:new Date().toISOString(),method:method==='usd'?'دلاری':'ریالی'});
@@ -3156,6 +3325,7 @@ function applyPurchasePrice(){
 function renderPrPurchase(){
   const pid=document.getElementById('ppProd')?.value||'all';
   const con=document.getElementById('prContent');
+  const hist=Array.isArray(S.priceHistory)?S.priceHistory:[];
   const lots=S.lots.filter(l=>pid==='all'||l.productId===pid).sort((a,b)=>new Date(b.date)-new Date(a.date));
   // Summary per product
   const summary=S.products.filter(p=>p.active&&(pid==='all'||p.id===pid)).map(p=>{
@@ -3175,7 +3345,7 @@ function renderPrPurchase(){
       <div class="card-title">📦 تاریخچه قیمت خرید — به تفکیک Lot</div>
       <div class="tw"><table>
         <thead><tr><th>کالا</th><th>Lot</th><th>قیمت خرید</th><th>موجودی</th><th>ارزش</th><th>تاریخ</th><th>روش</th></tr></thead>
-        <tbody>${S.priceHistory.slice().reverse().map(h=>`<tr>
+        <tbody>${hist.slice().reverse().map(h=>`<tr>
           <td>${prod(h.product).name}</td>
           <td><code style="font-size:11px">${h.lot}</code></td>
           <td><strong>${fmt(h.price)}</strong></td>
@@ -3275,8 +3445,8 @@ function openPIModal(productId, plId){
   document.getElementById('mPITitle').textContent=`${p.fullName||p.name} — ${pl?.name||''}`;
   document.getElementById('mPIListId').value=plId;
   document.getElementById('mPIProdId').value=productId;
-  document.getElementById('mPIProdInfo').innerHTML=`<strong>${p.fullName}</strong> | برند: ${p.brand} | IRC: <code>${p.ircCode}</code> | Cat: <code>${p.catalogCode}</code> | قیمت خرید: <strong>${fmt(buyPrice)}</strong> تومان`;
-  document.getElementById('mPICurrentInfo').innerHTML=current?`<div class="al blue"><span class="al-ico">ℹ️</span><div><div class="al-title">قیمت فعلی</div><div class="al-sub">${current.usdPrice?`$${current.usdPrice} × ${fmt(current.usdRate)} = ${fmt(Math.round(current.usdPrice*current.usdRate))}`:`${fmt(current.price)} تومان`} — از ${fmtDate(current.effectiveFrom)}</div></div></div>`:'';
+  document.getElementById('mPIProdInfo').innerHTML=`<strong>${p.fullName}</strong> | برند: ${p.brand} | IRC: <code>${p.ircCode}</code> | Cat: <code>${p.catalogCode}</code> | قیمت خرید: <strong>${fmt(buyPrice)}</strong> ریال`;
+  document.getElementById('mPICurrentInfo').innerHTML=current?`<div class="al blue"><span class="al-ico">ℹ️</span><div><div class="al-title">قیمت فعلی</div><div class="al-sub">${current.usdPrice?`$${current.usdPrice} × ${fmt(current.usdRate)} = ${fmt(Math.round(current.usdPrice*current.usdRate))}`:`${fmt(current.price)} ریال`} — از ${fmtDate(current.effectiveFrom)}</div></div></div>`:'';
   const isUsd=pl?.type==='usd_based';
   document.getElementById('mPIForm').innerHTML=`
     <div class="form-grid">
@@ -3285,7 +3455,7 @@ function openPIModal(productId, plId){
         <div class="fg"><label class="fl">نرخ دلار *</label><input class="fi" type="number" id="piRate" value="${current?.usdRate||95000}" oninput="calcPIRial()"/></div>
         <div class="fg"><label class="fl">معادل ریالی</label><input class="fi" id="piCalc" readonly style="background:var(--surface3)" value="${current&&current.usdPrice?fmt(Math.round(current.usdPrice*current.usdRate)):''}" placeholder="محاسبه خودکار"/></div>
       `:`
-        <div class="fg"><label class="fl">قیمت (تومان) *</label><input class="fi" type="number" id="piPrice" value="${current?.price||''}" placeholder="0" oninput="calcPIMargin(${buyPrice})"/></div>
+        <div class="fg"><label class="fl">قیمت (ریال) *</label><input class="fi" type="number" id="piPrice" value="${current?.price||''}" placeholder="0" oninput="calcPIMargin(${buyPrice})"/></div>
         <div class="fg"><label class="fl">مارجین نسبت به خرید</label><input class="fi" id="piMarginDisp" readonly style="background:var(--surface3)" value="${current&&buyPrice?Math.round((current.price-buyPrice)/buyPrice*100)+'٪':''}" placeholder="محاسبه خودکار"/></div>
         ${pl?.maxDiscountPct?`<div class="fg"><label class="fl">حداکثر تخفیف مجاز</label><input class="fi" readonly value="${pl.maxDiscountPct}٪" style="background:var(--surface3)"/></div>`:''}
       `}
@@ -3436,7 +3606,7 @@ function printPriceList(plId){
   const pl=S.priceLists.find(x=>x.id===plId); if(!pl) return;
   const rows=S.products.filter(p=>p.active).map(p=>{
     const pi=getCurrentPI(p.id,plId);
-    const price=pi?(pl.type==='usd_based'&&pi.usdPrice?`$${pi.usdPrice} (${fmt(Math.round(pi.usdPrice*pi.usdRate))} ت)`:`${fmt(pi.price)} تومان`):'—';
+    const price=pi?(pl.type==='usd_based'&&pi.usdPrice?`$${pi.usdPrice} (${fmt(Math.round(pi.usdPrice*pi.usdRate))} ر)`:`${fmt(pi.price)} ریال`):'—';
     return `<tr><td>${p.fullName}</td><td style="font-family:monospace">${p.catalogCode}</td><td style="font-family:monospace">${p.ircCode}</td><td>${p.unit}</td><td style="text-align:center;font-weight:700">${price}</td></tr>`;
   }).join('');
   const w=window.open('','_blank','width=800,height=600');
@@ -3600,7 +3770,7 @@ function renderRptInv(){
         <div class="card-title" style="margin:0">📦 گزارش موجودی — سلسله‌مراتبی</div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           <span class="badge bg">موجودی: ${fmt(totalQty)} عدد</span>
-          <span class="badge bb">ارزش: ${fmt(Math.round(totalVal/1000000))} میلیون تومان</span>
+          <span class="badge bb">ارزش: ${fmt(Math.round(totalVal/1000000))} میلیون ریال</span>
         </div>
       </div>
       <div class="tw"><table>
@@ -3890,7 +4060,7 @@ function genWeekly(){
     <h3 style="margin-bottom:16px">گزارش هفتگی — ${new Date().toLocaleDateString('fa-IR')}</h3>
     <table width="100%" style="border-collapse:collapse;margin-bottom:16px">
       <thead><tr style="background:#f1f5f9"><th style="padding:8px;text-align:right;border:1px solid #e2e8f0">کالا</th><th style="padding:8px;border:1px solid #e2e8f0">موجودی</th><th style="padding:8px;border:1px solid #e2e8f0">ارزش</th></tr></thead>
-      <tbody>${S.products.filter(p=>p.active).map(p=>{const q=S.lots.filter(l=>l.productId===p.id).reduce((s,l)=>s+l.qty,0);const v=S.lots.filter(l=>l.productId===p.id).reduce((s,l)=>s+l.qty*l.purchasePrice,0);return`<tr><td style="padding:8px;border:1px solid #e2e8f0">${p.fullName||p.name}</td><td style="padding:8px;border:1px solid #e2e8f0">${fmt(q)} ${p.unit}</td><td style="padding:8px;border:1px solid #e2e8f0">${fmt(Math.round(v/1000))} ه‌ت</td></tr>`;}).join('')}<tr style="font-weight:800;background:#f8fafc"><td style="padding:8px;border:1px solid #e2e8f0">جمع کل</td><td style="padding:8px;border:1px solid #e2e8f0">—</td><td style="padding:8px;border:1px solid #e2e8f0">${fmt(Math.round(val/1000))} ه‌ت</td></tr></tbody>
+      <tbody>${S.products.filter(p=>p.active).map(p=>{const q=S.lots.filter(l=>l.productId===p.id).reduce((s,l)=>s+l.qty,0);const v=S.lots.filter(l=>l.productId===p.id).reduce((s,l)=>s+l.qty*l.purchasePrice,0);return`<tr><td style="padding:8px;border:1px solid #e2e8f0">${p.fullName||p.name}</td><td style="padding:8px;border:1px solid #e2e8f0">${fmt(q)} ${p.unit}</td><td style="padding:8px;border:1px solid #e2e8f0">${fmt(Math.round(v/1000))} ه‌ر</td></tr>`;}).join('')}<tr style="font-weight:800;background:#f8fafc"><td style="padding:8px;border:1px solid #e2e8f0">جمع کل</td><td style="padding:8px;border:1px solid #e2e8f0">—</td><td style="padding:8px;border:1px solid #e2e8f0">${fmt(Math.round(val/1000))} ه‌ر</td></tr></tbody>
     </table>
     <p style="margin-bottom:8px"><strong>تراکنش‌های هفته:</strong> ${week.filter(t=>t.type==='entry').length} ورود، ${week.filter(t=>t.type==='exit').length} خروج</p>
     <p style="color:${alrts.length?'#dc2626':'#16a34a'}"><strong>هشدارها:</strong> ${alrts.length?alrts.map(a=>a.title).join(' | '):'همه چیز در وضعیت مناسب'}</p>`;
@@ -3921,11 +4091,50 @@ function getQRDataUrl(text,size=100){
       new QRCode(div,{text,width:size,height:size,colorDark:'#000000',colorLight:'#ffffff'});
       setTimeout(()=>{
         const canvas=div.querySelector('canvas');
-        resolve(canvas?canvas.toDataURL('image/png'):'');
-        document.body.removeChild(div);
-      },150);
+        const img=div.querySelector('img');
+        if(canvas) resolve(canvas.toDataURL('image/png'));
+        else if(img&&img.src) resolve(img.src);
+        else resolve('');
+        if(document.body.contains(div)) document.body.removeChild(div);
+      },220);
     }catch(e){resolve('');if(document.body.contains(div))document.body.removeChild(div);}
   });
+}
+function escH(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function buildWmsLabelHtml(l,p,w,c,qrImg){
+  const pc=S.printConfig||{};
+  const co=escH(pc.companyName||'آتنا زیست درمان');
+  const sub=escH(pc.companySub||'تجهیزات پزشکی');
+  const expCls=daysLeft(l.expiry)<90?'exp-warn':'exp-ok';
+  const qrBlock=qrImg
+    ?`<img src="${qrImg}" alt="QR"/>`
+    :'<div style="width:22mm;height:22mm;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;color:#94a3b8">QR</div>';
+  return `<div class="label-wrap" id="labelPrintArea">
+    <div class="wms-sticker">
+      <div class="wms-sticker-head">
+        <span class="wms-sticker-co">${co}</span>
+        <span class="wms-sticker-sub">${sub}</span>
+      </div>
+      <div class="wms-sticker-body">
+        <div class="wms-sticker-info">
+          <div class="wms-sticker-name">${escH(p.fullName||p.name)}</div>
+          <div class="wms-sticker-lot">${escH(l.lotNo)}</div>
+          <div class="wms-sticker-grid">
+            <span>IRC <code>${escH(p.ircCode||'—')}</code></span>
+            <span>Cat <code>${escH(p.catalogCode||'—')}</code></span>
+            <span>برند <strong>${escH(p.brand||'—')}</strong></span>
+            <span>سایز <strong>${escH(p.size||'—')}</strong></span>
+            <span>انقضا <strong class="${expCls}">${escH(fmtExpiry(l.expiry))}</strong></span>
+            <span>موجودی <strong>${fmt(l.qty)} ${escH(p.unit||'')}</strong></span>
+            <span>انبار <strong>${escH(w.name||'—')}</strong></span>
+            <span>تأمین <strong>${escH(c.name||'—')}</strong></span>
+          </div>
+        </div>
+        <div class="wms-sticker-qr">${qrBlock}<span>اسکن Lot</span></div>
+      </div>
+      <div class="wms-sticker-foot">WMS · ${escH(l.lotNo)} · ${escH(fmtDate(l.date))}</div>
+    </div>
+  </div>`;
 }
 function qrDataForLot(l){
   return JSON.stringify({t:'lot',id:l.id,n:l.lotNo,p:l.productId,e:l.expiry,w:l.warehouseId});
@@ -4116,55 +4325,27 @@ async function openQRLabel(lotId){
   const p=prod(l.productId);
   const w=wh(l.warehouseId);
   const c=cp(l.counterpartyId);
-  const qrData=qrDataForLot(l);
-  const qrImg=await getQRDataUrl(qrData,110);
-  document.getElementById('mLabelBody').innerHTML=`
-    <div class="label-wrap" id="labelPrintArea">
-      <div class="label-card">
-        <div class="label-header">آتنا زیست درمان — تجهیزات پزشکی</div>
-        <div style="display:flex;gap:10px;align-items:flex-start">
-          <div style="flex:1">
-            <div class="label-prod">${p.fullName||p.name}</div>
-            <div style="font-size:11px;color:#475569;margin-bottom:6px">${p.fullName}</div>
-            <div class="label-lot">${l.lotNo}</div>
-            <div class="label-row"><span>برند:</span><span>${p.brand}</span></div>
-            <div class="label-row"><span>سایز:</span><span>${p.size}</span></div>
-            <div class="label-row"><span>انقضا:</span><span style="color:${daysLeft(l.expiry)<90?'#dc2626':'#16a34a'};font-weight:700">${fmtDate(l.expiry)}</span></div>
-            <div class="label-row"><span>IRC:</span><span style="font-family:monospace">${p.ircCode}</span></div>
-            <div class="label-row"><span>Cat:</span><span style="font-family:monospace">${p.catalogCode}</span></div>
-            <div class="label-row"><span>انبار:</span><span>${w.name}</span></div>
-            <div class="label-row"><span>تأمین:</span><span>${c.name}</span></div>
-          </div>
-          <div class="label-qr">
-            ${qrImg?`<img src="${qrImg}" style="width:90px;height:90px;border:1px solid #e2e8f0;border-radius:4px"/>`:'<div style="width:90px;height:90px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:10px;color:#94a3b8">QR</div>'}
-          </div>
-        </div>
-        <div style="text-align:center;font-size:9px;color:#94a3b8;margin-top:6px;border-top:1px dashed #e2e8f0;padding-top:4px">اسکن کنید برای اطلاعات کامل</div>
-      </div>
-    </div>
-    <div style="text-align:center;margin-top:12px">
-      <p style="font-size:12px;color:var(--text3)">این برچسب را روی جعبه/باکس کالا بچسبانید</p>
-    </div>`;
+  const qrImg=await getQRDataUrl(qrDataForLot(l),168);
+  document.getElementById('mLabelBody').innerHTML=
+    buildWmsLabelHtml(l,p,w,c,qrImg)+
+    '<p class="wms-sticker-preview-note">اندازه چاپ: ۸۰×۵۰ میلی‌متر — مناسب پرینتر برچسب حرارتی</p>';
   openModal('mLabel');
 }
 function printLabel(){
   const area=document.getElementById('labelPrintArea');
-  if(!area) return;
-  // Always use #pz approach — popup blocking causes errors
-  const pz=document.getElementById('pz');
-  pz.innerHTML=`<div style="font-family:'Vazirmatn',sans-serif;direction:rtl;padding:20px;background:#fff">
-    <style>
-      .label-card{width:230px;border:2px solid #1a2744;border-radius:8px;padding:12px;background:#fff;font-family:'Vazirmatn',sans-serif;direction:rtl;}
-      .label-header{background:#1a2744;color:#fff;padding:5px 8px;border-radius:4px;margin:-12px -12px 10px;font-size:11px;font-weight:700;text-align:center;}
-      .label-prod{font-size:14px;font-weight:800;color:#0f172a;margin-bottom:2px;}
-      .label-lot{font-size:11px;font-weight:700;color:#0284c7;font-family:monospace;margin-bottom:4px;}
-      .label-row{display:flex;justify-content:space-between;font-size:10px;color:#475569;border-top:1px dashed #e2e8f0;padding-top:3px;margin-top:3px;}
-    </style>
-    ${area.innerHTML}
-  </div>`;
-  window.print();
-  // Clear pz after print
-  setTimeout(()=>pz.innerHTML='',1000);
+  if(!area){toast('برچسب یافت نشد','e');return;}
+  const pz=document.getElementById('label-pz');
+  if(!pz){toast('خطا در چاپ','e');return;}
+  pz.innerHTML=area.outerHTML;
+  document.body.classList.add('printing-wms-label');
+  const cleanup=()=>{
+    document.body.classList.remove('printing-wms-label');
+    pz.innerHTML='';
+    window.removeEventListener('afterprint',cleanup);
+  };
+  window.addEventListener('afterprint',cleanup);
+  setTimeout(()=>window.print(),80);
+  setTimeout(cleanup,8000);
 }
 
 // ══════════════════════════════════════════
@@ -4282,19 +4463,19 @@ async function openPrint(txnId){
           <td style="font-weight:700;color:${l&&daysLeft(l.expiry)<90?'#dc2626':'#16a34a'}">${l?fmtDate(l.expiry):'—'}</td>
           <td style="text-align:center;font-size:16px;font-weight:800">${fmt(t.qty)}</td>
           <td style="text-align:center">${p.unit}</td>
-          <td style="text-align:left">${fmt(unitP)} تومان</td>
-          <td style="text-align:left;font-weight:800">${fmt(total)} تومان</td>
+          <td style="text-align:left">${fmt(unitP)} ریال</td>
+          <td style="text-align:left;font-weight:800">${fmt(total)} ریال</td>
           ${lotQrImg?`<td style="text-align:center"><img src="${lotQrImg}" style="width:56px;height:56px"/></td>`:''}
         </tr>
         <tr class="prt-total">
           <td colspan="${lotQrImg?10:10}" style="text-align:left;padding-right:12px">جمع کل:</td>
-          <td style="text-align:left;font-size:15px">${fmt(total)} تومان</td>
+          <td style="text-align:left;font-size:15px">${fmt(total)} ریال</td>
           ${lotQrImg?'<td></td>':''}
         </tr>
       </tbody>
     </table>
     ${!isEntry&&t.salePrice?`<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:12px">
-      <strong>اطلاعات مالی:</strong> قیمت خرید: ${fmt(t.unitPrice)} | قیمت فروش: ${fmt(t.salePrice)} | حاشیه سود: ${fmt(t.salePrice-t.unitPrice)} تومان
+      <strong>اطلاعات مالی:</strong> قیمت خرید: ${fmt(t.unitPrice)} | قیمت فروش: ${fmt(t.salePrice)} | حاشیه سود: ${fmt(t.salePrice-t.unitPrice)} ریال
     </div>`:''}
     <div class="prt-note"><strong>یادداشت:</strong> ${t.note||'بدون یادداشت'}</div>
     <div class="prt-sigs">
@@ -4327,6 +4508,165 @@ async function openPrint(txnId){
 function doPrint(){ window.print(); }
 
 // ══════════════════════════════════════════
+// PROFORMA → EXIT PREFILL (FEFO queue)
+// ══════════════════════════════════════════
+let _pfExitQueue=null;
+
+function _resolveWmsProductId(item){
+  if(!item) return null;
+  if(item.prodId){
+    const p=S.products.find(x=>x.id===item.prodId);
+    if(p) return p.id;
+  }
+  if(item.catalogCode){
+    const p=S.products.find(x=>(x.catalogCode||'')===item.catalogCode);
+    if(p) return p.id;
+  }
+  const nm=(item.name||'').trim();
+  if(nm){
+    const p=S.products.find(x=>(x.fullName||x.name||'').trim()===nm);
+    if(p) return p.id;
+  }
+  return null;
+}
+
+function renderPfExitBanner(){
+  const el=document.getElementById('pfExitBanner');
+  if(!el||!_pfExitQueue) return;
+  const q=_pfExitQueue;
+  const rows=q.items.map((it,i)=>{
+    const done=q.submitted.includes(i);
+    const cur=i===q.index&&!done;
+    const st=done?'✅ ثبت شد':(cur?'▶️ در حال ثبت':'⏳');
+    const wmsName=it.wmsProductId?pn(it.wmsProductId):(it.name||'?');
+    return `<tr style="${cur?'background:#ede9fe':''}"><td style="padding:6px 8px">${st}</td><td style="padding:6px 8px">${wmsName}</td><td style="padding:6px 8px;text-align:center;font-weight:700">${fmt(it.qty)}</td></tr>`;
+  }).join('');
+  el.style.display='';
+  el.innerHTML=`
+    <div style="padding:14px 16px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:10px">
+        <div>
+          <div style="font-size:15px;font-weight:800;color:#6d28d9">📄 خروج از پیشفاکتور ${q.pfNo}</div>
+          <div style="font-size:12px;color:#64748b;margin-top:4px">مشتری: ${q.centerName||'—'} — پیشنهاد FEFO (زودترین انقضا) — پس از «ثبت درخواست خروج» در بخش تأییدات تأیید شود</div>
+        </div>
+        <div style="font-size:12px;font-weight:700;color:#7c3aed">کالا ${Math.min(q.index+1,q.items.length)} از ${q.items.length}</div>
+      </div>
+      <table style="width:100%;font-size:12px;border-collapse:collapse"><thead><tr style="background:#faf5ff"><th style="padding:6px 8px;text-align:right">وضعیت</th><th style="padding:6px 8px;text-align:right">کالا</th><th style="padding:6px 8px;text-align:center">تعداد</th></tr></thead><tbody>${rows}</tbody></table>
+    </div>`;
+}
+
+function prefillCurrentPfExitItem(){
+  if(!_pfExitQueue) return;
+  const q=_pfExitQueue;
+  let idx=q.index;
+  while(idx<q.items.length&&q.submitted.includes(idx)) idx++;
+  if(idx>=q.items.length){
+    toast('✅ همه کالاهای پیشفاکتور ثبت شد — به تأییدات بروید','s');
+    return;
+  }
+  q.index=idx;
+  const item=q.items[idx];
+  const typeEl=document.getElementById('exType');
+  if(typeEl) typeEl.value='sale';
+  onExTypeChange();
+  const whId=q.warehouseId||(S.warehouses.find(w=>w.active)?.id||'');
+  if(whId){
+    const ew=document.getElementById('exWh');
+    if(ew) ew.value=whId;
+  }
+  if(item.wmsProductId){
+    const p=prod(item.wmsProductId);
+    selectSSProd('exProd', item.wmsProductId, p.fullName||p.name||item.name||'');
+  } else {
+    const hidden=document.getElementById('exProd');
+    if(hidden) hidden.value='';
+    const searchEl=document.getElementById('exProdSearch');
+    if(searchEl) searchEl.value=item.name||'';
+  }
+  if(q.centerKey){
+    const c=cp(q.centerKey);
+    if(c&&c.name!=='?') selectSS('exCp', q.centerKey, c.name);
+    else {
+      const searchEl=document.getElementById('exCpSearch');
+      if(searchEl) searchEl.value=q.centerName||'';
+    }
+  }
+  const qtyEl=document.getElementById('exQty');
+  if(qtyEl) qtyEl.value=String(item.qty||'');
+  const priceEl=document.getElementById('exSalePrice');
+  if(priceEl) priceEl.value=String(item.unitPrice||'');
+  const refEl=document.getElementById('exRef');
+  if(refEl) refEl.value=q.pfNo;
+  const noteEl=document.getElementById('exNote');
+  if(noteEl) noteEl.value='حواله پیشفاکتور '+q.pfNo;
+  const hid=document.getElementById('exProformaId');
+  if(hid) hid.value=q.pfId;
+  setTimeout(()=>{suggestFEFO();if(typeof updateStockHint==='function')updateStockHint();},180);
+  renderPfExitBanner();
+  toast(`کالا ${idx+1}/${q.items.length}: ${item.name||''} — FEFO را بررسی و «ثبت درخواست خروج» بزنید`,'s');
+}
+
+function advancePfExitQueueAfterSubmit(){
+  if(!_pfExitQueue) return;
+  if(!_pfExitQueue.submitted.includes(_pfExitQueue.index)){
+    _pfExitQueue.submitted.push(_pfExitQueue.index);
+  }
+  const remaining=_pfExitQueue.items.length-_pfExitQueue.submitted.length;
+  renderPfExitBanner();
+  if(remaining>0){
+    setTimeout(()=>prefillCurrentPfExitItem(),450);
+  } else {
+    toast('✅ همه کالاها ثبت شد — انباردار در «تأییدات» تأیید نهایی می‌کند','s');
+    _pfExitQueue=null;
+    const banner=document.getElementById('pfExitBanner');
+    if(banner) banner.style.display='none';
+  }
+}
+
+async function initProformaExitFromUrl(){
+  const params=new URLSearchParams(location.search);
+  const pfId=params.get('pf');
+  if(!pfId) return false;
+  try{
+    const r=await fetch('/api/proforma/'+encodeURIComponent(pfId));
+    const pf=await r.json();
+    if(!r.ok){toast(pf.error||'پیشفاکتور یافت نشد','e');return true;}
+    if(!['approved','invoiced'].includes(pf.status)){
+      toast('فقط پیشفاکتور تأییدشده برای خروج کالا','e');return true;
+    }
+    const items=(pf.items||[]).map((it,i)=>{
+      const wmsId=_resolveWmsProductId(it);
+      return Object.assign({},it,{wmsProductId:wmsId,lineIdx:i});
+    }).filter(it=>(Number(it.qty)||0)>0);
+    if(!items.length){toast('ردیف کالا در پیشفاکتور نیست','e');return true;}
+    const missing=items.filter(it=>!it.wmsProductId);
+    _pfExitQueue={
+      pfId:pf.id,
+      pfNo:pf.no||'',
+      centerKey:pf.centerKey||'',
+      centerName:pf.centerName||'',
+      warehouseId:pf.wmsWarehouseId||'',
+      items,
+      index:0,
+      submitted:[]
+    };
+    go('exit');
+    setTimeout(()=>{
+      renderPfExitBanner();
+      prefillCurrentPfExitItem();
+    },320);
+    if(missing.length){
+      setTimeout(()=>toast('⚠️ '+missing.length+' کالا در WMS پیدا نشد — دستی انتخاب کنید','w'),600);
+    }
+    return true;
+  }catch(e){
+    console.error('[wms pf prefill]',e);
+    toast('خطا در بارگذاری پیشفاکتور','e');
+    return true;
+  }
+}
+
+// ══════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════
 document.addEventListener('DOMContentLoaded',async()=>{
@@ -4335,25 +4675,19 @@ document.addEventListener('DOMContentLoaded',async()=>{
     const ar=await fetch('/api/auth/me');
     if(!ar.ok){window.location.href='/';return;}
     const me=await ar.json();
-    currentUserId=me.username;
-    const roleMap={'مدیر':'sales_manager','کارشناس فروش':'sales','سوپر ادمین':'admin','مهمان':'support'};
-    currentRole=roleMap[me.role]||'sales';
-    document.getElementById('unEl').textContent=me.name;
-    document.getElementById('urEl').textContent=me.role;
-    const av=document.getElementById('avEl');
-    if(av){av.style.background=me.color||'#0284c7';av.textContent=me.name?me.name[0]:'?';}
+    applyAuthUser(me);
   }catch(e){window.location.href='/';return;}
 
   await loadS();
 
-  document.getElementById('mUser').addEventListener('click',e=>{if(e.target===document.getElementById('mUser'))closeModal('mUser');});
   document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)closeModal(m.id);}));
-  document.getElementById('mUser').querySelector('.sb-user')?.addEventListener('click',()=>{});
-  document.querySelector('.sb-user').addEventListener('click',()=>{renderSwitchUsers();openModal('mUser');});
   populateInvFilters();
-  const _hash=(location.hash||'').replace('#','').trim();
-  if(_hash&&document.getElementById('p-'+_hash)) go(_hash);
-  else renderDash();
+  const pfLoaded=await initProformaExitFromUrl();
+  if(!pfLoaded){
+    const _hash=(location.hash||'').replace('#','').trim();
+    if(_hash&&document.getElementById('p-'+_hash)) go(_hash);
+    else renderDash();
+  }
   updateBadges();
   const today=new Date().toISOString().split('T')[0];
   ['entExp'].forEach(id=>{const el=document.getElementById(id);if(el)el.min=today;});
@@ -4393,11 +4727,11 @@ function showDupLotModal(dupLot){
         <div class="info-row"><div class="info-label">موجودی فعلی</div><div class="info-val"><strong style="color:var(--success)">${fmt(dupLot.qty)} ${p.unit}</strong></div></div>
         <div class="info-row"><div class="info-label">انبار</div><div class="info-val">${wh(dupLot.warehouseId).name}</div></div>
         <div class="info-row"><div class="info-label">انقضا</div><div class="info-val">${fmtDate(dupLot.expiry)} ${expBadge(dupLot.expiry)}</div></div>
-        <div class="info-row"><div class="info-label">قیمت خرید قبلی</div><div class="info-val">${fmt(dupLot.purchasePrice)} تومان</div></div>
+        <div class="info-row"><div class="info-label">قیمت خرید قبلی</div><div class="info-val">${fmt(dupLot.purchasePrice)} ریال</div></div>
       </div>
     </div>
     <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:var(--r);padding:12px;margin-bottom:4px;font-size:12px">
-      <strong style="color:#1d4ed8">ورودی جدید:</strong> ${fmt(d.qty)} ${p.unit} با قیمت ${fmt(d.price)} تومان
+      <strong style="color:#1d4ed8">ورودی جدید:</strong> ${fmt(d.qty)} ${p.unit} با قیمت ${fmt(d.price)} ریال
     </div>
     <div style="font-size:12px;color:var(--text3);margin-top:12px">یکی از گزینه‌های زیر را انتخاب کنید:</div>`;
   document.getElementById('mDupLotFoot').innerHTML=`
@@ -5841,7 +6175,7 @@ async function openPrint(txnId){
         <td contenteditable="true" style="text-align:left;font-weight:800">${fmt(total)}</td>
       </tr>
       <tr style="background:#f8fafc;font-weight:800">
-        <td colspan="10" style="text-align:left">جمع کل (تومان):</td>
+        <td colspan="10" style="text-align:left">جمع کل (ریال):</td>
         <td contenteditable="true" style="text-align:left;font-size:13px">${fmt(total)}</td>
       </tr>
     </tbody>
@@ -6060,7 +6394,7 @@ async function buildPrintHTML(t){
     <thead><tr>${cols.map(c=>`<th>${c.h}</th>`).join('')}</tr></thead>
     <tbody>
       <tr>${cols.map(c=>`<td>${c.v}</td>`).join('')}</tr>
-      ${pc.showTotal!==false?`<tr style="background:#f8fafc"><td colspan="${cols.length-1}" style="text-align:left;font-weight:800;font-size:${fs-1}px">جمع کل:</td><td style="font-weight:800" contenteditable="true">${fmt(total)} تومان</td></tr>`:''}
+      ${pc.showTotal!==false?`<tr style="background:#f8fafc"><td colspan="${cols.length-1}" style="text-align:left;font-weight:800;font-size:${fs-1}px">جمع کل:</td><td style="font-weight:800" contenteditable="true">${fmt(total)} ریال</td></tr>`:''}
     </tbody>
   </table>
   <!-- NOTE -->
@@ -6486,7 +6820,7 @@ function printInv(){
   <div class="sub">تاریخ: ${today} | شمسی</div>
   <div class="totals">
     <div>کل موجودی: <span>${totalQty.toLocaleString()} عدد</span></div>
-    <div>ارزش کل: <span>${totalVal.toLocaleString()} تومان</span></div>
+    <div>ارزش کل: <span>${totalVal.toLocaleString()} ریال</span></div>
     <div>تعداد Lot: <span>${lots.length}</span></div>
   </div>
   <table>
@@ -6734,7 +7068,7 @@ function updateLastPriceHint(){
     .sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
   if(last&&last.unitPrice){
     hint.style.display='';
-    hint.textContent=`آخرین قیمت خرید: ${last.unitPrice.toLocaleString('fa-IR')} تومان (${fmtDate(last.date)})`;
+    hint.textContent=`آخرین قیمت خرید: ${last.unitPrice.toLocaleString('fa-IR')} ریال (${fmtDate(last.date)})`;
   } else {
     hint.style.display='none';
   }

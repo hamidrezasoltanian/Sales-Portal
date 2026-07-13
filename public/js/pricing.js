@@ -1873,10 +1873,9 @@ function openCenterModal(rtype,id){
   +(pot?'<span class="cm-profile-chip">P'+pot+'</span>':'')
     +'</div></div>'
     +'<div class="cm-tab-bar" role="tablist">'
-    +'<button type="button" class="cm-tab-btn active" onclick="_cmProfileTab(\'cm_'+id+'\',\'overview\',this)">📋 خلاصه</button>'
+    +'<button type="button" class="cm-tab-btn active" onclick="_cmProfileTab(\'cm_'+id+'\',\'overview\',this)">🏥 اطلاعات مرکز</button>'
     +'<button type="button" class="cm-tab-btn" onclick="_cmProfileTab(\'cm_'+id+'\',\'contact\',this)">📞 تماس</button>'
     +'<button type="button" class="cm-tab-btn" onclick="_cmProfileTab(\'cm_'+id+'\',\'sales\',this)">💰 فروش</button>'
-    +'<button type="button" class="cm-tab-btn" onclick="_cmProfileTab(\'cm_'+id+'\',\'activity\',this)">📝 فعالیت</button>'
     +'<button type="button" class="cm-tab-btn" onclick="_cmProfileTab(\'cm_'+id+'\',\'letters\',this)">✉️ نامه\u200cها</button>'
     +'</div>'
     +'<div class="cm-quick-actions">'
@@ -1980,20 +1979,6 @@ function openCenterModal(rtype,id){
     +'<textarea id="maddr_'+id+'" placeholder="آدرس کامل مرکز..." rows="2" style="width:100%;box-sizing:border-box;padding:5px 7px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;resize:vertical;background:var(--bg-input);color:var(--text-primary);direction:rtl" '
     +'onchange="setE(\''+rtype+'\',\''+r.id+'\',\'address\',this.value)">'+esc(e.address||'')+'</textarea>'
     +'<button onclick="var _v=document.getElementById(\'maddr_\'+\''+id+'\').value.trim();if(_v)window.open(\'https://www.google.com/maps/search/?api=1&query=\'+encodeURIComponent(_v),\'_blank\');else showToast(\'آدرس را وارد کنید\')" style="background:#f0f9ff;color:#0369a1;border:1px solid #7dd3fc;border-radius:5px;padding:3px 10px;font-size:11px;font-family:inherit;cursor:pointer;margin-top:4px">🗺 نقشه</button>'
-    +'<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)">'
-    +'<div style="font-size:10px;font-weight:700;color:#0369a1;margin-bottom:6px">📦 اطلاعات ارسال</div>'
-    +'<div class="cm-form-grid cm-form-grid-2">'
-    +'<div class="cm-field"><label>🚚 روش ارسال</label>'
-    +'<select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'shipMethod\',this.value)">'
-    +CM_SHIP_METHODS.map(function(m){return'<option value="'+m+'"'+((e.shipMethod||'')===m?' selected':'')+'>'+(m||'— انتخاب —')+'</option>';}).join('')
-    +'</select></div>'
-    +'<div class="cm-field"><label>👤 شخص تحویل‌گیرنده</label>'
-    +'<input type="text" class="cm-inp" value="'+esc(e.deliveryRecipient||'')+'" placeholder="نام و سمت تحویل‌گیرنده..." onchange="setE(\''+rtype+'\',\''+r.id+'\',\'deliveryRecipient\',this.value)"></div>'
-    +'</div>'
-    +'<div class="cm-field" style="margin-top:8px"><label>📍 آدرس ارسال (گیرنده / خریدار)</label>'
-    +'<textarea id="mshipaddr_'+id+'" rows="2" class="cm-inp" placeholder="آدرس دقیق تحویل بار..." style="resize:vertical;direction:rtl" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'shipAddress\',this.value)">'+esc(e.shipAddress||e.address||'')+'</textarea>'
-    +'<button type="button" class="cm-qact cm-qact-week" style="margin-top:6px" onclick="openCenterShipPrint(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName).replace(/'/g,"\\'")+'\')">🖨️ چاپ برچسب ارسال</button>'
-    +'</div></div>'
     +'</div>'
     +'<div class="cm-profile-section" data-cm-panel="overview">'
     +'<div class="cm-profile-section-title">🤖 رقبا و Prospect</div>'
@@ -2028,6 +2013,20 @@ function openCenterModal(rtype,id){
         +'</div></div>';
     })()
     +'</div>'
+    +'<div class="cm-profile-section" data-cm-panel="overview">'
+    +'<div class="cm-profile-section-title">📦 اطلاعات ارسال</div>'
+    +'<div class="cm-form-grid cm-form-grid-2">'
+    +'<div class="cm-field"><label>🚚 روش ارسال</label>'
+    +'<select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'shipMethod\',this.value)">'
+    +CM_SHIP_METHODS.map(function(m){return'<option value="'+m+'"'+((e.shipMethod||'')===m?' selected':'')+'>'+(m||'— انتخاب —')+'</option>';}).join('')
+    +'</select></div>'
+    +'<div class="cm-field"><label>👤 شخص تحویل‌گیرنده</label>'
+    +'<input type="text" class="cm-inp" value="'+esc(e.deliveryRecipient||'')+'" placeholder="نام و سمت تحویل‌گیرنده..." onchange="setE(\''+rtype+'\',\''+r.id+'\',\'deliveryRecipient\',this.value)"></div>'
+    +'</div>'
+    +'<div class="cm-field" style="margin-top:8px"><label>📍 آدرس ارسال (گیرنده / خریدار)</label>'
+    +'<textarea id="mshipaddr_'+id+'" rows="2" class="cm-inp" placeholder="آدرس دقیق تحویل بار..." style="resize:vertical;direction:rtl" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'shipAddress\',this.value)">'+esc(e.shipAddress||e.address||'')+'</textarea>'
+    +'<button type="button" class="cm-qact cm-qact-week" style="margin-top:6px" onclick="openCenterShipPrint(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName).replace(/'/g,"\\'")+'\')">🖨️ چاپ برچسب ارسال</button>'
+    +'</div></div>'
     +'<div id="cmWorkSec_'+id+'" class="cm-profile-section cm-profile-accent-work" data-cm-panel="overview">'
     +'<div class="cm-profile-section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">'
     +'<span>📌 وظایف و تیکت‌های باز</span>'
@@ -2042,9 +2041,10 @@ function openCenterModal(rtype,id){
     +'<div id="cmDeals_'+id+'" style="font-size:11px;color:#94a3b8">در حال بارگذاری…</div>'
     +'</div>'
     +'<div id="cmPricingInfo_'+r.id+'" class="cm-profile-section" data-cm-panel="sales" style="display:none;font-size:11px"><span style="color:var(--text-muted)">در حال بارگذاری قیمت‌گذاری...</span></div>'
-    +'<div data-cm-panel="activity" style="display:none">'
+    +'<div class="cm-profile-section" data-cm-panel="overview">'
+    +'<div class="cm-profile-section-title">📋 برنامه هفته و گزارش</div>'
    // برنامه هفته
-    +(wkEntries.length?'<label>برنامه هفته</label><div style="background:var(--bg-raised);border-radius:5px;padding:7px;font-size:11px">'
+    +(wkEntries.length?'<label style="font-size:10px;font-weight:700;display:block;margin:8px 0 4px">برنامه هفته</label><div style="background:var(--bg-raised);border-radius:5px;padding:7px;font-size:11px">'
     +wkEntries.map(function(we){
       var wt=DB.weekTags.find(function(w){return w.id===we.weekTagId;});
       var actType = we.actionType || 'call';
@@ -2074,7 +2074,8 @@ function openCenterModal(rtype,id){
         +'</div>'
         +'<textarea id="mnote_'+id+'" rows="4" placeholder="گزارش تماس، نتیجه ویزیت، توضیحات..." style="width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--border-input);border-radius:6px;font-family:inherit;font-size:12px;resize:vertical;line-height:1.6" onkeydown="_noteKeydown(event,\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')"></textarea>'
         +tagChips
-        +'<div style="display:flex;justify-content:flex-end;margin-top:8px">'
+        +'<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;flex-wrap:wrap">'
+        +'<button type="button" class="btn-secondary" style="background:#faf5ff;color:#7c3aed;border:1px solid #d8b4fe" onclick="sendCenterReportToManager(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">📨 ارسال گزارش</button>'
         +'<button class="btn-primary" onclick="addNoteFromModal(\''+rtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">✓ ثبت</button>'
         +'</div>'
         +'<div id="mNotesList_'+id+'" style="margin-top:10px">'
@@ -2082,7 +2083,7 @@ function openCenterModal(rtype,id){
         +'</div></div>';
     })();
 
-  body+='<div id="cmFilesSec_'+id+'" class="cm-profile-section">'
+  body+='<div id="cmFilesSec_'+id+'" class="cm-profile-section" data-cm-panel="overview">'
     +'<div class="cm-profile-section-title">📎 پیوست‌ها</div>'
     +'<div id="cmFiles_'+id+'" style="font-size:11px;color:#94a3b8">در حال بارگذاری…</div>'
     +'</div>';
@@ -2091,9 +2092,9 @@ function openCenterModal(rtype,id){
   var rkey=rtype+'_'+r.id;
   var hist=(DB.changeLog||[]).filter(function(h){return h.rkey===rkey;}).slice(-5).reverse();
   var fNames={status:'وضعیت',followupDate:'تاریخ پیگیری',contactName:'مخاطب',owner:'کارشناس',notes:'یادداشت',lead:'سرنخ',potential:'پتانسیل'};
-  body+='</div>'; // activity panel
+  body+='</div>'; // overview week/report section
 
-  body+='<div class="cm-profile-section" data-cm-panel="activity">'
+  body+='<div class="cm-profile-section" data-cm-panel="overview">'
     +'<div class="cm-profile-section-title">📋 تغییرات اخیر</div>'
     +(hist.length?hist.map(function(h){
       var d=new Date(h.at);var jd=g2j(d.getFullYear(),d.getMonth()+1,d.getDate());
@@ -2172,7 +2173,8 @@ function openCenterModal(rtype,id){
       var _pfBtn=document.getElementById('pfBtn_'+_mid4);
       if(_pfBtn){
         _pfBtn.addEventListener('click',function(){
-          if(typeof pfOpenForCenter==='function')pfOpenForCenter(_ck4,_nm4);
+          if(typeof pfOpenNewForCenter==='function')pfOpenNewForCenter(_ck4,_nm4);
+          else if(typeof pfOpenForCenter==='function')pfOpenForCenter(_ck4,_nm4);
           if(typeof closeModal==='function')closeModal('cm_'+_mid4);
         });
       }
@@ -2500,6 +2502,30 @@ function _renderNotesList(notes){
       +'<span style="margin-right:6px">'+esc(n.date||(n.at?msToJ(n.at):'')||'')+'</span></div></div>';
   }).join('');
 }
+
+function sendCenterReportToManager(type, id, name) {
+  var inp = document.getElementById('mnote_' + id);
+  if (!inp || !inp.value.trim()) { showToast('متن گزارش را وارد کنید'); return; }
+  var text = inp.value.trim();
+  var centerKey = recK(type, id);
+  var members = (typeof umGetMembers === 'function' ? umGetMembers() : (DB.settings && DB.settings.members) || []);
+  var managers = members.filter(function(m) {
+    return m.active !== false && (m.role === 'مدیر' || m.role === 'سوپر ادمین');
+  });
+  if (!managers.length) { showToast('مدیر فعالی یافت نشد'); return; }
+  if (typeof sendNotif !== 'function') { showToast('ماژول اعلان بارگذاری نشده'); return; }
+  var msg = '📨 گزارش «' + name + '»: ' + text;
+  var sent = 0;
+  managers.forEach(function(m) {
+    if (m.id && m.id !== currentUser) {
+      sendNotif(m.id, msg, centerKey, [], 'manager_request', { centerName: name, reportText: text });
+      sent++;
+    }
+  });
+  if (!sent) { showToast('گزارش برای مدیر دیگری ارسال نشد'); return; }
+  addNoteFromModal(type, id, name);
+}
+window.sendCenterReportToManager = sendCenterReportToManager;
 
 function addNoteFromModal(type,id,name){
   var inp=document.getElementById('mnote_'+id);

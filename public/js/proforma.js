@@ -1,6 +1,6 @@
 // ════════════════════════════════════════════════════════════════════════════
 // PROFORMA MODULE — پیشفاکتور
-// Workflow: draft → sent → approved/rejected → (reopen → draft)
+// Workflow: draft → sent → negotiating → approved/rejected/expired → invoiced
 // ════════════════════════════════════════════════════════════════════════════
 'use strict';
 
@@ -18,9 +18,12 @@ var _pfProdSearch = '';
 var _pfActiveCat = null; // expanded category in tree view
 var _pfSearch    = '';   // live search query
 var _pfOwnerF    = '';   // owner/creator filter
+var _pfCatF      = '';   // category filter
+var _pfProdF     = '';   // product filter
 var _pfExpanded  = {};   // expanded row IDs in list {pfId: true}
 var _pfCenterMap = [];  // center lookup for proforma list clicks
 var _pfOpenPf = null;   // proforma object currently open in modal
+var _pfPendingNewCenter = null; // { centerKey, centerName } from center profile
 var _pfStats = null;    // cached stats from /api/proforma/stats
 
 function _pfRoot() {
@@ -29,12 +32,15 @@ function _pfRoot() {
 
 // ── Status labels & colors ───────────────────────────────────────────────
 var PF_STATUS = {
-  draft:     { label: 'پیش‌نویس',   cls: 'bgr' },
-  sent:      { label: 'ارسال شده',  cls: 'bb'  },
-  approved:  { label: 'تأیید شده', cls: 'bg'  },
-  rejected:  { label: 'رد شده',    cls: 'br'  },
-  cancelled: { label: 'لغو شده',   cls: 'by'  },
-  invoiced:  { label: 'فاکتور شده', cls: 'bc'  },
+  draft:       { label: 'پیش‌نویس',    cls: 'bgr' },
+  sent:        { label: 'ارسال شده',   cls: 'bb'  },
+  negotiating: { label: 'در مذاکره',   cls: 'bo'  },
+  pending_disc: { label: 'انتظار تأیید تخفیف', cls: 'bo' },
+  approved:    { label: 'تأیید شده',  cls: 'bg'  },
+  rejected:    { label: 'رد شده',     cls: 'br'  },
+  cancelled:   { label: 'لغو شده',    cls: 'by'  },
+  invoiced:    { label: 'فاکتور شده', cls: 'bc'  },
+  expired:     { label: 'منقضی شده',  cls: 'bk'  },
 };
 
 function pfStatusBadge(s) {
@@ -122,7 +128,7 @@ function _pfStatsBarHtml() {
   var invoiced = (bySt.invoiced && bySt.invoiced.count) || 0;
   var approvedVal = Number(t.approved_value || 0);
   var cycle = t.avg_cycle_days != null ? Number(t.avg_cycle_days) : null;
-  return '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;padding:12px 14px;background:linear-gradient(135deg,#f5f3ff,#eff6ff);border:1px solid #ddd6fe;border-radius:10px">' +
+  return '<div data-pf-stats="1" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;padding:12px 14px;background:linear-gradient(135deg,#f5f3ff,#eff6ff);border:1px solid #ddd6fe;border-radius:10px">' +
     '<div style="width:100%;font-size:11px;font-weight:700;color:#6d28d9;margin-bottom:2px">📊 آمار پیشفاکتور (SQL)</div>' +
     '<div style="flex:1;min-width:90px;text-align:center;background:white;border-radius:8px;padding:8px;border:1px solid #e2e8f0"><div style="font-size:18px;font-weight:800;color:#6366f1">' + (t.total || _pfList.length) + '</div><div style="font-size:10px;color:#64748b">کل</div></div>' +
     '<div style="flex:1;min-width:90px;text-align:center;background:white;border-radius:8px;padding:8px;border:1px solid #e2e8f0"><div style="font-size:18px;font-weight:800;color:#15803d">' + approved + '</div><div style="font-size:10px;color:#64748b">تأیید/فاکتور</div></div>' +
@@ -143,8 +149,15 @@ async function renderProformaPanel() {
     await pfLoad();
     await _pfLoadStats();
     await _pfLoadWmsProds();
+    if (typeof buildUSERS === 'function') buildUSERS();
+    _pfEnsureCenterCache();
     _renderPfPanel(el);
     _pfHandleDeepLink();
+    if (_pfPendingNewCenter) {
+      _pfConsumePendingNewCenter().catch(function(e) {
+        console.error('[proforma] pending new center:', e);
+      });
+    }
   } catch(e) {
     el.innerHTML = '<div style="padding:40px;text-align:center;color:#dc2626">خطا: ' + (e && e.message ? e.message : String(e)) + '</div>';
     console.error('[proforma] renderProformaPanel error:', e);
@@ -152,80 +165,200 @@ async function renderProformaPanel() {
 }
 
 
+function _pfEnsureCenterCache() {
+  if (typeof _buildPCCache === 'function') { try { _buildPCCache(); } catch (_) {} }
+}
+
+function _pfGetResponsibleId(pf) {
+  if (!pf) return '';
+  _pfEnsureCenterCache();
+  var centerOwner = _pfResolveOwnerId(_pfGetCenterOwnerId(pf.centerKey) || '');
+  var created = _pfResolveOwnerId(pf.createdBy || '');
+  var salesRaw = pf.salesOwner != null ? String(pf.salesOwner).trim() : '';
+  var sales = salesRaw ? _pfResolveOwnerId(salesRaw) : '';
+  // مسئول فروش صریح (فقط اگر با ثبت‌کننده متفاوت باشد — نه مقدار پیش‌فرض خودکار)
+  if (sales && sales !== created) return sales;
+  if (centerOwner) return centerOwner;
+  if (sales) return sales;
+  return created;
+}
+
+function _pfGetResponsibleName(pf) {
+  var id = _pfGetResponsibleId(pf);
+  return id ? _pfCreatorName(id) : 'نامشخص';
+}
+
+function _pfGetFilteredList() {
+  var byStatus = _pfFilter === 'all' ? _pfList : _pfList.filter(function(p) { return p.status === _pfFilter; });
+  return _pfApplySearch(byStatus);
+}
+
 function _pfApplySearch(list) {
   var q = (_pfSearch || '').trim();
   var owner = _pfOwnerF || '';
-  if (!q && !owner) return list;
+  var catF = _pfCatF || '';
+  var prodF = _pfProdF || '';
+  if (!q && !owner && !catF && !prodF) return list;
   var qn = q ? fNorm(q) : '';
+  var wantOwner = owner ? _pfResolveOwnerId(owner) : '';
   return list.filter(function(pf) {
-    // Filter by center owner instead of creator
-    if (owner) {
-      var actualOwner = _pfGetCenterOwnerId(pf.centerKey);
-      if (actualOwner !== owner) return false;
+    if (wantOwner) {
+      if (_pfResolveOwnerId(_pfGetResponsibleId(pf)) !== wantOwner) return false;
+    }
+    if (catF) {
+      var hasCat = (pf.items || []).some(function(it) { return _pfItemCategory(it) === catF; });
+      if (!hasCat) return false;
+    }
+    if (prodF) {
+      var hasProd = (pf.items || []).some(function(it) {
+        return String(it.prodId || '') === prodF ||
+          String(it.catalogCode || '') === prodF ||
+          String(it.name || '') === prodF;
+      });
+      if (!hasProd) return false;
     }
     if (!qn) return true;
     if (fNorm(pf.centerName || '').indexOf(qn) !== -1) return true;
     if (fNorm(pf.no || '').indexOf(qn) !== -1) return true;
-    if (fNorm(_pfGetCenterOwner(pf.centerKey) || '').indexOf(qn) !== -1) return true;
+    if (fNorm(_pfGetResponsibleName(pf) || '').indexOf(qn) !== -1) return true;
+    if (fNorm(_pfCreatorName(pf.createdBy) || '').indexOf(qn) !== -1) return true;
     if ((pf.items || []).some(function(it) {
       return fNorm(it.name || '').indexOf(qn) !== -1 ||
-             fNorm(it.catalogCode || '').indexOf(qn) !== -1;
+             fNorm(it.catalogCode || '').indexOf(qn) !== -1 ||
+             fNorm(_pfItemCategory(it) || '').indexOf(qn) !== -1;
     })) return true;
     return false;
   });
 }
 
-function _pfToggleExpand(id) {
-  _pfExpanded[id] = !_pfExpanded[id];
-  var el = document.getElementById('pfVanillaRoot');
-  if (el) _renderPfPanel(el);
+function _pfOnSearchInput(val) {
+  _pfSearch = val;
+  _pfPage = 0;
+  _pfRefreshListDom();
 }
 
-function _renderPfPanel(el) {
-  var byStatus = _pfFilter === 'all' ? _pfList : _pfList.filter(function(p){ return p.status === _pfFilter; });
-  var filtered  = _pfApplySearch(byStatus);
-  var isManager = _isManager();
-  var PER_PAGE  = 25;
-  var pageItems = filtered.slice(0, (_pfPage + 1) * PER_PAGE);
-  var hasMore   = filtered.length > pageItems.length;
+function _pfOnOwnerFilter(val) {
+  _pfOwnerF = val;
+  _pfPage = 0;
+  _pfRefreshListDom();
+}
 
-  // members for owner dropdown
-  var members = (typeof DB !== 'undefined' && DB.settings && DB.settings.members) ? DB.settings.members.filter(function(m){ return m.active !== false; }) : [];
+function _pfOnCatFilter(val) {
+  _pfCatF = val;
+  _pfPage = 0;
+  _pfRefreshListDom();
+}
 
-  var filterBtns = ['all','draft','sent','approved','rejected','cancelled','invoiced'].map(function(s) {
-    var lbl = s === 'all' ? 'همه' : (s === 'invoiced' ? 'فاکتور شده' : (PF_STATUS[s] || { label: s }).label);
-    var cnt = s === 'all' ? _pfList.length : _pfList.filter(function(p){ return p.status === s; }).length;
-    return '<button onclick="_pfSetFilter(\'' + s + '\')" style="padding:5px 12px;border-radius:20px;border:1px solid ' +
-      (_pfFilter === s ? 'var(--brand)' : '#e2e8f0') + ';background:' +
-      (_pfFilter === s ? 'var(--brand)' : 'white') + ';color:' +
-      (_pfFilter === s ? 'white' : '#64748b') + ';font-size:12px;font-family:inherit;cursor:pointer">' +
-      lbl + (cnt ? ' <span style="background:rgba(0,0,0,.12);border-radius:10px;padding:0 6px;font-size:10px">' + cnt + '</span>' : '') + '</button>';
-  }).join('');
+function _pfOnProdFilter(val) {
+  _pfProdF = val;
+  _pfPage = 0;
+  _pfRefreshListDom();
+}
 
-  // Search + filter bar
-  var ownerOpts = '<option value="">همه کارشناسان</option>' +
-    members.map(function(m){ return '<option value="' + esc(m.id) + '"' + (_pfOwnerF===m.id?' selected':'') + '>' + esc(m.name) + '</option>'; }).join('');
+function _pfGetExpertMembers() {
+  var map = {};
+  function add(id, name) {
+    if (!id || id === 'guest') return;
+    if (!map[id]) map[id] = name || (typeof _pfCreatorName === 'function' ? _pfCreatorName(id) : id);
+  }
+  if (typeof umGetActive === 'function') {
+    umGetActive().forEach(function(m) { add(m.id, m.name); });
+  } else if (typeof DB !== 'undefined' && DB.settings && DB.settings.members) {
+    DB.settings.members.filter(function(m) { return m.active !== false; }).forEach(function(m) { add(m.id, m.name); });
+  }
+  (_pfList || []).forEach(function(pf) {
+    var oid = _pfGetResponsibleId(pf);
+    if (oid) add(oid, _pfGetResponsibleName(pf));
+  });
+  if (typeof USERS !== 'undefined') {
+    Object.keys(USERS).forEach(function(k) {
+      if (k !== 'guest' && !map[k]) add(k, USERS[k]);
+    });
+  }
+  return Object.keys(map).map(function(id) { return { id: id, name: map[id] }; })
+    .sort(function(a, b) { return String(a.name).localeCompare(String(b.name), 'fa'); });
+}
 
-  var searchBar =
-    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px">' +
-      '<input id="pfSearchInp" type="text" placeholder="🔍 جستجو: مرکز، کالا، کد کاتالوگ، مسئول مرکز..." value="' + esc(_pfSearch) + '" ' +
-        'oninput="if(window._pfSearchTimer)clearTimeout(window._pfSearchTimer);window._pfSearchTimer=setTimeout(function(){_pfSearch=document.getElementById(\'pfSearchInp\').value;_pfPage=0;var el=document.getElementById(\'pfVanillaRoot\');if(el)_renderPfPanel(el);},500)" ' +
-        'style="flex:1;min-width:200px;padding:7px 12px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:13px;outline:none" autocomplete="off">' +
-      '<select onchange="_pfOwnerF=this.value;_pfPage=0;var el=document.getElementById(\'pfVanillaRoot\');if(el)_renderPfPanel(el)" ' +
-        'style="padding:7px 10px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:12px">' +
-        ownerOpts +
-      '</select>' +
-      (_pfSearch||_pfOwnerF ? '<button onclick="_pfSearch=\'\';_pfOwnerF=\'\';_pfPage=0;var el=document.getElementById(\'pfVanillaRoot\');if(el)_renderPfPanel(el)" style="padding:6px 12px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer">✕ پاک کردن</button>' : '') +
-      '<span style="font-size:12px;color:#94a3b8;white-space:nowrap">' + filtered.length + ' پیشفاکتور</span>' +
-    '</div>';
+function _pfCategoryOptions() {
+  var cats = {};
+  (_pfWmsProds || []).forEach(function(p) {
+    var cat = p.category || 'سایر';
+    cats[cat] = true;
+  });
+  (_pfList || []).forEach(function(pf) {
+    (pf.items || []).forEach(function(it) { cats[_pfItemCategory(it)] = true; });
+  });
+  return Object.keys(cats).sort(function(a, b) { return a.localeCompare(b, 'fa'); });
+}
 
-  _pfCenterMap = [];
-  var rows = pageItems.length ? pageItems.map(function(pf) {
+function _pfProductOptions() {
+  var seen = {};
+  var out = [];
+  function addProd(key, label) {
+    if (!key || seen[key]) return;
+    seen[key] = true;
+    out.push({ id: key, label: label || key });
+  }
+  (_pfWmsProds || []).forEach(function(p) {
+    var key = String(p.catalog_code || p.catalogCode || p.id || '');
+    if (!key) return;
+    addProd(key, (p.full_name || p.name || key) + (p.catalog_code ? ' · ' + p.catalog_code : ''));
+  });
+  (_pfList || []).forEach(function(pf) {
+    (pf.items || []).forEach(function(it) {
+      var key = String(it.catalogCode || it.prodId || it.name || '');
+      if (key) addProd(key, (it.name || key) + (it.catalogCode ? ' · ' + it.catalogCode : ''));
+    });
+  });
+  return out.sort(function(a, b) { return a.label.localeCompare(b.label, 'fa'); });
+}
+
+function _pfClearFilters() {
+  _pfSearch = '';
+  _pfOwnerF = '';
+  _pfCatF = '';
+  _pfProdF = '';
+  _pfPage = 0;
+  var si = document.getElementById('pfSearchInp');
+  var so = document.getElementById('pfOwnerSel');
+  var sc = document.getElementById('pfCatSel');
+  var sp = document.getElementById('pfProdSel');
+  if (si) si.value = '';
+  if (so) so.value = '';
+  if (sc) sc.value = '';
+  if (sp) sp.value = '';
+  _pfRefreshListDom();
+}
+
+function _pfSyncFiltersFromDom() {
+  var si = document.getElementById('pfSearchInp');
+  var so = document.getElementById('pfOwnerSel');
+  var sc = document.getElementById('pfCatSel');
+  var sp = document.getElementById('pfProdSel');
+  if (si) _pfSearch = si.value;
+  if (so) _pfOwnerF = so.value;
+  if (sc) _pfCatF = sc.value;
+  if (sp) _pfProdF = sp.value;
+}
+
+function _pfToggleExpand(id) {
+  _pfExpanded[id] = !_pfExpanded[id];
+  _pfRefreshListDom();
+}
+
+function _pfBuildRowsHtml(pageItems) {
+  return pageItems.map(function(pf) {
     var st = PF_STATUS[pf.status] || { label: pf.status, cls: 'bgr' };
     var actions = _pfActions(pf);
     var isExpanded = !!_pfExpanded[pf.id];
     var commBadge = pf.hasCommission ? '<span style="display:inline-block;margin-right:4px;background:#fef3c7;color:#b45309;border:1px solid #fcd34d;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700">💸 پورسانت ' + (pf.commissionAmt ? fmtNum(pf.commissionAmt) + ' ﷼' : '') + '</span>' : '';
     var verBadge = pf.versions && pf.versions.length ? '<span style="background:#f0f9ff;color:#0284c7;border:1px solid #bae6fd;border-radius:10px;padding:1px 6px;font-size:10px" title="' + pf.versions.length + ' نسخه قبلی">' + pf.versions.length + 'v</span>' : '';
+    var respName = _pfGetResponsibleName(pf);
+    var expDate = pf.expiryDate || (typeof _pfComputeExpiry === 'function' ? _pfComputeExpiry(pf) : '');
+    var expHint = (expDate && ['sent','negotiating','draft'].includes(pf.status))
+      ? '<div style="font-size:10px;color:#b45309;margin-top:2px" title="تاریخ انقضا">⏳ ' + esc(expDate) + '</div>' : '';
+    var lossHint = (pf.status === 'rejected' && pf.lossReason)
+      ? '<div style="font-size:10px;color:#b91c1c;margin-top:2px">' + esc((typeof PF_LOSS_REASONS !== 'undefined' ? PF_LOSS_REASONS[pf.lossReason] : pf.lossReason) || '') + '</div>' : '';
     var mainRow = '<tr style="border-bottom:' + (isExpanded?'none':'1px solid #f1f5f9') + ';transition:background .15s" ' +
       'onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'white\'">' +
       '<td style="padding:10px 12px">' +
@@ -233,7 +366,7 @@ function _renderPfPanel(el) {
         '<span style="font-family:monospace;font-size:12px;color:#0284c7;font-weight:700">' + esc(pf.no) + '</span>' +
         (verBadge ? ' ' + verBadge : '') +
       '</td>' +
-      '<td style="padding:10px 12px;font-size:12px;color:#475569">' + esc(pf.jalaliDate || '') + '</td>' +
+      '<td style="padding:10px 12px;font-size:12px;color:#475569">' + esc(pf.jalaliDate || '') + expHint + '</td>' +
       '<td style="padding:10px 12px">' +
         (pf.centerKey
           ? '<div onclick="pfCenterClick(' + (_pfCenterMap.push({key:pf.centerKey,name:pf.centerName||''}) - 1) + ')" style="font-weight:600;font-size:13px;color:#0284c7;cursor:pointer;text-decoration:underline;text-underline-offset:2px">' + esc(pf.centerName || '\u2014') + '</div>'
@@ -242,8 +375,8 @@ function _renderPfPanel(el) {
       '</td>' +
       '<td style="padding:10px 12px;font-size:12px;color:#64748b">' + ((pf.items||[]).length) + ' ردیف</td>' +
       '<td style="padding:10px 12px;font-family:monospace;font-size:13px;color:#1e293b;font-weight:600">' + fmtNum(pf.total) + ' ﷼</td>' +
-      '<td style="padding:10px 12px"><span class="status-badge" style="background:' + _badgeBg(pf.status) + ';color:' + _badgeFg(pf.status) + ';padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700">' + st.label + '</span></td>' +
-      '<td style="padding:10px 12px;font-size:12px">' + esc(_pfGetCenterOwner(pf.centerKey)) + '</td>' +
+      '<td style="padding:10px 12px"><span class="status-badge" style="background:' + _badgeBg(pf.status) + ';color:' + _badgeFg(pf.status) + ';padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700">' + st.label + '</span>' + lossHint + '</td>' +
+      '<td style="padding:10px 12px;font-size:12px" title="' + esc(_pfCreatorName(pf.createdBy)) + '">' + esc(respName) + '</td>' +
       '<td style="padding:10px 12px;white-space:nowrap">' + actions + '</td>' +
       '</tr>';
 
@@ -254,6 +387,7 @@ function _renderPfPanel(el) {
             '<thead><tr style="background:#f0f9ff">' +
               '<th style="padding:5px 10px;text-align:right;color:#0369a1;font-weight:600">کد کاتالوگ</th>' +
               '<th style="padding:5px 10px;text-align:right;color:#0369a1;font-weight:600">نام کالا</th>' +
+              '<th style="padding:5px 10px;text-align:center;color:#0369a1;font-weight:600">دسته</th>' +
               '<th style="padding:5px 10px;text-align:center;color:#0369a1;font-weight:600">تعداد</th>' +
               '<th style="padding:5px 10px;text-align:center;color:#0369a1;font-weight:600">واحد</th>' +
               '<th style="padding:5px 10px;text-align:center;color:#0369a1;font-weight:600">قیمت واحد</th>' +
@@ -266,11 +400,12 @@ function _renderPfPanel(el) {
               return '<tr style="border-top:1px solid #e0f2fe' + (idx%2===1?';background:#f8fbff':'') + '">' +
                 '<td style="padding:5px 10px;font-family:monospace;color:#0284c7">' + esc(it.catalogCode || it.prodId || '—') + '</td>' +
                 '<td style="padding:5px 10px;font-weight:600">' + esc(it.name || '') + '</td>' +
+                '<td style="padding:5px 10px;text-align:center;font-size:11px;color:#64748b">' + esc(_pfItemCategory(it)) + '</td>' +
                 '<td style="padding:5px 10px;text-align:center">' + fmtNum(it.qty) + '</td>' +
                 '<td style="padding:5px 10px;text-align:center;color:#64748b">' + esc(it.unit||'عدد') + '</td>' +
                 '<td style="padding:5px 10px;text-align:center;font-family:monospace">' + fmtNum(it.unitPrice) + '</td>' +
                 '<td style="padding:5px 10px;text-align:center;color:#c2410c">' + disc + '</td>' +
-                '<td style="padding:5px 10px;text-align:center;font-family:monospace;font-weight:700;color:#15803d">' + fmtNum(it.lineTotal||it.qty*it.unitPrice) + '</td>' +
+                '<td style="padding:5px 10px;text-align:center;font-family:monospace;font-weight:700;color:#15803d">' + fmtNum(_pfItemAmount(it, pf)) + '</td>' +
               '</tr>';
             }).join('') +
             '</tbody></table>'
@@ -286,46 +421,153 @@ function _renderPfPanel(el) {
       '</td></tr>';
     }
     return mainRow + expandRow;
-  }).join('') : '<tr><td colspan="8" style="text-align:center;padding:40px;color:#94a3b8">پیشفاکتوری یافت نشد</td></tr>';
+  }).join('');
+}
+
+function _pfRefreshListDom() {
+  var tbody = document.getElementById('pfListTbody');
+  var countEl = document.getElementById('pfListCount');
+  var moreWrap = document.getElementById('pfListMoreWrap');
+  var clearBtn = document.getElementById('pfClearFiltersBtn');
+  if (!tbody) {
+    var el = _pfRoot();
+    if (el) _renderPfPanel(el);
+    return;
+  }
+  var filtered = _pfGetFilteredList();
+  var PER_PAGE = 25;
+  var pageItems = filtered.slice(0, (_pfPage + 1) * PER_PAGE);
+  var hasMore = filtered.length > pageItems.length;
+  _pfCenterMap = [];
+  tbody.innerHTML = pageItems.length ? _pfBuildRowsHtml(pageItems) : '<tr><td colspan="8" style="text-align:center;padding:40px;color:#94a3b8">پیشفاکتوری یافت نشد</td></tr>';
+  if (countEl) countEl.textContent = filtered.length + ' پیش\u200cفاکتور';
+  if (clearBtn) clearBtn.style.display = (_pfSearch || _pfOwnerF || _pfCatF || _pfProdF || _pfDateFrom || _pfDateTo || _pfChannelF || _pfQuickF) ? '' : 'none';
+  if (moreWrap) {
+    moreWrap.innerHTML = hasMore
+      ? '<button onclick="_pfLoadMore()" style="padding:8px 24px;border:1px solid var(--brand);background:white;color:var(--brand);border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer">\u2b07 \u0628\u0627\u0631\u06af\u0630\u0627\u0631\u06cc \u0628\u06cc\u0634\u062a\u0631 (' + (filtered.length - pageItems.length) + ' \u0645\u0648\u0631\u062f \u062f\u06cc\u06af\u0631)</button>'
+      : '';
+  }
+}
+
+function _renderPfPanel(el) {
+  _pfSyncFiltersFromDom();
+  _pfEnsureCenterCache();
+  var filtered = _pfGetFilteredList();
+  var isManager = _isManager();
+  var PER_PAGE = 25;
+  var pageItems = filtered.slice(0, (_pfPage + 1) * PER_PAGE);
+  var hasMore = filtered.length > pageItems.length;
+
+  var members = _pfGetExpertMembers();
+  var catOpts = '<option value="">همه دسته‌ها</option>' +
+    _pfCategoryOptions().map(function(cat) {
+      return '<option value="' + esc(cat) + '"' + (_pfCatF === cat ? ' selected' : '') + '>' + esc(cat) + '</option>';
+    }).join('');
+  var prodOpts = '<option value="">همه کالاها</option>' +
+    _pfProductOptions().map(function(p) {
+      return '<option value="' + esc(p.id) + '"' + (_pfProdF === p.id ? ' selected' : '') + '>' + esc(p.label) + '</option>';
+    }).join('');
+
+  var filterBtns = ['all','draft','pending_disc','sent','negotiating','approved','rejected','cancelled','invoiced','expired'].map(function(s) {
+    var lbl = s === 'all' ? 'همه' : (s === 'invoiced' ? 'فاکتور شده' : (s === 'pending_disc' ? 'تأیید تخفیف' : (PF_STATUS[s] || { label: s }).label));
+    var cnt = s === 'all' ? _pfList.length : _pfList.filter(function(p){ return p.status === s; }).length;
+    return '<button onclick="_pfSetFilter(\'' + s + '\')" style="padding:5px 12px;border-radius:20px;border:1px solid ' +
+      (_pfFilter === s ? 'var(--brand)' : '#e2e8f0') + ';background:' +
+      (_pfFilter === s ? 'var(--brand)' : 'white') + ';color:' +
+      (_pfFilter === s ? 'white' : '#64748b') + ';font-size:12px;font-family:inherit;cursor:pointer">' +
+      lbl + (cnt ? ' <span style="background:rgba(0,0,0,.12);border-radius:10px;padding:0 6px;font-size:10px">' + cnt + '</span>' : '') + '</button>';
+  }).join('');
+
+  var ownerOpts = '<option value="">همه کارشناسان</option>' +
+    members.map(function(m) {
+      return '<option value="' + esc(m.id) + '"' + (_pfOwnerF === m.id ? ' selected' : '') + '>' + esc(m.name) + '</option>';
+    }).join('');
+
+  var searchBar =
+    '<div id="pfSearchBar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px">' +
+      '<input id="pfSearchInp" type="text" placeholder="🔍 جستجو: مرکز، کالا، دسته، مسئول..." value="' + esc(_pfSearch) + '" ' +
+        'oninput="_pfOnSearchInput(this.value)" ' +
+        'style="flex:1;min-width:180px;padding:7px 12px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:13px;outline:none" autocomplete="off">' +
+      '<select id="pfOwnerSel" onchange="_pfOnOwnerFilter(this.value)" title="کارشناس" ' +
+        'style="padding:7px 10px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:12px;min-width:130px;max-width:160px">' +
+        ownerOpts +
+      '</select>' +
+      '<select id="pfCatSel" onchange="_pfOnCatFilter(this.value)" title="دسته کالا" ' +
+        'style="padding:7px 10px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:12px;min-width:120px;max-width:150px">' +
+        catOpts +
+      '</select>' +
+      '<select id="pfProdSel" onchange="_pfOnProdFilter(this.value)" title="کالای خاص" ' +
+        'style="padding:7px 10px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:12px;min-width:140px;max-width:220px">' +
+        prodOpts +
+      '</select>' +
+      '<button id="pfClearFiltersBtn" onclick="typeof _pfClearAllFilters===\'function\'?_pfClearAllFilters():_pfClearFilters()" style="padding:6px 12px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer;' + ((_pfSearch||_pfOwnerF||_pfCatF||_pfProdF)?'':'display:none') + '">✕ پاک</button>' +
+      '<span id="pfListCount" style="font-size:12px;color:#94a3b8;white-space:nowrap">' + filtered.length + ' \u067eیش‌\u0641ا\u06a9\u062a\u0648\u0631</span>' +
+    '</div>';
+
+  _pfCenterMap = [];
+  var rows = pageItems.length ? _pfBuildRowsHtml(pageItems) : '<tr><td colspan="8" style="text-align:center;padding:40px;color:#94a3b8">پیشفاکتوری یافت نشد</td></tr>';
 
   el.innerHTML = _pfStatsBarHtml() + _pfBuildPendingQueueHtml() +
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap">' + filterBtns + '</div>' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
-        '<button onclick="pfOpenNew()" style="padding:8px 16px;background:var(--brand);color:white;border:none;border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer;font-weight:600">+ پیشفاکتور جدید</button>' +
-        (isManager ? '<button onclick="pfManageTemplates()" style="padding:8px 12px;background:#f8fafc;color:#475569;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer" title="مدیریت قالب‌های چاپ">🎨 قالب‌های چاپ</button>' +
-                     '<button onclick="pfOpenSellerEditor()" style="padding:8px 12px;background:#f8fafc;color:#475569;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer" title="ویرایش مشخصات فروشنده">🏢 فروشنده</button>' : '') +
+        '<button onclick="pfOpenNew()" style="padding:8px 16px;background:var(--brand);color:white;border:none;border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer;font-weight:600">+ \u067e\u06cc\u0634\u0641\u0627\u06a9\u062a\u0648\u0631 \u062c\u062f\u06cc\u062f</button>' +
+(isManager ? '<button onclick="pfManageTemplates()" style="padding:8px 12px;background:#f8fafc;color:#475569;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer" title="\u0645\u062f\u06cc\u0631\u06cc\u062a \u0642\u0627\u0644\u0628\u200c\u0647\u0627\u06cc \u0686\u0627\u067e">\ud83c\udfa8 \u0642\u0627\u0644\u0628\u200c\u0647\u0627\u06cc \u0686\u0627\u067e</button>' +
+                     '<button onclick="pfOpenSellerEditor()" style="padding:8px 12px;background:#f8fafc;color:#475569;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer" title="\u0648\u06cc\u0631\u0627\u06cc\u0634 \u0645\u0634\u062e\u0635\u0627\u062a \u0641\u0631\u0648\u0634\u0646\u062f\u0647">\ud83c\udfe2 \u0641\u0631\u0648\u0634\u0646\u062f\u0647</button>' : '') +
       '</div>' +
     '</div>' +
     searchBar +
     '<div style="overflow-x:auto;background:white;border:1px solid #e2e8f0;border-radius:10px">' +
       '<table style="width:100%;border-collapse:collapse">' +
         '<thead><tr style="background:#f8fafc">' +
-          '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">شماره</th>' +
-          '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">تاریخ</th>' +
-          '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">مرکز / مشتری</th>' +
-          '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">کالاها</th>' +
-          '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">مبلغ کل</th>' +
-          '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">وضعیت</th>' +
-          '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">مسئول مرکز</th>' +
-          '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">عملیات</th>' +
+          '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">\u0634\u0645\u0627\u0631\u0647</th>' +
+          '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">\u062a\u0627\u0631\u06cc\u062e</th>' +
+          '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">\u0645\u0631\u06a9\u0632 / \u0645\u0634\u062a\u0631\u06cc</th>' +
+          '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">\u06a9\u0627\u0644\u0627\u0647\u0627</th>' +
+          '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">\u0645\u0628\u0644\u063a \u06a9\u0644</th>' +
+          '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">\u0648\u0636\u0639\u06cc\u062a</th>' +
+          '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">\u0645\u0633\u0626\u0648\u0644</th>' +
+          '<th style="padding:10px 12px;text-align:right;font-size:11px;font-weight:700;color:#64748b;border-bottom:1px solid #e2e8f0">\u0639\u0645\u0644\u06cc\u0627\u062a</th>' +
         '</tr></thead>' +
-        '<tbody>' + rows + '</tbody>' +
+        '<tbody id="pfListTbody">' + rows + '</tbody>' +
       '</table>' +
     '</div>' +
-    (hasMore ? '<div style="text-align:center;margin-top:12px"><button onclick="_pfLoadMore()" style="padding:8px 24px;border:1px solid var(--brand);background:white;color:var(--brand);border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer">⬇ بارگذاری بیشتر (' + (filtered.length - pageItems.length) + ' مورد دیگر)</button></div>' : '');
+    '<div id="pfListMoreWrap" style="text-align:center;margin-top:12px">' +
+      (hasMore ? '<button onclick="_pfLoadMore()" style="padding:8px 24px;border:1px solid var(--brand);background:white;color:var(--brand);border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer">\u2b07 \u0628\u0627\u0631\u06af\u0630\u0627\u0631\u06cc \u0628\u06cc\u0634\u062a\u0631 (' + (filtered.length - pageItems.length) + ' \u0645\u0648\u0631\u062f \u062f\u06cc\u06af\u0631)</button>' : '') +
+    '</div>';
 }
 
 function _badgeBg(s) {
-  return { draft:'#f1f5f9', sent:'#eff6ff', approved:'#dcfce7', rejected:'#fee2e2', cancelled:'#fff7ed', invoiced:'#e0f2fe' }[s] || '#f1f5f9';
+  return { draft:'#f1f5f9', sent:'#eff6ff', negotiating:'#fef3c7', pending_disc:'#ffedd5', approved:'#dcfce7', rejected:'#fee2e2', cancelled:'#fff7ed', invoiced:'#e0f2fe', expired:'#fce7f3' }[s] || '#f1f5f9';
 }
 function _badgeFg(s) {
-  return { draft:'#475569', sent:'#1d4ed8', approved:'#15803d', rejected:'#b91c1c', cancelled:'#c2410c', invoiced:'#0369a1' }[s] || '#475569';
+  return { draft:'#475569', sent:'#1d4ed8', negotiating:'#b45309', pending_disc:'#c2410c', approved:'#15803d', rejected:'#b91c1c', cancelled:'#c2410c', invoiced:'#0369a1', expired:'#be185d' }[s] || '#475569';
 }
+function _pfResolveOwnerId(raw) {
+  if (!raw) return '';
+  var s = String(raw).trim();
+  var members = (typeof umGetActive === 'function' ? umGetActive() : ((DB.settings && DB.settings.members) || []));
+  var byId = members.find(function(m) { return m.id === s; });
+  if (byId) return byId.id;
+  var sn = typeof fNorm === 'function' ? fNorm(s) : s;
+  var byName = members.find(function(m) { return m.name === s || (typeof fNorm === 'function' && fNorm(m.name) === sn); });
+  if (byName) return byName.id;
+  if (typeof USERS !== 'undefined' && USERS[s]) return s;
+  if (typeof USERS !== 'undefined') {
+    for (var k in USERS) { if (USERS[k] === s) return k; }
+  }
+  return s;
+}
+
 function _pfCreatorName(uid) {
   if (!uid) return '';
-  var m = (DB.settings && DB.settings.members || []).find(function(x){ return x.id === uid; });
-  return m ? m.name : uid;
+  var id = _pfResolveOwnerId(uid);
+  var memList = typeof umGetActive === 'function' ? umGetActive() : ((DB.settings && DB.settings.members) || []);
+  var m = memList.find(function(x) { return x.id === id; });
+  if (m) return m.name;
+  if (typeof USERS !== 'undefined' && USERS[id]) return USERS[id];
+  if (String(uid) !== String(id)) return uid;
+  return id;
 }
 
 // ── Helper: canonical center owner (delegates to data.js getCenterOwnerFromKey) ─
@@ -343,8 +585,9 @@ function _pfGetCenterOwner(centerKey) {
 
 function _pfBuildPendingQueueHtml() {
   if (typeof _isManager !== 'function' || !_isManager()) return '';
-  var pending = _pfList.filter(function(p) { return p.status === 'sent'; });
-  if (!pending.length) return '';
+  var pending = _pfList.filter(function(p) { return p.status === 'sent' || p.status === 'negotiating'; });
+  var discPending = _pfList.filter(function(p) { return p.status === 'pending_disc'; });
+  if (!pending.length && !discPending.length) return '';
   var cards = pending.map(function(pf) {
     return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:white;border:1px solid #bfdbfe;border-radius:8px;margin-bottom:6px;flex-wrap:wrap">' +
       '<div style="flex:1;min-width:180px">' +
@@ -359,23 +602,36 @@ function _pfBuildPendingQueueHtml() {
         '<button onclick="pfReject(\'' + pf.id + '\')" style="padding:4px 10px;font-size:11px;border:1px solid #dc2626;border-radius:6px;background:#fef2f2;color:#b91c1c;cursor:pointer;font-family:inherit">❌ رد</button>' +
       '</div></div>';
   }).join('');
+  var discCards = discPending.map(function(pf) {
+    var maxD = typeof _pfMaxDisc === 'function' ? _pfMaxDisc(pf) : (pf.discountPct || 0);
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:white;border:1px solid #fed7aa;border-radius:8px;margin-bottom:6px;flex-wrap:wrap">' +
+      '<div style="flex:1;min-width:180px">' +
+        '<div style="font-weight:700;font-size:13px;color:#c2410c">⚠️ ' + esc(pf.no) + ' — تخفیف ' + maxD + '٪</div>' +
+        '<div style="font-size:11px;color:#64748b">' + esc(pf.centerName || '') + ' · ' + fmtNum(pf.total) + ' ﷼</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:6px">' +
+        '<button onclick="pfApproveDiscount(\'' + pf.id + '\')" style="padding:4px 10px;font-size:11px;border:1px solid #16a34a;border-radius:6px;background:#f0fdf4;color:#15803d;cursor:pointer;font-weight:600">✅ تأیید تخفیف</button>' +
+        '<button onclick="pfRejectDiscount(\'' + pf.id + '\')" style="padding:4px 10px;font-size:11px;border:1px solid #dc2626;border-radius:6px;background:#fef2f2;color:#b91c1c;cursor:pointer">❌ رد</button>' +
+      '</div></div>';
+  }).join('');
   return '<div style="margin-bottom:14px;background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1px solid #93c5fd;border-radius:12px;padding:14px 16px">' +
-    '<div style="font-weight:700;font-size:14px;color:#1d4ed8;margin-bottom:10px">📋 پیشفاکتورهای در انتظار تأیید ' +
-      '<span style="background:#1d4ed8;color:white;border-radius:10px;padding:2px 8px;font-size:11px;margin-right:6px">' + pending.length + '</span></div>' +
-    cards + '</div>';
+    (pending.length ? '<div style="font-weight:700;font-size:14px;color:#1d4ed8;margin-bottom:10px">📋 در انتظار تأیید مدیر ' +
+      '<span style="background:#1d4ed8;color:white;border-radius:10px;padding:2px 8px;font-size:11px;margin-right:6px">' + pending.length + '</span></div>' + cards : '') +
+    (discPending.length ? '<div style="font-weight:700;font-size:14px;color:#c2410c;margin:10px 0">⚠️ انتظار تأیید تخفیف ' +
+      '<span style="background:#c2410c;color:white;border-radius:10px;padding:2px 8px;font-size:11px;margin-right:6px">' + discPending.length + '</span></div>' + discCards : '') +
+    '</div>';
 }
 
 // ── Filter setter ─────────────────────────────────────────────────────────
 function _pfLoadMore() {
   _pfPage++;
-  var el = document.getElementById('pfVanillaRoot');
-  if (el) _renderPfPanel(el);
+  _pfRefreshListDom();
 }
 
 function _pfSetFilter(f) {
   _pfFilter = f;
   _pfPage = 0;
-  var el = document.getElementById('pfVanillaRoot');
+  var el = _pfRoot();
   if (el) _renderPfPanel(el);
 }
 
@@ -408,23 +664,35 @@ function _pfActions(pf) {
 
   // Follow-up scheduling (if center attached)
   if (pf.centerKey) {
-    btns.push('<button onclick="pfScheduleFollowup(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #bbf7d0;border-radius:5px;background:#f0fdf4;color:#15803d;cursor:pointer" title="پیگیری در برنامه هفته">📅</button>');
+    btns.push('<button onclick="pfAddToToday(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #86efac;border-radius:5px;background:#dcfce7;color:#166534;cursor:pointer;font-weight:600" title="افزودن به برنامه امروز">➕ امروز</button>');
+    if (['sent', 'negotiating', 'approved', 'pending_disc', 'invoiced'].includes(pf.status)) {
+      btns.push('<button onclick="pfOpenOutcomeModal(\'' + pf.id + '\',\'followup\')" style="padding:3px 8px;font-size:11px;border:1px solid #38bdf8;border-radius:5px;background:#f0f9ff;color:#0369a1;cursor:pointer;font-weight:600" title="ثبت نتیجه پیگیری — تاریخ بعدی">🔄 پیگیری</button>');
+      btns.push('<button onclick="pfOpenOutcomeModal(\'' + pf.id + '\',\'inactive\')" style="padding:3px 8px;font-size:11px;border:1px solid #fca5a5;border-radius:5px;background:#fef2f2;color:#991b1b;cursor:pointer" title="رد مشتری / غیرفعال با دلیل">❌ رد</button>');
+    }
+    btns.push('<button onclick="pfScheduleFollowup(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #bbf7d0;border-radius:5px;background:#f0fdf4;color:#15803d;cursor:pointer" title="افزودن به برنامه هفته (تاریخ دلخواه)">📅</button>');
   }
+  btns.push('<button onclick="pfCreateTask(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #c4b5fd;border-radius:5px;background:#f5f3ff;color:#6d28d9;cursor:pointer" title="ساخت وظیفه">📌</button>');
+  btns.push('<button onclick="pfOpenTimeline(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px;background:white;cursor:pointer" title="تایم‌لاین">🕐</button>');
 
   // Send (expert, draft only)
   if (pf.status === 'draft' && pf.createdBy === currentUser) {
     btns.push('<button onclick="pfAction(\'' + pf.id + '\',\'send\')" style="padding:3px 8px;font-size:11px;border:1px solid #3b82f6;border-radius:5px;background:#eff6ff;color:#1d4ed8;cursor:pointer">ارسال</button>');
   }
 
-  // Approve / Reject (manager, sent only)
-  if (isManager && pf.status === 'sent') {
+  // Negotiate (manager/owner, sent)
+  if ((isManager || pf.createdBy === currentUser) && pf.status === 'sent') {
+    btns.push('<button onclick="pfAction(\'' + pf.id + '\',\'negotiate\')" style="padding:3px 8px;font-size:11px;border:1px solid #fcd34d;border-radius:5px;background:#fef3c7;color:#b45309;cursor:pointer">مذاکره</button>');
+  }
+
+  // Approve / Reject (manager, sent or negotiating)
+  if (isManager && (pf.status === 'sent' || pf.status === 'negotiating')) {
     btns.push('<button onclick="pfAction(\'' + pf.id + '\',\'approve\')" style="padding:3px 8px;font-size:11px;border:1px solid #16a34a;border-radius:5px;background:#f0fdf4;color:#15803d;cursor:pointer">تأیید</button>');
-    btns.push('<button onclick="pfReject(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #dc2626;border-radius:5px;background:#fef2f2;color:#b91c1c;cursor:pointer">رد</button>');
+    btns.push('<button onclick="pfReject(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #dc2626;border-radius:5px;background:#fef2f2;color:#b91c1c;cursor:pointer" title="رد workflow توسط مدیر">رد مدیر</button>');
   }
 
   // WMS dispatch (approved / invoiced)
   if (['approved','invoiced'].includes(pf.status)) {
-    btns.push('<button onclick="pfShowDispatch(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #a78bfa;border-radius:5px;background:#f5f3ff;color:#6d28d9;cursor:pointer" title="حواله انبار">📦 حواله</button>');
+    btns.push('<button onclick="pfIssueDispatch(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #a78bfa;border-radius:5px;background:#f5f3ff;color:#6d28d9;cursor:pointer;font-weight:600" title="صدور حواله انبار با کالاهای پیشفاکتور">📦 صدور حواله</button>');
   }
 
   // Issue Invoice (manager, approved only)
@@ -432,8 +700,8 @@ function _pfActions(pf) {
     btns.push('<button onclick="pfIssueInvoice(\'' + pf.id + '\')" style="padding:3px 8px;font-size:11px;border:1px solid #7c3aed;border-radius:5px;background:#f5f3ff;color:#6d28d9;cursor:pointer" title="صدور فاکتور رسمی">🧾 فاکتور</button>');
   }
 
-  // Reopen (manager or owner, rejected/cancelled)
-  if (['rejected','cancelled'].includes(pf.status) && (isManager || pf.createdBy === currentUser)) {
+  // Reopen (manager or owner, rejected/cancelled/expired)
+  if (['rejected','cancelled','expired'].includes(pf.status) && (isManager || pf.createdBy === currentUser)) {
     btns.push('<button onclick="pfAction(\'' + pf.id + '\',\'reopen\')" style="padding:3px 8px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px;background:white;cursor:pointer">بازگشایی</button>');
   }
 
@@ -487,10 +755,11 @@ async function pfDelete(id) {
 }
 
 // ── Workflow action call ──────────────────────────────────────────────────
-async function pfAction(id, action, note) {
+async function pfAction(id, action, note, extra) {
   try {
     var body = { action: action };
     if (note) body.note = note;
+    if (extra && typeof extra === 'object') Object.assign(body, extra);
     var r = await fetch('/api/proforma/' + id + '/action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -501,15 +770,10 @@ async function pfAction(id, action, note) {
     await pfLoad();
     var el = document.getElementById('pfVanillaRoot');
     if (el) _renderPfPanel(el);
-    var labels = { send:'ارسال شد', approve:'تأیید شد', reject:'رد شد', cancel:'لغو شد', reopen:'بازگشایی شد' };
+    var labels = { send:'ارسال شد', approve:'تأیید شد', reject:'رد شد', cancel:'لغو شد', reopen:'بازگشایی شد', negotiate:'در مذاکره', expire:'منقضی شد', approve_disc:'تخفیف تأیید شد — ارسال', reject_disc:'تخفیف رد شد' };
     var msg = '✅ پیشفاکتور ' + (labels[action] || action);
-    if (action === 'approve' && data.wmsDispatch) {
-      if (data.wmsDispatch.error) msg += ' — ⚠️ حواله: ' + data.wmsDispatch.error;
-      else if (data.wmsDispatch.already) msg += ' — 📦 حواله قبلاً صادر شده';
-      else if (data.wmsDispatch.transactionIds && data.wmsDispatch.transactionIds.length) {
-        msg += ' — 📦 ' + data.wmsDispatch.transactionIds.length + ' حواله انبار';
-        if (data.wmsDispatch.warnings && data.wmsDispatch.warnings.length) msg += ' (هشدار کسری موجودی)';
-      }
+    if (action === 'approve') {
+      msg += ' — برای صدور حواله دکمه «📦 صدور حواله» را بزنید';
     }
     showToast(msg);
   } catch(e) {
@@ -520,20 +784,124 @@ async function pfAction(id, action, note) {
 function pfReject(id) {
   var pf = _pfList.find(function(p){ return p.id === id; });
   var pfNo = pf ? pf.no : id;
+  var reasonOpts = Object.keys(typeof PF_LOSS_REASONS !== 'undefined' ? PF_LOSS_REASONS : { price_high:'قیمت بالا', competitor:'رقیب', need_change:'تغییر نیاز', no_response:'عدم پاسخ', other:'سایر' }).map(function(k) {
+    var lbl = (typeof PF_LOSS_REASONS !== 'undefined' ? PF_LOSS_REASONS[k] : k);
+    return '<option value="' + k + '">' + lbl + '</option>';
+  }).join('');
   openModal('pfRejectModal', '❌ رد پیشفاکتور ' + pfNo,
-    '<div style="margin-bottom:12px;font-size:13px;color:#475569">دلیل رد را بنویسید (اختیاری):</div>' +
-    '<textarea id="pfRejectNote" rows="3" class="form-input" placeholder="توضیحات رد..." style="resize:vertical"></textarea>',
+    '<div style="margin-bottom:10px"><label style="font-size:12px;font-weight:700;color:#475569;display:block;margin-bottom:4px">دلیل رد *</label>' +
+    '<select id="pfLossReason" class="form-input" style="width:100%">' + reasonOpts + '</select></div>' +
+    '<div id="pfLossCompWrap" style="margin-bottom:10px;display:none"><label style="font-size:12px;color:#475569;display:block;margin-bottom:4px">نام رقیب</label>' +
+    '<input id="pfLossCompetitor" class="form-input" placeholder="نام رقیب"></div>' +
+    '<div style="margin-bottom:8px;font-size:12px;color:#64748b">توضیح تکمیلی:</div>' +
+    '<textarea id="pfRejectNote" rows="2" class="form-input" placeholder="توضیحات..." style="resize:vertical"></textarea>',
     '<button onclick="closeModal(\'pfRejectModal\')" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">انصراف</button>' +
     '<button onclick="_pfDoReject(\'' + id + '\')" style="padding:8px 18px;background:#dc2626;color:white;border:none;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">❌ رد پیشفاکتور</button>'
   );
+  setTimeout(function() {
+    var sel = document.getElementById('pfLossReason');
+    var wrap = document.getElementById('pfLossCompWrap');
+    if (sel && wrap) sel.onchange = function() { wrap.style.display = sel.value === 'competitor' ? '' : 'none'; };
+  }, 50);
 }
 
 async function _pfDoReject(id) {
+  var reasonEl = document.getElementById('pfLossReason');
+  var compEl = document.getElementById('pfLossCompetitor');
   var noteEl = document.getElementById('pfRejectNote');
-  var note   = noteEl ? noteEl.value.trim() : '';
+  var lossReason = reasonEl ? reasonEl.value : '';
+  if (!lossReason) { showToast('❌ دلیل رد را انتخاب کنید'); return; }
+  var note = noteEl ? noteEl.value.trim() : '';
+  var lossCompetitor = compEl ? compEl.value.trim() : '';
   closeModal('pfRejectModal');
-  await pfAction(id, 'reject', note);
+  if (typeof pfAction === 'function' && pfAction._pfWrapped) {
+    await pfAction(id, 'reject', note, { lossReason: lossReason, lossCompetitor: lossCompetitor });
+  } else {
+    try {
+      var r = await fetch('/api/proforma/' + id + '/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reject', note: note, lossReason: lossReason, lossCompetitor: lossCompetitor }),
+      });
+      var data = await r.json();
+      if (!r.ok) { showToast('❌ ' + (data.error || 'خطا')); return; }
+      await pfLoad();
+      var el = _pfRoot();
+      if (el) _renderPfPanel(el);
+      showToast('✅ پیشفاکتور رد شد');
+    } catch (e) { showToast('❌ ' + e.message); }
+  }
 }
+
+function _pfFmtTimelineAt(iso) {
+  if (!iso) return '';
+  if (typeof msToJ === 'function') {
+    try {
+      var d = new Date(iso);
+      if (!isNaN(d.getTime())) return msToJ(d.getTime());
+    } catch (_) {}
+  }
+  return String(iso).slice(0, 16).replace('T', ' ');
+}
+
+function pfOpenTimeline(pfId) {
+  if (!pfId) { showToast('شناسه نامعتبر'); return; }
+  showToast('در حال بارگذاری تایم‌لاین…', 800);
+  fetch('/api/proforma/' + encodeURIComponent(pfId) + '/timeline', { credentials: 'include' })
+    .then(function(r) {
+      return r.json().then(function(data) {
+        if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+        return data;
+      });
+    })
+    .then(function(data) {
+      if (!data || data.ok === false) {
+        showToast('❌ ' + ((data && data.error) || 'خطا در دریافت تایم‌لاین'));
+        return;
+      }
+      var items = data.timeline || [];
+      if (!items.length && data.events && data.events.length) {
+        items = data.events.map(function(e) {
+          return { at: e.at, label: e.type, actor: e.actor, note: e.note || '' };
+        });
+      }
+      var body;
+      if (!items.length) {
+        body = '<div style="color:#94a3b8;padding:32px;text-align:center;font-size:13px">هنوز رویدادی ثبت نشده — پس از ارسال، تأیید یا پیگیری اینجا نمایش داده می‌شود.</div>';
+      } else {
+        body = '<div style="max-height:420px;overflow-y:auto;padding:4px 0">' +
+          items.map(function(it, idx) {
+            var who = it.actor ? (_pfCreatorName(it.actor) || it.actor) : '';
+            var border = idx < items.length - 1 ? 'border-bottom:1px solid #f1f5f9;' : '';
+            return '<div style="padding:10px 4px;' + border + 'display:flex;gap:12px;align-items:flex-start">' +
+              '<div style="width:8px;height:8px;border-radius:50%;background:var(--brand,#6366f1);margin-top:6px;flex-shrink:0"></div>' +
+              '<div style="flex:1;min-width:0">' +
+                '<div style="font-size:12px;font-weight:700;color:#1e293b">' + esc(it.label || it.type || 'رویداد') + '</div>' +
+                (it.note ? '<div style="font-size:12px;color:#475569;margin-top:4px;line-height:1.5">' + esc(it.note) + '</div>' : '') +
+                '<div style="font-size:10px;color:#94a3b8;margin-top:4px">' +
+                  esc(_pfFmtTimelineAt(it.at)) + (who ? ' · ' + esc(who) : '') +
+                '</div>' +
+              '</div></div>';
+          }).join('') +
+          '</div>';
+      }
+      if (typeof openModal !== 'function') {
+        alert('تایم‌لاین ' + (data.no || pfId) + ' — ' + items.length + ' رویداد');
+        return;
+      }
+      openModal('pfTimelineModal', '🕐 تایم‌لاین ' + esc(data.no || ''), body,
+        '<button type="button" class="btn-secondary" id="pfTimelineCloseBtn">بستن</button>',
+        { lg: true, rawFoot: true }
+      );
+      var closeBtn = document.getElementById('pfTimelineCloseBtn');
+      if (closeBtn) closeBtn.onclick = function() { closeModal('pfTimelineModal'); };
+    })
+    .catch(function(e) {
+      console.error('[pfOpenTimeline]', e);
+      showToast('❌ ' + (e.message || 'خطا در تایم‌لاین'));
+    });
+}
+window.pfOpenTimeline = pfOpenTimeline;
 
 // ── Fetch WMS products (refresh every 5 min or on-demand) ───────────────────
 async function _pfLoadWmsProds(force) {
@@ -679,11 +1047,12 @@ function _pfProdListItem(p) {
   var unit  = esc(p.unit || '\u0639\u062f\u062f');
   var cat   = esc(p.category || '');
   var code  = esc(p.catalog_code || '');
-  var price = Number(p.sale_price || 0);
+  var price = Number(p.salePrice || p.sale_price || 0);
+  var cost = Number(p.avgPurchasePrice || p.avg_purchase_price || 0);
   var priceHtml = price > 0
     ? '<span style="color:#15803d;font-size:11px;font-weight:700;white-space:nowrap;background:#f0fdf4;padding:1px 6px;border-radius:8px">' + price.toLocaleString('fa-IR') + ' \u0631\u06cc\u0627\u0644</span>'
     : '<span style="color:#94a3b8;font-size:10px;white-space:nowrap" title="\u0642\u06cc\u0645\u062a \u0641\u0631\u0648\u0634 \u062f\u0631 \u0627\u0646\u0628\u0627\u0631 \u062a\u0646\u0638\u06cc\u0645 \u0646\u0634\u062f\u0647">&mdash; \u0642\u06cc\u0645\u062a \u0646\u062f\u0627\u0631\u062f</span>';
-  return '<div onclick="pfAddProductRow(\'' + esc(p.id) + '\', \'' + name + '\', \'' + unit + '\', ' + price + ', \'' + code + '\')" ' +
+  return '<div onclick="pfAddProductRow(\'' + esc(p.id) + '\', \'' + name + '\', \'' + unit + '\', ' + price + ', \'' + code + '\', ' + cost + ')" ' +
     'style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border-radius:5px;cursor:pointer;font-size:12px;border-bottom:1px solid #f1f5f9;transition:background 0.15s;gap:8px" ' +
     'onmouseover="this.style.background=\'#eff6ff\'" onmouseout="this.style.background=\'transparent\'">' +
     '<div style="flex:1;min-width:0">' +
@@ -723,7 +1092,7 @@ function _refreshProductPicker() {
   container.innerHTML = _pfBuildProductListHtml();
 }
 
-function pfAddProductRow(prodId, name, unit, salePrice, catalogCode) {
+function pfAddProductRow(prodId, name, unit, salePrice, catalogCode, unitCost) {
   // Check if this product already has a row, if so just pick first empty row
   var emptyIdx = _pfItems.findIndex(function(it) { return !it.name; });
   var idx;
@@ -731,13 +1100,15 @@ function pfAddProductRow(prodId, name, unit, salePrice, catalogCode) {
     idx = emptyIdx;
     _pfItems[idx].prodId      = prodId;
     _pfItems[idx].catalogCode = catalogCode || '';
+    _pfItems[idx].category    = _pfItemCategory({ prodId: prodId, catalogCode: catalogCode });
     _pfItems[idx].name        = name;
     _pfItems[idx].unit        = unit;
     _pfItems[idx].unitPrice   = salePrice || 0;
+    _pfItems[idx].unitCost    = Number(unitCost) || 0;
     _pfItems[idx].lineTotal = (_pfItems[idx].qty || 1) * (salePrice || 0);
   } else {
     idx = _pfItems.length;
-    _pfItems.push({ prodId: prodId, name: name, unit: unit, qty: 1, unitPrice: salePrice || 0, discPct: 0, discAmt: 0, lineTotal: salePrice || 0 });
+    _pfItems.push({ prodId: prodId, catalogCode: catalogCode || '', category: _pfItemCategory({ prodId: prodId, catalogCode: catalogCode }), name: name, unit: unit, qty: 1, unitPrice: salePrice || 0, unitCost: Number(unitCost) || 0, discPct: 0, discAmt: 0, lineTotal: salePrice || 0 });
   }
   // Re-render items table
   var wrap = document.getElementById('pfItemsWrap');
@@ -909,6 +1280,40 @@ async function _pfShowModal(pf) { try {
         '<input id="pfValid" type="number" class="form-input" value="' + validVal + '" ' + (readOnly?'disabled':'') + ' min="1" max="365">' +
       '</div>' +
     '</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:10px;margin-bottom:12px">' +
+      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">کانال ورودی</label>' +
+        '<select id="pfChannel" class="form-input" ' + (readOnly?'disabled':'') + '>' +
+          Object.keys(typeof PF_CHANNELS !== 'undefined' ? PF_CHANNELS : {direct:'تماس مستقیم',tender:'مناقصه',visit:'ویزیت',web:'وب'}).map(function(k) {
+            var lbl = (typeof PF_CHANNELS !== 'undefined' ? PF_CHANNELS[k] : k);
+            var sel = (pf && pf.channel === k) || (!pf && k === 'direct') ? ' selected' : '';
+            return '<option value="' + k + '"' + sel + '>' + lbl + '</option>';
+          }).join('') +
+        '</select></div>' +
+      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">شرایط پرداخت</label>' +
+        '<select id="pfPaymentTerms" class="form-input" ' + (readOnly?'disabled':'') + '>' +
+          '<option value="">—</option>' +
+          Object.keys(typeof PF_PAYMENT_TERMS !== 'undefined' ? PF_PAYMENT_TERMS : {cash:'نقد',installment:'اقساط',check:'چک'}).map(function(k) {
+            var lbl = (typeof PF_PAYMENT_TERMS !== 'undefined' ? PF_PAYMENT_TERMS[k] : k);
+            return '<option value="' + k + '"' + ((pf && pf.paymentTerms === k) ? ' selected' : '') + '>' + lbl + '</option>';
+          }).join('') +
+        '</select></div>' +
+      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">مسئول فروش</label>' +
+        '<select id="pfSalesOwner" class="form-input" ' + (readOnly?'disabled':'') + '>' +
+          _pfGetExpertMembers().map(function(m) {
+            var oid = pf ? _pfGetResponsibleId(pf) : currentUser;
+            return '<option value="' + esc(m.id) + '"' + (m.id === oid ? ' selected' : '') + '>' + esc(m.name) + '</option>';
+          }).join('') +
+        '</select></div>' +
+      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">پشتیبان فنی</label>' +
+        '<select id="pfSupportOwner" class="form-input" ' + (readOnly?'disabled':'') + '><option value="">—</option>' +
+          _pfGetExpertMembers().map(function(m) {
+            return '<option value="' + esc(m.id) + '"' + ((pf && pf.supportOwner === m.id) ? ' selected' : '') + '>' + esc(m.name) + '</option>';
+          }).join('') +
+        '</select></div>' +
+      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">تاریخ انقضا</label>' +
+        '<div id="pfExpiryDisplay" style="padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;color:#64748b">' +
+          (pf ? (pf.expiryDate || '—') : '—') + '</div></div>' +
+    '</div>' +
     whBlock +
     // ── Buyer Details (مشخصات کامل خریدار)
     '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:12px">' +
@@ -964,6 +1369,7 @@ async function _pfShowModal(pf) { try {
             '<th style="padding:6px 8px;text-align:center;border-bottom:2px solid #e2e8f0;width:120px">قیمت واحد (ریال)</th>' +
             '<th style="padding:6px 8px;text-align:center;border-bottom:2px solid #e2e8f0;width:110px">تخفیف ردیف</th>' +
             '<th style="padding:6px 8px;text-align:center;border-bottom:2px solid #e2e8f0;width:110px">جمع ردیف (ریال)</th>' +
+            (typeof _pfCanSeeMargin === 'function' && _pfCanSeeMargin() ? '<th style="padding:6px 8px;text-align:center;border-bottom:2px solid #e2e8f0;width:90px">حاشیه</th>' : '') +
             (readOnly ? '' : '<th style="padding:6px 8px;text-align:center;border-bottom:2px solid #e2e8f0;width:40px"></th>') +
           '</tr>' +
         '</thead>' +
@@ -1012,7 +1418,7 @@ async function _pfShowModal(pf) { try {
     (pf && pf.actionNote ? '<div style="margin-top:10px;padding:10px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:12px"><strong>نظر مدیر:</strong> ' + esc(pf.actionNote) + '</div>' : '');
 
   document.getElementById('pfModalFooter').innerHTML =
-    (pf && ['approved','invoiced'].includes(pf.status) ? '<button onclick="pfShowDispatch(\'' + pf.id + '\')" style="padding:8px 12px;background:#f5f3ff;color:#6d28d9;border:1px solid #ddd6fe;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">📦 حواله انبار</button>' : '') +
+    (pf && ['approved','invoiced'].includes(pf.status) ? '<button onclick="pfIssueDispatch(\'' + pf.id + '\')" style="padding:8px 12px;background:#f5f3ff;color:#6d28d9;border:1px solid #ddd6fe;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">📦 صدور حواله</button>' : '') +
     (readOnly ? '<button onclick="pfPrint(\'' + (pf.id) + '\')" style="padding:8px 16px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">🖨️ چاپ پیش‌فاکتور</button>' : '') +
     (pf && pf.versions && pf.versions.length ? '<button onclick="pfShowVersions(\'' + pf.id + '\')" style="padding:8px 12px;background:#f0f9ff;color:#0284c7;border:1px solid #bae6fd;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">🕐 تاریخچه (' + pf.versions.length + ')</button>' : '') +
     '<button onclick="var _el=document.getElementById(\'pfModal\');if(_el)_el.style.display=\'none\';" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer">بستن</button>' +
@@ -1020,6 +1426,13 @@ async function _pfShowModal(pf) { try {
 
 
   modal.style.display = 'flex';
+  var _cInp = document.getElementById('pfCenterName');
+  if (_cInp && centerKey) _cInp.dataset.key = centerKey;
+  if (centerKey && !readOnly && (!pf || !pf.id)) {
+    setTimeout(function() {
+      if (typeof pfSelectCenter === 'function') pfSelectCenter(centerKey, centerVal);
+    }, 60);
+  }
   pfRecalc();
 } catch(e) { alert('Error in _pfShowModal: ' + e.message); } }
 
@@ -1032,6 +1445,15 @@ function pfToggleCommission() {
 
 function _pfItemRow(i, item, readOnly) {
   var lineAfterDisc = _pfItemLineTotal(item);
+  var showMargin = typeof _pfCanSeeMargin === 'function' && _pfCanSeeMargin();
+  var marginPct = showMargin && typeof _pfItemMarginPct === 'function' ? _pfItemMarginPct(item) : null;
+  var marginCell = showMargin
+    ? '<td style="padding:6px 8px;text-align:center;font-size:11px">' +
+        (readOnly
+          ? (marginPct != null ? '<span style="color:' + (marginPct >= 15 ? '#15803d' : '#dc2626') + ';font-weight:700">' + marginPct + '٪</span>' : '—')
+          : '<input type="number" class="form-input pf-item-cost" data-idx="' + i + '" value="' + (item.unitCost || 0) + '" min="0" oninput="_pfRowChange(' + i + ',\'unitCost\',this.value)" style="width:80px;text-align:center;font-size:11px" title="بهای تمام‌شده">') +
+      '</td>'
+    : '';
   return '<tr id="pfRow_' + i + '" style="border-bottom:1px solid #f1f5f9">' +
     '<td style="padding:6px 8px">' +
       (readOnly
@@ -1064,6 +1486,7 @@ function _pfItemRow(i, item, readOnly) {
     '<td style="padding:6px 8px;text-align:center;font-family:monospace;font-size:13px;color:#1e293b">' +
       fmtNum(lineAfterDisc) +
     '</td>' +
+    marginCell +
     (readOnly ? '' :
       '<td style="padding:6px 8px;text-align:center">' +
         '<button onclick="pfRemoveRow(' + i + ')" style="padding:2px 7px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:5px;cursor:pointer;font-size:14px">✕</button>' +
@@ -1079,7 +1502,7 @@ function _pfItemLineTotal(item) {
 
 function _pfRowChange(i, field, val) {
   if (!_pfItems[i]) return;
-  if (['qty','unitPrice','discPct'].indexOf(field) !== -1) _pfItems[i][field] = Number(val) || 0;
+  if (['qty','unitPrice','discPct','unitCost'].indexOf(field) !== -1) _pfItems[i][field] = Number(val) || 0;
   else _pfItems[i][field] = val;
   _pfItems[i].lineTotal = _pfItemLineTotal(_pfItems[i]);
   // Update the lineTotal cell in DOM only
@@ -1227,6 +1650,12 @@ function pfSelectCenter(key, name) {
     if (document.getElementById('pfBuyerPhone'))   document.getElementById('pfBuyerPhone').value = (ce.phones && ce.phones.join(', ')) || '';
     if (document.getElementById('pfBuyerPostal'))  document.getElementById('pfBuyerPostal').value = '';
   }
+  var ownerId = typeof getCenterOwnerFromKey === 'function' ? getCenterOwnerFromKey(key) : '';
+  if (ownerId) {
+    var sel = document.getElementById('pfSalesOwner');
+    var resolved = _pfResolveOwnerId(ownerId);
+    if (sel && resolved) sel.value = resolved;
+  }
 }
 
 // ── Save ──────────────────────────────────────────────────────────────────
@@ -1259,11 +1688,13 @@ async function pfSave() {
     var qtyEl   = document.querySelector('.pf-item-qty[data-idx="' + i + '"]');
     var priceEl = document.querySelector('.pf-item-price[data-idx="' + i + '"]');
     var discEl  = document.querySelector('.pf-item-disc[data-idx="' + i + '"]');
+    var costEl  = document.querySelector('.pf-item-cost[data-idx="' + i + '"]');
     if (nameEl)  item.name        = nameEl.value.trim();
     // catalogCode is stored in _pfItems directly when product is selected from WMS
     if (qtyEl)   item.qty         = Number(qtyEl.value)   || 0;
     if (priceEl) item.unitPrice   = Number(priceEl.value) || 0;
     if (discEl)  item.discPct     = Number(discEl.value)  || 0;
+    if (costEl)  item.unitCost    = Number(costEl.value)    || 0;
     item.lineTotal = _pfItemLineTotal(item);
   });
 
@@ -1274,6 +1705,10 @@ async function pfSave() {
   var commissionAmt  = Number(document.getElementById('pfCommissionAmt')  ? document.getElementById('pfCommissionAmt').value  : 0) || 0;
   var commissionNote = document.getElementById('pfCommissionNote') ? document.getElementById('pfCommissionNote').value.trim() : '';
   var wmsWarehouseId = document.getElementById('pfWarehouse') ? document.getElementById('pfWarehouse').value : '';
+  var channel = document.getElementById('pfChannel') ? document.getElementById('pfChannel').value : 'direct';
+  var paymentTerms = document.getElementById('pfPaymentTerms') ? document.getElementById('pfPaymentTerms').value : '';
+  var salesOwner = document.getElementById('pfSalesOwner') ? document.getElementById('pfSalesOwner').value : '';
+  var supportOwner = document.getElementById('pfSupportOwner') ? document.getElementById('pfSupportOwner').value : '';
 
   var body = {
     centerKey: centerKey, centerName: centerName,
@@ -1283,7 +1718,9 @@ async function pfSave() {
     buyerNatId: buyerNatId, buyerEcoCode: buyerEcoCode, buyerRegId: buyerRegId,
     buyerAddress: buyerAddress, buyerPhone: buyerPhone, buyerPostal: buyerPostal,
     hasCommission: hasCommission, commissionAmt: commissionAmt, commissionNote: commissionNote,
-    wmsWarehouseId: wmsWarehouseId
+    wmsWarehouseId: wmsWarehouseId,
+    channel: channel, paymentTerms: paymentTerms,
+    salesOwner: salesOwner, supportOwner: supportOwner,
   };
 
   try {
@@ -1364,6 +1801,23 @@ function pfDoPrint(id, templateId) {
   var tpls = _pfGetTemplates();
   var tpl = (templateId ? tpls.find(function(t){ return t.id === templateId; }) : null) || _pfDefaultTplForPrint();
 
+  var html = _pfPrintHTML(pf, tpl.includeSeller, tpl.html || null);
+  if (/^\s*<!DOCTYPE/i.test(html) || /^\s*<html/i.test(html)) {
+    var iframe = document.getElementById('pfPrintFrame');
+    if (!iframe) {
+      iframe = document.createElement('iframe');
+      iframe.id = 'pfPrintFrame';
+      iframe.style.cssText = 'position:fixed;left:-9999px;width:0;height:0;border:0';
+      document.body.appendChild(iframe);
+    }
+    var pdoc = iframe.contentWindow.document;
+    pdoc.open();
+    pdoc.write(html);
+    pdoc.close();
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
+    return;
+  }
   var zone = document.getElementById('pfPrintZone');
   if (!zone) {
     zone = document.createElement('div');
@@ -1371,7 +1825,7 @@ function pfDoPrint(id, templateId) {
     zone.style.display = 'none';
     document.body.appendChild(zone);
   }
-  zone.innerHTML = _pfPrintHTML(pf, tpl.includeSeller, tpl.html || null);
+  zone.innerHTML = html;
   window.print();
 }
 
@@ -1387,14 +1841,14 @@ function _pfPrintHTML(pf, includeSeller, customHtml) {
   var itemRows = (pf.items || []).map(function(item, i) {
     var discVal = Number(item.discPct || 0);
     return '<tr>' +
-      '<td style="border:1px solid #000;text-align:center;padding:5px">' + (i+1) + '</td>' +
-      '<td style="border:1px solid #000;text-align:center;padding:5px;font-family:monospace">' + esc(item.catalogCode || item.prodId || '') + '</td>' +
-      '<td style="border:1px solid #000;text-align:right;padding:5px">' + esc(item.name || '') + '</td>' +
-      '<td style="border:1px solid #000;text-align:center;padding:5px">' + fmtNum(item.qty) + '</td>' +
-      '<td style="border:1px solid #000;text-align:center;padding:5px">' + esc(item.unit || 'عدد') + '</td>' +
-      '<td style="border:1px solid #000;text-align:center;font-family:monospace;padding:5px">' + fmtNum(item.unitPrice) + '</td>' +
-      '<td style="border:1px solid #000;text-align:center;padding:5px">' + (discVal ? discVal + '٪' : '—') + '</td>' +
-      '<td style="border:1px solid #000;text-align:center;font-family:monospace;padding:5px">' + fmtNum(item.lineTotal) + '</td>' +
+      '<td>' + (i + 1) + '</td>' +
+      '<td style="font-family:monospace">' + esc(item.catalogCode || item.prodId || '') + '</td>' +
+      '<td class="desc-col">' + esc(item.name || '') + '</td>' +
+      '<td>' + fmtNum(item.qty) + '</td>' +
+      '<td>' + esc(item.unit || 'عدد') + '</td>' +
+      '<td class="currency-col">' + fmtNum(item.unitPrice) + '</td>' +
+      '<td>' + (discVal ? discVal + '٪' : '—') + '</td>' +
+      '<td class="currency-col">' + fmtNum(item.lineTotal) + '</td>' +
       '</tr>';
   }).join('');
 
@@ -1407,20 +1861,22 @@ function _pfPrintHTML(pf, includeSeller, customHtml) {
       address: 'تهران، خیابان ولیعصر، نرسیده به پارک وی، کوچه ...', postal: '۱۹۶۶۶۴۵۳۲۱', phone: '۰۲۱-۸۸۸۸۸۸۸۸'
     };
 
-    sellerHeader = 
-      '<div style="text-align:center;font-weight:bold;font-size:18px;margin-bottom:15px;border-bottom:2px solid #000;padding-bottom:10px">' +
-        'صورتحساب فروش کالا و خدمات' +
+    sellerHeader =
+      '<div style="text-align:center;font-weight:800;font-size:16px;color:#1e3a8a;padding-bottom:8px;border-bottom:2px solid #2563eb;margin-bottom:4px">' +
+        esc(seller.name || 'آتنا زیست درمان') +
       '</div>';
 
-    sellerSection = 
-      '<div style="border:1px solid #000;border-radius:4px;margin-bottom:15px;font-size:12px">' +
-        '<div style="background:#f0f0f0;padding:5px;border-bottom:1px solid #000;font-weight:bold">مشخصات فروشنده</div>' +
-        '<div style="padding:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">' +
-          '<div><strong>فروشنده:</strong> ' + esc(seller.name) + '</div>' +
-          '<div><strong>شماره اقتصادی:</strong> ' + esc(seller.ecoCode) + '</div>' +
+    sellerSection =
+      '<div class="buyer-section" style="margin-bottom:15px">' +
+        '<div class="buyer-header">مشخصات فروشنده</div>' +
+        '<div class="buyer-body">' +
+          '<div><strong>نام:</strong> ' + esc(seller.name) + '</div>' +
           '<div><strong>شناسه ملی:</strong> ' + esc(seller.natId) + '</div>' +
+          '<div><strong>شماره اقتصادی:</strong> ' + esc(seller.ecoCode) + '</div>' +
           '<div><strong>شماره ثبت:</strong> ' + esc(seller.regId) + '</div>' +
-          '<div style="grid-column:1/-1"><strong>آدرس:</strong> ' + esc(seller.address) + ' &nbsp;&nbsp; <strong>کد پستی:</strong> ' + esc(seller.postal) + ' &nbsp;&nbsp; <strong>تلفن:</strong> ' + esc(seller.phone) + '</div>' +
+          '<div><strong>تلفن:</strong> <span style="direction:ltr;display:inline-block">' + esc(seller.phone) + '</span></div>' +
+          '<div><strong>کد پستی:</strong> ' + esc(seller.postal) + '</div>' +
+          '<div style="grid-column:1/-1"><strong>آدرس:</strong> ' + esc(seller.address) + '</div>' +
         '</div>' +
       '</div>';
   } else {
@@ -1430,11 +1886,10 @@ function _pfPrintHTML(pf, includeSeller, customHtml) {
 
   var noteHtml = '';
   if (pf.note && pf.note.trim()) {
-    noteHtml = 
-      '<div style="font-size:12px;margin-bottom:10px;border:1px solid #000;padding:10px;border-radius:4px;white-space:pre-wrap">' +
-        '<strong>توضیحات:</strong> ' + esc(pf.note) +
-      '</div>';
+    noteHtml = '<strong>توضیحات:</strong> ' + esc(pf.note);
   }
+
+  var verifyUrl = (typeof location !== 'undefined' ? location.origin : '') + '/?pf=' + (pf.id || pf.no || '');
 
   var html = template
     .replace(/\{\{seller_header\}\}/g, sellerHeader)
@@ -1449,6 +1904,7 @@ function _pfPrintHTML(pf, includeSeller, customHtml) {
     .replace(/\{\{pf\.buyerPostal\}\}/g, esc(pf.buyerPostal||'—'))
     .replace(/\{\{pf\.buyerAddress\}\}/g, esc(pf.buyerAddress||'—'))
     .replace(/\{\{pf\.creatorName\}\}/g, esc(_pfCreatorName(pf.createdBy)))
+    .replace(/\{\{pf\.verifyUrl\}\}/g, encodeURIComponent(verifyUrl))
     .replace(/\{\{items_html\}\}/g, itemRows)
     .replace(/\{\{subtotal\}\}/g, fmtNum(subtotal))
     .replace(/\{\{discAmt\}\}/g, fmtNum(discAmt))
@@ -1462,74 +1918,361 @@ function _pfPrintHTML(pf, includeSeller, customHtml) {
 }
 
 function _pfDefaultTemplate() {
-  return `<div class="pf-print" style="font-family:Vazirmatn,sans-serif;direction:rtl;color:#000;padding:20px;width:100%;max-width:900px;margin:0 auto">
-  {{seller_header}}
-  <div style="display:flex;justify-content:space-between;margin-bottom:15px;font-size:13px">
-    <div><strong>شماره پیش‌فاکتور:</strong> <span style="font-family:monospace">{{pf.no}}</span></div>
-    <div><strong>تاریخ:</strong> {{pf.jalaliDate}}</div>
-  </div>
-  
-  {{seller_section}}
+  return `<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>پیش‌فاکتور {{pf.no}}</title>
+    <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            padding: 10px;
+            background: linear-gradient(135deg, #f0f4f8 0%, #d9e2ec 100%);
+            -webkit-font-smoothing: antialiased;
+        }
+        .watermark {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(-45deg);
+            font-size: 120px;
+            color: rgba(37, 99, 235, 0.04);
+            font-weight: 900;
+            white-space: nowrap;
+            pointer-events: none;
+            z-index: 0;
+            user-select: none;
+        }
+        .pf-container {
+            position: relative;
+            font-family: 'Vazirmatn', Tahoma, Arial, sans-serif;
+            direction: rtl;
+            color: #334155;
+            background: #ffffff;
+            padding: 20px;
+            width: 100%;
+            max-width: 210mm;
+            min-height: 297mm;
+            margin: 0 auto;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05), 0 4px 10px rgba(0, 0, 0, 0.03);
+            border-radius: 12px;
+            border-top: 6px solid #2563eb;
+            box-sizing: border-box;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        .main-title {
+            text-align: center;
+            font-size: 18px;
+            font-weight: 800;
+            color: #1e3a8a;
+            margin-bottom: 10px;
+            position: relative;
+            z-index: 2;
+        }
+        .invoice-meta {
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 10px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+            position: relative;
+            z-index: 2;
+        }
+        .invoice-meta .meta-info {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            font-size: 13px;
+        }
+        .qr-placeholder {
+            width: 65px;
+            height: 65px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #fff;
+            padding: 3px;
+            overflow: hidden;
+        }
+        .qr-placeholder img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        .buyer-section {
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            font-size: 11px;
+            overflow: hidden;
+            position: relative;
+            z-index: 2;
+            background: #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+        }
+        .buyer-header {
+            background: #eff6ff;
+            color: #1e3a8a;
+            padding: 6px 15px;
+            border-bottom: 1px solid #bfdbfe;
+            font-weight: bold;
+            font-size: 13px;
+        }
+        .buyer-body {
+            padding: 10px 15px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 8px;
+            color: #475569;
+        }
+        .buyer-body strong {
+            color: #1e293b;
+        }
+        .table-responsive {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            margin-bottom: 15px;
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid #cbd5e1;
+            position: relative;
+            z-index: 2;
+            background: #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+            min-width: 600px;
+            text-align: center;
+        }
+        th {
+            background-color: #e2e8f0;
+            color: #0f172a;
+            font-weight: 800;
+            padding: 6px 4px;
+            border: 1px solid #cbd5e1;
+        }
+        td {
+            border: 1px solid #e2e8f0;
+            padding: 6px 4px;
+            color: #334155;
+            line-height: 1.3;
+        }
+        td.desc-col {
+            text-align: right;
+        }
+        tbody tr:nth-child(even) {
+            background-color: #f8fafc;
+        }
+        tbody tr:hover {
+            background-color: #f1f5f9;
+        }
+        .currency-col {
+            text-align: left;
+            font-family: monospace;
+            font-size: 12px;
+            direction: ltr;
+        }
+        tfoot td {
+            color: #475569;
+        }
+        tfoot tr.total-row td {
+            background-color: #ecfdf5;
+            color: #065f46;
+            border-top: 2px solid #10b981;
+            font-weight: bold;
+            font-size: 13px;
+        }
+        .note-section {
+            margin-bottom: 10px;
+            font-size: 11px;
+            line-height: 1.5;
+            color: #475569;
+            position: relative;
+            z-index: 2;
+            padding-right: 10px;
+            border-right: 3px solid #cbd5e1;
+        }
+        .words-amount {
+            font-size: 12px;
+            margin-bottom: 15px;
+            background: #fffbeb;
+            border: 1px solid #fde68a;
+            color: #92400e;
+            padding: 10px 15px;
+            border-radius: 6px;
+            position: relative;
+            z-index: 2;
+            display: flex;
+            align-items: center;
+        }
+        .signatures {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: auto;
+            padding-top: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            position: relative;
+            z-index: 2;
+            color: #475569;
+        }
+        .signature-box {
+            text-align: center;
+            padding: 15px 10px 5px 10px;
+            border-top: 1px dashed #cbd5e1;
+        }
+        @media print {
+            @page {
+                size: A4;
+                margin: 5mm;
+            }
+            body {
+                background: transparent;
+                padding: 0;
+            }
+            .pf-container {
+                box-shadow: none !important;
+                border: none !important;
+                max-width: 100% !important;
+                padding: 0 !important;
+                border-top: 6px solid #2563eb !important;
+                min-height: 287mm;
+                display: flex;
+                flex-direction: column;
+            }
+            * {
+                -webkit-print-color-adjust: exact !important;
+                color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            .table-responsive {
+                border: 1px solid #cbd5e1;
+                overflow-x: visible;
+                box-shadow: none;
+            }
+            table {
+                min-width: auto;
+            }
+            tr, .no-page-break {
+                page-break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body>
 
-  <div style="border:1px solid #000;border-radius:4px;margin-bottom:15px;font-size:12px">
-    <div style="background:#f0f0f0;padding:5px;border-bottom:1px solid #000;font-weight:bold">مشخصات خریدار</div>
-    <div style="padding:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-      <div><strong>نام شخص حقیقی/حقوقی:</strong> {{pf.centerName}}</div>
-      <div><strong>شناسه ملی / کد ملی:</strong> {{pf.buyerNatId}}</div>
-      <div><strong>شماره اقتصادی:</strong> {{pf.buyerEcoCode}}</div>
-      <div><strong>شماره ثبت:</strong> {{pf.buyerRegId}}</div>
-      <div><strong>تلفن خریدار:</strong> {{pf.buyerPhone}}</div>
-      <div><strong>کد پستی:</strong> {{pf.buyerPostal}}</div>
-      <div style="grid-column:1/-1"><strong>آدرس:</strong> {{pf.buyerAddress}}</div>
+<div class="pf-container pf-print">
+
+  <div class="watermark">پیش‌فاکتور</div>
+
+  <div class="main-title">پیش‌فاکتور فروش</div>
+
+  <div style="margin-bottom: 15px; position: relative; z-index: 2;">
+    {{seller_header}}
+  </div>
+
+  <div class="invoice-meta">
+    <div class="meta-info">
+        <div><strong style="color: #1e293b;">شماره پیش‌فاکتور:</strong> <span style="font-family: monospace; font-size: 16px; color: #2563eb;">{{pf.no}}</span></div>
+        <div><strong style="color: #1e293b;">تاریخ:</strong> {{pf.jalaliDate}}</div>
+    </div>
+    <div class="qr-placeholder">
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data={{pf.verifyUrl}}" alt="QR Code پیش‌فاکتور {{pf.no}}">
     </div>
   </div>
 
-  <table style="width:100%;border-collapse:collapse;margin-bottom:15px;font-size:12px;border:1px solid #000;text-align:center">
-    <thead style="background:#f0f0f0">
-      <tr>
-        <th style="border:1px solid #000;padding:5px">ردیف</th>
-        <th style="border:1px solid #000;padding:5px">کد کالا</th>
-        <th style="border:1px solid #000;padding:5px">شرح کالا / خدمات</th>
-        <th style="border:1px solid #000;padding:5px">تعداد</th>
-        <th style="border:1px solid #000;padding:5px">واحد</th>
-        <th style="border:1px solid #000;padding:5px">مبلغ واحد (ریال)</th>
-        <th style="border:1px solid #000;padding:5px">تخفیف</th>
-        <th style="border:1px solid #000;padding:5px">مبلغ کل (ریال)</th>
-      </tr>
-    </thead>
-    <tbody>
-      {{items_html}}
-    </tbody>
-    <tfoot>
-      <tr>
-        <td colspan="7" style="text-align:left;padding:5px;border:1px solid #000;font-weight:bold">جمع کل قبل از تخفیف کلی:</td>
-        <td style="border:1px solid #000;padding:5px;font-family:monospace">{{subtotal}}</td>
-      </tr>
-      <tr>
-        <td colspan="7" style="text-align:left;padding:5px;border:1px solid #000;font-weight:bold">تخفیف کلی:</td>
-        <td style="border:1px solid #000;padding:5px;font-family:monospace">{{discAmt}}</td>
-      </tr>
-      <tr>
-        <td colspan="7" style="text-align:left;padding:5px;border:1px solid #000;font-weight:bold">مالیات و عوارض ارزش افزوده ({{taxPct}}٪):</td>
-        <td style="border:1px solid #000;padding:5px;font-family:monospace">{{taxAmt}}</td>
-      </tr>
-      <tr style="background:#f0f0f0">
-        <td colspan="7" style="text-align:left;padding:5px;border:1px solid #000;font-weight:bold">جمع کل فاکتور (ریال):</td>
-        <td style="border:1px solid #000;padding:5px;font-weight:bold;font-family:monospace">{{total}}</td>
-      </tr>
-    </tfoot>
-  </table>
-  
-  {{pf.note}}
+  <div style="margin-bottom: 25px; position: relative; z-index: 2;">
+    {{seller_section}}
+  </div>
 
-  <div style="font-size:12px;margin-bottom:20px;border:1px solid #000;padding:10px;border-radius:4px">
-    <strong>مبلغ کل به حروف:</strong> {{totalWords}} ریال
+  <div class="buyer-section">
+    <div class="buyer-header">
+      مشخصات خریدار
+    </div>
+    <div class="buyer-body">
+      <div><strong>نام خریدار:</strong> {{pf.centerName}}</div>
+      <div><strong>شناسه/کد ملی:</strong> {{pf.buyerNatId}}</div>
+      <div><strong>شماره اقتصادی:</strong> {{pf.buyerEcoCode}}</div>
+      <div><strong>شماره ثبت:</strong> {{pf.buyerRegId}}</div>
+      <div><strong>تلفن:</strong> <span style="direction: ltr; display: inline-block;">{{pf.buyerPhone}}</span></div>
+      <div><strong>کد پستی:</strong> {{pf.buyerPostal}}</div>
+      <div style="grid-column: 1 / -1;"><strong>آدرس:</strong> {{pf.buyerAddress}}</div>
+    </div>
   </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:40px;font-size:13px;font-weight:bold">
-    <div style="text-align:center">مهر و امضای فروشنده</div>
-    <div style="text-align:center">مهر و امضای خریدار</div>
+
+  <div class="table-responsive">
+    <table>
+      <thead>
+        <tr>
+          <th>ردیف</th>
+          <th>کد کالا</th>
+          <th style="width: 30%;">شرح کالا / خدمات</th>
+          <th>تعداد</th>
+          <th>واحد</th>
+          <th>مبلغ واحد (ریال)</th>
+          <th>تخفیف</th>
+          <th>مبلغ کل (ریال)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{items_html}}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="7" style="text-align: right; padding: 10px 12px; font-weight: bold;">جمع کل قبل از تخفیف کلی:</td>
+          <td class="currency-col">{{subtotal}}</td>
+        </tr>
+        <tr>
+          <td colspan="7" style="text-align: right; padding: 10px 12px; font-weight: bold;">تخفیف کلی:</td>
+          <td class="currency-col">{{discAmt}}</td>
+        </tr>
+        <tr>
+          <td colspan="7" style="text-align: right; padding: 10px 12px; font-weight: bold;">مالیات و عوارض ارزش افزوده ({{taxPct}}٪):</td>
+          <td class="currency-col">{{taxAmt}}</td>
+        </tr>
+        <tr class="total-row">
+          <td colspan="7" style="text-align: right; padding: 12px; font-size: 14px;">جمع کل فاکتور (ریال):</td>
+          <td class="currency-col" style="font-size: 16px;">{{total}}</td>
+        </tr>
+      </tfoot>
+    </table>
   </div>
-</div>`;
+
+  <div class="note-section">
+    {{pf.note}}
+  </div>
+
+  <div class="words-amount no-page-break">
+    <strong style="margin-left: 8px;">مبلغ کل به حروف:</strong> {{totalWords}} ریال
+  </div>
+
+  <div class="signatures no-page-break">
+    <div class="signature-box">
+      مهر و امضای فروشنده
+    </div>
+    <div class="signature-box">
+      مهر و امضای خریدار
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>`;
 }
 
 // ── pfManageTemplates — multi-template management ──────────────────────────
@@ -1546,7 +2289,7 @@ function _pfRenderManageTemplates() {
   var vars = '<div style=\"font-size:11px;color:#0284c7;background:#f0f9ff;padding:8px 12px;border-radius:6px;border:1px solid #bae6fd;margin-bottom:12px;line-height:1.8\">' +
     '<strong>متغیرهای قابل استفاده در HTML:</strong><br>' +
     '{{seller.name}}, {{seller.ecoCode}}, {{seller.natId}}, {{seller.regId}}, {{seller.address}}, {{seller.postal}}, {{seller.phone}}<br>' +
-    '{{pf.no}}, {{pf.jalaliDate}}, {{pf.centerName}}, {{pf.creatorName}}<br>' +
+    '{{pf.no}}, {{pf.jalaliDate}}, {{pf.centerName}}, {{pf.creatorName}}, {{pf.verifyUrl}}<br>' +
     '{{items_html}}, {{subtotal}}, {{discAmt}}, {{taxPct}}, {{taxAmt}}, {{total}}, {{totalWords}}, {{seller_header}}, {{seller_section}}' +
     '</div>';
 
@@ -1619,7 +2362,40 @@ function pfResetTemplate() {
   if (a && confirm('بازگشت به قالب پیش‌فرض؟')) a.value = _pfDefaultTemplate();
 }
 
-// ── Open proformas for a specific center ─────────────────────────────────
+// ── Open new proforma for a center (from center profile) ───────────────────
+async function _pfOpenNewForCenterForm(centerKey, centerName) {
+  _pfEditId = null;
+  _pfItems = [{ prodId:'', name:'', unit:'عدد', qty:1, unitPrice:0, discPct:0, discAmt:0, lineTotal:0 }];
+  _pfProdViewMode = 'tree';
+  _pfProdSearch = '';
+  _pfActiveCat = null;
+  await _pfLoadWmsProds();
+  if (typeof buildUSERS === 'function') buildUSERS();
+  _pfEnsureCenterCache();
+  _pfShowModal({ centerKey: centerKey || '', centerName: centerName || '', status: 'draft' });
+}
+
+async function _pfConsumePendingNewCenter() {
+  if (!_pfPendingNewCenter) return;
+  var p = _pfPendingNewCenter;
+  _pfPendingNewCenter = null;
+  await _pfOpenNewForCenterForm(p.centerKey, p.centerName);
+}
+
+async function pfOpenNewForCenter(centerKey, centerName) {
+  _pfPendingNewCenter = { centerKey: centerKey || '', centerName: centerName || '' };
+  if (typeof ensureTabScripts === 'function') {
+    await ensureTabScripts('proforma');
+  }
+  if (typeof switchTab === 'function') {
+    switchTab('proforma');
+  } else {
+    await _pfConsumePendingNewCenter();
+  }
+}
+window.pfOpenNewForCenter = pfOpenNewForCenter;
+
+// ── Open proformas list filtered for a center ─────────────────────────────
 async function pfOpenForCenter(centerKey, centerName) {
   // Switch to proforma tab
   if (typeof switchTab === 'function') switchTab('proforma');
@@ -1636,6 +2412,132 @@ async function pfOpenForCenter(centerKey, centerName) {
       _renderPfPanel(el);
     } catch(e) { console.error('[proforma] pfOpenForCenter:', e); }
   }
+}
+
+
+// ── Product / category aggregation report ────────────────────────────────
+function _pfItemCategory(it) {
+  if (it && it.category) return it.category;
+  var pid = it && it.prodId;
+  var code = it && it.catalogCode;
+  var p = (_pfWmsProds || []).find(function(x) {
+    return (pid && String(x.id) === String(pid)) || (code && String(x.catalog_code || x.catalogCode || '') === String(code));
+  });
+  return p ? (p.category || 'سایر') : 'سایر';
+}
+
+function _pfItemAmount(it, pf) {
+  var qty = Number(it && it.qty) || 0;
+  var amt = Number(it && it.lineTotal);
+  if (!amt || isNaN(amt)) amt = qty * (Number(it && it.unitPrice) || 0);
+  if (!amt && pf && pf.total && (pf.items || []).length === 1) amt = Number(pf.total) || 0;
+  return amt || 0;
+}
+
+function _pfPfAmount(pf) {
+  var t = Number(pf && pf.total);
+  if (t > 0) return t;
+  return (pf.items || []).reduce(function(s, it) { return s + _pfItemAmount(it, pf); }, 0);
+}
+
+function _pfStatusLabel(st) {
+  return (PF_STATUS[st] || { label: st }).label;
+}
+
+function _pfFilteredListForReport() {
+  return _pfGetFilteredList();
+}
+
+function _pfBuildAggReport(list, mode) {
+  var agg = {};
+  list.forEach(function(pf) {
+    var pfId = pf.id || pf.no || '';
+    var pfAmt = _pfPfAmount(pf);
+    var expert = _pfGetResponsibleName(pf);
+    var expertId = _pfGetResponsibleId(pf);
+    var items = pf.items || [];
+    if (!items.length) {
+      var k = mode === 'category' ? 'بدون ردیف' : '—';
+      if (!agg[k]) agg[k] = { label: k, sub: '', qty: 0, amount: 0, pfSet: {}, products: {}, entries: [], centers: {} };
+      agg[k].amount += pfAmt;
+      if (pfId) agg[k].pfSet[pfId] = true;
+      agg[k].entries.push({ pfId: pfId, pfNo: pf.no, centerName: pf.centerName, expert: expert, status: pf.status, date: pf.jalaliDate, total: pfAmt, items: [] });
+      return;
+    }
+    items.forEach(function(it) {
+      var qty = Number(it.qty) || 0;
+      var amt = _pfItemAmount(it, pf);
+      var cat = _pfItemCategory(it);
+      var key, label, sub;
+      if (mode === 'category') {
+        key = cat; label = cat; sub = '';
+      } else if (mode === 'expert') {
+        key = expertId || expert || 'نامشخص';
+        label = expert || 'نامشخص'; sub = '';
+      } else {
+        key = String(it.catalogCode || it.prodId || it.name || '—');
+        label = it.name || key;
+        sub = it.catalogCode || it.prodId || '';
+      }
+      if (!agg[key]) agg[key] = { label: label, sub: sub, qty: 0, amount: 0, pfSet: {}, products: {}, entries: [], centers: {} };
+      var row = agg[key];
+      row.qty += qty;
+      row.amount += amt;
+      if (pfId) row.pfSet[pfId] = true;
+      var pk = String(it.catalogCode || it.prodId || it.name || '—');
+      if (!row.products[pk]) row.products[pk] = { name: it.name || pk, code: it.catalogCode || it.prodId || '', qty: 0, amount: 0 };
+      row.products[pk].qty += qty;
+      row.products[pk].amount += amt;
+      var ck = pf.centerKey || pf.centerName || pfId;
+      if (!row.centers[ck]) row.centers[ck] = { name: pf.centerName || '—', expert: expert, count: 0, amount: 0, statuses: {} };
+      row.centers[ck].count += 1;
+      row.centers[ck].amount += amt;
+      row.centers[ck].statuses[pf.status] = (row.centers[ck].statuses[pf.status] || 0) + 1;
+      row.entries.push({
+        pfId: pfId, pfNo: pf.no, centerName: pf.centerName, centerKey: pf.centerKey,
+        expert: expert, status: pf.status, date: pf.jalaliDate, total: pfAmt,
+        itemName: it.name, itemQty: qty, itemAmt: amt, category: cat
+      });
+    });
+  });
+  return Object.keys(agg).map(function(k) {
+    var row = agg[k];
+    row.pfCount = Object.keys(row.pfSet).length;
+    row.centerCount = Object.keys(row.centers).length;
+    row.productList = Object.keys(row.products).map(function(p) { return row.products[p]; }).sort(function(a, b) { return b.amount - a.amount; });
+    row.centerList = Object.keys(row.centers).map(function(x) { return row.centers[x]; }).sort(function(a, b) { return b.amount - a.amount; });
+    delete row.pfSet;
+    delete row.products;
+    delete row.centers;
+    return row;
+  }).sort(function(a, b) { return b.amount - a.amount; });
+}
+
+function _pfBuildPlanningRows(list) {
+  var rows = [];
+  list.forEach(function(pf) {
+    var expert = _pfGetResponsibleName(pf);
+    var stLbl = _pfStatusLabel(pf.status);
+    var items = pf.items || [];
+    if (!items.length) {
+      rows.push({ expert: expert, pfNo: pf.no, pfId: pf.id, centerName: pf.centerName || '—', category: '—', product: '—', qty: 0, amount: _pfPfAmount(pf), status: stLbl, date: pf.jalaliDate || '', rawStatus: pf.status });
+      return;
+    }
+    items.forEach(function(it) {
+      rows.push({
+        expert: expert, pfNo: pf.no, pfId: pf.id, centerName: pf.centerName || '—',
+        category: _pfItemCategory(it), product: it.name || '—',
+        qty: Number(it.qty) || 0, amount: _pfItemAmount(it, pf),
+        status: stLbl, date: pf.jalaliDate || '', rawStatus: pf.status
+      });
+    });
+  });
+  rows.sort(function(a, b) {
+    if (a.expert !== b.expert) return a.expert.localeCompare(b.expert, 'fa');
+    if (a.date !== b.date) return (b.date || '').localeCompare(a.date || '');
+    return (a.centerName || '').localeCompare(b.centerName || '', 'fa');
+  });
+  return rows;
 }
 
 // ── Navigate to center from proforma panel ───────────────────────────────
@@ -1777,11 +2679,11 @@ function pfScheduleFollowup(pfId) {
       '<div><label style="font-size:12px;color:#64748b;display:block;margin-bottom:4px">تاریخ</label>' +
         '<input type="text" id="pfWpDate" value="' + today + '" placeholder="YYYY/MM/DD" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:13px" onclick="openJDP(this,function(v){document.getElementById(\'pfWpDate\').value=v})"></div>' +
       '<div><label style="font-size:12px;color:#64748b;display:block;margin-bottom:4px">نوع اقدام</label>' +
-        '<select id="pfWpType" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:13px">' +
-          '<option value="call">📞 تماس</option><option value="visit">🤝 ملاقات</option>' +
-        '</select></div>' +
+        '<div style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;background:#f8fafc;color:#0369a1">📞 تماس (پیگیری پیشفاکتور)</div>' +
+        '<input type="hidden" id="pfWpType" value="call"></div>' +
     '</div>';
 
+  html += '<input type="hidden" id="pfWpPfNo" value="' + esc(pf.no || '') + '">';
   openModal('pfWpModal', '📅 ثبت پیگیری در برنامه هفته', html,
     '<button onclick="var _el=document.getElementById(\'pfWpModal\');if(_el)_el.style.display=\'none\';" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;margin-left:8px">انصراف</button>' +
     '<button onclick="_pfDoSchedule(\'' + rtype + '\',\'' + esc(rid) + '\',\'' + esc(cname) + '\')" style="padding:8px 18px;background:var(--brand);color:white;border:none;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">📅 ثبت</button>',
@@ -1789,25 +2691,147 @@ function pfScheduleFollowup(pfId) {
   );
 }
 
+function _pfAddToWeekPlan(rtype, rid, cname, scheduledDate, actionType, pfNo, pfId) {
+  if (!scheduledDate) { showToast('تاریخ نامعتبر'); return false; }
+  var act = (pfId || pfNo) ? 'call' : (actionType || 'call');
+  var weekId = typeof getWeekId === 'function' ? getWeekId(scheduledDate) : null;
+  if (!weekId) { showToast('هفته‌ی برای این تاریخ یافت نشد'); return false; }
+  var recKey = rtype + '_' + rid;
+  var entryKey = typeof wpEntryKey === 'function' ? wpEntryKey(weekId, rtype, rid) : (weekId + ':::' + rtype + ':::' + rid);
+  if (typeof wpRemoveFromOtherWeeks === 'function') wpRemoveFromOtherWeeks(recKey, weekId);
+  if (!DB.weekEntries) DB.weekEntries = {};
+  var notePrefix = pfNo ? ('PF ' + pfNo + ' — ') : '';
+  DB.weekEntries[entryKey] = {
+    rtype: rtype, rid: rid, recKey: recKey,
+    scheduledDate: scheduledDate, actionType: act,
+    done: false, doneDate: null,
+    addedBy: _pfGetResponsibleId({ centerKey: rtype + '_' + rid, createdBy: currentUser }) || currentUser,
+    centerName: cname,
+    pfNote: notePrefix + 'پیگیری پیش‌فاکتور',
+    pfNo: pfNo || '',
+    pfId: pfId || ''
+  };
+  if (typeof saveWeekEntryApi === 'function') saveWeekEntryApi(entryKey, DB.weekEntries[entryKey]);
+  if (typeof _wpSaveWeek === 'function') _wpSaveWeek([entryKey]);
+  else if (typeof saveDB === 'function') saveDB();
+  if (typeof setE === 'function') setE(rtype, rid, 'followupDate', scheduledDate);
+  return entryKey;
+}
+
+function pfEnsureWeekEntryForPf(pf) {
+  if (!pf || !pf.centerKey) return null;
+  var parts = pf.centerKey.split('_');
+  var rtype = parts[0];
+  var rid = parts.slice(1).join('_');
+  var recKey = rtype + '_' + rid;
+  var foundKey = null;
+  if (DB.weekEntries) {
+    Object.keys(DB.weekEntries).forEach(function(k) {
+      if (foundKey) return;
+      var we = DB.weekEntries[k];
+      if (!we || we.done) return;
+      var rk = we.recKey || ((we.rtype || '') + '_' + (we.rid || ''));
+      if (rk === recKey) foundKey = k;
+    });
+  }
+  if (foundKey) {
+    var we0 = DB.weekEntries[foundKey];
+    we0.pfId = pf.id;
+    we0.pfNo = pf.no || '';
+    we0.actionType = 'call';
+    if (!we0.pfNote) we0.pfNote = 'PF ' + (pf.no || '') + ' — پیگیری پیش‌فاکتور';
+    if (typeof saveWeekEntryApi === 'function') saveWeekEntryApi(foundKey, we0);
+    return foundKey;
+  }
+  var today = typeof todayStr === 'function' ? todayStr() : '';
+  return _pfAddToWeekPlan(rtype, rid, pf.centerName || pf.centerKey, today, 'call', pf.no, pf.id);
+}
+
+function pfOpenOutcomeModal(pfId, presetOutcome) {
+  var pf = _pfList.find(function(p) { return p.id === pfId; });
+  if (!pf || !pf.centerKey) { showToast('مرکز مشخص نیست'); return; }
+  if (typeof wpMarkDoneKey !== 'function') { showToast('ماژول برنامه هفته بارگذاری نشده'); return; }
+  var eKey = pfEnsureWeekEntryForPf(pf);
+  if (!eKey) { showToast('خطا در آماده‌سازی برنامه'); return; }
+  window._wpDonePreset = presetOutcome || null;
+  wpMarkDoneKey(eKey);
+}
+
+function _pfMapLostReason(reason) {
+  var map = {
+    'رقیب برد': 'competitor',
+    'قیمت بالا': 'price_high',
+    'نیاز نداشتن': 'need_change',
+    'زمان‌بندی نامناسب': 'other',
+    'عدم دسترسی به تصمیم‌گیر': 'no_response',
+    'سایر': 'other'
+  };
+  return map[reason] || 'other';
+}
+
+function _pfOnOutcomeDone(pfId, data) {
+  if (!pfId || !data) return;
+  var typeMap = { followup: 'followup', inactive: 'outcome_inactive', won: 'outcome_won' };
+  var ftype = typeMap[data.outcome] || 'followup';
+  var noteParts = [];
+  if (data.pfNo) noteParts.push('PF ' + data.pfNo);
+  if (data.outcome === 'followup' && data.nextDate) noteParts.push('پیگیری بعدی: ' + data.nextDate);
+  if (data.outcome === 'inactive' && data.lostReason) noteParts.push('دلیل: ' + data.lostReason);
+  if (data.outcome === 'won' && data.amount > 0) noteParts.push('مبلغ: ' + data.amount + ' میلیون');
+  if (data.note) noteParts.push(data.note);
+  fetch('/api/proforma/' + encodeURIComponent(pfId) + '/followup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({
+      type: ftype,
+      note: noteParts.join(' — '),
+      outcome: data.outcome,
+      nextDate: data.nextDate || '',
+      lostReason: data.lostReason || '',
+      lostReasonKey: _pfMapLostReason(data.lostReason || ''),
+      amount: data.amount || 0
+    })
+  }).then(function() {
+    if (typeof pfLoad === 'function') {
+      return pfLoad().then(function() {
+        var el = _pfRoot();
+        if (el) _renderPfPanel(el);
+      });
+    }
+  }).catch(function() {});
+}
+window._pfOnOutcomeDone = _pfOnOutcomeDone;
+window.pfOpenOutcomeModal = pfOpenOutcomeModal;
+
+function pfAddToToday(pfId) {
+  var pf = _pfList.find(function(p) { return p.id === pfId; });
+  if (!pf || !pf.centerKey) { showToast('مرکز مشخص نیست'); return; }
+  var parts = pf.centerKey.split('_');
+  var rtype = parts[0];
+  var rid = parts.slice(1).join('_');
+  var today = typeof todayStr === 'function' ? todayStr() : '';
+  if (_pfAddToWeekPlan(rtype, rid, pf.centerName || pf.centerKey, today, 'call', pf.no, pf.id)) {
+    showToast('✅ به برنامه امروز اضافه شد — ' + (pf.centerName || ''));
+  }
+}
+
 function _pfDoSchedule(rtype, rid, cname) {
   var dateEl = document.getElementById('pfWpDate');
   var typeEl = document.getElementById('pfWpType');
   if (!dateEl || !dateEl.value) { showToast('تاریخ را وارد کنید'); return; }
   var scheduledDate = dateEl.value;
-  var actionType = typeEl ? typeEl.value : 'call';
-
-  var weekId = (typeof getWeekId === 'function') ? getWeekId(scheduledDate) : scheduledDate;
-  var recKey = rtype + '_' + rid;
-  var entryKey = weekId + ':::' + recKey;
-  if (!DB.weekEntries) DB.weekEntries = {};
-  DB.weekEntries[entryKey] = {
-    rtype: rtype, rid: rid, recKey: recKey, weekId: weekId,
-    scheduledDate: scheduledDate, actionType: actionType,
-    done: false, doneDate: null, addedBy: currentUser, centerName: cname
-  };
-  saveWeekEntryApi(entryKey, DB.weekEntries[entryKey]);
-  var _pfWM=document.getElementById('pfWpModal'); if(_pfWM) _pfWM.style.display='none';
-  showToast('✅ پیگیری در برنامه هفته ثبت شد — ' + scheduledDate);
+  var actionType = 'call';
+  var pfNoEl = document.getElementById('pfWpPfNo');
+  var pfNo = pfNoEl ? pfNoEl.value : '';
+  var pfId = '';
+  var pfObj = _pfList.find(function(p) { return p.no === pfNo; });
+  if (pfObj) pfId = pfObj.id;
+  if (_pfAddToWeekPlan(rtype, rid, cname, scheduledDate, actionType, pfNo, pfId)) {
+    var _pfWM = document.getElementById('pfWpModal');
+    if (_pfWM) _pfWM.style.display = 'none';
+    showToast('✅ پیگیری در برنامه هفته ثبت شد — ' + scheduledDate);
+  }
 }
 
 // ── Modal HTML ───────────────────────────────────────────────────────────
@@ -1954,34 +2978,17 @@ async function pfDeleteAttachment(fileId) {
   } catch (e) { showToast('❌ ' + e.message); }
 }
 
-async function pfShowDispatch(pfId) {
-  try {
-    var r = await fetch('/api/proforma/' + pfId + '/dispatch');
-    var data = await r.json();
-    if (!r.ok) { showToast('❌ ' + (data.error || 'خطا')); return; }
-    var txns = data.transactions || [];
-    if (!txns.length) {
-      openModal('pfDispatchModal', '📦 حواله انبار',
-        '<div style="padding:20px;text-align:center;color:#94a3b8">حواله‌ای برای این پیشفاکتور ثبت نشده</div>',
-        '<button onclick="closeModal(\'pfDispatchModal\')" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;cursor:pointer">بستن</button>');
-      return;
-    }
-    var rows = txns.map(function(t) {
-      var st = t.status === 'approved' ? '✅ تأیید شده' : (t.status === 'pending' ? '⏳ در انتظار' : esc(t.status));
-      return '<tr><td style="padding:8px;font-family:monospace;font-size:12px">' + esc(t.txn_no) + '</td>' +
-        '<td style="padding:8px;font-size:12px">' + esc(t.product_name || t.product_id || '') + '</td>' +
-        '<td style="padding:8px;text-align:center">' + t.qty + '</td>' +
-        '<td style="padding:8px;font-size:11px">' + st + '</td></tr>';
-    }).join('');
-    var body = '<p style="font-size:12px;color:#64748b;margin-bottom:10px">حواله‌های خروج کالا (FEFO) — تأیید نهایی در WMS → تأییدات</p>' +
-      '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#f8fafc">' +
-      '<th style="padding:8px;text-align:right">شماره</th><th style="padding:8px;text-align:right">کالا</th>' +
-      '<th style="padding:8px;text-align:center">تعداد</th><th style="padding:8px;text-align:right">وضعیت</th></tr></thead><tbody>' + rows + '</tbody></table>';
-    var foot = '<button onclick="window.open(\'/wms\',\'_blank\')" style="padding:8px 14px;background:#7c3aed;color:white;border:none;border-radius:8px;font-family:inherit;cursor:pointer;font-size:12px">📦 باز کردن WMS</button>' +
-      '<button onclick="closeModal(\'pfDispatchModal\')" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;cursor:pointer;margin-right:8px">بستن</button>';
-    openModal('pfDispatchModal', '📦 حواله‌های انبار', body, foot);
-  } catch (e) { showToast('❌ ' + e.message); }
+function pfIssueDispatch(pfId) {
+  var pf = _pfList.find(function(p) { return p.id === pfId; });
+  if (!pf) { showToast('پیشفاکتور یافت نشد'); return; }
+  if (!['approved', 'invoiced'].includes(pf.status)) {
+    showToast('فقط پیشفاکتور تأییدشده قابل صدور حواله است');
+    return;
+  }
+  window.open('/wms?pf=' + encodeURIComponent(pfId) + '#exit', '_blank');
 }
+window.pfIssueDispatch = pfIssueDispatch;
+window.pfShowDispatch = pfIssueDispatch;
 
 // ── Vue bridge callbacks ──────────────────────────────────────────────────
 // Called by ProformaPanel.vue — pf is the full object from Vue's API fetch.
@@ -2058,6 +3065,7 @@ function pfSelectProduct(i, name, unit, price, catalogCode) {
     _pfItems[i].unit        = unit;
     _pfItems[i].unitPrice   = price || 0;
     _pfItems[i].catalogCode = catalogCode || '';
+    _pfItems[i].category    = _pfItemCategory(_pfItems[i]);
     _pfItems[i].lineTotal   = _pfItemLineTotal(_pfItems[i]);
   }
   // Also update price cell

@@ -426,8 +426,21 @@ router.get('/lots/scan/:code', requireAuth, async (req, res) => {
 
 router.get('/products', requireAuth, async (req, res) => {
   try {
-    const r = await query('SELECT * FROM wms_products WHERE active = true ORDER BY name');
-    res.json(r.rows.map(rowToProduct));
+    const r = await query(`
+      SELECT p.*,
+        COALESCE((
+          SELECT ROUND(AVG(l.purchase_price))::bigint
+          FROM wms_lots l
+          WHERE l.product_id = p.id AND l.purchase_price > 0
+        ), 0) AS avg_purchase_price
+      FROM wms_products p
+      WHERE p.active = true
+      ORDER BY p.name`);
+    res.json(r.rows.map(function(row) {
+      const p = rowToProduct(row);
+      p.avgPurchasePrice = Number(row.avg_purchase_price || 0);
+      return p;
+    }));
   } catch(e) {
     console.error('[wms/products GET]', e.message);
     res.status(500).json({ error: 'خطای سرور' });

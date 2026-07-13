@@ -315,6 +315,11 @@ function renderKPIPanel(){
     }
   })();
 
+  // ── پیش‌فاکتور MoM / YoY (مدیر)
+  if (_isManager()) {
+    html += '<div id="kpiPfTrend" style="margin-bottom:14px"></div>';
+  }
+
   // ── header
   html+='<div class="kpi-header-row" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px">'    +'<h2 style="margin:0;font-size:18px;color:var(--text-primary)">📊 عملکرد KPI</h2>'    +'<select onchange="_kpiUserChange(this.value)" style="padding:5px 10px;border:1px solid var(--border-input);border-radius:5px;background:var(--bg-input);color:var(--text-primary);font-family:inherit;font-size:12px">'+userOpts+'</select>'    +'<select onchange="_kpiMonth=this.value;renderKPIPanel()" style="padding:5px 10px;border:1px solid var(--border-input);border-radius:6px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)">'+monthOpts+'</select>'    +'<div style="margin-right:auto;display:flex;gap:8px">'    +'<button style="background:#f0fdf4;color:#15803d;border:1px solid #86efac;border-radius:5px;font-size:11px;padding:5px 12px;cursor:pointer;font-weight:600" onclick="openTeamKPITargets()">🎯 تنظیم اهداف تیم</button>'    +(_isManager()?'<button style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:5px;font-size:11px;padding:5px 12px;cursor:pointer;font-weight:600;margin-right:6px" onclick="openProvTargetsModal()">🗺 اهداف استانی</button>':'')    +'<button class="btn-primary" onclick="openKPILog(_kpiUser)" style="font-size:11px;padding:5px 12px">📝 ثبت فعالیت</button>'    +'<button style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:5px;font-size:11px;padding:5px 12px;cursor:pointer;font-weight:600" onclick="exportKPIReport()">📥 دانلود گزارش</button>'    +'</div></div>';
 
@@ -580,6 +585,37 @@ function renderKPIPanel(){
 
   var el=document.getElementById('kpiPanel');
   if(el)el.innerHTML=html;
+
+  if (_isManager()) {
+    var month = _kpiMonth || (typeof currentJMonth === 'function' ? currentJMonth() : '');
+    fetch('/api/proforma/stats?month=' + encodeURIComponent(month)).then(function(r) { return r.json(); }).then(function(st) {
+      var box = document.getElementById('kpiPfTrend');
+      if (!box || !st.ok) return;
+      var mom = st.mom, yoy = st.yoy;
+      var cards = '';
+      if (mom) {
+        var mp = mom.pct != null ? (mom.pct >= 0 ? '+' : '') + mom.pct + '٪' : '—';
+        var mc = mom.pct != null && mom.pct >= 0 ? '#15803d' : '#dc2626';
+        cards += '<div style="flex:1;min-width:140px;background:white;border:1px solid #e2e8f0;border-radius:10px;padding:12px;text-align:center">'
+          + '<div style="font-size:11px;color:#64748b;margin-bottom:4px">📄 پیش‌فاکتور — MoM</div>'
+          + '<div style="font-size:18px;font-weight:800;color:#1e293b">' + (mom.approvedValue || 0).toLocaleString('fa-IR') + ' <span style="font-size:11px">﷼</span></div>'
+          + '<div style="font-size:12px;color:' + mc + ';font-weight:700;margin-top:4px">' + mp + ' نسبت به ماه قبل</div></div>';
+      }
+      if (yoy) {
+        var yp = yoy.pct != null ? (yoy.pct >= 0 ? '+' : '') + yoy.pct + '٪' : '—';
+        var yc = yoy.pct != null && yoy.pct >= 0 ? '#15803d' : '#dc2626';
+        cards += '<div style="flex:1;min-width:140px;background:white;border:1px solid #e2e8f0;border-radius:10px;padding:12px;text-align:center">'
+          + '<div style="font-size:11px;color:#64748b;margin-bottom:4px">📄 پیش‌فاکتور — YoY</div>'
+          + '<div style="font-size:18px;font-weight:800;color:#1e293b">' + (mom ? (mom.approvedValue || 0).toLocaleString('fa-IR') : '—') + '</div>'
+          + '<div style="font-size:12px;color:' + yc + ';font-weight:700;margin-top:4px">' + yp + ' نسبت به سال قبل</div></div>';
+      }
+      if (cards) {
+        box.innerHTML = '<div style="background:linear-gradient(135deg,#eff6ff,#f0fdf4);border:1px solid #bfdbfe;border-radius:12px;padding:14px 16px">'
+          + '<div style="font-size:13px;font-weight:700;color:#1e40af;margin-bottom:10px">📈 روند پیش‌فاکتور (ارزش تأیید‌شده) — ' + (typeof jMonthLabel === 'function' ? jMonthLabel(month) : month) + '</div>'
+          + '<div style="display:flex;gap:10px;flex-wrap:wrap">' + cards + '</div></div>';
+      }
+    }).catch(function() {});
+  }
 }
 
 function _renderKPIHistory(userId,month){

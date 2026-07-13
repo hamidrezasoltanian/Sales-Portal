@@ -1,6 +1,6 @@
 /* ═══ Lazy tab script loader (Phase 2) ═══ */
 (function () {
-  var V = '20260712j';
+  var V = '20260713n';
   var _loaded = {};
 
   var TAB_SCRIPTS = {
@@ -11,7 +11,7 @@
     tasks: ['tasks.js'],
     kpi: ['tasks.js', 'manager-tasks.js'],
     mtr: ['mtr.js'],
-    proforma: ['proforma.js'],
+    proforma: ['proforma.js', 'proforma-analytics.js', 'proforma-phase2.js'],
     hcp: ['hcp.js'],
     support: ['support.js'],
     hr: ['hr.js'],

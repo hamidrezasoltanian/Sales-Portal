@@ -109,6 +109,7 @@ app.use('/api/missions', require('./routes/missions'));
 app.use('/api/wms', require('./routes/wms'));
 app.use('/api/wms', require('./routes/wms-ext').router);
 app.use('/api/proforma', require('./routes/proforma'));
+app.use('/api/webhooks', require('./routes/webhooks'));
 app.use('/api/tasks', require('./routes/tasks'));
 app.use('/api/week-entries', require('./routes/week-entries'));
 app.use('/api/crm-settings', require('./routes/crm-settings'));
@@ -263,6 +264,11 @@ async function start() {
       require('./lib/faradis-auto-sync').startFaradisAutoSync();
     } catch (e) {
       console.warn('[faradis-auto-sync] scheduler not started:', e.message);
+    }
+    try {
+      require('./lib/proforma-scheduler').startProformaScheduler();
+    } catch (e) {
+      console.warn('[proforma-scheduler] not started:', e.message);
     }
     if (process.env.TELEGRAM_BOT_TOKEN) {
       const bot = require('./bot/telegram');

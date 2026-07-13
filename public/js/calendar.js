@@ -28,11 +28,27 @@ function collectCalItems(){
     items.push({type:'week',jDate:we.scheduledDate,jy:pts[0],jm:pts[1],jd:pts[2],time:null,
       title:'📋 '+getRecLabel(we.recKey)+(we.done?' ✓':''),color:we.done?'#22c55e':'#8b5cf6',sk:jMs(pts[0],pts[1],pts[2])});
   });
+  // proforma expiry overlay
+  (window._pfCalCache||[]).forEach(function(pf){
+    if(!pf.expiryDate)return;var pts=pf.expiryDate.split('/').map(Number);if(pts.length!==3)return;
+    if(_isExpert()&&pf.owner&&pf.owner!==currentUser)return;
+    var stClr=pf.status==='pending_disc'?'#f97316':pf.status==='negotiating'?'#eab308':'#6366f1';
+    items.push({type:'proforma',jDate:pf.expiryDate,jy:pts[0],jm:pts[1],jd:pts[2],time:null,
+      title:'📄 '+pf.no+' · '+esc(pf.centerName||''),color:stClr,pfId:pf.id,sk:jMs(pts[0],pts[1],pts[2])});
+  });
   return items;
 }
 
 function renderCalendar(){
   try{
+  if(window._pfCalCacheLoading){return;}
+  if(window._pfCalCache===undefined){
+    window._pfCalCacheLoading=true;
+    fetch('/api/proforma/calendar').then(function(r){return r.ok?r.json():[];}).then(function(d){
+      window._pfCalCache=d||[];window._pfCalCacheLoading=false;renderCalendar();
+    }).catch(function(){window._pfCalCache=[];window._pfCalCacheLoading=false;renderCalendar();});
+    return;
+  }
   if(!_calDate){var t=todayJ();_calDate=[t[0],t[1],t[2]];}
   var items=collectCalItems();
   var title=_calView==='month'?J_MONTHS[_calDate[1]-1]+' '+_calDate[0]:_calView==='week'?'هفته '+_calDate.join('/'):' ۳۰ روز از '+_calDate.join('/');
@@ -53,7 +69,8 @@ function calChip(it){
   var hnd='';
   if(it.type==='event')hnd='onclick="event.stopPropagation();openEvModal('+it.evId+')"';
   else if(it.type==='followup')hnd='onclick="event.stopPropagation();openCenterModal(\''+it.rtype+'\',\''+it.rid+'\')"';
-  var icon=it.type==='event'?'🗓':it.type==='followup'?'📅':'📋';
+  else if(it.type==='proforma'&&it.pfId)hnd='onclick="event.stopPropagation();if(typeof pfOpenEdit===\'function\')pfOpenEdit(\''+it.pfId+'\')"';
+  var icon=it.type==='event'?'🗓':it.type==='followup'?'📅':it.type==='proforma'?'📄':'📋';
   return'<div class="cal-chip" style="background:'+_safeColor(it.color)+'" '+hnd+'>'
     +'<span style="flex-shrink:0;font-size:9px">'+icon+'</span>'
     +(it.time?'<span class="cal-chip-time">'+it.time+'</span>':'')

@@ -7,6 +7,13 @@ const { query }  = require('../db');
 const { requirePermission } = require('../permissions');
 const { requireAuth } = require('../auth');
 const { createDispatchFromProforma, getDispatchForProforma } = require('../lib/wms-dispatch');
+const {
+  computeExpiryDate, appendProformaEvent, appendAuditLog, runAutoExpire, LOSS_REASONS,
+  buildProformaTimeline, parseAuditLog,
+} = require('../lib/proforma-helpers');
+const {
+  loadDiscountCaps, exceedsDiscountCap, canApproveDiscount, maxDiscountPct, getDiscountCap,
+} = require('../lib/pf-discount');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -39,6 +46,7 @@ const ItemSchema = z.object({
   qty:         z.coerce.number().min(1),
   unitPrice:   z.coerce.number().min(0),
   discPct:     z.coerce.number().min(0).max(100).default(0),
+  unitCost:    z.coerce.number().min(0).default(0),
 });
 
 const CreateSchema = z.object({
@@ -61,11 +69,21 @@ const CreateSchema = z.object({
   commissionAmt:  z.coerce.number().min(0).default(0),
   commissionNote: z.string().default(''),
   wmsWarehouseId: z.string().default(''),
+  channel:          z.string().default('direct'),
+  currency:         z.string().default('IRR'),
+  exchangeRate:     z.coerce.number().min(0).default(1),
+  paymentTerms:     z.string().default(''),
+  salesOwner:       z.string().default(''),
+  supportOwner:     z.string().default(''),
+  parentProformaId: z.string().default(''),
+  expiryDate:       z.string().default(''),
 });
 
 const ActionSchema = z.object({
-  action: z.enum(['send','approve','reject','cancel','reopen']),
+  action: z.enum(['send','approve','reject','cancel','reopen','negotiate','expire','approve_disc','reject_disc']),
   note:   z.string().default(''),
+  lossReason:     z.string().default(''),
+  lossCompetitor: z.string().default(''),
 });
 
 function isManagerRole(role) {
@@ -73,6 +91,9 @@ function isManagerRole(role) {
 }
 function isSuperAdminRole(role) {
   return role === 'سوپر ادمین';
+}
+function isFinanceRole(role) {
+  return role === 'مالی';
 }
 function canViewProforma(user, row) {
   if (isManagerRole(user.role)) return true;
@@ -91,6 +112,23 @@ function canEditProforma(user, row) {
 }
 
 // ── Helper: validate with zod, return 400 on error ─────────────────────────
+
+function pfExtendedFields(d, reqUser) {
+  const jalali = d.jalaliDate || '';
+  const validDays = d.validDays || 30;
+  const expiry = d.expiryDate || computeExpiryDate(jalali, validDays) || null;
+  return {
+    expiry,
+    channel: d.channel || 'direct',
+    currency: d.currency || 'IRR',
+    exchangeRate: d.exchangeRate != null ? d.exchangeRate : 1,
+    paymentTerms: d.paymentTerms || '',
+    salesOwner: d.salesOwner || '',
+    supportOwner: d.supportOwner || '',
+    parentProformaId: d.parentProformaId || null,
+  };
+}
+
 function validate(schema, data, res) {
   const r = schema.safeParse(data);
   if (!r.success) {
@@ -130,6 +168,14 @@ function buildProformaSnapshot(pf, by) {
     commissionNote:  pf.commissionNote || '',
     wmsWarehouseId:  pf.wmsWarehouseId || '',
     wmsDispatchIds:  pf.wmsDispatchIds || [],
+    channel:         pf.channel || 'direct',
+    currency:        pf.currency || 'IRR',
+    exchangeRate:    pf.exchangeRate || 1,
+    paymentTerms:    pf.paymentTerms || '',
+    salesOwner:      pf.salesOwner || '',
+    supportOwner:    pf.supportOwner || '',
+    parentProformaId: pf.parentProformaId || '',
+    expiryDate:      pf.expiryDate || '',
   };
 }
 
@@ -170,6 +216,18 @@ function rowToObj(r) {
     buyerPostal:    r.buyer_postal || '',
     wmsDispatchIds: r.wms_dispatch_ids || [],
     wmsWarehouseId: r.wms_warehouse_id || '',
+    expiryDate:     r.expiry_date || computeExpiryDate(r.jalali_date, r.valid_days) || '',
+    channel:        r.channel || 'direct',
+    currency:       r.currency || 'IRR',
+    exchangeRate:   Number(r.exchange_rate || 1),
+    paymentTerms:   r.payment_terms || '',
+    lossReason:     r.loss_reason || '',
+    lossCompetitor: r.loss_competitor || '',
+    parentProformaId: r.parent_proforma_id || '',
+    salesOwner:     r.sales_owner || '',
+    supportOwner:   r.support_owner || '',
+    auditLog:       r.audit_log || [],
+    lastFollowupAt: r.last_followup_at || null,
   };
 }
 
@@ -225,11 +283,30 @@ router.get('/stats', requireAuth, async (req, res) => {
              FROM proformas${where}`, params),
     ]);
 
+    const curMonth = (req.query.month || '').trim();
+    let mom = null, yoy = null;
+    if (curMonth) {
+      const parts = curMonth.split('/');
+      const prevM = parts.length >= 2 ? (function(){
+        var y=+parts[0], m=+parts[1]; m--; if(m<1){m=12;y--;} return y+'/'+String(m).padStart(2,'0');
+      })() : '';
+      const prevY = parts.length >= 1 ? ((+parts[0]-1)+'/'+parts.slice(1).join('/')) : '';
+      const [curR, prevMR, prevYR] = await Promise.all([
+        query(`SELECT COUNT(*)::int AS cnt, COALESCE(SUM(CASE WHEN status IN ('approved','invoiced') THEN total ELSE 0 END),0) AS val FROM proformas WHERE LEFT(jalali_date,7)=$1`, [curMonth]),
+        prevM ? query(`SELECT COUNT(*)::int AS cnt, COALESCE(SUM(CASE WHEN status IN ('approved','invoiced') THEN total ELSE 0 END),0) AS val FROM proformas WHERE LEFT(jalali_date,7)=$1`, [prevM]) : { rows:[{cnt:0,val:0}] },
+        prevY ? query(`SELECT COUNT(*)::int AS cnt, COALESCE(SUM(CASE WHEN status IN ('approved','invoiced') THEN total ELSE 0 END),0) AS val FROM proformas WHERE LEFT(jalali_date,7)=$1`, [prevY]) : { rows:[{cnt:0,val:0}] },
+      ]);
+      const cv = Number(curR.rows[0].val)||0, pv = Number(prevMR.rows[0].val)||0, yv = Number(prevYR.rows[0].val)||0;
+      mom = { month: curMonth, count: curR.rows[0].cnt, approvedValue: cv, prevMonth: prevM, prevValue: pv, pct: pv ? Math.round((cv-pv)/pv*1000)/10 : null };
+      yoy = { month: curMonth, prevYearMonth: prevY, prevValue: yv, pct: yv ? Math.round((cv-yv)/yv*1000)/10 : null };
+    }
+
     res.json({
       ok: true,
       byStatus: byStatus.rows.map(r => ({ status: r.status, count: r.cnt, totalValue: Number(r.total_value) })),
       byMonth: byMonth.rows.map(r => ({ month: r.month, count: r.cnt, approvedTotal: Number(r.approved_total) })),
       totals: totals.rows[0] || {},
+      mom, yoy,
     });
   } catch (e) {
     console.error('[proforma stats]', e.message);
@@ -281,6 +358,8 @@ router.post('/', requireAuth, async (req, res) => {
           note, manager_note, buyer_nat_id, buyer_eco_code, buyer_reg_id,
           buyer_address, buyer_phone, buyer_postal,
           has_commission, commission_amt, commission_note, wms_warehouse_id,
+          expiry_date, channel, currency, exchange_rate, payment_terms,
+          sales_owner, support_owner, parent_proforma_id,
           status, created_by, created_at, updated_at)
        VALUES 
          ($1, $2, $3, $4, $5, $6, $7, 
@@ -288,16 +367,24 @@ router.post('/', requireAuth, async (req, res) => {
           $14, $15, $16, $17, $18, 
           $19, $20, $21, 
           $22, $23, $24, $25,
-          'draft', $26, NOW(), NOW())
+          $26, $27, $28, $29, $30,
+          $31, $32, $33,
+          'draft', $34, NOW(), NOW())
        RETURNING *`,
-      [id, no, d.jalaliDate||null, d.validDays, d.centerKey, d.centerName,
+      (function(){
+         var ext = pfExtendedFields(d, req.user.username);
+         return [id, no, d.jalaliDate||null, d.validDays, d.centerKey, d.centerName,
        JSON.stringify(itemsFull), subtotal, d.discountPct, discAmt,
        d.taxPct, taxAmt, total, d.note, d.managerNote,
        d.buyerNatId, d.buyerEcoCode, d.buyerRegId, d.buyerAddress, d.buyerPhone, d.buyerPostal,
        d.hasCommission||false, d.commissionAmt||0, d.commissionNote||'',
        d.wmsWarehouseId || null,
-       req.user.username]
+       ext.expiry, ext.channel, ext.currency, ext.exchangeRate, ext.paymentTerms,
+       ext.salesOwner, ext.supportOwner, ext.parentProformaId,
+       req.user.username];
+       })()
     );
+    await appendProformaEvent(id, 'created', req.user.username, 'ایجاد ' + no, { centerKey: d.centerKey });
     res.status(201).json(rowToObj(r.rows[0]));
   } catch(e) {
     console.error('[proforma POST]', e.message);
@@ -360,6 +447,153 @@ router.delete('/files/:fileId', requireAuth, async (req, res) => {
   }
 });
 
+
+
+// GET /api/proforma/calendar — items for team calendar overlay
+router.get('/calendar', requireAuth, async (req, res) => {
+  try {
+    const isManager = ['مدیر', 'سوپر ادمین'].includes(req.user.role);
+    const params = [];
+    let where = " WHERE status IN ('sent','negotiating','approved','pending_disc') AND expiry_date IS NOT NULL AND expiry_date != ''";
+    if (!isManager) { where += ' AND created_by = $1'; params.push(req.user.username); }
+    const r = await query(
+      `SELECT id, no, center_name, center_key, expiry_date, status, total,
+              COALESCE(NULLIF(sales_owner,''), created_by) AS owner
+       FROM proformas ${where} ORDER BY expiry_date LIMIT 300`,
+      params
+    );
+    res.json(r.rows.map(x => ({
+      id: x.id, no: x.no, centerName: x.center_name, centerKey: x.center_key,
+      expiryDate: x.expiry_date, status: x.status, total: Number(x.total), owner: x.owner,
+    })));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/proforma/workload — open PF count per expert (manager)
+router.get('/workload', requireAuth, async (req, res) => {
+  try {
+    const isManager = ['مدیر', 'سوپر ادمین'].includes(req.user.role);
+    if (!isManager) return res.status(403).json({ error: 'فقط مدیر' });
+    const r = await query(`
+      SELECT COALESCE(NULLIF(sales_owner,''), created_by) AS expert,
+             COUNT(*)::int AS open_count,
+             COALESCE(SUM(total),0) AS open_value,
+             COUNT(*) FILTER (WHERE status IN ('sent','negotiating'))::int AS pending_count
+      FROM proformas
+      WHERE status IN ('sent','negotiating','approved')
+      GROUP BY 1 ORDER BY open_count DESC
+    `);
+    res.json({ ok: true, rows: r.rows.map(x => ({
+      expert: x.expert,
+      openCount: x.open_count,
+      openValue: Number(x.open_value),
+      pendingCount: x.pending_count,
+    })) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/proforma/reports/summary
+router.get('/reports/summary', requireAuth, async (req, res) => {
+  try {
+    const isManager = ['مدیر', 'سوپر ادمین'].includes(req.user.role);
+    const params = [];
+    let where = '';
+    if (!isManager) { where = ' WHERE created_by = $1'; params.push(req.user.username); }
+    const [byExpert, byStatus, lossReasons] = await Promise.all([
+      query(`SELECT COALESCE(NULLIF(sales_owner,''), created_by) AS expert,
+                    COUNT(*)::int AS cnt,
+                    COALESCE(SUM(total),0) AS total_val,
+                    COUNT(*) FILTER (WHERE status IN ('approved','invoiced'))::int AS won,
+                    COUNT(*) FILTER (WHERE status = 'rejected')::int AS lost
+             FROM proformas${where} GROUP BY 1 ORDER BY total_val DESC`, params),
+      query(`SELECT status, COUNT(*)::int AS cnt, COALESCE(SUM(total),0) AS total_val FROM proformas${where} GROUP BY status`, params),
+      query(`SELECT loss_reason, COUNT(*)::int AS cnt FROM proformas WHERE loss_reason IS NOT NULL AND loss_reason != '' GROUP BY loss_reason ORDER BY cnt DESC`),
+    ]);
+    res.json({
+      ok: true,
+      byExpert: byExpert.rows,
+      byStatus: byStatus.rows,
+      lossReasons: lossReasons.rows,
+      lossReasonLabels: LOSS_REASONS,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/proforma/expire-check — manual trigger
+router.post('/expire-check', requireAuth, async (req, res) => {
+  try {
+    if (!['مدیر', 'سوپر ادمین'].includes(req.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
+    const n = await runAutoExpire();
+    res.json({ ok: true, expired: n });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/proforma/:id/timeline — must stay before bare GET /:id
+router.get('/:id/timeline', requireAuth, async (req, res) => {
+  try {
+    const pf = await query('SELECT * FROM proformas WHERE id = $1', [req.params.id]);
+    if (!pf.rows.length) return res.status(404).json({ error: 'پیشفاکتور یافت نشد' });
+    if (!canViewProforma(req.user, pf.rows[0])) return res.status(403).json({ error: 'دسترسی ندارید' });
+    const row = pf.rows[0];
+    let dbEvents = [];
+    try {
+      const events = await query(
+        'SELECT * FROM proforma_events WHERE proforma_id = $1 ORDER BY event_at DESC LIMIT 100',
+        [req.params.id]
+      );
+      dbEvents = events.rows || [];
+    } catch (evErr) {
+      console.warn('[proforma timeline] proforma_events:', evErr.message);
+    }
+    const timeline = buildProformaTimeline(row, dbEvents);
+    res.json({
+      ok: true,
+      proformaId: req.params.id,
+      no: row.no,
+      timeline,
+      auditLog: parseAuditLog(row.audit_log),
+      events: dbEvents.map(e => ({
+        id: e.id, type: e.event_type, at: e.event_at, actor: e.actor, note: e.note, meta: e.meta || {},
+      })),
+    });
+  } catch (e) {
+    console.error('[proforma timeline]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/proforma/:id/followup — record follow-up activity
+router.post('/:id/followup', requireAuth, async (req, res) => {
+  try {
+    const pf = await query('SELECT created_by, status FROM proformas WHERE id = $1', [req.params.id]);
+    if (!pf.rows.length) return res.status(404).json({ error: 'پیشفاکتور یافت نشد' });
+    if (!canViewProforma(req.user, pf.rows[0])) return res.status(403).json({ error: 'دسترسی ندارید' });
+    const body = req.body || {};
+    const note = body.note || '';
+    const ftype = body.type || 'followup';
+    const meta = Object.assign({}, body);
+    await appendProformaEvent(req.params.id, ftype, req.user.username, note, meta);
+    await query('UPDATE proformas SET last_followup_at = NOW(), updated_at = NOW() WHERE id = $1', [req.params.id]);
+    if (ftype === 'outcome_inactive' && body.lostReasonKey) {
+      await query(
+        'UPDATE proformas SET loss_reason = $2 WHERE id = $1 AND (loss_reason IS NULL OR loss_reason = \'\')',
+        [req.params.id, body.lostReasonKey]
+      ).catch(() => {});
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── GET /api/proforma/:id ───────────────────────────────────────────────────
 router.get('/:id', requireAuth, async (req, res) => {
   try {
@@ -371,6 +605,7 @@ router.get('/:id', requireAuth, async (req, res) => {
     res.json(rowToObj(r.rows[0]));
   } catch(e) { res.status(500).json({ error: 'خطای سرور' }); }
 });
+
 
 // ── GET /api/proforma/:id/versions ──────────────────────────────────
 router.get('/:id/versions', requireAuth, async (req, res) => {
@@ -494,9 +729,11 @@ router.post('/:id/restore', requireAuth, async (req, res) => {
          buyer_phone=$18, buyer_postal=$19,
          has_commission=$20, commission_amt=$21, commission_note=$22,
          wms_warehouse_id=$23,
+         expiry_date=$26, channel=$27, currency=$28, exchange_rate=$29, payment_terms=$30,
+         sales_owner=$31, support_owner=$32, parent_proforma_id=$33,
          updated_at=NOW(),
-         versions = versions || $24::jsonb
-       WHERE id=$25 RETURNING *`,
+         versions = versions || $34::jsonb
+       WHERE id=$35 RETURNING *`,
       [
         snap.jalaliDate || row.jalali_date, snap.validDays || row.valid_days,
         snap.centerKey || row.center_key, snap.centerName || row.center_name,
@@ -574,7 +811,10 @@ router.put('/:id', requireAuth, async (req, res) => {
          updated_at=NOW(),
          versions = versions || $24::jsonb
        WHERE id=$25 RETURNING *`,
-      [d.jalaliDate||pf.jalaliDate, d.validDays||pf.validDays,
+      (function(){
+        var ext = pfExtendedFields(Object.assign({}, pf, d), pf.salesOwner || pf.createdBy);
+        if (d.expiryDate) ext.expiry = d.expiryDate;
+        return [d.jalaliDate||pf.jalaliDate, d.validDays||pf.validDays,
        d.centerKey||pf.centerKey, d.centerName||pf.centerName,
        JSON.stringify(items), subtotal, discPct, discAmt,
        taxPct, taxAmt, total, d.note!==undefined?d.note:pf.note,
@@ -589,8 +829,14 @@ router.put('/:id', requireAuth, async (req, res) => {
        d.commissionAmt!==undefined?d.commissionAmt:pf.commissionAmt,
        d.commissionNote!==undefined?d.commissionNote:pf.commissionNote,
        d.wmsWarehouseId !== undefined ? (d.wmsWarehouseId || null) : (pf.wmsWarehouseId || null),
+       ext.expiry, d.channel||pf.channel||'direct', d.currency||pf.currency||'IRR',
+       d.exchangeRate!=null?d.exchangeRate:(pf.exchangeRate||1),
+       d.paymentTerms!=null?d.paymentTerms:(pf.paymentTerms||''),
+       d.salesOwner||pf.salesOwner||pf.createdBy, d.supportOwner!=null?d.supportOwner:(pf.supportOwner||''),
+       d.parentProformaId||pf.parentProformaId||null,
        JSON.stringify([snapshot]),
-       req.params.id]
+       req.params.id];
+      })()
     );
     res.json(rowToObj(r.rows[0]));
   } catch(e) {
@@ -599,14 +845,49 @@ router.put('/:id', requireAuth, async (req, res) => {
   }
 });
 
+
+// POST /api/proforma/:id/revise — new draft version linked to parent
+router.post('/:id/revise', requireAuth, async (req, res) => {
+  try {
+    const src = await query('SELECT * FROM proformas WHERE id = $1', [req.params.id]);
+    if (!src.rows.length) return res.status(404).json({ error: 'پیشفاکتور یافت نشد' });
+    const row = src.rows[0];
+    if (!canViewProforma(req.user, row)) return res.status(403).json({ error: 'دسترسی ندارید' });
+    const pf = rowToObj(row);
+    const year = (pf.jalaliDate || '').split('/')[0] || String(new Date().getFullYear());
+    const maxRes = await query(
+      `SELECT MAX(CAST(SUBSTRING(no FROM '\\d+$') AS INTEGER)) as max_seq FROM proformas WHERE no LIKE $1`,
+      [`PF-${year}-%`]
+    );
+    let nextSeq = 1;
+    if (maxRes.rows.length && maxRes.rows[0].max_seq != null) nextSeq = parseInt(maxRes.rows[0].max_seq) + 1;
+    const no = `PF-${year}-${String(nextSeq).padStart(4, '0')}`;
+    const id = 'pf_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const ext = pfExtendedFields({ jalaliDate: pf.jalaliDate, validDays: pf.validDays, channel: pf.channel, currency: pf.currency, exchangeRate: pf.exchangeRate, paymentTerms: pf.paymentTerms, salesOwner: pf.salesOwner, supportOwner: pf.supportOwner, parentProformaId: pf.id }, req.user.username);
+    const r = await query(
+      `INSERT INTO proformas (id, no, jalali_date, valid_days, center_key, center_name, items, subtotal, discount_pct, disc_amt, tax_pct, tax_amt, total, note, manager_note, buyer_nat_id, buyer_eco_code, buyer_reg_id, buyer_address, buyer_phone, buyer_postal, has_commission, commission_amt, commission_note, wms_warehouse_id, expiry_date, channel, currency, exchange_rate, payment_terms, sales_owner, support_owner, parent_proforma_id, status, created_by, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,'draft',$34,NOW(),NOW()) RETURNING *`,
+      [id, no, pf.jalaliDate, pf.validDays, pf.centerKey, pf.centerName, JSON.stringify(pf.items||[]), pf.subtotal, pf.discountPct, pf.discAmt, pf.taxPct, pf.taxAmt, pf.total, pf.note, '', pf.buyerNatId, pf.buyerEcoCode, pf.buyerRegId, pf.buyerAddress, pf.buyerPhone, pf.buyerPostal, pf.hasCommission, pf.commissionAmt, pf.commissionNote, pf.wmsWarehouseId||null, ext.expiry, ext.channel, ext.currency, ext.exchangeRate, ext.paymentTerms, ext.salesOwner, ext.supportOwner, pf.id, req.user.username]
+    );
+    await appendProformaEvent(pf.id, 'revision_created', req.user.username, 'نسخه جدید ' + no, { newId: id });
+    await appendProformaEvent(id, 'revision_from', req.user.username, 'از ' + pf.no, { parentId: pf.id });
+    res.status(201).json(rowToObj(r.rows[0]));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── POST /api/proforma/:id/action — workflow ────────────────────────────────
 const TRANSITIONS = {
-  draft:     ['send','cancel'],
-  sent:      ['approve','reject','cancel'],
-  approved:  ['cancel','reject'],
-  rejected:  ['reopen'],
-  cancelled: ['reopen'],
-  invoiced:  [],
+  draft:         ['send','cancel'],
+  pending_disc:  ['approve_disc','reject_disc','cancel'],
+  sent:          ['negotiate','approve','reject','cancel','expire'],
+  negotiating:   ['approve','reject','cancel','expire'],
+  approved:      ['cancel','reject'],
+  rejected:      ['reopen'],
+  cancelled:     ['reopen'],
+  expired:       ['reopen'],
+  invoiced:      [],
 };
 
 router.post('/:id/action', requireAuth, async (req, res) => {
@@ -645,42 +926,64 @@ router.post('/:id/action', requireAuth, async (req, res) => {
     let updateSQL = '';
     let params    = [];
 
+    const caps = await loadDiscountCaps();
+    const pfObj = rowToObj(pf);
+
     if (d.action === 'send') {
-      updateSQL = `SET status='sent', sent_at=NOW(), updated_at=NOW() WHERE id=$1`;
-      params    = [req.params.id];
+      const overCap = exceedsDiscountCap(pfObj, req.user.role, caps);
+      if (overCap) {
+        updateSQL = `SET status='pending_disc', updated_at=NOW(), manager_note=$2 WHERE id=$1`;
+        params    = [req.params.id, 'تخفیف ' + maxDiscountPct(pfObj) + '٪ — سقف مجاز ' + getDiscountCap(req.user.role, caps) + '٪'];
+      } else {
+        updateSQL = `SET status='sent', sent_at=NOW(), updated_at=NOW() WHERE id=$1`;
+        params    = [req.params.id];
+      }
+    } else if (d.action === 'approve_disc') {
+      if (!canApproveDiscount(req.user)) return res.status(403).json({ error: 'فقط مدیر یا مالی می‌تواند تخفیف را تأیید کند' });
+      updateSQL = `SET status='sent', sent_at=NOW(), updated_at=NOW(), manager_note=COALESCE(NULLIF($2,''), manager_note) WHERE id=$1`;
+      params    = [req.params.id, d.note || 'تأیید تخفیف'];
+    } else if (d.action === 'reject_disc') {
+      if (!canApproveDiscount(req.user)) return res.status(403).json({ error: 'فقط مدیر یا مالی' });
+      updateSQL = `SET status='draft', updated_at=NOW(), manager_note=$2 WHERE id=$1`;
+      params    = [req.params.id, d.note || 'رد تخفیف — بازگشت به پیش‌نویس'];
+    } else if (d.action === 'negotiate') {
+      if (!isManager && !isOwner) return res.status(403).json({ error: 'دسترسی ندارید' });
+      updateSQL = `SET status='negotiating', updated_at=NOW(), manager_note=COALESCE(NULLIF($2,''), manager_note) WHERE id=$1`;
+      params    = [req.params.id, d.note || ''];
     } else if (d.action === 'approve') {
       if (!isManager) return res.status(403).json({ error: 'فقط مدیر می‌تواند تأیید کند' });
       updateSQL = `SET status='approved', responded_at=NOW(), responded_by=$2, manager_note=$3, updated_at=NOW() WHERE id=$1`;
       params    = [req.params.id, req.user.username, d.note];
     } else if (d.action === 'reject') {
       if (!isManager) return res.status(403).json({ error: 'فقط مدیر می‌تواند رد کند' });
-      updateSQL = `SET status='rejected', responded_at=NOW(), responded_by=$2, manager_note=$3, updated_at=NOW() WHERE id=$1`;
-      params    = [req.params.id, req.user.username, d.note];
+      if (!d.lossReason) return res.status(400).json({ error: 'دلیل رد الزامی است' });
+      updateSQL = `SET status='rejected', responded_at=NOW(), responded_by=$2, manager_note=$3, loss_reason=$4, loss_competitor=$5, updated_at=NOW() WHERE id=$1`;
+      params    = [req.params.id, req.user.username, d.note, d.lossReason, d.lossCompetitor || ''];
+    } else if (d.action === 'expire') {
+      if (!isManager) return res.status(403).json({ error: 'فقط مدیر' });
+      updateSQL = `SET status='expired', updated_at=NOW() WHERE id=$1`;
+      params    = [req.params.id];
     } else if (d.action === 'cancel') {
       updateSQL = `SET status='cancelled', updated_at=NOW() WHERE id=$1`;
       params    = [req.params.id];
     } else if (d.action === 'reopen') {
-      updateSQL = `SET status='draft', responded_at=NULL, responded_by=NULL, manager_note='', updated_at=NOW() WHERE id=$1`;
+      updateSQL = `SET status='draft', responded_at=NULL, responded_by=NULL, manager_note='', loss_reason=NULL, loss_competitor=NULL, updated_at=NOW() WHERE id=$1`;
       params    = [req.params.id];
     }
 
     const r = await query(`UPDATE proformas ${updateSQL} RETURNING *`, params);
+
     const updated = rowToObj(r.rows[0]);
+    await appendAuditLog(req.params.id, {
+      action: d.action, by: req.user.username,
+      from: pf.status, to: updated.status, note: d.note || '',
+      lossReason: d.lossReason || '', lossCompetitor: d.lossCompetitor || '',
+    });
+    await appendProformaEvent(req.params.id, 'status_' + d.action, req.user.username, d.note || '', {
+      from: pf.status, to: updated.status, lossReason: d.lossReason || '',
+    });
 
-    let wmsDispatch = null;
-    if (d.action === 'approve') {
-      try {
-        wmsDispatch = await createDispatchFromProforma(updated, req.user.username);
-        if (wmsDispatch && wmsDispatch.transactionIds) {
-          updated.wmsDispatchIds = wmsDispatch.transactionIds;
-        }
-      } catch (dispatchErr) {
-        console.error('[proforma approve dispatch]', dispatchErr.message);
-        wmsDispatch = { error: dispatchErr.message };
-      }
-    }
-
-    res.json(Object.assign({}, updated, { wmsDispatch: wmsDispatch }));
+    res.json(updated);
 
     // Push Telegram notifications (non-blocking, only if enabled in settings)
     try {
@@ -688,10 +991,14 @@ router.post('/:id/action', requireAuth, async (req, res) => {
       const notifyEnabled = !settingsRow.rows.length || settingsRow.rows[0].value !== false;
       if (!notifyEnabled) throw new Error('telegram notify disabled');
       const bot = require('../bot/telegram');
-      if (d.action === 'send') {
+      if (d.action === 'send' && updated.status === 'sent') {
         const msg = '📄 پیشفاکتور ' + updated.no + ' از ' + req.user.username +
           ' در انتظار تأیید است.\n💰 مبلغ: ' + Number(updated.total).toLocaleString('fa-IR') + ' ﷼\n👤 مشتری: ' + (updated.centerName || '—');
         bot.notifyManagers(msg).catch(function(){});
+      } else if (d.action === 'send' && updated.status === 'pending_disc') {
+        const msg = '⚠️ پیشفاکتور ' + updated.no + ' — تخفیف ' + maxDiscountPct(updated) + '٪ نیاز به تأیید مدیر/مالی دارد\n👤 ' + req.user.username;
+        bot.notifyManagers(msg).catch(function(){});
+        if (bot.notifyFinance) bot.notifyFinance(msg).catch(function(){});
       } else if (d.action === 'approve' || d.action === 'reject') {
         const label = d.action === 'approve' ? '✅ تأیید شد' : '❌ رد شد';
         const msg   = '📄 پیشفاکتور ' + updated.no + ' ' + label + ' توسط ' + req.user.username +

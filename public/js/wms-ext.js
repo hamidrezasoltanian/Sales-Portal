@@ -537,6 +537,7 @@
           body: JSON.stringify({ purchasePrice: price }),
         });
         lot.purchasePrice = price;
+        if (!Array.isArray(S.priceHistory)) S.priceHistory = [];
         S.priceHistory.push({
           product: lot.productId, lot: lot.lotNo, price: price, qty: lot.qty,
           date: new Date().toISOString(), method: method === 'usd' ? 'دلاری' : 'ریالی',
@@ -888,7 +889,7 @@
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">' +
         '<span class="badge bb">' + rep.methodLabel + '</span>' +
         '<span class="badge bg">موجودی: ' + fmt(rep.totalQty) + '</span>' +
-        '<span class="badge bt">ارزش: ' + fmt(Math.round(rep.totalValue / 1000000)) + ' M</span>' +
+        '<span class="badge bt">ارزش: ' + fmt(Math.round(rep.totalValue / 1000000)) + ' م.ریال</span>' +
         '<span class="badge bt">' + rep.productCount + ' کالا</span>' +
         (varianceCount ? '<span class="badge br">⚠ ' + varianceCount + ' مغایرت</span>' : '') + '</div>' +
         (varianceCount ? '<div class="imed-alert"><div style="flex:1"><strong>مغایرت بین گردش و موجودی Lot</strong><div style="font-size:11px;margin-top:3px">برای اصلاح، انبارگردانی ثبت کنید تا سند تعدیل ایجاد شود.</div></div><button class="btn btn-warn btn-sm" onclick="go(\'count\')">رفتن به انبارگردانی</button></div>' : '') +

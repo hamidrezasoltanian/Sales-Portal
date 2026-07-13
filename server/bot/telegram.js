@@ -3070,6 +3070,17 @@ async function notifyManagers(text) {
   } catch(e) {}
 }
 
+async function notifyFinance(text) {
+  try {
+    const stored = await loadBotSessions();
+    for (const [chatId, s] of Object.entries(stored)) {
+      if (s.role === 'مالی' && s.state === ST.IDLE) {
+        await sendMsg(parseInt(chatId), text).catch(function(){});
+      }
+    }
+  } catch(e) {}
+}
+
 async function notifyAll(text) {
   try {
     const stored = await loadBotSessions();
@@ -3378,4 +3389,4 @@ async function poll() {
 
 function stop() { _running = false; }
 
-module.exports = { poll, stop, notifyManagers, notifyAll, notifyUser };
+module.exports = { poll, stop, notifyManagers, notifyAll, notifyUser, notifyFinance };

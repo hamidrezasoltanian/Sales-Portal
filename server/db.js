@@ -641,6 +641,38 @@ async function initSchema() {
   await query(`ALTER TABLE wms_transactions ADD COLUMN IF NOT EXISTS proforma_id VARCHAR(50)`).catch(() => {});
   await query(`CREATE INDEX IF NOT EXISTS idx_wms_txn_proforma ON wms_transactions(proforma_id)`).catch(() => {});
 
+  // Proforma v2 — EspoCRM-ready extended fields
+  await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS expiry_date VARCHAR(20)`).catch(() => {});
+  await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS channel VARCHAR(50) DEFAULT 'direct'`).catch(() => {});
+  await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'IRR'`).catch(() => {});
+  await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(12,4) DEFAULT 1`).catch(() => {});
+  await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS payment_terms VARCHAR(50) DEFAULT ''`).catch(() => {});
+  await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS loss_reason VARCHAR(50)`).catch(() => {});
+  await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS loss_competitor VARCHAR(200)`).catch(() => {});
+  await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS parent_proforma_id VARCHAR(50)`).catch(() => {});
+  await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS support_owner VARCHAR(100)`).catch(() => {});
+  await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS sales_owner VARCHAR(100)`).catch(() => {});
+  await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS audit_log JSONB DEFAULT '[]'`).catch(() => {});
+  await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS last_followup_at TIMESTAMPTZ`).catch(() => {});
+  await query(`CREATE INDEX IF NOT EXISTS idx_pf_expiry ON proformas(expiry_date)`).catch(() => {});
+  await query(`CREATE INDEX IF NOT EXISTS idx_pf_sales_owner ON proformas(sales_owner)`).catch(() => {});
+  await query(`ALTER TABLE proformas DROP CONSTRAINT IF EXISTS proformas_status_check`).catch(() => {});
+  await query(`ALTER TABLE proformas ADD CONSTRAINT proformas_status_check
+    CHECK(status IN ('draft','sent','negotiating','approved','rejected','cancelled','invoiced','expired','pending_disc'))`).catch(() => {});
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS proforma_events (
+      id           SERIAL PRIMARY KEY,
+      proforma_id  VARCHAR(50) NOT NULL,
+      event_type   VARCHAR(50) NOT NULL DEFAULT 'note',
+      event_at     TIMESTAMPTZ DEFAULT NOW(),
+      actor        VARCHAR(100) DEFAULT '',
+      note         TEXT DEFAULT '',
+      meta         JSONB DEFAULT '{}'
+    )
+  `).catch(() => {});
+  await query(`CREATE INDEX IF NOT EXISTS idx_pf_events_pf ON proforma_events(proforma_id, event_at DESC)`).catch(() => {});
+
   // Auto-migrate proformas from blob → table (run once)
   await _migrateProformasFromBlob();
 

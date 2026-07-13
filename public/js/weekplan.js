@@ -1069,8 +1069,10 @@ function wpMarkDoneKey(eKey){
   var defNext=jAddDays(tdp[0],tdp[1],tdp[2],7);
   var defNextStr=defNext[0]+'/'+(defNext[1]<10?'0'+defNext[1]:defNext[1])+'/'+(defNext[2]<10?'0'+defNext[2]:defNext[2]);
   var actLabel=typeof wpActLabel==='function'?wpActLabel(we.actionType||'call'):(we.actionType==='visit'?'مراجعه':'تماس');
+  var pfCtx=we.pfNo||we.pfId||'';
   var body='<div style="padding:4px 0">'
     +'<div style="margin-bottom:12px;padding:8px 12px;background:var(--bg-raised);border-radius:7px;font-size:13px">مرکز: <b>'+esc(cname)+'</b> &nbsp;|&nbsp; نوع: <b>'+actLabel+'</b></div>'
+    +(pfCtx?'<div style="margin-bottom:10px;padding:6px 10px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;font-size:12px">📄 پیشفاکتور: <b>'+esc(we.pfNo||String(we.pfId))+'</b></div>':'')
     +'<div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">نتیجه این '+actLabel+' چه بود؟ <span style="color:#dc2626">*</span></div>'
     +'<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">'
     +'<label style="display:flex;align-items:flex-start;gap:8px;padding:9px 12px;border:1.5px solid var(--border);border-radius:7px;cursor:pointer;transition:border-color .15s" onclick="_mdkSelectOutcome(this,\'followup\')">'
@@ -1103,7 +1105,16 @@ function wpMarkDoneKey(eKey){
     +'</div>';
   var footer='<button id="_mdk_submit" class="btn-primary" onclick="_wpFinishDone(\''+eKey+'\')" disabled style="opacity:.45;cursor:not-allowed">✅ ثبت</button>'
     +'<button class="btn-secondary" onclick="closeModal(\'wpDoneModal\')">انصراف</button>';
-  openModal('wpDoneModal','✅ نتیجه '+actLabel,body,footer);
+  var modalTitle=pfCtx?('✅ پیگیری پیشفاکتور '+esc(we.pfNo||'')):('✅ نتیجه '+actLabel);
+  openModal('wpDoneModal',modalTitle,body,footer);
+  var preset=window._wpDonePreset;
+  window._wpDonePreset=null;
+  if(preset){
+    setTimeout(function(){
+      var lbl=document.querySelector('label[onclick*="_mdkSelectOutcome"][onclick*="\''+preset+'\'"]');
+      _mdkSelectOutcome(lbl,preset);
+    },60);
+  }
 }
 function _mdkSelectOutcome(lbl,val){
   // Highlight selected option
@@ -1190,6 +1201,7 @@ function _wpFinishDone(eKey){
     var _dnKey=rtype+'_'+rid;
     if(!DB.notes[_dnKey])DB.notes[_dnKey]=[];
     var pfx=(typeof wpActLabel==='function'?wpActLabel(actionType): (actionType==='visit'?'🤝 مراجعه':'📞 تماس'))+' انجام شد: ';
+    if(we.pfNo)pfx='📄 PF '+we.pfNo+' — '+pfx;
     var outcomeText = '';
     if(outcome==='won'){
       outcomeText = 'قرارداد / فروش بسته شد' + (amount > 0 ? ' (مبلغ: ' + amount + ' میلیون تومان)' : '');
@@ -1261,6 +1273,9 @@ function _wpFinishDone(eKey){
     }
   }
 
+  if(we.pfId&&typeof window._pfOnOutcomeDone==='function'){
+    window._pfOnOutcomeDone(we.pfId,{outcome:outcome,note:note,nextDate:nextDate,lostReason:lostReason,amount:amount,pfNo:we.pfNo||''});
+  }
   closeModal('wpDoneModal');
   (function(){var _we3=DB.weekEntries[eKey];if(_we3&&_we3.sqlId){fetch('/api/week-entries/'+encodeURIComponent(_we3.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({done:_we3.done,doneDate:_we3.doneDate||null,scheduledDate:_we3.scheduledDate||null,doneResult:_we3.doneResult||null,doneNote:_we3.doneNote||null,doneAmount:_we3.doneAmount||null})}).catch(function(){});}})();
   _debouncedRenderWeekPlan();renderDashboard();
