@@ -56,6 +56,8 @@ async function initSchema() {
     )
   `);
   await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS signature_pin VARCHAR(100)`);
+  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS signature_image BYTEA`);
+  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS signature_image_mime VARCHAR(50) DEFAULT 'image/png'`);
 
   await query(`
     CREATE TABLE IF NOT EXISTS app_data (
@@ -1933,6 +1935,41 @@ async function initSchema() {
     )
   `);
   await query(`CREATE INDEX IF NOT EXISTS idx_center_files_key ON center_files(center_key)`).catch(() => {});
+
+  // ════════════════════════════════════════
+  // SOFT DELETE / TRASH — unified audit trail
+  // ════════════════════════════════════════
+  await query(`
+    CREATE TABLE IF NOT EXISTS deleted_entities (
+      id              SERIAL PRIMARY KEY,
+      entity_type     VARCHAR(40) NOT NULL,
+      entity_id       VARCHAR(200) NOT NULL,
+      center_key      VARCHAR(200),
+      title           VARCHAR(500),
+      payload         JSONB NOT NULL DEFAULT '{}',
+      deleted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      deleted_by      VARCHAR(100),
+      delete_reason   TEXT,
+      restored_at     TIMESTAMPTZ,
+      restored_by     VARCHAR(100),
+      purged_at       TIMESTAMPTZ,
+      purged_by       VARCHAR(100)
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_deleted_entities_type ON deleted_entities(entity_type, deleted_at DESC)`).catch(() => {});
+  await query(`CREATE INDEX IF NOT EXISTS idx_deleted_entities_active ON deleted_entities(deleted_at DESC) WHERE restored_at IS NULL AND purged_at IS NULL`).catch(() => {});
+
+  await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`).catch(() => {});
+  await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(100)`).catch(() => {});
+  await query(`CREATE INDEX IF NOT EXISTS idx_tasks_deleted ON tasks(deleted_at) WHERE deleted_at IS NOT NULL`).catch(() => {});
+
+  await query(`ALTER TABLE center_deals ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`).catch(() => {});
+  await query(`ALTER TABLE center_deals ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(100)`).catch(() => {});
+
+  await query(`ALTER TABLE center_files ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`).catch(() => {});
+  await query(`ALTER TABLE center_files ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(100)`).catch(() => {});
+
+  await query(`ALTER TABLE healthcare_professionals ADD COLUMN IF NOT EXISTS updated_by VARCHAR(100)`).catch(() => {});
 
   // User-definable workflows (process definitions + running instances)
   await query(`

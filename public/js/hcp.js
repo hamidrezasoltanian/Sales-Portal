@@ -425,12 +425,12 @@ function _hcpSubmitForm(id) {
 }
 
 function _hcpDelete(id) {
-  if (!confirm('آیا از حذف این پزشک/کارشناس مطمئن هستید؟ (این عمل قابل بازگشت نیست)')) return;
+  if (!confirm('آیا از حذف این پزشک/کارشناس مطمئن هستید؟ (به سطل زباله منتقل می‌شود و مدیر می‌تواند بازیابی کند)')) return;
   fetch('/api/hcps/' + id, { method: 'DELETE' })
     .then(function(r) { return r.ok ? r.json() : null; })
     .then(function(d) {
       if (d && (d.ok || d.success)) {
-        showToast('🗑 پزشک حذف شد');
+        showToast('🗑 به سطل زباله منتقل شد');
         _hcpSearch();
       } else {
         showToast('❌ خطا در حذف پزشک');

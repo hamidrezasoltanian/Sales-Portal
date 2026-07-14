@@ -56,7 +56,7 @@ function _dealUpdate(id, field, val) {
 }
 
 function _dealDelete(id, ck, domId, rtype, rid) {
-  if (!confirm('این فرصت حذف شود؟')) return;
+  if (!confirm('این فرصت به سطل زباله منتقل شود؟')) return;
   fetch('/api/center-deals/' + encodeURIComponent(id), { method: 'DELETE' })
-    .then(function () { _dealLoadSection(rtype, rid, domId); });
+    .then(function () { _dealLoadSection(rtype, rid, domId); showToast('🗑 به سطل زباله منتقل شد', 2000); });
 }

@@ -10,6 +10,7 @@ const {
   getUserProvinceAllowlist,
   applyProvinceRestriction,
 } = require('../lib/center-ownership');
+const { softDeleteCenterNote, filterActiveNotes, activeNoteIndexToRaw } = require('../lib/soft-delete');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -160,7 +161,7 @@ router.post('/:key/notes', async function (req, res) {
     );
 
     notifyCenterChange(req, { centerKey, field: 'notes' });
-    res.json({ ok: true, centerKey, note, notes });
+    res.json({ ok: true, centerKey, notes: filterActiveNotes(notes) });
   } catch (e) {
     console.error('[centers POST /:key/notes]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
@@ -181,20 +182,16 @@ router.delete('/:key/notes/:index', async function (req, res) {
 
     let notes = existing.rows[0].notes || [];
     if (!Array.isArray(notes)) notes = [];
-    if (idx >= notes.length) return res.status(404).json({ error: 'index خارج از محدوده' });
+    const rawIdx = activeNoteIndexToRaw(notes, idx);
+    if (rawIdx < 0) return res.status(404).json({ error: 'یادداشت یافت نشد' });
+    if (notes[rawIdx] && notes[rawIdx]._deletedAt) return res.status(404).json({ error: 'یادداشت قبلاً حذف شده' });
 
-    notes.splice(idx, 1);
-
-    await query(
-      `INSERT INTO center_notes (center_key, notes, updated_at, updated_by)
-       VALUES ($1, $2::jsonb, NOW(), $3)
-       ON CONFLICT (center_key) DO UPDATE
-         SET notes = EXCLUDED.notes, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
-      [centerKey, JSON.stringify(notes), req.user.username]
-    );
+    const trashRow = await softDeleteCenterNote(centerKey, rawIdx, notes[rawIdx], req.user.username);
+    const refreshed = await query('SELECT notes FROM center_notes WHERE center_key = $1', [centerKey]);
+    const activeNotes = filterActiveNotes(refreshed.rows.length ? refreshed.rows[0].notes : []);
 
     notifyCenterChange(req, { centerKey, field: 'notes' });
-    res.json({ ok: true, centerKey, notes });
+    res.json({ ok: true, centerKey, trashId: trashRow.id, notes: activeNotes });
   } catch (e) {
     console.error('[centers DELETE /:key/notes/:index]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });

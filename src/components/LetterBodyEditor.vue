@@ -248,17 +248,29 @@ async function exportDocx(): Promise<ArrayBuffer | null> {
 
 function getPlainPreview(maxLen = 400): string {
 
+  const md = getMarkdown();
+
+  if (!md) return '';
+
+  const flat = md.replace(/\s+/g, ' ').trim();
+
+  if (!flat) return '';
+
+  return flat.length > maxLen ? `${flat.slice(0, maxLen)}…` : flat;
+
+}
+
+
+
+function getMarkdown(): string {
+
   const doc = editorRef.value?.getDocument();
 
   if (!doc) return '';
 
   try {
 
-    const md = toMarkdown(doc).replace(/[#>*_\[\]()`-]/g, ' ').replace(/\s+/g, ' ').trim();
-
-    if (!md) return '';
-
-    return md.length > maxLen ? `${md.slice(0, maxLen)}…` : md;
+    return toMarkdown(doc).trim();
 
   } catch {
 
@@ -281,6 +293,8 @@ defineExpose({
   exportDocx,
 
   getPlainPreview,
+
+  getMarkdown,
 
   getEditorRef: () => editorRef.value,
 

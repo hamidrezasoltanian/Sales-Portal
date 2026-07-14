@@ -17,6 +17,42 @@
   var _tkMonthRecord = null;
 
   // ── Date helpers ───────────────────────────────────────────────────────────
+  var _TK_JMONTHS = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور',
+    'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
+
+  function _tkJYear() {
+    var d = new Date();
+    var j = g2j(d.getFullYear(), d.getMonth() + 1, d.getDate());
+    return j[0];
+  }
+
+  function _tkMonthKey(year, month) {
+    return year + '/' + (typeof p2 === 'function' ? p2(month) : String(month).padStart(2, '0'));
+  }
+
+  function _tkMonthLabel(year, month) {
+    return _TK_JMONTHS[month - 1] + ' ' + year;
+  }
+
+  function _tkBuildMonthOptions() {
+    var curYear = _tkJYear();
+    var out = [];
+    for (var y = curYear; y >= curYear - 2; y--) {
+      for (var m = 1; m <= 12; m++) {
+        out.push({ value: _tkMonthKey(y, m), label: _tkMonthLabel(y, m) });
+      }
+    }
+    out.sort(function(a, b) { return b.value.localeCompare(a.value); });
+    return out;
+  }
+
+  function _tkDateInput(id, value, width, placeholder) {
+    var ph = placeholder || '۱۴۰۴/۰۱/۰۱';
+    return '<input id="' + id + '" type="text" value="' + esc(value || '') + '" readonly placeholder="' + ph + '" ' +
+      'style="' + _tkInputStyle(width || 120) + 'cursor:pointer" ' +
+      'onclick="if(typeof openJDP===\'function\')openJDP(this,function(v){this.value=v})">';
+  }
+
   function _tkCurrentMonth() {
     var d = new Date();
     var j = g2j(d.getFullYear(), d.getMonth() + 1, d.getDate());
@@ -108,20 +144,11 @@
     var root = document.getElementById('tradeKPIRoot');
     if (!root) return;
 
-    // Month selector — current + 5 previous months
-    var months = [];
-    var d = new Date();
-    for (var i = 0; i < 6; i++) {
-      var mm = d.getMonth() + 1 - i;
-      var yy = d.getFullYear();
-      while (mm < 1) { mm += 12; yy--; }
-      var j = g2j(yy, mm, 1);
-      months.push(j[0] + '/' + String(j[1]).padStart(2, '0'));
-    }
-
-    var monthSel = '<select onchange="window._tkSetMonth(this.value)" style="' + _tkInputStyle() + '">' +
-      months.map(function(m) {
-        return '<option value="' + m + '"' + (m === _tkMonth ? ' selected' : '') + '>' + m + '</option>';
+    // Month selector — all 12 months per year (current + 2 previous years)
+    var monthOpts = _tkBuildMonthOptions();
+    var monthSel = '<select onchange="window._tkSetMonth(this.value)" style="' + _tkInputStyle() + 'min-width:140px">' +
+      monthOpts.map(function(o) {
+        return '<option value="' + o.value + '"' + (o.value === _tkMonth ? ' selected' : '') + '>' + o.label + '</option>';
       }).join('') + '</select>';
 
     var empSel = '';
@@ -396,7 +423,7 @@
           '<div style="flex:2;min-width:180px"><label style="font-size:.75rem;color:#6b7280;display:block;margin-bottom:3px">عنوان وظیفه</label>' +
           '<input id="tka_title" placeholder="عنوان وظیفه جدید..." style="' + _tkInputStyle('100%') + '"></div>' +
           '<div><label style="font-size:.75rem;color:#6b7280;display:block;margin-bottom:3px">مهلت</label>' +
-          '<input id="tka_deadline" placeholder="۱۴۰۳/۰۷/۰۱" style="' + _tkInputStyle(120) + '"></div>' +
+          _tkDateInput('tka_deadline', '', 120) + '</div>' +
           '<div><label style="font-size:.75rem;color:#6b7280;display:block;margin-bottom:3px">اولویت</label>' +
           '<select id="tka_priority" style="' + _tkInputStyle(90) + '"><option value="1">کم</option><option value="2" selected>متوسط</option><option value="3">بالا</option></select></div>' +
           '<button onclick="_tkAddTask()" style="' + _tkBtnStyle() + '">+ افزودن</button>' +
@@ -457,7 +484,7 @@
           '<div style="flex:1"><label style="font-size:.8rem;color:#6b7280;display:block;margin-bottom:3px">وضعیت</label>' +
           '<select id="tke_status" style="' + _tkInputStyle('100%') + '">' + statusOpts + '</select></div>' +
           '<div style="flex:1"><label style="font-size:.8rem;color:#6b7280;display:block;margin-bottom:3px">مهلت</label>' +
-          '<input id="tke_deadline" value="' + esc(t.deadline || '') + '" style="' + _tkInputStyle('100%') + '"></div>' +
+          _tkDateInput('tke_deadline', t.deadline || '', '100%') + '</div>' +
         '</div>' +
         '<div><label style="font-size:.8rem;color:#6b7280;display:block;margin-bottom:3px">یادداشت</label>' +
         '<textarea id="tke_note" rows="2" style="' + _tkTextareaStyle() + '">' + esc(t.note || '') + '</textarea></div>' +
@@ -496,7 +523,7 @@
         '<div><label style="font-size:.78rem;color:#6b7280;display:block;margin-bottom:3px">عنوان / محموله</label>' +
         '<input id="tkc_title" placeholder="مثلاً: ترخیص دستگاه X" style="' + _tkInputStyle(220) + '"></div>' +
         '<div><label style="font-size:.78rem;color:#6b7280;display:block;margin-bottom:3px">تاریخ شروع (جلالی)</label>' +
-        '<input id="tkc_start" placeholder="مثلاً: ' + _tkToday() + '" value="' + _tkToday() + '" style="' + _tkInputStyle(120) + '"></div>' +
+        _tkDateInput('tkc_start', _tkToday(), 120, _tkToday()) + '</div>' +
         '<div><label style="font-size:.78rem;color:#6b7280;display:block;margin-bottom:3px">حداکثر روز مجاز</label>' +
         '<input id="tkc_days" type="number" value="' + ((_tkTargets && _tkTargets.customs_days_target) || 10) + '" style="' + _tkInputStyle(80) + '"></div>' +
         '<button onclick="window._tkAddClearance()" style="' + _tkBtnStyle() + '">ثبت</button>' +
@@ -873,7 +900,7 @@
       return;
     }
     var html = '<div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e2e8f0">' +
-      '<h3 style="margin:0 0 14px;font-size:.95rem;font-weight:600">📈 تاریخچه ۶ ماه اخیر</h3>';
+      '<h3 style="margin:0 0 14px;font-size:.95rem;font-weight:600">📈 تاریخچه ماهانه</h3>';
     list.forEach(function(row) {
       var score = row.final_score != null ? parseFloat(row.final_score) : parseFloat(row.avg_score);
       if (isNaN(score)) score = 0;

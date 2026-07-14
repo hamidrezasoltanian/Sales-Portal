@@ -5,6 +5,7 @@ const { query } = require('../db');
 const { requireAuth } = require('../auth');
 const { requirePermission } = require('../permissions');
 const { requireCenterAccess, userCanAccessCenter } = require('../lib/center-access');
+const { softDeleteDeal } = require('../lib/soft-delete');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -33,7 +34,7 @@ router.get('/', requirePermission('provinces', 'view'), requireCenterAccess(func
     const ck = req.query.center_key;
     if (!ck) return res.status(400).json({ error: 'center_key الزامی است' });
     const r = await query(
-      'SELECT * FROM center_deals WHERE center_key = $1 ORDER BY updated_at DESC',
+      'SELECT * FROM center_deals WHERE center_key = $1 AND deleted_at IS NULL ORDER BY updated_at DESC',
       [String(ck)]
     );
     res.json({ deals: r.rows.map(rowToDeal) });
@@ -72,7 +73,7 @@ router.post('/', requirePermission('provinces', 'view'), requireCenterAccess(fun
 router.put('/:id', requirePermission('provinces', 'view'), async function (req, res) {
   try {
     const b = req.body || {};
-    const accessR = await query('SELECT center_key FROM center_deals WHERE id = $1', [req.params.id]);
+    const accessR = await query('SELECT center_key FROM center_deals WHERE id = $1 AND deleted_at IS NULL', [req.params.id]);
     if (!accessR.rows.length) return res.status(404).json({ error: 'یافت نشد' });
     if (!(await userCanAccessCenter(req.user, accessR.rows[0].center_key))) {
       return res.status(403).json({ error: 'دسترسی به این مرکز مجاز نیست' });
@@ -108,14 +109,13 @@ router.put('/:id', requirePermission('provinces', 'view'), async function (req, 
 // DELETE /api/center-deals/:id
 router.delete('/:id', requirePermission('provinces', 'view'), async function (req, res) {
   try {
-    const accessR = await query('SELECT center_key FROM center_deals WHERE id = $1', [req.params.id]);
+    const accessR = await query('SELECT * FROM center_deals WHERE id = $1 AND deleted_at IS NULL', [req.params.id]);
     if (!accessR.rows.length) return res.status(404).json({ error: 'یافت نشد' });
     if (!(await userCanAccessCenter(req.user, accessR.rows[0].center_key))) {
       return res.status(403).json({ error: 'دسترسی به این مرکز مجاز نیست' });
     }
-    const r = await query('DELETE FROM center_deals WHERE id = $1 RETURNING id', [req.params.id]);
-    if (!r.rows.length) return res.status(404).json({ error: 'یافت نشد' });
-    res.json({ ok: true });
+    const trashRow = await softDeleteDeal(accessR.rows[0], req.user.username);
+    res.json({ ok: true, trashId: trashRow.id, message: 'به سطل زباله منتقل شد' });
   } catch (e) {
     console.error('[center-deals DELETE]', e.message);
     res.status(500).json({ error: 'خطای سرور' });

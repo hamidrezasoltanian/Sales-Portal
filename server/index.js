@@ -144,6 +144,7 @@ app.use('/api/faradis-match', faradisMatch);
 const faradisData = require('./routes/faradis-data');
 app.use('/api/faradis-data', faradisData);
 app.use('/api/letters', require('./routes/letters'));
+app.use('/api/trash', require('./routes/trash'));
 
 app.get('/api/health', async function (req, res) {
   const start = Date.now();
@@ -264,9 +265,14 @@ async function start() {
       console.warn('[WARNING] Dev port 4000 connected to PRODUCTION database "' + pgDb + '"');
       console.warn('[WARNING] Use PG_DATABASE=atena_crm_dev — see .env.dev.example and scripts/setup_dev_db.sh');
     }
-    app.listen(PORT, function () {
+    const server = app.listen(PORT, function () {
       console.log('[Atena CRM] Server running on http://localhost:' + PORT);
     });
+    // Keep long-lived SSE streams open (default timeouts can drop /api/events/stream)
+    server.timeout = 0;
+    if (typeof server.requestTimeout !== 'undefined') server.requestTimeout = 0;
+    server.keepAliveTimeout = 120000;
+    server.headersTimeout = 125000;
     try {
       require('./lib/auto-backup').startAutoBackupScheduler();
     } catch (e) {

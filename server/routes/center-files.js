@@ -6,6 +6,7 @@ const { query } = require('../db');
 const { requireAuth } = require('../auth');
 const { requirePermission } = require('../permissions');
 const { requireCenterAccess, userCanAccessCenter } = require('../lib/center-access');
+const { softDeleteCenterFile } = require('../lib/soft-delete');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -24,7 +25,7 @@ router.get('/list/:centerKey', requirePermission('provinces', 'view'), requireCe
   try {
     const ck = encodeCenterKey(decodeURIComponent(req.params.centerKey));
     const r = await query(
-      'SELECT id, filename, mime_type, file_size, uploaded_by, created_at FROM center_files WHERE center_key = $1 ORDER BY created_at DESC',
+      'SELECT id, filename, mime_type, file_size, uploaded_by, created_at FROM center_files WHERE center_key = $1 AND deleted_at IS NULL ORDER BY created_at DESC',
       [ck]
     );
     res.json({ files: r.rows });
@@ -61,7 +62,7 @@ router.get('/:id', requirePermission('provinces', 'view'), async function (req, 
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: 'شناسه نامعتبر' });
-    const r = await query('SELECT center_key, filename, mime_type, data FROM center_files WHERE id = $1', [id]);
+    const r = await query('SELECT center_key, filename, mime_type, data FROM center_files WHERE id = $1 AND deleted_at IS NULL', [id]);
     if (!r.rows.length) return res.status(404).json({ error: 'فایل یافت نشد' });
     if (!(await userCanAccessCenter(req.user, r.rows[0].center_key))) {
       return res.status(403).json({ error: 'دسترسی به این مرکز مجاز نیست' });
@@ -82,14 +83,13 @@ router.delete('/:id', requirePermission('provinces', 'view'), async function (re
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: 'شناسه نامعتبر' });
-    const accessR = await query('SELECT center_key FROM center_files WHERE id = $1', [id]);
+    const accessR = await query('SELECT * FROM center_files WHERE id = $1 AND deleted_at IS NULL', [id]);
     if (!accessR.rows.length) return res.status(404).json({ error: 'فایل یافت نشد' });
     if (!(await userCanAccessCenter(req.user, accessR.rows[0].center_key))) {
       return res.status(403).json({ error: 'دسترسی به این مرکز مجاز نیست' });
     }
-    const r = await query('DELETE FROM center_files WHERE id = $1 RETURNING id', [id]);
-    if (!r.rows.length) return res.status(404).json({ error: 'فایل یافت نشد' });
-    res.json({ ok: true });
+    const trashRow = await softDeleteCenterFile(accessR.rows[0], req.user.username);
+    res.json({ ok: true, trashId: trashRow.id, message: 'به سطل زباله منتقل شد' });
   } catch (e) {
     console.error('[center-files delete]', e.message);
     res.status(500).json({ error: 'خطای سرور' });

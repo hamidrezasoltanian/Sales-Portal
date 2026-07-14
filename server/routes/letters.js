@@ -6,8 +6,22 @@ const { query } = require('../db');
 const { requirePermission } = require('../permissions');
 const { requireAuth } = require('../auth');
 const { searchLetterCenters, resolveCenterName } = require('../lib/letterCenters');
+const {
+  DEFAULT_PRINT_TEMPLATE,
+  buildPrintHtml,
+} = require('../lib/letter-print');
 
 const router = express.Router();
+let _broadcast = null;
+try { _broadcast = require('./events').broadcast; } catch (_) {}
+
+function emitLetterChanged(letterId, by, extra) {
+  try {
+    if (_broadcast) {
+      _broadcast('letter-changed', Object.assign({ letter_id: letterId, at: Date.now(), by }, extra || {}));
+    }
+  } catch (_) {}
+}
 const DEFAULT_LETTERS_PIN = process.env.LETTERS_DEFAULT_PIN || '1234';
 router.use(requireAuth);
 router.use((req, res, next) => {
@@ -156,37 +170,6 @@ function he(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-const DEFAULT_PRINT_TEMPLATE = `<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="utf-8">
-<title>چاپ نامه — {{subject}}</title>
-<style>
-  @page { size: A4; margin: 18mm 15mm; }
-  body { font-family: Vazirmatn, Tahoma, sans-serif; font-size: 13px; color: #1e293b; line-height: 1.9; margin: 0; padding: 24px; }
-  .lh { text-align: center; border-bottom: 2px solid #6366f1; padding-bottom: 12px; margin-bottom: 20px; }
-  .lh-title { font-size: 18px; font-weight: 800; color: #312e81; }
-  .lh-sub { font-size: 11px; color: #64748b; letter-spacing: 2px; }
-  .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 12px; margin-bottom: 18px; background: #f8fafc; padding: 12px; border-radius: 8px; }
-  .meta b { color: #475569; }
-  h1 { font-size: 16px; margin: 0 0 16px; text-align: center; }
-  .body { min-height: 200px; padding: 16px; border: 1px solid #e2e8f0; border-radius: 8px; }
-  .signers { margin-top: 24px; font-size: 12px; }
-  .sig-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed #e2e8f0; }
-  @media print { .no-print { display: none; } }
-</style></head><body>
-{{letterhead}}
-<div class="meta">
-  <div><b>شماره اندیکاتور:</b> {{indicator_number}}</div>
-  <div><b>نوع:</b> {{type}}</div>
-  <div><b>تاریخ:</b> {{date}}</div>
-  <div><b>ثبت\u200cکننده:</b> {{creator}}</div>
-  {{sender_block}}
-  {{receiver_block}}
-</div>
-<h1>موضوع: {{subject}}</h1>
-<div class="body">{{body}}</div>
-{{signers_block}}
-<button class="no-print" onclick="window.print()" style="margin-top:20px;padding:10px 20px;background:#6366f1;color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:inherit">\uD83D\uDDA8 \u0686\u0627\u067E</button>
-</body></html>`;
-
 async function getPrintTemplateHtml() {
   try {
     const r = await query(`SELECT value FROM letter_settings WHERE key = 'print_template'`);
@@ -195,14 +178,6 @@ async function getPrintTemplateHtml() {
     }
   } catch (_) { /* table may not exist yet on first boot */ }
   return DEFAULT_PRINT_TEMPLATE;
-}
-
-function applyPrintTemplate(template, vars) {
-  let html = template;
-  Object.keys(vars).forEach((k) => {
-    html = html.split(`{{${k}}}`).join(vars[k] == null ? '' : String(vars[k]));
-  });
-  return html;
 }
 
 // ─────────────────────────────────────────────
@@ -504,6 +479,69 @@ router.put('/print-template', requireAuth, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
+// POST /signature-image — آپلود تصویر امضا (کاربر جاری)
+// GET  /signature-image/:username — دریافت تصویر امضا
+// ─────────────────────────────────────────────
+const SIG_UPLOAD = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (/^image\/(png|jpeg|jpg|webp)$/i.test(file.mimetype)) cb(null, true);
+    else cb(new Error('فقط تصویر PNG/JPEG/WebP مجاز است'));
+  },
+});
+
+router.post('/signature-image', SIG_UPLOAD.single('image'), async (req, res) => {
+  if (!req.file || !req.file.buffer || !req.file.buffer.length) {
+    return res.status(400).json({ error: 'فایل تصویر امضا الزامی است' });
+  }
+  try {
+    await query(
+      `UPDATE app_users SET signature_image = $1, signature_image_mime = $2 WHERE username = $3`,
+      [req.file.buffer, req.file.mimetype || 'image/png', req.user.username]
+    );
+    res.json({ ok: true, has_image: true });
+  } catch (e) {
+    console.error('[letters POST /signature-image]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+router.get('/signature-image/status', requireAuth, async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT (signature_image IS NOT NULL AND octet_length(signature_image) > 0) AS has_image
+       FROM app_users WHERE username = $1`,
+      [req.user.username]
+    );
+    res.json({ has_image: !!(r.rows[0] && r.rows[0].has_image) });
+  } catch (e) {
+    console.error('[letters GET /signature-image/status]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+router.get('/signature-image/:username', requireAuth, async (req, res) => {
+  const uname = String(req.params.username || '').trim();
+  if (!uname) return res.status(400).json({ error: 'نام کاربری نامعتبر' });
+  try {
+    const r = await query(
+      'SELECT signature_image, signature_image_mime FROM app_users WHERE username = $1',
+      [uname]
+    );
+    if (!r.rows.length || !r.rows[0].signature_image) {
+      return res.status(404).send('تصویر امضا یافت نشد');
+    }
+    res.setHeader('Content-Type', r.rows[0].signature_image_mime || 'image/png');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(r.rows[0].signature_image);
+  } catch (e) {
+    console.error('[letters GET /signature-image]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+// ─────────────────────────────────────────────
 // GET /by-center/:centerKey — نامه‌های مرتبط با یک مرکز
 // ─────────────────────────────────────────────
 router.get('/by-center/:centerKey', requireAuth, async (req, res) => {
@@ -601,7 +639,14 @@ router.get('/:id/print', requireAuth, async (req, res) => {
   try {
     const r = await query(`
       SELECT l.*, u.display_name AS creator_name,
-        (SELECT json_agg(json_build_object('username', us.username, 'display_name', us.display_name, 'status', ls.status, 'signed_at', ls.signed_at))
+        (SELECT json_agg(json_build_object(
+          'username', us.username,
+          'display_name', us.display_name,
+          'status', ls.status,
+          'sign_type', ls.sign_type,
+          'signed_at', ls.signed_at,
+          'signature_mime', us.signature_image_mime
+        ) ORDER BY ls.id)
          FROM letter_signers ls JOIN app_users us ON ls.user_id = us.username WHERE ls.letter_id = l.id) AS signers
       FROM letters l
       LEFT JOIN app_users u ON l.created_by = u.username
@@ -609,30 +654,20 @@ router.get('/:id/print', requireAuth, async (req, res) => {
     `, [letterId]);
     if (!r.rows.length) return res.status(404).send('نامه یافت نشد');
     const L = r.rows[0];
-    const typeFa = L.type === 'outgoing' ? 'صادره' : (L.type === 'incoming' ? 'وارده' : 'داخلی');
-    const ind = L.indicator_number || '— (پیش از صدور نهایی)';
-    const bodyHtml = he(L.body || '').replace(/\n/g, '<br>');
-    const letterhead = L.use_letterhead ? `
-      <div class="lh">
-        <div class="lh-title">آتنا زیست درمان</div>
-        <div class="lh-sub">ATENA BIOMEDICAL</div>
-      </div>` : '';
-    const signersHtml = (L.signers || []).map((s) =>
-      `<div class="sig-row"><span>${he(s.display_name)}</span><span>${s.status === 'signed' ? '✅ امضا شده' : '⏳ در انتظار'}</span></div>`
-    ).join('');
+    const signers = L.signers || [];
+    const signedUsernames = signers.filter((s) => s.status === 'signed').map((s) => s.username);
+    const signatureMap = {};
+    if (signedUsernames.length) {
+      const sigRes = await query(
+        'SELECT username, signature_image FROM app_users WHERE username = ANY($1) AND signature_image IS NOT NULL',
+        [signedUsernames]
+      );
+      sigRes.rows.forEach((row) => {
+        signatureMap[row.username] = row.signature_image;
+      });
+    }
     const template = await getPrintTemplateHtml();
-    const html = applyPrintTemplate(template, {
-      letterhead,
-      indicator_number: he(ind),
-      type: typeFa,
-      date: he(new Date(L.created_at).toLocaleDateString('fa-IR')),
-      creator: he(L.creator_name || L.created_by),
-      sender_block: L.sender_external ? `<div><b>فرستنده:</b> ${he(L.sender_external)}</div>` : '',
-      receiver_block: L.receiver_external ? `<div><b>گیرنده:</b> ${he(L.receiver_external)}</div>` : '',
-      subject: he(L.subject),
-      body: bodyHtml,
-      signers_block: signersHtml ? `<div class="signers"><strong>امضاکنندگان:</strong>${signersHtml}</div>` : '',
-    });
+    const html = await buildPrintHtml(L, signers, signatureMap, template);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   } catch (e) {
@@ -754,6 +789,7 @@ router.post('/', requireAuth, async (req, res) => {
     `, [req.user.username, `letter_${letterId}`, JSON.stringify({ action: 'create', type, subject, indicator })]);
 
     await query('COMMIT');
+    emitLetterChanged(letterId, req.user.username, { action: 'create' });
     res.status(201).json({ ok: true, letter: letterRow });
   } catch (e) {
     await query('ROLLBACK');
@@ -938,6 +974,7 @@ router.put('/:id', requireAuth, async (req, res) => {
     }
 
     await query('COMMIT');
+    emitLetterChanged(letterId, req.user.username, { action: 'update' });
     res.json({ ok: true, letter: updatedRow });
   } catch (e) {
     await query('ROLLBACK');
@@ -1043,6 +1080,7 @@ router.post('/:id/approve-outgoing', requireAuth, async (req, res) => {
       row.has_docx = !!(row.body_docx && row.body_docx.length);
       delete row.body_docx;
     }
+    emitLetterChanged(letterId, req.user.username, { action: 'approve-outgoing' });
     res.json({ ok: true, letter: row });
   } catch (e) {
     await query('ROLLBACK');
@@ -1158,6 +1196,7 @@ router.post('/:id/sign', requireAuth, async (req, res) => {
       }
 
       await query('COMMIT');
+      emitLetterChanged(letterId, username, { action: 'signed_complete' });
       return res.json({ ok: true, status: 'signed_complete', indicator_number: indicator });
     } else {
       // امضای ناقص (بقیه امضاکننده‌ها مانده‌اند)
@@ -1168,6 +1207,7 @@ router.post('/:id/sign', requireAuth, async (req, res) => {
       `, [!!use_letterhead, letterId]);
 
       await query('COMMIT');
+      emitLetterChanged(letterId, username, { action: 'signed_partial' });
       return res.json({ ok: true, status: 'signed_partial' });
     }
   } catch (e) {
@@ -1218,6 +1258,7 @@ router.post('/:id/unsign', requireAuth, async (req, res) => {
     `, [letterId, username]);
 
     await query('COMMIT');
+    emitLetterChanged(letterId, username, { action: 'unsign' });
     res.json({ ok: true });
   } catch (e) {
     await query('ROLLBACK');
@@ -1285,6 +1326,7 @@ router.post('/:id/refer', requireAuth, async (req, res) => {
 
     await query(`UPDATE letters SET status = 'in_referral', updated_at = NOW() WHERE id = $1 AND status = 'registered'`, [letterId]).catch(() => {});
 
+    emitLetterChanged(letterId, req.user.username, { action: 'refer' });
     res.json({ ok: true, referral: referralResult.rows[0] });
   } catch (e) {
     console.error('[letters POST /:id/refer]', e.message);
@@ -1364,6 +1406,7 @@ router.post('/referrals/:refId/complete', requireAuth, async (req, res) => {
       VALUES ($1, $2, $3, NOW(), FALSE)
     `, [notifId, ref.sender_id, `✅ ارجاع نامه «${subject}» توسط ${receiverName} تکمیل شد.`]).catch(() => {});
 
+    emitLetterChanged(ref.letter_id, req.user.username, { action: 'referral_complete' });
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: 'خطای سرور' });
@@ -1383,6 +1426,7 @@ router.post('/:id/archive', requireAuth, async (req, res) => {
     }
 
     await query('UPDATE letters SET is_archived = TRUE, status = \'registered\', updated_at = NOW() WHERE id = $1', [letterId]);
+    emitLetterChanged(letterId, req.user.username, { action: 'archive' });
     res.json({ ok: true });
   } catch (e) {
     console.error('[letters archive POST]', e.message);

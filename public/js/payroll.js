@@ -12,14 +12,26 @@ function _payrollFmt(n){
 
 function openPayrollPanel(){
   if(typeof _isSuperAdmin==='function'&&!_isSuperAdmin()){showToast('⚠ فقط سوپر ادمین دسترسی دارد');return;}
-  // Default month: current Jalali month
   if(!_payrollMonth){
     var t=todayStr().split('/');
     _payrollMonth=t[0]+'/'+t[1];
   }
-  var foot='<button onclick="openPayrollSettings()" style="background:#f5f3ff;color:#7c3aed;border:1px solid #c4b5fd;border-radius:5px;padding:6px 14px;cursor:pointer;font-size:12px;font-family:inherit">⚙️ تنظیمات پورسانت</button>'
-    +'<button class="btn-secondary" onclick="closeModal(\'payrollModal\')" style="margin-right:8px">بستن</button>';
-  openModal('payrollModal','💰 گزارش حقوق و پورسانت','<div id="payrollWrap">'+_payrollLoading()+'</div>',foot,{lg:true});
+  var m=openModal('payrollModal','💰 گزارش حقوق و پورسانت','<div id="payrollWrap">'+_payrollLoading()+'</div>','',{lg:true});
+  if(m&&m.foot){
+    var settingsBtn=document.createElement('button');
+    settingsBtn.type='button';
+    settingsBtn.textContent='⚙️ تنظیمات پورسانت';
+    settingsBtn.style.cssText='background:#f5f3ff;color:#7c3aed;border:1px solid #c4b5fd;border-radius:5px;padding:6px 14px;cursor:pointer;font-size:12px;font-family:inherit';
+    settingsBtn.addEventListener('click',function(){openPayrollSettings();});
+    m.foot.appendChild(settingsBtn);
+    var closeBtn=document.createElement('button');
+    closeBtn.type='button';
+    closeBtn.className='btn-secondary';
+    closeBtn.style.marginRight='8px';
+    closeBtn.textContent='بستن';
+    closeBtn.addEventListener('click',function(){closeModal('payrollModal');});
+    m.foot.appendChild(closeBtn);
+  }
   renderPayrollPanel();
 }
 
@@ -171,29 +183,41 @@ function _payrollFinalizeAll(){
 
 function openPayrollSettings(){
   fetch('/api/payroll/settings')
-    .then(function(r){return r.json();})
+    .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||('خطای '+r.status));return d;});})
     .then(function(s){
       var body='<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'
         +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">نرخ پایه (٪)</label>'
-        +'<input id="ps_base" type="number" step="0.1" min="0" max="100" value="'+esc(s.base_pct||1)+'" class="ed-inp" style="width:100%;box-sizing:border-box"></div>'
+        +'<input id="ps_base" type="number" step="0.1" min="0" max="100" value="'+esc(String(s.base_pct!=null?s.base_pct:1))+'" class="ed-inp" style="width:100%;box-sizing:border-box"></div>'
         +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">آستانه شروع پلکان (ریال)</label>'
-        +'<input id="ps_threshold" type="number" step="100000000" value="'+esc(s.tier_threshold||2000000000)+'" class="ed-inp" dir="ltr" style="width:100%;box-sizing:border-box"></div>'
+        +'<input id="ps_threshold" type="number" step="100000000" value="'+esc(String(s.tier_threshold!=null?s.tier_threshold:2000000000))+'" class="ed-inp" dir="ltr" style="width:100%;box-sizing:border-box"></div>'
         +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">مقدار هر پله (ریال)</label>'
-        +'<input id="ps_step_amt" type="number" step="100000000" value="'+esc(s.tier_step_amount||500000000)+'" class="ed-inp" dir="ltr" style="width:100%;box-sizing:border-box"></div>'
+        +'<input id="ps_step_amt" type="number" step="100000000" value="'+esc(String(s.tier_step_amount!=null?s.tier_step_amount:500000000))+'" class="ed-inp" dir="ltr" style="width:100%;box-sizing:border-box"></div>'
         +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">افزایش هر پله (٪)</label>'
-        +'<input id="ps_step_pct" type="number" step="0.05" min="0" value="'+esc(s.tier_step_pct||0.1)+'" class="ed-inp" style="width:100%;box-sizing:border-box"></div>'
+        +'<input id="ps_step_pct" type="number" step="0.05" min="0" value="'+esc(String(s.tier_step_pct!=null?s.tier_step_pct:0.1))+'" class="ed-inp" style="width:100%;box-sizing:border-box"></div>'
         +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">آستانه KPI (از ۱۰۰)</label>'
-        +'<input id="ps_kpi_thr" type="number" step="1" min="0" max="100" value="'+esc(s.kpi_threshold||80)+'" class="ed-inp" style="width:100%;box-sizing:border-box"></div>'
+        +'<input id="ps_kpi_thr" type="number" step="1" min="0" max="100" value="'+esc(String(s.kpi_threshold!=null?s.kpi_threshold:80))+'" class="ed-inp" style="width:100%;box-sizing:border-box"></div>'
         +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">ضریب پله برای KPI بالا (x)</label>'
-        +'<input id="ps_kpi_mul" type="number" step="0.5" min="1" value="'+esc(s.kpi_multiplier||2)+'" class="ed-inp" style="width:100%;box-sizing:border-box"></div>'
+        +'<input id="ps_kpi_mul" type="number" step="0.5" min="1" value="'+esc(String(s.kpi_multiplier!=null?s.kpi_multiplier:2))+'" class="ed-inp" style="width:100%;box-sizing:border-box"></div>'
         +'</div>'
         +'<div style="margin-top:12px;background:#fef9c3;border:1px solid #fcd34d;border-radius:6px;padding:8px 12px;font-size:11px;color:#92400e">'
         +'مثال: فروش ۳.۵ میلیارد → نرخ = ۱٪ + ۳ پله × ۰.۱٪ = ۱.۳٪ پورسانت</div>';
-      var foot='<button class="btn-secondary" onclick="closeModal(\'payrollSettingsModal\')">لغو</button>'
-        +'<button class="btn-primary" onclick="savePayrollSettings()">💾 ذخیره تنظیمات</button>';
-      openModal('payrollSettingsModal','⚙️ تنظیمات پورسانت',body,foot);
+      var m=openModal('payrollSettingsModal','⚙️ تنظیمات پورسانت',body,'',{lg:true});
+      if(m&&m.foot){
+        var cancelBtn=document.createElement('button');
+        cancelBtn.type='button';
+        cancelBtn.className='btn-secondary';
+        cancelBtn.textContent='لغو';
+        cancelBtn.addEventListener('click',function(){closeModal('payrollSettingsModal');});
+        m.foot.appendChild(cancelBtn);
+        var saveBtn=document.createElement('button');
+        saveBtn.type='button';
+        saveBtn.className='btn-primary';
+        saveBtn.textContent='💾 ذخیره تنظیمات';
+        saveBtn.addEventListener('click',function(){savePayrollSettings();});
+        m.foot.appendChild(saveBtn);
+      }
     })
-    .catch(function(e){showToast('❌ '+e.message);});
+    .catch(function(e){showToast('❌ '+(e.message||e));});
 }
 
 function savePayrollSettings(){
@@ -212,3 +236,7 @@ function savePayrollSettings(){
     .then(function(){closeModal('payrollSettingsModal');showToast('✅ تنظیمات ذخیره شد');_payrollCalc();})
     .catch(function(e){showToast('❌ خطا: '+e.message);});
 }
+
+window.openPayrollPanel=openPayrollPanel;
+window.openPayrollSettings=openPayrollSettings;
+window.savePayrollSettings=savePayrollSettings;

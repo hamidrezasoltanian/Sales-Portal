@@ -815,9 +815,9 @@ function idbSet(key,value){
   }).catch(function(){return false;});
 }
 
-// لود مراکز از IndexedDB و پر کردن CENTERS و PC_RAW
+// لود مراکز از سرور / IndexedDB و پر کردن CENTERS و PC_RAW
 function loadMasterCenters(){
-  return fetch('/api/data/centers/master',{credentials:'same-origin'})
+  window._masterCentersReady = fetch('/api/data/centers/master',{credentials:'same-origin'})
     .then(function(r){
       if(r.status===401)return Promise.reject('auth');
       if(!r.ok)return Promise.reject('HTTP '+r.status);
@@ -860,6 +860,7 @@ function loadMasterCenters(){
         console.log('[AtenaCRM] Master DB loaded from IndexedDB: '+data.centers.length+' centers');
       });
     });
+  return window._masterCentersReady;
 }
 
 // ذخیره مراکز در IndexedDB

@@ -6,6 +6,7 @@ const { requireAuth, requireManager } = require('../auth');
 const { requirePermission } = require('../permissions');
 const { buildOwnerMaps, filterDbForUser, filterPutBodyForUser, isManagerRole } = require('../lib/center-ownership');
 const { mergeNoteArrays } = require('../lib/db-merge');
+const { filterActiveNotes } = require('../lib/soft-delete');
 let _broadcast = null;
 try { _broadcast = require('./events').broadcast; } catch(e) {}
 
@@ -37,10 +38,10 @@ async function loadDBFromSQL(client) {
     c.query('SELECT id, key, value FROM week_entries').catch(() => ({ rows: [] })),
     c.query("SELECT updated_at FROM app_data WHERE key = '_db_meta'"),
     c.query('SELECT at, "by", rkey, field, val FROM change_log ORDER BY at DESC LIMIT 500').catch(() => ({ rows: [] })),
-    c.query('SELECT a.center_key, h.name, h.specialty, a.role as title, h.phones FROM hcp_affiliations a JOIN healthcare_professionals h ON a.hcp_id = h.id').catch(() => ({ rows: [] })),
+    c.query('SELECT a.center_key, h.name, h.specialty, a.role as title, h.phones FROM hcp_affiliations a JOIN healthcare_professionals h ON a.hcp_id = h.id AND h.deleted_at IS NULL').catch(() => ({ rows: [] })),
     c.query(`SELECT id, title, owner, due_date AS "dueDate", priority, status, center_key AS "centerKey",
       note, subtasks, done, done_at AS "doneAt", created_by AS "createdBy", created_at AS "createdAt",
-      updated_at AS "updatedAt", recurring, activity, department FROM tasks ORDER BY created_at DESC`).catch(() => ({ rows: [] })),
+      updated_at AS "updatedAt", recurring, activity, department FROM tasks WHERE deleted_at IS NULL ORDER BY created_at DESC`).catch(() => ({ rows: [] })),
     c.query('SELECT rec_key, data FROM manager_tasks').catch(() => ({ rows: [] }))
   ]);
 
@@ -61,7 +62,7 @@ async function loadDBFromSQL(client) {
   }
 
   const notes = {};
-  notesR.rows.forEach(function(r) { notes[r.center_key] = r.notes; });
+  notesR.rows.forEach(function(r) { notes[r.center_key] = filterActiveNotes(r.notes); });
 
   const rTags = {};
   tagsR.rows.forEach(function(r) { rTags[r.center_key] = r.tags; });
@@ -1199,6 +1200,77 @@ router.put('/centers/master', requirePermission('provinces', 'edit'), async (req
   } catch (e) {
     console.error('[data/centers/master PUT]', e.message);
     return res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+// POST /api/data/centers/soft-delete — حذف نرم مرکز با امکان بازیابی
+router.post('/centers/soft-delete', requirePermission('provinces', 'edit'), async (req, res) => {
+  const { softDeleteCenter } = require('../lib/soft-delete');
+  const body = req.body || {};
+  const centerKey = body.centerKey || (body.rtype && body.id ? body.rtype + '_' + body.id : null);
+  if (!centerKey) return res.status(400).json({ error: 'centerKey الزامی است' });
+
+  try {
+    let masterBefore = null;
+    var masterAfter = null;
+    if (!body.isExtra) {
+      const masterR = await query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS', 'PC_RAW')");
+      const masters = { CENTERS: [], PC_RAW: {} };
+      masterR.rows.forEach(function (r) { masters[r.key] = r.data; });
+      const CENTERS = JSON.parse(JSON.stringify(masters.CENTERS || []));
+      const PC_RAW = JSON.parse(JSON.stringify(masters.PC_RAW || {}));
+      const rtype = body.rtype;
+      const id = body.id;
+      if (rtype === 'center') {
+        for (var i = CENTERS.length - 1; i >= 0; i--) {
+          var cc = CENTERS[i];
+          var cid = 'c_' + (cc.row || cc.id || '');
+          if (cid === id || String(cc.id) === String(id)) { CENTERS.splice(i, 1); break; }
+        }
+      } else if (rtype === 'pc' && id) {
+        var provId = id.split('||')[0];
+        var rowNum = Number(id.split('||')[1]);
+        Object.keys(PC_RAW).forEach(function (k) {
+          if (Array.isArray(PC_RAW[k])) {
+            PC_RAW[k] = PC_RAW[k].filter(function (r) {
+              return (Array.isArray(r) ? r[0] : r.row) !== rowNum;
+            });
+          }
+        });
+      }
+      masterBefore = { CENTERS: masters.CENTERS, PC_RAW: masters.PC_RAW };
+      var masterAfter = { CENTERS: CENTERS, PC_RAW: PC_RAW };
+    }
+
+    const trashRow = await softDeleteCenter({
+      centerKey: centerKey,
+      rtype: body.rtype,
+      id: body.id,
+      name: body.name,
+      provinceId: body.provinceId,
+      isExtra: body.isExtra,
+      extraId: body.extraId,
+      centerRecord: body.centerRecord,
+      masterBefore: masterBefore,
+    }, req.user.username);
+
+    if (!body.isExtra && masterAfter) {
+      await query(
+        `INSERT INTO centers_master (key, data, updated_at) VALUES ('CENTERS', $1, NOW())
+         ON CONFLICT (key) DO UPDATE SET data = $1, updated_at = NOW()`,
+        [JSON.stringify(masterAfter.CENTERS)]
+      );
+      await query(
+        `INSERT INTO centers_master (key, data, updated_at) VALUES ('PC_RAW', $1, NOW())
+         ON CONFLICT (key) DO UPDATE SET data = $1, updated_at = NOW()`,
+        [JSON.stringify(masterAfter.PC_RAW)]
+      );
+    }
+
+    return res.json({ ok: true, trashId: trashRow.id, message: 'مرکز به سطل زباله منتقل شد' });
+  } catch (e) {
+    console.error('[data/centers/soft-delete]', e.message);
+    return res.status(500).json({ error: e.message || 'خطای سرور' });
   }
 });
 

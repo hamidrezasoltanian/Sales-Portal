@@ -9,9 +9,15 @@ function getAllProvinces(){
 function getProvType(provId){return provId==='tehran'?'center':'pc';}
 // Cache: PC_RAW یک بار normalize می‌شود — null = نیاز به rebuild دارد
 var _PC_CACHE=null;
+var _pcCacheSrcLen=-1;
+function _pcMasterLen(){
+  return (CENTERS.length||0)+Object.values(PC_RAW).reduce(function(s,a){return s+(Array.isArray(a)?a.length:0);},0);
+}
 function _buildPCCache(){
-  if(_PC_CACHE!==null&&Object.keys(_PC_CACHE).length>0)return;
-  _PC_CACHE={};
+  var srcLen=_pcMasterLen();
+  if(_PC_CACHE!==null&&_pcCacheSrcLen===srcLen)return;
+  _pcCacheSrcLen=srcLen;
+  _PC_CACHE={};
   PROVINCES.forEach(function(p){
     var pname=p.name.replace(/[ي]/g,'ی').replace(/[ك]/g,'ک');
     var rawByName=PC_RAW[pname]||[];var rawById=PC_RAW[p.id]||[];var raw=rawByName.concat(rawById.filter(function(r){var rname=(r&&(r.name||r[1]))||'';return!rawByName.some(function(s){return((s&&(s.name||s[1]))||'')==rname;});}));
@@ -164,7 +170,7 @@ function _wpGetOwner(we) {
   return owner || we.addedBy || '';
 }
 
-function clearPCCache(){_PC_CACHE=null;}
+function clearPCCache(){_PC_CACHE=null;_pcCacheSrcLen=-1;}
 function isStalled(type,id){
   var e=getE(type,id);var st=e.status||'بدون تماس';
   if(st==='قرارداد بسته شد'||st==='غیرفعال')return false;

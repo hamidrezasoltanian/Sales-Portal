@@ -169,8 +169,13 @@ async function markDone(t: Task) {
 }
 
 async function deleteTask(t: Task) {
-  if (!confirm(`حذف وظیفه "${t.title}"؟`)) return;
-  await fetch(`/api/tasks/${t.id}`, { method: 'DELETE' });
+  if (!confirm(`وظیفه «${t.title}» به سطل زباله منتقل شود؟ (مدیر می‌تواند بازیابی کند)`)) return;
+  const r = await fetch(`/api/tasks/${t.id}`, { method: 'DELETE', credentials: 'same-origin' });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    alert((d as { error?: string }).error || 'خطا در حذف وظیفه');
+    return;
+  }
   tasks.value = tasks.value.filter(x => x.id !== t.id);
 }
 

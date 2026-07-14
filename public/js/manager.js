@@ -2303,10 +2303,14 @@ async function init(){
     window._myDepartment=authData.department||'';
     window._myDirectManager=authData.direct_manager||'';
     hideLoginOverlay();
+    if(typeof window.mountVuePanels==='function'){
+      window.mountVuePanels({username:currentUser,role:window._authUserRole||''});
+    }
   }catch(e){
     showLoginOverlay();return;
   }
   await loadDB();
+  var _centersLoad=loadMasterCenters();
   initSettings();initTags();initWeekTags();initEvents();_initNotif();
   _initBrowserNotif();
   setTimeout(_sendWeeklyDigest,3000);
@@ -2326,7 +2330,7 @@ async function init(){
     var _spid=localStorage.getItem('_spid');
     var _svm=localStorage.getItem('_svm');
     if(_svm&&['list','card','pipeline'].indexOf(_svm)>=0)_viewMode=_svm;
-    if(_st&&['home','provinces','weekplan','calendar','checklist','activity','kpi','manager','mtr','pricing','tasks','changelog','proforma','support','hr','trade-kpi','workflows'].indexOf(_st)>=0)currentTab=_st;
+    if(_st&&['home','provinces','weekplan','calendar','checklist','activity','kpi','manager','mtr','pricing','tasks','changelog','proforma','support','hr','trade-kpi','workflows','letters','reports','hcp'].indexOf(_st)>=0)currentTab=_st;
     if(_spid)_currentProvId=_spid;
   }catch(e){}
   if(!_st) currentTab=_isManager()?'manager':'home';
@@ -2357,31 +2361,39 @@ async function init(){
       }
     });
   })();
-  loadMasterCenters().then(function(){
+  _centersLoad.then(function(){
     _typeFilterBuilt=false;
-    cleanupOrphanedEntries(false);
-    var _dedup=wpDeduplicateEntries();if(_dedup>0){saveDBSync();console.info('[wp] dedup removed',_dedup,'duplicate week entries');}
-    var _reconciled=wpReconcileFollowupDates();if(_reconciled>0){saveDBSync();console.info('[wp] reconciled',_reconciled,'missing week entries');}
+    var _dedup=wpDeduplicateEntries();if(_dedup>0)console.info('[wp] dedup removed',_dedup,'duplicate week entries');
     rebuildFilters();buildTypeFilter();
     if(typeof loadKolCenterKeys==='function')loadKolCenterKeys(function(){
       if(currentTab==='provinces'&&typeof renderTable==='function')renderTable();
     });
-    switchTab(currentTab);
+    _restoringNav=true;
+    if(_currentProvId&&currentTab==='provinces'){
+      openProvince(_currentProvId);
+    }else{
+      switchTab(currentTab);
+    }
+    _restoringNav=false;
     _initOnboarding();
     var _clbtn=document.getElementById('tab_changelog');if(_clbtn)_clbtn.style.display=_hasAccess('changelog')?'':'none';
     var _tbtn=document.getElementById('tab_tasks');if(_tbtn)_tbtn.style.display='';
     // بعد از اتمام init، history navigation فعال می‌شود
     _navReady=true;
+    window.__appBooted=true;
+    var _bootErr=document.getElementById('bootError');if(_bootErr)_bootErr.style.display='none';
     try{history.replaceState({v:1,tab:currentTab,provId:_currentProvId||null},'',window.location.pathname+window.location.search);}catch(e){}
     checkEmptyDB();
     // Build cache + populate CNC now that PC_RAW is ready
     _PC_CACHE=null;_buildPCCache();
     if(currentTab==='weekplan') setTimeout(renderWeekPlan,100);
+    if(typeof initSSE==='function')initSSE();
   }).catch(function(){
     rebuildFilters();buildTypeFilter();switchTab(currentTab);
     _initOnboarding();
     checkEmptyDB();
     if(currentTab==='weekplan') setTimeout(renderWeekPlan,100);
+    if(typeof initSSE==='function')initSSE();
   });
   // ── بررسی پیگیری‌های سررسیده ──
   setTimeout(function(){
@@ -2443,7 +2455,6 @@ async function init(){
     if((e.ctrlKey||e.metaKey)&&e.key==='z'&&!e.shiftKey){var ae=document.activeElement;var isInput=ae&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA');if(!isInput){e.preventDefault();undoEdit();}}
     if((e.ctrlKey||e.metaKey)&&(e.key==='y'||(e.key==='z'&&e.shiftKey))){var ae2=document.activeElement;var isInput2=ae2&&(ae2.tagName==='INPUT'||ae2.tagName==='TEXTAREA');if(!isInput2){e.preventDefault();redoEdit();}}
   });
-  initSSE();
 }
 
 document.addEventListener('DOMContentLoaded', function () {

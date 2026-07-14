@@ -361,7 +361,7 @@ router.get('/kpi-history/:employee', requireAuth, async function(req, res) {
     const { employee } = req.params;
     if (!isManager(user.role) && user.username !== employee) return res.status(403).json({ error: 'دسترسی ندارید' });
     const { rows } = await query(
-      'SELECT * FROM trade_kpi_monthly WHERE employee=$1 ORDER BY month DESC LIMIT 6',
+      'SELECT * FROM trade_kpi_monthly WHERE employee=$1 ORDER BY month DESC',
       [employee]
     );
     res.json(rows);

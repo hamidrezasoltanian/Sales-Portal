@@ -77,6 +77,13 @@ function p2(n){return n<10?'0'+n:String(n);}
 function jMs(jy,jm,jd){var g=j2g(jy,jm,jd);return new Date(g[0],g[1]-1,g[2],12).getTime();}
 function msToJ(ms){if(!ms)return'';var d=new Date(ms);var j=g2j(d.getFullYear(),d.getMonth()+1,d.getDate());return j[0]+'/'+p2(j[1])+'/'+p2(j[2]);}
 function jAdd(jy,jm,jd,n){var g=j2g(jy,jm,jd);var d=new Date(g[0],g[1]-1,g[2]+n,12);return g2j(d.getFullYear(),d.getMonth()+1,d.getDate());}
+function addDaysToJalali(dateStr,days){
+  if(!dateStr)return '';
+  var parts=dateStr.split('/').map(Number);
+  if(parts.length!==3)return dateStr;
+  var d=jAdd(parts[0],parts[1],parts[2],days);
+  return d[0]+'/'+p2(d[1])+'/'+p2(d[2]);
+}
 function wkStart(jy,jm,jd){var dow=jDow(jy,jm,jd);var g=j2g(jy,jm,jd);var d=new Date(g[0],g[1]-1,g[2]-dow,12);return g2j(d.getFullYear(),d.getMonth()+1,d.getDate());}
 
 // ════════════════════════ HELPERS ══════════════════════
@@ -84,6 +91,11 @@ function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace
 function _safeColor(c){return(typeof c==='string'&&(/^#[0-9a-fA-F]{3,8}$/.test(c)||/^rgb/.test(c)||/^hsl/.test(c)))?c:'#888888';}
 function fNorm(s){return(s||'').toString().toLowerCase().replace(/[ي]/g,'ی').replace(/[ك]/g,'ک').replace(/[أإآا]/g,'ا').replace(/[\u200c\u200d]/g,' ').replace(/[۰-۹]/g,function(d){return'0123456789'['۰۱۲۳۴۵۶۷۸۹'.indexOf(d)];}).replace(/\s+/g,' ').trim();}
 function fMatch(q,t){return!q||fNorm(t).indexOf(fNorm(q))>=0;}
+function filterActiveNotes(notes){
+  if(!Array.isArray(notes))return[];
+  return notes.filter(function(n){return n&&!n._deletedAt;});
+}
+window.filterActiveNotes=filterActiveNotes;
 function nowTs(){return Date.now();}
 function stCls(st){var i=STATUS_LIST.indexOf(st);return STATUS_CLS[i]||'st-0';}
 function stHCls(st){var i=STATUS_LIST.indexOf(st);return H_CLS[i]||'h-st-0';}
@@ -110,6 +122,7 @@ function initSSE() {
     try { _sse.close(); } catch (e) {}
     _sse = null;
   }
+  clearTimeout(_sseReconnectTimer);
   _sse = new EventSource('/api/events/stream?cid=' + _sseClientId);
   _sse.onopen = function () {
     _sseRetryMs = 2000;
@@ -126,6 +139,10 @@ function initSSE() {
       } else if (data.type === 'notif_new' && data.to === currentUser) {
         if (typeof _refreshNotifs === 'function') _refreshNotifs();
         if (data.msg && typeof _firePushNotif === 'function') _firePushNotif('\uD83D\uDD14 اعلان جدید', data.msg, 'notif-' + Date.now());
+      } else if (data.type === 'week-entry-changed') {
+        if (typeof _wpOnWeekEntryChanged === 'function') _wpOnWeekEntryChanged(data);
+      } else if (data.type === 'letter-changed') {
+        if (typeof window._lettersOnSSE === 'function') window._lettersOnSSE(data);
       }
     } catch(err) {}
   };
@@ -133,7 +150,9 @@ function initSSE() {
     try { _sse.close(); } catch (e) {}
     _sse = null;
     clearTimeout(_sseReconnectTimer);
+    // ERR_INCOMPLETE_CHUNKED_ENCODING is normal after server restart — reconnect quietly
     _sseReconnectTimer = setTimeout(function () {
+      if (document.visibilityState === 'hidden') return;
       initSSE();
       _sseRetryMs = Math.min(_sseRetryMs * 2, 30000);
     }, _sseRetryMs);
@@ -143,7 +162,7 @@ window.initSSE = initSSE;
 
 if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'visible' && !_sse) initSSE();
+    if (document.visibilityState === 'visible' && (!_sse || _sse.readyState === EventSource.CLOSED)) initSSE();
   });
 }
 
@@ -221,20 +240,45 @@ function _getAllValidRecKeys(){
 }
 function cleanupOrphanedEntries(showReport){
   var valid=_getAllValidRecKeys();
-  if(!valid.size)return;
+  if(!valid.size)return {removedWP:0,removedFU:0};
   var removedWP=0,removedFU=0;
+  var sqlDeleteIds=[];
   Object.keys(DB.weekEntries||{}).forEach(function(k){
     var we=DB.weekEntries[k];
+    if(!we) return;
     var rk=we.recKey||(we.rtype?we.rtype+'_'+we.rid:'');
-    if(rk&&!valid.has(rk)){_weRemove(k);removedWP++;}
+    if(!rk||valid.has(rk)) return;
+    if(we.sqlId) sqlDeleteIds.push(String(we.sqlId));
+    _weRemove(k);
+    removedWP++;
   });
+  if(sqlDeleteIds.length){
+    fetch('/api/week-entries/bulk-delete',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ids:sqlDeleteIds}),
+    }).catch(function(){});
+  }
+  var patchEdits={};
   Object.keys(DB.edits||{}).forEach(function(k){
-    if(!valid.has(k)&&DB.edits[k].followupDate){delete DB.edits[k].followupDate;removedFU++;}
+    if(valid.has(k)||!DB.edits[k]||!DB.edits[k].followupDate) return;
+    delete DB.edits[k].followupDate;
+    patchEdits[k]=DB.edits[k];
+    removedFU++;
   });
-  if(removedWP||removedFU){
-    saveDB();
-    if(showReport)showToast('🧹 پاک‌سازی: '+removedWP+' ورودی هفته و '+removedFU+' پیگیری منسوخ حذف شد',4000);
-  }else if(showReport){showToast('✅ هیچ ورودی منسوخی یافت نشد');}
+  if(removedFU&&Object.keys(patchEdits).length){
+    if(typeof savePatchDB==='function') savePatchDB({edits:patchEdits});
+    else saveDB();
+  }
+  if(showReport){
+    if(removedWP||removedFU){
+      showToast('🧹 پاک‌سازی: '+removedWP+' ورودی هفته و '+removedFU+' پیگیری منسوخ حذف شد',4000);
+    }else{
+      showToast('✅ هیچ ورودی منسوخی یافت نشد');
+    }
+  }else if(removedWP||removedFU){
+    console.info('[cleanup] removed',removedWP,'orphan week entries,',removedFU,'orphan followups');
+  }
   return{removedWP:removedWP,removedFU:removedFU};
 }
 window.cleanupOrphanedEntries = cleanupOrphanedEntries;
@@ -259,7 +303,11 @@ async function doLogin(){
     var d=await r.json();
     if(!r.ok){if(errEl){errEl.textContent=d.error||'خطا';errEl.style.display='block';}return;}
     currentUser=d.user.username;
+    window._authUserRole=d.user.role||'';
     hideLoginOverlay();
+    if(typeof window.mountVuePanels==='function'){
+      window.mountVuePanels({username:d.user.username,role:d.user.role||''});
+    }
     init();
   }catch(e){
     if(errEl){errEl.textContent='خطا در اتصال به سرور';errEl.style.display='block';}
@@ -341,6 +389,7 @@ async function loadDB(){
     });
     if(_migrated){saveDB();console.log('[migration] legacy contacts migrated');}
     _serverSynced=true;_invalidateEditsCache();
+    await loadWeekEntriesFromSQL();
     _lastSyncedDB = JSON.parse(JSON.stringify(DB));
     _loadKpiFromSql();
 
@@ -355,6 +404,23 @@ async function loadDB(){
     var _sp2=document.getElementById('loadingSpinner');if(_sp2)_sp2.style.display='none';
   }
 }
+
+async function loadWeekEntriesFromSQL(){
+  try{
+    var r=await fetch('/api/week-entries?done=false');
+    if(!r.ok)return;
+    var rows=await r.json();
+    if(!Array.isArray(rows))return;
+    DB.weekEntries={};
+    rows.forEach(function(row){
+      var mapped=wpRowToMem(row);
+      DB.weekEntries[mapped.key]=mapped.entry;
+    });
+  }catch(e){
+    console.warn('loadWeekEntriesFromSQL failed:',e.message);
+  }
+}
+window.loadWeekEntriesFromSQL=loadWeekEntriesFromSQL;
 
 async function loadTasksFromSQL(){
   try{
@@ -500,8 +566,211 @@ function deleteCenterExtraApi(id) {
     .catch(function (e) { console.warn('[deleteCenterExtraApi]', e.message); });
 }
 
+function _wpNewWeId() {
+  return 'we_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+}
+
+function wpRowToMem(row) {
+  var k = row.weekId + ':::' + row.rtype + ':::' + row.rid;
+  return {
+    key: k,
+    entry: {
+      id: row.id, sqlId: row.id, weekId: row.weekId, recKey: row.recKey,
+      rtype: row.rtype, rid: row.rid, scheduledDate: row.scheduledDate,
+      actionType: row.actionType, done: row.done, doneDate: row.doneDate,
+      addedBy: row.addedBy, centerName: row.centerName, weekTagId: row.weekTagId,
+      doneNote: row.doneNote, doneResult: row.doneResult,
+    },
+  };
+}
+
+function deleteWeekEntryApi(we, eKey) {
+  if (we && we.sqlId) {
+    return fetch('/api/week-entries/' + encodeURIComponent(we.sqlId), { method: 'DELETE' })
+      .then(function (r) { return r.ok || r.status === 404; })
+      .catch(function () { return false; });
+  }
+  var key = eKey;
+  if (!key && we && we.weekId && we.rtype && we.rid !== undefined) {
+    key = we.weekId + ':::' + we.rtype + ':::' + we.rid;
+  }
+  if (!key) return Promise.resolve(true);
+  return fetch('/api/week-entries/bulk-delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ keys: [key] }),
+  }).then(function (r) { return r.ok; }).catch(function () { return false; });
+}
+
+function wpRemoveFromOtherWeeks(recKey, keepWeekId) {
+  return fetch('/api/week-entries/purge-center', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recKey: recKey, keepWeekId: keepWeekId || null }),
+  }).then(function (r) { return r.ok ? r.json() : {}; })
+    .catch(function () { return {}; })
+    .finally(function () {
+      Object.keys(DB.weekEntries || {}).forEach(function (k) {
+        if (keepWeekId && k.startsWith(keepWeekId + ':::')) return;
+        var we = DB.weekEntries[k];
+        if (!we || typeof we !== 'object' || we.done) return;
+        if (!wpMatchRecKey(we, recKey)) return;
+        _weRemove(k);
+      });
+    });
+}
+
+function wpMatchRecKey(we, recKey) {
+  if (!we || !recKey) return false;
+  var rk = we.recKey || ((we.rtype || '') + '_' + (we.rid || ''));
+  if (rk === recKey) return true;
+  var parts = recKey.split('_');
+  if (parts.length >= 2) {
+    var rt = parts[0];
+    var rid = parts.slice(1).join('_');
+    if (we.rtype === rt && String(we.rid) === rid) return true;
+  }
+  return false;
+}
+
+function wpFindActiveEntryKey(recKey, exceptWeekId) {
+  var found = null;
+  Object.keys(DB.weekEntries || {}).forEach(function (k) {
+    if (found) return;
+    if (exceptWeekId && k.startsWith(exceptWeekId + ':::')) return;
+    var we = DB.weekEntries[k];
+    if (!we || we.done || !wpMatchRecKey(we, recKey)) return;
+    found = k;
+  });
+  return found;
+}
+
+function wpSyncCenterWeekEntriesFromApi(recKey) {
+  return fetch('/api/week-entries?rec_key=' + encodeURIComponent(recKey) + '&done=false')
+    .then(function (r) {
+      if (!r.ok) return Promise.reject(new Error('HTTP ' + r.status));
+      return r.json();
+    })
+    .then(function (rows) {
+      if (!Array.isArray(rows)) rows = [];
+      rows.forEach(function (row) {
+        var mapped = wpRowToMem(row);
+        DB.weekEntries[mapped.key] = mapped.entry;
+      });
+      if (rows.length) {
+        Object.keys(DB.weekEntries || {}).forEach(function (k) {
+          var we = DB.weekEntries[k];
+          if (!we || we.done || !wpMatchRecKey(we, recKey)) return;
+          var stillThere = rows.some(function (row) {
+            return row.weekId + ':::' + row.rtype + ':::' + row.rid === k;
+          });
+          if (!stillThere) _weRemove(k);
+        });
+      }
+      return rows;
+    });
+}
+
+function wpBulkDeleteEntries(keys) {
+  if (!keys || !keys.length) return Promise.resolve(0);
+  var ids = [];
+  var keyList = [];
+  keys.forEach(function (k) {
+    var we = DB.weekEntries[k];
+    if (we && we.sqlId) ids.push(we.sqlId);
+    else keyList.push(k);
+  });
+  return fetch('/api/week-entries/bulk-delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: ids, keys: keyList }),
+  }).then(function (r) { return r.ok ? r.json() : { deleted: 0 }; })
+    .then(function (d) {
+      keys.forEach(function (k) { _weRemove(k); });
+      return d.deleted || keys.length;
+    })
+    .catch(function () {
+      keys.forEach(function (k) { _weRemove(k); });
+      return keys.length;
+    });
+}
+
+function wpTransferWeekEntry(eKey, targetWeekId, opts) {
+  opts = opts || {};
+  var we = DB.weekEntries[eKey];
+  if (!we) return Promise.resolve(null);
+  var parsed = typeof wpParseEntryKey === 'function' ? wpParseEntryKey(eKey) : null;
+  var rtype = parsed ? parsed.rtype : we.rtype;
+  var rid = parsed ? parsed.rid : we.rid;
+  var recKey = we.recKey || (rtype + '_' + rid);
+  var newKey = typeof wpEntryKey === 'function'
+    ? wpEntryKey(targetWeekId, rtype, rid)
+    : (targetWeekId + ':::' + rtype + ':::' + rid);
+  if (newKey === eKey) return Promise.resolve(newKey);
+
+  var dupInTarget = [];
+  Object.keys(DB.weekEntries || {}).forEach(function (k) {
+    if (!k.startsWith(targetWeekId + ':::') || k === eKey) return;
+    var we2 = DB.weekEntries[k];
+    if (!we2 || we2.done) return;
+    var rk2 = we2.recKey || (we2.rtype + '_' + we2.rid);
+    if (rk2 === recKey) dupInTarget.push(k);
+  });
+
+  return Promise.all(dupInTarget.map(function (dk) {
+    var dwe = DB.weekEntries[dk];
+    return deleteWeekEntryApi(dwe, dk).finally(function () { _weRemove(dk); });
+  })).then(function () {
+    if (we.sqlId) {
+      var body = { ids: [we.sqlId], weekId: targetWeekId };
+      if (opts.scheduledDate !== undefined) body.scheduledDate = opts.scheduledDate;
+      else if (opts.clearSchedule) body.scheduledDate = null;
+      if (opts.actionType) body.actionType = opts.actionType;
+      return fetch('/api/week-entries/bulk-move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(function (r) {
+        return r.ok ? r.json() : r.json().then(function (j) { return Promise.reject(new Error(j.error || r.status)); });
+      }).then(function (rows) {
+        var row = rows && rows[0];
+        if (!row) throw new Error('انتقال ناموفق');
+        var mapped = wpRowToMem(row);
+        Object.keys(DB.weekEntries || {}).forEach(function (k) {
+          var w2 = DB.weekEntries[k];
+          if (!w2 || w2.done || !wpMatchRecKey(w2, recKey)) return;
+          if (k !== mapped.key) _weRemove(k);
+        });
+        if (eKey !== mapped.key) _weRemove(eKey);
+        DB.weekEntries[mapped.key] = Object.assign({}, mapped.entry, {
+          scheduledDate: opts.scheduledDate !== undefined ? opts.scheduledDate
+            : (opts.clearSchedule ? null : we.scheduledDate),
+          actionType: opts.actionType || we.actionType,
+          done: opts.done !== undefined ? opts.done : we.done,
+          doneDate: opts.doneDate !== undefined ? opts.doneDate : we.doneDate,
+          doneResult: we.doneResult, doneNote: we.doneNote,
+        });
+        return mapped.key;
+      });
+    }
+    return wpRemoveFromOtherWeeks(recKey, targetWeekId).then(function () {
+      var copy = Object.assign({}, we, {
+        scheduledDate: opts.scheduledDate !== undefined ? opts.scheduledDate
+          : (opts.clearSchedule ? null : we.scheduledDate),
+        actionType: opts.actionType || we.actionType,
+        done: opts.done !== undefined ? opts.done : false,
+        doneDate: opts.doneDate !== undefined ? opts.doneDate : null,
+        weekId: targetWeekId,
+      });
+      DB.weekEntries[newKey] = copy;
+      _weRemove(eKey);
+      return saveWeekEntryApi(newKey, copy).then(function () { return newKey; });
+    });
+  });
+}
+
 function saveWeekEntryApi(eKey, we) {
-  if (!eKey || !we) return;
+  if (!eKey || !we) return Promise.resolve(null);
   var pts = eKey.split(':::');
   var weekId = pts[0];
   var rtype = pts.length >= 3 ? pts[1] : we.rtype;
@@ -511,18 +780,37 @@ function saveWeekEntryApi(eKey, we) {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        weekId: weekId,
         scheduledDate: we.scheduledDate || null,
         actionType: we.actionType || 'call',
         done: !!we.done,
         doneDate: we.doneDate || null,
+        doneResult: we.doneResult || null,
+        doneNote: we.doneNote || null,
+        doneAmount: we.doneAmount != null ? we.doneAmount : undefined,
+        centerName: we.centerName || undefined,
       }),
-    }).catch(function () {});
+    }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (d && d.id && DB.weekEntries[eKey]) {
+          DB.weekEntries[eKey].sqlId = d.id;
+          if (d.weekId && d.weekId !== weekId) {
+            var nk = d.weekId + ':::' + d.rtype + ':::' + d.rid;
+            if (nk !== eKey) {
+              DB.weekEntries[nk] = Object.assign({}, DB.weekEntries[eKey], wpRowToMem(d).entry);
+              _weRemove(eKey);
+            }
+          }
+        }
+        return d;
+      })
+      .catch(function () { return null; });
   }
   return fetch('/api/week-entries', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      id: 'we_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+      id: _wpNewWeId(),
       weekId: weekId,
       recKey: we.recKey || (we.rtype + '_' + we.rid),
       rtype: we.rtype || rtype,
@@ -533,22 +821,21 @@ function saveWeekEntryApi(eKey, we) {
       doneDate: we.doneDate || null,
       addedBy: we.addedBy || currentUser,
       centerName: we.centerName || '',
+      weekTagId: we.weekTagId || null,
     }),
   }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
     if (d && d.id && DB.weekEntries[eKey]) DB.weekEntries[eKey].sqlId = d.id;
-  }).catch(function () {});
+    return d;
+  }).catch(function () { return null; });
 }
 
-function wpRemoveFromOtherWeeks(recKey, keepWeekId) {
-  Object.keys(DB.weekEntries || {}).forEach(function (k) {
-    if (keepWeekId && k.startsWith(keepWeekId + ':::')) return;
-    var we = DB.weekEntries[k];
-    if (!we || typeof we !== 'object') return;
-    if (we.done) return;
-    var rk = we.recKey || (we.rtype + '_' + we.rid);
-    if (rk === recKey) _weRemove(k);
-  });
-}
+window.deleteWeekEntryApi = deleteWeekEntryApi;
+window.wpRemoveFromOtherWeeks = wpRemoveFromOtherWeeks;
+window.wpSyncCenterWeekEntriesFromApi = wpSyncCenterWeekEntriesFromApi;
+window.wpBulkDeleteEntries = wpBulkDeleteEntries;
+window.wpTransferWeekEntry = wpTransferWeekEntry;
+window.wpMatchRecKey = wpMatchRecKey;
+window.wpFindActiveEntryKey = wpFindActiveEntryKey;
 
 function _cleanCenterData(rtype, id) {
   var recKey = rtype + '_' + id;
@@ -774,7 +1061,10 @@ function mergeDatabaseDiff(local, server, lastSynced) {
     var map = {};
     sn.forEach(function(n) { map[n.text + ':::' + (n.by || n.user)] = n; });
     ln.forEach(function(n) { map[n.text + ':::' + (n.by || n.user)] = n; });
-    merged.notes[k] = Object.values(map);
+    merged.notes[k] = filterActiveNotes(Object.values(map));
+  });
+  Object.keys(merged.notes).forEach(function(k){
+    merged.notes[k]=filterActiveNotes(merged.notes[k]);
   });
 
   // 3. weekEntries
@@ -998,10 +1288,15 @@ function getWeekId(dateStr){
   return null;
 }
 
-// تطبیق خودکار تاریخ‌های پیگیری و ساخت ورودی‌های هفته گم‌شده
-function wpReconcileFollowupDates(){
+// تطبیق خودکار تاریخ‌های پیگیری با برنامه هفته SQL
+// opts.allowCreate / opts.allowMove — روی startup خاموش تا POST/transfer تکراری نشود
+function wpReconcileFollowupDates(opts){
+  opts=opts||{};
+  var allowCreate=opts.allowCreate!==false;
+  var allowMove=opts.allowMove!==false;
   if(!DB.edits)return 0;
   var added=0, updated=0, moved=0;
+  var today=typeof todayStr==='function'?todayStr():'';
   Object.keys(DB.edits).forEach(function(k){
     var e=DB.edits[k];
     if(!e||!e.followupDate)return;
@@ -1009,153 +1304,81 @@ function wpReconcileFollowupDates(){
     if(pts.length<2)return;
     var rtype=pts[0];
     var rid=pts.slice(1).join('_');
-    
     var val=e.followupDate;
     var _p=val.split('/').map(Number);
     if(_p.length!==3||isNaN(_p[0]))return;
-    var _ndMs=jMs(_p[0],_p[1],_p[2]);
-    
-    // پیدا کردن هفته مناسب برای این تاریخ پیگیری
-    var foundWeek=null;
-    var yrs=[_p[0]-1,_p[0],_p[0]+1];
-    for(var i=0;i<yrs.length;i++){
-      var yr=yrs[i];
-      var wks=getYearWeeks(yr);
-      for(var j=0;j<wks.length;j++){
-        var wk=wks[j];
-        var wsMs=jMs(wk.wsArr[0],wk.wsArr[1],wk.wsArr[2]);
-        var weMs=jMs(wk.weArr[0],wk.weArr[1],wk.weArr[2]);
-        if(_ndMs>=wsMs&&_ndMs<=weMs){foundWeek=wk;break;}
-      }
-      if(foundWeek)break;
-    }
-    if(!foundWeek)return;
-    
-    var correctKey=wpEntryKey(foundWeek.id,rtype,rid);
-    
-    // پیدا کردن ورودی‌های فعال (انجام‌نشده) موجود برای این مرکز
+    var foundWeekId=typeof getWeekId==='function'?getWeekId(val):null;
+    if(!foundWeekId)return;
+    var correctKey=wpEntryKey(foundWeekId,rtype,rid);
+    var actionable=!today||val>=today;
+
     var activeKeys=[];
     Object.keys(DB.weekEntries||{}).forEach(function(wkKey){
       var we=DB.weekEntries[wkKey];
       if(!we||we.done)return;
-      var weRk=we.recKey||(we.rtype+'_'+we.rid);
-      if(weRk===k) activeKeys.push(wkKey);
-    });
-    
-    if(activeKeys.length===0){
-      // سناریو ۱: هیچ ورودی فعالی در برنامه هفته وجود ندارد. یکی می‌سازیم!
-      if(!DB.weekEntries[correctKey]){
-        var cname=(typeof _getCenterName==='function'?_getCenterName(rtype,rid):'')||(rtype+'_'+rid);
-        DB.weekEntries[correctKey]={
-          scheduledDate:val,
-          done:false,
-          doneDate:null,
-          rtype:rtype,
-          rid:rid,
-          recKey:k,
-          centerName:cname,
-          actionType:'call',
-          addedBy:typeof currentUser!=='undefined'?currentUser:'system'
-        };
-        added++;
-        (function(_k,_we){
-          var _pts=_k.split(':::');
-          fetch('/api/week-entries',{
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-              id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),
-              weekId:_pts[0],
-              recKey:_we.recKey || (_we.rtype+'_'+_we.rid),
-              rtype:_we.rtype,
-              rid:_we.rid,
-              scheduledDate:_we.scheduledDate||null,
-              actionType:_we.actionType||'call',
-              done:false,
-              doneDate:null,
-              addedBy:_we.addedBy||'system',
-              centerName:_we.centerName||''
-            })
-          }).then(function(r){return r.ok?r.json():null;}).then(function(d){
-            if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;
-          }).catch(function(){});
-        })(correctKey,DB.weekEntries[correctKey]);
+      if(typeof wpMatchRecKey==='function'?wpMatchRecKey(we,k):(we.recKey||(we.rtype+'_'+we.rid))===k){
+        activeKeys.push(wkKey);
       }
-    } else {
-      // سناریو ۲: ورودی‌های فعالی وجود دارند. صحت هفته و تاریخ را بررسی می‌کنیم.
-      var hasCorrectEntry=false;
-      activeKeys.forEach(function(wkKey){
-        if(wkKey===correctKey){
-          hasCorrectEntry=true;
-          var we=DB.weekEntries[wkKey];
-          if(we.scheduledDate!==val){
-            // اصلاح روز قرارگیری در صورتی که تاریخ فیلد با تاریخ ورودی مغایرت دارد
-            we.scheduledDate=val;
-            updated++;
-            (function(_we, _wk){
-              var idOrKey = _we.sqlId || _we.id || _wk;
-              fetch('/api/week-entries/'+encodeURIComponent(idOrKey),{
-                method:'PUT',
-                headers:{'Content-Type':'application/json'},
-                body:JSON.stringify({scheduledDate:val})
-              }).catch(function(){});
-            })(we, wkKey);
-          }
-        } else {
-          // در هفته اشتباه است! حذفش می‌کنیم.
-          var we=DB.weekEntries[wkKey];
-          (function(oldK, _we){
-            var idOrKey = _we.sqlId || _we.id || oldK;
-            fetch('/api/week-entries/'+encodeURIComponent(idOrKey),{method:'DELETE'}).catch(function(){});
-            delete DB.weekEntries[oldK];
-            if(!DB._weDeletedKeys)DB._weDeletedKeys=[];
-            if(DB._weDeletedKeys.indexOf(oldK)<0)DB._weDeletedKeys.push(oldK);
-          })(wkKey, we);
-          moved++;
-        }
-      });
-      
-      // اگر ورودی هفته اشتباه حذف شد و ورودی صحیح در هفته درست هنوز وجود ندارد، یکی ایجاد می‌کنیم
-      if(!hasCorrectEntry && !DB.weekEntries[correctKey]){
-        var cname=(typeof _getCenterName==='function'?_getCenterName(rtype,rid):'')||(rtype+'_'+rid);
-        DB.weekEntries[correctKey]={
-          scheduledDate:val,
-          done:false,
-          doneDate:null,
-          rtype:rtype,
-          rid:rid,
-          recKey:k,
-          centerName:cname,
-          actionType:'call',
-          addedBy:typeof currentUser!=='undefined'?currentUser:'system'
-        };
-        added++;
-        (function(_k,_we){
-          var _pts=_k.split(':::');
-          fetch('/api/week-entries',{
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-              id:'we_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),
-              weekId:_pts[0],
-              recKey:_we.recKey || (_we.rtype+'_'+_we.rid),
-              rtype:_we.rtype,
-              rid:_we.rid,
-              scheduledDate:_we.scheduledDate||null,
-              actionType:_we.actionType||'call',
-              done:false,
-              doneDate:null,
-              addedBy:_we.addedBy||'system',
-              centerName:_we.centerName||''
-            })
-          }).then(function(r){return r.ok?r.json():null;}).then(function(d){
-            if(d&&d.id&&DB.weekEntries[_k])DB.weekEntries[_k].sqlId=d.id;
-          }).catch(function(){});
-        })(correctKey,DB.weekEntries[correctKey]);
+    });
+
+    function _ensureCorrectEntry(){
+      if(!allowCreate||!actionable)return;
+      if(DB.weekEntries[correctKey])return;
+      var cname=(typeof _getCenterName==='function'?_getCenterName(rtype,rid):'')||(rtype+'_'+rid);
+      DB.weekEntries[correctKey]={
+        scheduledDate:val,done:false,doneDate:null,rtype:rtype,rid:rid,recKey:k,
+        centerName:cname,actionType:'call',addedBy:typeof currentUser!=='undefined'?currentUser:'system'
+      };
+      added++;
+      if(typeof saveWeekEntryApi==='function'){
+        saveWeekEntryApi(correctKey,DB.weekEntries[correctKey]);
       }
     }
+
+    if(activeKeys.length===0){
+      _ensureCorrectEntry();
+      return;
+    }
+
+    var hasCorrect=activeKeys.indexOf(correctKey)>=0;
+    if(hasCorrect){
+      var we=DB.weekEntries[correctKey];
+      if(we.scheduledDate!==val){
+        we.scheduledDate=val;
+        updated++;
+        if(typeof saveWeekEntryApi==='function')saveWeekEntryApi(correctKey,we);
+      }
+      if(allowMove){
+        activeKeys.forEach(function(wkKey){
+          if(wkKey===correctKey)return;
+          _weRemove(wkKey);
+          moved++;
+        });
+        if(moved>0&&typeof wpRemoveFromOtherWeeks==='function'){
+          wpRemoveFromOtherWeeks(k,foundWeekId);
+        }
+      }
+      return;
+    }
+
+    if(!allowMove||!actionable)return;
+
+    var srcKey=null;
+    activeKeys.forEach(function(wkKey){
+      if(!srcKey&&DB.weekEntries[wkKey]&&DB.weekEntries[wkKey].sqlId)srcKey=wkKey;
+    });
+    if(!srcKey)srcKey=activeKeys[0];
+
+    if(DB.weekEntries[srcKey]&&DB.weekEntries[srcKey].sqlId&&typeof wpTransferWeekEntry==='function'){
+      wpTransferWeekEntry(srcKey,foundWeekId,{scheduledDate:val,clearSchedule:false});
+      moved++;
+    }else{
+      activeKeys.forEach(function(wkKey){_weRemove(wkKey);moved++;});
+      _ensureCorrectEntry();
+      if(typeof wpRemoveFromOtherWeeks==='function')wpRemoveFromOtherWeeks(k,foundWeekId);
+    }
   });
-  return added + updated + moved;
+  return added+updated+moved;
 }
 
 

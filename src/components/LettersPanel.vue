@@ -244,11 +244,13 @@
             </div>
           </div>
 
-          <div class="lt-workflow-tracker" :style="{ '--wf-pct': workflowProgressPct(selectedLetter) + '%' }">
+          <div class="lt-workflow-tracker" :class="{ 'wf-live': wfAnimating }" :style="{ '--wf-pct': workflowProgressPct(selectedLetter) + '%' }">
             <div
               v-for="(step, idx) in workflowStepsFor(selectedLetter)"
               :key="step.key"
-              :class="['wf-step', { active: step.active, done: step.done, pending: !step.active && !step.done }]"
+              :class="['wf-step', { active: step.active, done: step.done, pending: !step.active && !step.done, clickable: isWorkflowStepClickable(step, selectedLetter) }]"
+              :title="workflowStepHint(step)"
+              @click="onWorkflowStepClick(step)"
             >
               <div class="wf-dot">
                 <span class="wf-num">{{ idx + 1 }}</span>
@@ -394,7 +396,7 @@
                 height="520px"
               />
               <div v-else-if="docxLoading" class="body-content-loading">در حال بارگذاری سند Word...</div>
-              <div v-else class="body-content-html" v-html="selectedLetter.body || 'بدون متن'"></div>
+              <div v-else class="body-content-html" v-html="renderBodyHtml(selectedLetter.body)"></div>
             </div>
 
             <div v-if="selectedLetter.sender_external || selectedLetter.sender_center_key" class="lt-external-info">
@@ -824,6 +826,17 @@
             <label>پین‌کد جدید *</label>
             <input type="password" v-model="pinForm.newPin" placeholder="پین‌کد جدید" class="lt-input" />
           </div>
+          <div class="modal-form-row sig-upload-row">
+            <label>تصویر امضا (برای چاپ نامه)</label>
+            <div class="sig-upload-wrap">
+              <img v-if="signaturePreviewUrl" :src="signaturePreviewUrl" class="sig-preview-img" alt="پیش‌نمایش امضا" />
+              <input type="file" ref="sigFileInput" accept="image/png,image/jpeg,image/webp" class="hidden-file-input" @change="uploadSignatureImage" />
+              <button type="button" class="lt-btn-secondary" :disabled="sigUploadLoading" @click="($refs.sigFileInput as HTMLInputElement)?.click()">
+                📷 {{ signaturePreviewUrl ? 'تغییر تصویر امضا' : 'آپلود تصویر امضا' }}
+              </button>
+            </div>
+            <p class="sig-upload-hint">این تصویر در چاپ نامه (بالای «با تشکر») درج می‌شود.</p>
+          </div>
         </div>
         <div class="lt-modal-footer">
           <button class="lt-btn-cancel" @click="showPinModal = false">انصراف</button>
@@ -837,7 +850,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, reactive, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted, reactive, nextTick, watch } from 'vue';
 import LetterBodyEditor from './LetterBodyEditor.vue';
 import { arrayBufferToBase64, fetchLetterDocx } from '../utils/letterDocx';
 
@@ -1023,6 +1036,10 @@ const printTplPlaceholders = ref<string[]>([
   'letterhead', 'indicator_number', 'type', 'date', 'creator',
   'sender_block', 'receiver_block', 'subject', 'body', 'signers_block',
 ]);
+const wfAnimating = ref(false);
+const signaturePreviewUrl = ref('');
+const sigUploadLoading = ref(false);
+const sigFileInput = ref<HTMLInputElement | null>(null);
 const printTplForm = reactive({
   template: '',
   defaultTemplate: '',
@@ -1415,7 +1432,10 @@ async function approveOutgoingLetter(letter: Letter) {
       const res = await r.json();
       alert('نامه به میز کار امضا ارسال شد.');
       await load();
-      if (res.letter) selectLetter(res.letter);
+      if (res.letter) {
+        await selectLetter(res.letter);
+        pulseWorkflow();
+      }
     } else {
       const err = await r.json();
       alert(err.error || 'خطا در ارسال جهت امضا');
@@ -1457,7 +1477,10 @@ async function submitSignature() {
       await load();
       if (selectedLetter.value) {
         const refreshed = letters.value.find(x => x.id === selectedLetter.value!.id);
-        if (refreshed) selectLetter(refreshed);
+        if (refreshed) {
+          await selectLetter(refreshed);
+          pulseWorkflow();
+        }
       }
     } else {
       const err = await r.json();
@@ -1812,7 +1835,138 @@ async function syncEditorBody() {
   const buf = await editor.exportDocx();
   if (buf) {
     newForm.bodyDocx = arrayBufferToBase64(buf);
-    newForm.body = editor.getPlainPreview() || newForm.subject.trim();
+    newForm.body = editor.getMarkdown() || editor.getPlainPreview() || newForm.subject.trim();
+  }
+}
+
+function renderBodyHtml(body: string): string {
+  if (!body || !body.trim()) return 'بدون متن';
+  const esc = (s: string) => s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  let html = esc(body);
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/__(.+?)__/g, '<strong>$1</strong>');
+  html = html.replace(/\n/g, '<br>');
+  return html;
+}
+
+function pulseWorkflow() {
+  wfAnimating.value = true;
+  setTimeout(() => { wfAnimating.value = false; }, 600);
+}
+
+function isWorkflowStepClickable(step: WorkflowStep, l: Letter): boolean {
+  if (!l || l.is_archived || l.is_deleted) return false;
+  if (step.key === 'sign') {
+    if (canSignLetter(l)) return true;
+    if (l.type === 'outgoing' && l.status === 'pending_action' && isLetterOwner(l)) return true;
+  }
+  if (step.key === 'followup' && (showFollowupPanel(l) || openReferralsOnSelected.value.length > 0)) return true;
+  if (step.key === 'draft' && l.status === 'draft' && isLetterOwner(l)) return true;
+  if (step.key === 'archived' && canArchiveLetter(l)) return true;
+  return step.active;
+}
+
+function workflowStepHint(step: WorkflowStep): string {
+  if (step.key === 'sign') {
+    if (selectedLetter.value?.status === 'pending_action') return 'ارسال به میز کار امضا';
+    return 'رفتن به امضای دیجیتال';
+  }
+  if (step.key === 'followup') return 'رفتن به پنل پیگیری و ارجاع';
+  if (step.key === 'draft') return 'ویرایش پیش‌نویس';
+  if (step.key === 'registered') return 'ارسال به میز کار امضا';
+  if (step.key === 'archived') return 'بایگانی نامه';
+  return step.label;
+}
+
+function onWorkflowStepClick(step: WorkflowStep) {
+  if (!selectedLetter.value) return;
+  const l = selectedLetter.value;
+  if (step.key === 'sign') {
+    if (canSignLetter(l)) {
+      showSignModal.value = true;
+      return;
+    }
+    if (l.type === 'outgoing' && l.status === 'pending_action' && isLetterOwner(l)) {
+      approveOutgoingLetter(l);
+      return;
+    }
+  }
+  if (step.key === 'followup') {
+    scrollToFollowupPanel();
+    return;
+  }
+  if (step.key === 'draft' && l.status === 'draft' && isLetterOwner(l)) {
+    openEditDraft(l);
+    return;
+  }
+  if (step.key === 'archived' && canArchiveLetter(l)) {
+    archiveLetter(l.id);
+    return;
+  }
+  if (step.active) pulseWorkflow();
+}
+
+async function loadSignaturePreview() {
+  try {
+    const st = await fetch('/api/letters/signature-image/status');
+    if (!st.ok) return;
+    const meta = await st.json() as { has_image?: boolean };
+    if (!meta.has_image) {
+      if (signaturePreviewUrl.value) {
+        URL.revokeObjectURL(signaturePreviewUrl.value);
+        signaturePreviewUrl.value = '';
+      }
+      return;
+    }
+    const r = await fetch(`/api/letters/signature-image/${encodeURIComponent(props.username)}`);
+    if (r.ok) {
+      const blob = await r.blob();
+      if (signaturePreviewUrl.value) URL.revokeObjectURL(signaturePreviewUrl.value);
+      signaturePreviewUrl.value = URL.createObjectURL(blob);
+    }
+  } catch {
+    /* preview optional */
+  }
+}
+
+async function uploadSignatureImage(ev: Event) {
+  const input = ev.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  sigUploadLoading.value = true;
+  try {
+    const fd = new FormData();
+    fd.append('image', file);
+    const r = await fetch('/api/letters/signature-image', { method: 'POST', body: fd });
+    if (r.ok) {
+      await loadSignaturePreview();
+      alert('تصویر امضا ذخیره شد.');
+    } else {
+      const err = await r.json().catch(() => ({}));
+      alert((err as { error?: string }).error || 'خطا در آپلود تصویر امضا');
+    }
+  } catch {
+    alert('خطا در آپلود تصویر امضا');
+  } finally {
+    sigUploadLoading.value = false;
+    input.value = '';
+  }
+}
+
+async function onLetterSSE(data: { letter_id?: number; by?: string }) {
+  if (data.by === props.username) return;
+  const prevId = selectedLetter.value?.id;
+  await load();
+  if (prevId) {
+    const found = letters.value.find(l => l.id === prevId);
+    if (found) {
+      pulseWorkflow();
+      await selectLetter(found);
+    }
   }
 }
 
@@ -2083,6 +2237,16 @@ function formatPersianDate(dateStr: string): string {
 
 onMounted(() => {
   load();
+  (window as unknown as { _lettersOnSSE?: (d: { letter_id?: number; by?: string }) => void })._lettersOnSSE = onLetterSSE;
+});
+
+watch(showPinModal, (open) => {
+  if (open) loadSignaturePreview();
+});
+
+onUnmounted(() => {
+  if (signaturePreviewUrl.value) URL.revokeObjectURL(signaturePreviewUrl.value);
+  delete (window as unknown as { _lettersOnSSE?: unknown })._lettersOnSSE;
 });
 
 defineExpose({ load });
@@ -2864,7 +3028,10 @@ defineExpose({ load });
   background: linear-gradient(270deg, #6366f1, #22c55e);
   border-radius: 2px;
   z-index: 0;
-  transition: width 0.4s ease;
+  transition: width 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.lt-workflow-tracker.wf-live::after {
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.45);
 }
 .wf-step {
   display: flex;
@@ -2903,6 +3070,10 @@ defineExpose({ load });
 }
 .wf-step.done .wf-num { color: #fff; }
 .wf-step.pending .wf-dot { background: #f8fafc; }
+.wf-step.clickable { cursor: pointer; }
+.wf-step.clickable:hover .wf-dot { transform: scale(1.08); box-shadow: 0 2px 8px rgba(99,102,241,.25); }
+.wf-step.clickable:hover .wf-label { color: #6366f1; }
+.wf-step .wf-dot { transition: transform 0.2s ease, box-shadow 0.2s ease; }
 .wf-badge {
   position: absolute;
   top: -6px;
@@ -2985,6 +3156,10 @@ defineExpose({ load });
 .body-content-html ol {
   padding-right: 1.5em;
 }
+.sig-upload-row { margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e2e8f0; }
+.sig-upload-wrap { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.sig-preview-img { max-height: 48px; max-width: 120px; object-fit: contain; border: 1px solid #e2e8f0; border-radius: 6px; padding: 4px; background: #fff; }
+.sig-upload-hint { font-size: 11px; color: #64748b; margin: 6px 0 0; }
 
 .lt-external-info {
   margin-top: 14px;

@@ -96,6 +96,8 @@ function openModal(id,titleHTML,bodyHTML,footHTML,opts){
   closeModal(id);
   var overlay=document.createElement('div');
   overlay.className='m-overlay';overlay.id='mo_'+id;
+  var stack=document.querySelectorAll('.m-overlay').length;
+  overlay.style.zIndex=String(2000+stack*10);
   overlay.addEventListener('click',function(e){if(e.target===overlay)closeModal(id);});
   var box=document.createElement('div');
   box.className='m-box'+(opts&&opts.lg?' lg':'')+(opts&&opts.xl?' xl':'');

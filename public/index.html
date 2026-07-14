@@ -14,13 +14,53 @@ document.addEventListener('keydown', function (e) {
 </script>
 <title>پورتال فروش آتنا زیست درمان v2.1</title>
 <!-- cache-bust: v2.1 -->
-<script>if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(function(){});}</script>
+<style id="boot-critical">
+  .top-bar{display:flex!important;background:linear-gradient(135deg,#1e1b4b 0%,#4f46e5 100%)!important;color:#fff!important;min-height:48px;visibility:visible!important}
+  .sidebar{display:flex!important;background:#fff!important;visibility:visible!important}
+</style>
+<script>
+window.__bootErrors=[];
+function __showBootError(msg){
+  var el=document.getElementById('bootError');
+  var m=document.getElementById('bootErrorMsg');
+  if(el)el.style.display='block';
+  if(m)m.textContent=msg;
+}
+window.addEventListener('error',function(e){
+  window.__bootErrors.push(e.message||String(e));
+  __showBootError('خطای جاوااسکریپت: '+window.__bootErrors.join(' | '));
+});
+window.addEventListener('unhandledrejection',function(e){
+  window.__bootErrors.push(String(e.reason&&(e.reason.message||e.reason)||e));
+  __showBootError('خطا: '+window.__bootErrors.join(' | '));
+});
+setTimeout(function(){
+  if(window.__appBooted)return;
+  var tb=document.querySelector('.top-bar');
+  var lo=document.getElementById('loginOverlay');
+  if((tb&&tb.offsetHeight>=8)||(lo&&lo.style.display==='flex'))return;
+  __showBootError('صفحه کامل بارگذاری نشد. Hard Refresh بزنید (Ctrl+Shift+R) یا کش مرورگر را پاک کنید.');
+},12000);
+window.__APP_BUILD='20260714t';
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.getRegistrations().then(function(regs){
+    regs.forEach(function(r){r.unregister();});
+  }).catch(function(){});
+}
+</script>
 <!-- Vazirmatn از jsDelivr — npm package، بدون Google dependency -->
-<link rel="stylesheet" href="/css/app.css?v=20260713w">
+<link rel="stylesheet" href="/css/app.css?v=20260714s">
+<link rel="stylesheet" href="/dist/assets/main.css?v=20260714s">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" onerror="console.warn('XLSX CDN failed - only TSV format supported offline')"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
 </head>
 <body>
+
+<div id="bootError" style="display:none;position:fixed;inset:0;z-index:100000;background:#f8fafc;padding:32px;direction:rtl;font-family:Tahoma,sans-serif;overflow:auto">
+  <h2 style="color:#1e1b4b;margin-bottom:12px">خطا در بارگذاری اپ</h2>
+  <p id="bootErrorMsg" style="color:#334155;margin-bottom:16px;white-space:pre-wrap"></p>
+  <button type="button" onclick="location.reload()" style="padding:10px 20px;background:#4f46e5;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-family:inherit">تلاش مجدد</button>
+</div>
 
 <!-- LOADING SPINNER -->
 <div id="loadingSpinner" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(255,255,255,.92);align-items:center;justify-content:center;flex-direction:column;gap:14px">
@@ -329,35 +369,6 @@ document.addEventListener('keydown', function (e) {
 
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
-
-<!-- DATA — core modules; tab-specific scripts load on demand via tab-loader.js -->
-<script src="/js/safe-dom.js?v=20260710c"></script>
-<script src="/js/tab-loader.js?v=20260713q"></script>
-<script src="/js/roles.js?v=20260710c"></script>
-<script src="/js/core.js?v=20260713t"></script>
-<script src="/js/settings.js?v=20260713u"></script>
-<script src="/js/data.js?v=20260712c"></script>
-<script src="/js/ui-core.js?v=20260710c"></script>
-<script src="/js/kpi.js?v=20260712b"></script>
-<script src="/js/dashboard.js?v=20260712b"></script>
-<script src="/js/provinces.js?v=20260712h"></script>
-<script src="/js/center-modal.js?v=20260713s"></script>
-<script src="/js/global-search.js?v=20260710c"></script>
-<script src="/js/center-deals.js?v=20260710a"></script>
-<script src="/js/center-files.js?v=20260710a"></script>
-<script src="/js/workflows.js?v=20260710b"></script>
-<script src="/js/pricing.js?v=20260713t"></script>
-<script src="/js/weekplan.js?v=20260713a"></script>
-<script src="/js/tasks.js?v=20260712j"></script>
-<script src="/js/manager.js?v=20260713t"></script>
-<script src="/js/payroll.js?v=20260713a"></script>
-<script src="/js/crm-complete.js?v=20260711a"></script>
-<script src="/js/onboarding.js?v=20260710c"></script>
-<script src="/js/backup.js?v=20260711a"></script>
-<script src="/js/data-hub.js?v=20260711a"></script>
-
-
-<!-- JS -->
 
 <!-- Show province filters when province is open -->
 
@@ -777,7 +788,47 @@ document.addEventListener('keydown', function (e) {
   <button class="mob-tab sb-manager-wrap" onclick="switchTab('kpi')"><span class="mob-icon">🎯</span>KPI</button>
   <button class="mob-tab" onclick="switchTab('mtr')"><span class="mob-icon">💰</span>مطالبات</button>
 </nav>
-  <link rel="stylesheet" href="/dist/assets/main.css?v=20260712o">
-  <script type="module" src="/dist/assets/main.js?v=20260712w"></script>
+<!-- DATA — core modules; tab-specific scripts load on demand via tab-loader.js -->
+<script src="/js/safe-dom.js?v=20260714s"></script>
+<script src="/js/tab-loader.js?v=20260714t"></script>
+<script src="/js/roles.js?v=20260714s"></script>
+<script src="/js/core.js?v=20260714s"></script>
+<script src="/js/settings.js?v=20260714s"></script>
+<script src="/js/data.js?v=20260714s"></script>
+<script src="/js/ui-core.js?v=20260714s"></script>
+<script src="/js/kpi.js?v=20260714s"></script>
+<script src="/js/dashboard.js?v=20260714s"></script>
+<script src="/js/provinces.js?v=20260714s"></script>
+<script src="/js/center-modal.js?v=20260714s"></script>
+<script src="/js/global-search.js?v=20260714s"></script>
+<script src="/js/center-deals.js?v=20260714s"></script>
+<script src="/js/center-files.js?v=20260714s"></script>
+<script src="/js/workflows.js?v=20260714s"></script>
+<script src="/js/pricing.js?v=20260714s"></script>
+<script src="/js/weekplan.js?v=20260714s"></script>
+<script src="/js/manager.js?v=20260714s"></script>
+<script src="/js/tasks.js?v=20260714s"></script>
+<script src="/js/payroll.js?v=20260714s"></script>
+<script src="/js/crm-complete.js?v=20260714s"></script>
+<script src="/js/onboarding.js?v=20260714s"></script>
+<script src="/js/backup.js?v=20260714s"></script>
+<script src="/js/data-hub.js?v=20260714s"></script>
+<script type="module" src="/dist/assets/main.js?v=20260714s"></script>
+<script>
+(function(){
+  if(!window.__APP_BUILD||sessionStorage.getItem('_build_ok_'+window.__APP_BUILD))return;
+  var match=false;
+  document.querySelectorAll('script[src]').forEach(function(s){
+    if(s.src.indexOf('provinces.js')>=0&&s.src.indexOf(window.__APP_BUILD)>=0)match=true;
+  });
+  if(!match){
+    sessionStorage.setItem('_build_ok_'+window.__APP_BUILD,'1');
+    var base=location.href.split('#')[0].replace(/[?&]_cb=\d+/,'');
+    location.replace(base+(base.indexOf('?')>=0?'&':'?')+'_cb='+Date.now());
+  }else{
+    sessionStorage.setItem('_build_ok_'+window.__APP_BUILD,'1');
+  }
+})();
+</script>
 </body>
 </html>

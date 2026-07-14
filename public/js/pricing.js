@@ -2476,8 +2476,8 @@ function confirmDeleteCenter(rtype,id,name){
     +'<div style="font-size:13px;color:var(--text-muted);margin-bottom:14px">«<strong>'+esc(name)+'</strong>»</div>'
     +'<div style="background:'+(isExtra?'#fef3c7':'#fef2f2')+';border:1px solid '+(isExtra?'#fcd34d':'#fca5a5')+';border-radius:7px;padding:10px;font-size:12px;color:'+(isExtra?'#92400e':'#991b1b')+';text-align:right">'
     +(isExtra
-      ?'این مرکز به صورت دستی اضافه شده. حذف می‌شود.<br>داده‌های CRM (وضعیت، یادداشت) باقی می‌مانند.'
-      :'این مرکز از دیتابیس اصلی حذف می‌شود.<br>داده‌های CRM (وضعیت، یادداشت) باقی می‌مانند.')
+      ?'این مرکز به صورت دستی اضافه شده و به سطل زباله منتقل می‌شود.<br>داده‌های CRM (وضعیت، یادداشت) حفظ می‌شوند و توسط مدیر قابل بازیابی است.'
+      :'این مرکز از لیست اصلی حذف می‌شود (سطل زباله).<br>داده‌های CRM حفظ می‌شوند و توسط مدیر قابل بازیابی است.')
     +'</div></div>';
   var foot='<button class="btn-secondary" onclick="closeModal(\'delCenterModal\')">لغو</button>'
     +'<button style="background:#dc2626;color:var(--text-primary);border:none;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600" '
@@ -2487,22 +2487,20 @@ function confirmDeleteCenter(rtype,id,name){
 
 function _doDeleteCenter(rtype,id){
   var isExtra=(id.indexOf('_new_')>=0);
-  // پاک‌سازی داده‌های وابسته
+  var centerKey=rtype+'_'+id;
+  var centerName=typeof _getCenterName==='function'?_getCenterName(rtype,id):id;
   _cleanCenterData(rtype,id);
   if(isExtra){
     DB.extra=(DB.extra||[]).filter(function(c){return c.id!==id;});
-    saveDB();closeModal('delCenterModal');
-    clearPCCache();_ALL_PROVS=null;renderTable();
-    showToast('✅ مرکز حذف شد');return;
+    saveDB();
   }
-  // حذف از حافظه (CENTERS یا PC_RAW) و ذخیره روی سرور
   if(rtype==='center'){
     for(var _ci=CENTERS.length-1;_ci>=0;_ci--){
       var _cc=CENTERS[_ci];
       var _cid='c_'+(_cc.row||_cc.id||'');
       if(_cid===id||String(_cc.id)===String(id)){CENTERS.splice(_ci,1);break;}
     }
-  }else{
+  }else if(!isExtra){
     var _provId=id.split('||')[0];
     var _row=Number(id.split('||')[1]);
     PROVINCES.forEach(function(p){
@@ -2514,20 +2512,26 @@ function _doDeleteCenter(rtype,id){
     });
   }
   clearPCCache();_ALL_PROVS=null;_typeFilterBuilt=false;
-  var _newCENTERS=CENTERS.slice();
-  var _newPC_RAW={};Object.keys(PC_RAW).forEach(function(k){_newPC_RAW[k]=PC_RAW[k];});
-  fetch('/api/data/centers/master',{method:'PUT',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({CENTERS:_newCENTERS,PC_RAW:_newPC_RAW})
-  }).then(function(r){
-    if(!r.ok)console.error('[delete center] server save failed:',r.status);
+  fetch('/api/data/centers/soft-delete',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    credentials:'same-origin',
+    body:JSON.stringify({
+      centerKey:centerKey,rtype:rtype,id:id,name:centerName,
+      isExtra:isExtra,extraId:isExtra?id:null,
+      provinceId:rtype==='pc'?id.split('||')[0]:null
+    })
+  }).then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
+  .then(function(res){
+    if(!res.ok)console.warn('[soft-delete center]',res.d&&res.d.error);
     rebuildFilters();renderTable();
     closeModal('delCenterModal');
-    showToast('✅ مرکز از دیتابیس حذف شد');
+    showToast(res.ok?'✅ مرکز به سطل زباله منتقل شد':'⚠ حذف با خطا مواجه شد');
   }).catch(function(e){
     console.error('[delete center]',e.message);
     rebuildFilters();renderTable();
     closeModal('delCenterModal');
-    showToast('✅ مرکز حذف شد');
+    showToast('⚠ خطا در حذف مرکز');
   });
 }
 

@@ -26,8 +26,9 @@ function onUserChange(u){
 }
 
 // ════════════════════════ TAB SWITCH ══════════════════
+var _restoringNav=false;
 function switchTab(tab){
-  if(tab==='provinces' && currentTab==='provinces' && _currentProvId){
+  if(tab==='provinces' && currentTab==='provinces' && _currentProvId && !_restoringNav){
     backToProvinces();
     return;
   }
@@ -66,7 +67,12 @@ function switchTab(tab){
   var _fmp=document.getElementById('faradisMatchPanel');if(_fmp)_fmp.style.display=(tab==='faradis-match')?'':'none';
   var lettersP=document.getElementById('lettersPanel');if(lettersP)lettersP.style.display=(tab==='letters')?'':'none';
   var workflowsP=document.getElementById('workflowsPanel');if(workflowsP)workflowsP.style.display=(tab==='workflows')?'':'none';
-  if(tab==='letters'&&typeof window._lettersVueLoad==='function')window._lettersVueLoad();
+  if(tab==='letters'){
+    if(typeof window.mountVuePanels==='function'&&typeof currentUser==='string'&&currentUser){
+      window.mountVuePanels({username:currentUser,role:window._authUserRole||''});
+    }
+    if(typeof window._lettersVueLoad==='function')window._lettersVueLoad();
+  }
   // update mobile nav
   (function(){document.querySelectorAll('.mob-tab').forEach(function(btn){var fn=btn.getAttribute('onclick')||'';var m=fn.match(/switchTab\('([^']+)'\)/);if(m)btn.classList.toggle('active',m[1]===tab);});})();
   function _safeRender(fn, tabName) {
@@ -167,8 +173,17 @@ function openProvince(provId){
   var _ftb=document.getElementById('filterToggleBtn');var _fcol=document.getElementById('filterCollapsible');
   if(window.innerWidth<=900){if(_ftb)_ftb.style.display='block';if(_fcol){_fcol.style.display='none';if(_ftb)_ftb.textContent='🔽 فیلترها';}}
   else{if(_ftb)_ftb.style.display='none';if(_fcol)_fcol.style.display='contents';}
-  rebuildFilters();
-  renderProvTable();
+  function _finishOpenProvince(){
+    if(typeof clearPCCache==='function')clearPCCache();
+    rebuildFilters();
+    renderProvTable();
+  }
+  var ready=window._masterCentersReady;
+  if(ready&&typeof ready.then==='function'){
+    ready.then(_finishOpenProvince).catch(_finishOpenProvince);
+  }else{
+    _finishOpenProvince();
+  }
 }
 
 function toggleFiltersCollapse(){

@@ -49,6 +49,18 @@ async function assertEntryIdsAllowed(req, idList) {
   return allowed;
 }
 
+/** یک مرکز فقط در یک هفته فعال — بقیه ردیف‌های همان rec_key حذف می‌شوند */
+async function purgeOtherActiveForRecKey(recKey, keepId) {
+  if (!recKey || !keepId) return 0;
+  const r = await query(
+    `DELETE FROM week_entries
+     WHERE rec_key = $1 AND done = false AND id <> $2
+     RETURNING id`,
+    [recKey, String(keepId)]
+  );
+  return r.rows.length;
+}
+
 // ── Helper: map DB row → camelCase object ──────────────────────────────────
 function rowToObj(r) {
   const v = (r.value && typeof r.value === 'object') ? r.value : {};
@@ -91,6 +103,10 @@ router.get('/', requireAuth, async function (req, res) {
     if (req.query.done !== undefined) {
       params.push(req.query.done === 'true');
       conditions.push(`done = $${params.length}`);
+    }
+    if (req.query.rec_key) {
+      params.push(req.query.rec_key);
+      conditions.push(`rec_key = $${params.length}`);
     }
 
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
@@ -170,9 +186,11 @@ router.post('/', requireAuth, requirePermission('weekplan', 'edit'), async funct
         weekTagId || null,
       ]
     );
-    notifyWeekChange(req, { action: 'create', id: result.rows[0].id, weekId });
-    res.status(201).json(rowToObj(result.rows[0]));
-    try { require('../lib/inbox-hooks').onWeekChange(result.rows[0].id); } catch (_) {}
+    const saved = result.rows[0];
+    const purged = await purgeOtherActiveForRecKey(cleanRecKey, saved.id);
+    notifyWeekChange(req, { action: 'create', id: saved.id, weekId, purged });
+    res.status(201).json(rowToObj(saved));
+    try { require('../lib/inbox-hooks').onWeekChange(saved.id); } catch (_) {}
   } catch (e) {
     console.error('[week-entries POST /]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
@@ -211,6 +229,7 @@ router.put('/:id', requireAuth, requirePermission('weekplan', 'edit'), async fun
     const result = await query(
       `UPDATE week_entries
        SET week_id        = CASE WHEN $15::boolean THEN $1 ELSE week_id END,
+           key            = CASE WHEN $15::boolean THEN $1 || ':::' || rtype || ':::' || rid ELSE key END,
            scheduled_date = CASE WHEN $9::boolean THEN $2 ELSE scheduled_date END,
            done           = CASE WHEN $10::boolean THEN $3 ELSE done END,
            done_date      = CASE WHEN $11::boolean THEN $4 ELSE done_date END,
@@ -240,8 +259,12 @@ router.put('/:id', requireAuth, requirePermission('weekplan', 'edit'), async fun
         req.params.id,
       ]
     );
-    notifyWeekChange(req, { action: 'update', id: req.params.id, weekId: result.rows[0].week_id });
-    res.json(rowToObj(result.rows[0]));
+    const saved = result.rows[0];
+    if (weekId !== undefined) {
+      await purgeOtherActiveForRecKey(saved.rec_key, saved.id);
+    }
+    notifyWeekChange(req, { action: 'update', id: req.params.id, weekId: saved.week_id });
+    res.json(rowToObj(saved));
     try { require('../lib/inbox-hooks').onWeekChange(req.params.id); } catch (_) {}
   } catch (e) {
     console.error('[week-entries PUT /:id]', e.message);
@@ -345,17 +368,54 @@ router.post('/bulk-move', requireAuth, requirePermission('weekplan', 'edit'), as
     const result = await query(
       `UPDATE week_entries
        SET week_id        = $1,
+           key            = $1 || ':::' || rtype || ':::' || rid,
+           value          = jsonb_set(COALESCE(value, '{}'::jsonb), '{weekId}', to_jsonb($1::text), true),
            scheduled_date = CASE WHEN $2::boolean THEN $3 ELSE scheduled_date END,
            updated_at     = NOW()
        WHERE id IN (${placeholders})
        RETURNING *`,
       [weekId, hasScheduledDate, scheduledDate !== undefined ? scheduledDate : null, ...idList]
     );
+    for (let i = 0; i < result.rows.length; i++) {
+      await purgeOtherActiveForRecKey(result.rows[i].rec_key, result.rows[i].id);
+    }
     notifyWeekChange(req, { action: 'bulk-move', count: result.rows.length, weekId });
     res.json(result.rows.map(rowToObj));
   } catch (e) {
     console.error('[week-entries POST /bulk-move]', e.message);
     res.status(e.status || 500).json({ error: e.status ? e.message : 'خطای داخلی سرور' });
+  }
+});
+
+// ── POST /api/week-entries/purge-center ───────────────────────────────────
+// حذف همه برنامه‌های فعال یک مرکز به جز هفته/ردیف نگه‌داشته‌شده
+router.post('/purge-center', requireAuth, requirePermission('weekplan', 'edit'), async function (req, res) {
+  try {
+    const { recKey, keepWeekId, keepId } = req.body || {};
+    if (!recKey) return res.status(400).json({ error: 'recKey الزامی است' });
+
+    if (!isManagerRole(req.user.role)) {
+      const context = await loadCenterAccessContext();
+      if (!canAccessCenter(req.user, recKey, context)) {
+        return res.status(403).json({ error: 'دسترسی به این مرکز مجاز نیست' });
+      }
+    }
+
+    let sql = 'DELETE FROM week_entries WHERE rec_key = $1 AND done = false';
+    const params = [recKey];
+    if (keepId) {
+      params.push(String(keepId));
+      sql += ' AND id <> $' + params.length;
+    } else if (keepWeekId) {
+      params.push(keepWeekId);
+      sql += ' AND week_id <> $' + params.length;
+    }
+    const result = await query(sql + ' RETURNING id', params);
+    notifyWeekChange(req, { action: 'purge', recKey, count: result.rows.length });
+    res.json({ deleted: result.rows.length });
+  } catch (e) {
+    console.error('[week-entries POST /purge-center]', e.message);
+    res.status(500).json({ error: 'خطای داخلی سرور' });
   }
 });
 

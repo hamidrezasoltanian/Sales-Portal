@@ -81,3 +81,22 @@ function crmIsManagerRole(role) {
 function crmIsSuperAdminRole(role) {
   return role === 'سوپر ادمین';
 }
+
+/** نقش فعلی: اول members، بعد JWT/session */
+function crmResolveCurrentRole() {
+  if (typeof currentUser !== 'undefined' && currentUser) {
+    var members = typeof umGetMembers === 'function' ? umGetMembers() : [];
+    var me = members.find(function (m) { return m.id === currentUser; });
+    if (me && me.role) return crmNormalizeRole(me.role);
+  }
+  if (typeof window !== 'undefined' && window._authUserRole) {
+    return crmNormalizeRole(window._authUserRole);
+  }
+  return '';
+}
+
+/** سطل زباله / بازیابی / بکاپ مدیریتی — مدیر یا سوپر ادمین */
+function crmCanDataAdmin() {
+  var role = crmResolveCurrentRole();
+  return crmIsManagerRole(role) || crmIsSuperAdminRole(role);
+}

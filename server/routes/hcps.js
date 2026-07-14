@@ -3,6 +3,7 @@
 const express = require('express');
 const { query } = require('../db');
 const { requireAuth } = require('../auth');
+const { softDeleteHcp } = require('../lib/soft-delete');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -109,7 +110,7 @@ router.post('/', async (req, res) => {
 // GET /api/hcps/:id - get an HCP by ID
 router.get('/:id', async (req, res) => {
   try {
-    const result = await query('SELECT * FROM healthcare_professionals WHERE id = $1', [req.params.id]);
+    const result = await query('SELECT * FROM healthcare_professionals WHERE id = $1 AND deleted_at IS NULL', [req.params.id]);
     if (!result.rows.length) {
       return res.status(404).json({ error: 'یافت نشد' });
     }
@@ -165,16 +166,35 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/hcps/:id - delete an HCP
+// DELETE /api/hcps/:id — soft delete (قابل بازیابی از سطل زباله)
 router.delete('/:id', async (req, res) => {
   try {
-    const result = await query('DELETE FROM healthcare_professionals WHERE id = $1 RETURNING id', [req.params.id]);
-    if (!result.rows.length) {
+    const { id } = req.params;
+    const existing = await query('SELECT * FROM healthcare_professionals WHERE id = $1 AND deleted_at IS NULL', [id]);
+    if (!existing.rows.length) {
       return res.status(404).json({ error: 'پزشک/کارشناس یافت نشد' });
     }
-    return res.json({ ok: true });
+    const trashRow = await softDeleteHcp(existing.rows[0], req.user.username);
+    return res.json({ ok: true, trashId: trashRow.id, message: 'به سطل زباله منتقل شد' });
   } catch (e) {
     console.error('[HCP DELETE /:id]', e.message);
+    return res.status(500).json({ error: 'خطای سرور در حذف مخاطب' });
+  }
+});
+
+// POST /api/hcps/:id/restore — بازیابی از سطل زباله
+router.post('/:id/restore', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await query(
+      `UPDATE healthcare_professionals SET deleted_at = NULL, is_active = TRUE, updated_at = NOW() WHERE id = $1`,
+      [id]
+    );
+    const result = await query('SELECT * FROM healthcare_professionals WHERE id = $1', [id]);
+    if (!result.rows.length) return res.status(404).json({ error: 'یافت نشد' });
+    return res.json({ ok: true, hcp: result.rows[0] });
+  } catch (e) {
+    console.error('[HCP POST /:id/restore]', e.message);
     return res.status(500).json({ error: 'خطای سرور' });
   }
 });
@@ -187,7 +207,7 @@ router.get('/:id/affiliations', async (req, res) => {
     const result = await query(
       `SELECT a.*, p.name as hcp_name, p.specialty as hcp_specialty, p.rank as hcp_rank
        FROM hcp_affiliations a
-       JOIN healthcare_professionals p ON a.hcp_id = p.id
+       JOIN healthcare_professionals p ON a.hcp_id = p.id AND p.deleted_at IS NULL
        WHERE a.hcp_id = $1
        ORDER BY a.updated_at DESC`,
       [req.params.id]
@@ -206,7 +226,7 @@ router.get('/centers/:centerKey/affiliations', async (req, res) => {
     const result = await query(
       `SELECT a.*, p.name as hcp_name, p.specialty as hcp_specialty, p.rank as hcp_rank, p.phones as hcp_phones, p.medical_council_no as hcp_mc_no
        FROM hcp_affiliations a
-       JOIN healthcare_professionals p ON a.hcp_id = p.id
+       JOIN healthcare_professionals p ON a.hcp_id = p.id AND p.deleted_at IS NULL
        WHERE a.center_key = $1
        ORDER BY a.id ASC`,
       [centerKey]
@@ -305,18 +325,6 @@ router.delete('/affiliations/:id', async (req, res) => {
   } catch (e) {
     console.error('[HCP DELETE /affiliations/:id]', e.message);
     return res.status(500).json({ error: 'خطای سرور' });
-  }
-});
-
-// DELETE /api/hcps/:id - Soft delete an HCP
-router.delete('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    await query(`UPDATE healthcare_professionals SET deleted_at = NOW(), is_active = FALSE WHERE id = $1`, [id]);
-    return res.json({ success: true });
-  } catch (e) {
-    console.error('[HCP DELETE /:id]', e.message);
-    return res.status(500).json({ error: 'خطای سرور در حذف مخاطب' });
   }
 });
 

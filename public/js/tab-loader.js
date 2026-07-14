@@ -1,6 +1,6 @@
 /* ═══ Lazy tab script loader (Phase 2) ═══ */
 (function () {
-  var V = '20260713ad';
+  var V = '20260714t';
   var _loaded = {};
 
   var TAB_SCRIPTS = {

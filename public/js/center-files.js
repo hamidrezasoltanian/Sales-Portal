@@ -43,10 +43,11 @@ function _cfUpload(inp, ck, domId) {
 }
 
 function _cfDelete(id, ck, domId) {
-  if (!confirm('فایل حذف شود؟')) return;
+  if (!confirm('فایل به سطل زباله منتقل شود؟ (مدیر می‌تواند بازیابی کند)')) return;
   fetch('/api/center-files/' + id, { method: 'DELETE' }).then(function () {
     var parts = ck.split('_');
     _cfLoadSection(parts[0], parts.slice(1).join('_'), domId);
+    showToast('🗑 به سطل زباله منتقل شد', 2000);
   });
 }
 

@@ -485,12 +485,18 @@ function tkSaveTask(tid){
 }
 
 function tkDeleteTask(tid){
+  if(!confirm('وظیفه به سطل زباله منتقل شود؟ (مدیر می‌تواند بازیابی کند)'))return;
   _ensureTasks();
-  DB.tasks=DB.tasks.filter(function(x){return String(x.id)!==String(tid);});
-  fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'DELETE'}).catch(function(){});
-  closeModal('taskDetail');
-  showToast('🗑 وظیفه حذف شد');
-  renderTasksPanel();
+  fetch('/api/tasks/'+encodeURIComponent(String(tid)),{method:'DELETE',credentials:'same-origin'})
+    .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
+    .then(function(res){
+      if(!res.ok){showToast('⚠ '+(res.d&&res.d.error||'خطا در حذف وظیفه'));return;}
+      DB.tasks=DB.tasks.filter(function(x){return String(x.id)!==String(tid);});
+      closeModal('taskDetail');
+      showToast('🗑 وظیفه به سطل زباله منتقل شد');
+      renderTasksPanel();
+    })
+    .catch(function(){showToast('⚠ خطا در حذف وظیفه');});
 }
 
 function tkAddComment(tid){

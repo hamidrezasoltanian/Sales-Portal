@@ -6,6 +6,7 @@ const { requireAuth, requireManager } = require('../auth');
 const { requirePermission } = require('../permissions');
 const { isManagerRole } = require('../lib/roles');
 const { loadCenterAccessContext, canAccessCenter } = require('../lib/center-access');
+const { softDeleteTask } = require('../lib/soft-delete');
 
 const router = express.Router();
 
@@ -42,7 +43,7 @@ async function canAccessTask(user, task, context) {
 }
 
 async function loadAuthorizedTask(req, id) {
-  const r = await query('SELECT * FROM tasks WHERE id = $1', [id]);
+  const r = await query('SELECT * FROM tasks WHERE id = $1 AND deleted_at IS NULL', [id]);
   if (!r.rows.length) return { status: 404 };
   if (!(await canAccessTask(req.user, r.rows[0]))) return { status: 403 };
   return { status: 200, row: r.rows[0] };
@@ -52,7 +53,7 @@ async function loadAuthorizedTask(req, id) {
 // Query params: ?owner=, ?status=, ?overdue=true
 router.get('/', requireAuth, requirePermission('tasks', 'view'), async function (req, res) {
   try {
-    const conditions = [];
+    const conditions = ['deleted_at IS NULL'];
     const params = [];
 
     if (req.query.owner) {
@@ -214,11 +215,8 @@ router.delete('/:id', requireAuth, requirePermission('tasks', 'edit'), async fun
   try {
     const access = await loadAuthorizedTask(req, req.params.id);
     if (access.status !== 200) return res.status(access.status).json({ error: access.status === 404 ? 'وظیفه یافت نشد' : 'دسترسی مجاز نیست' });
-    const result = await query('DELETE FROM tasks WHERE id = $1 RETURNING id', [req.params.id]);
-    if (!result.rows.length) {
-      return res.status(404).json({ error: 'وظیفه یافت نشد' });
-    }
-    res.json({ ok: true });
+    const trashRow = await softDeleteTask(access.row, req.user.username);
+    res.json({ ok: true, trashId: trashRow.id, message: 'وظیفه به سطل زباله منتقل شد' });
     try { require('../lib/inbox-hooks').onTaskDelete(req.params.id); } catch (_) {}
   } catch (e) {
     console.error('[tasks DELETE /:id]', e.message);

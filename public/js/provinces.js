@@ -443,10 +443,14 @@ function quickAddToToday(rtype,id,name){
   if(!weekId){showToast('⚠ هفته جاری یافت نشد',1500);return;}
   var eKey=wpEntryKey(weekId,rtype,id);
   if(!DB.weekEntries)DB.weekEntries={};
-  DB.weekEntries[eKey]={rtype:rtype,rid:id,recKey:recKey,centerName:name,scheduledDate:today,actionType:'call',done:false,addedBy:currentUser,weekId:weekId};
-  saveWeekEntryApi(eKey,DB.weekEntries[eKey]);
-  showToast('✅ اضافه شد: '+name,1800);
-  renderProvTable();
+  var assign=function(){
+    DB.weekEntries[eKey]={rtype:rtype,rid:id,recKey:recKey,centerName:name,scheduledDate:today,actionType:'call',done:false,addedBy:currentUser,weekId:weekId};
+    return saveWeekEntryApi(eKey,DB.weekEntries[eKey]);
+  };
+  (typeof wpRemoveFromOtherWeeks==='function'?wpRemoveFromOtherWeeks(recKey,weekId):Promise.resolve())
+    .then(assign)
+    .then(function(){showToast('✅ اضافه شد: '+name,1800);renderProvTable();})
+    .catch(function(){showToast('خطا در افزودن به امروز',2000);});
 }
 function openCallFocus(rtype,id,name){
   var e=getE(rtype,id);
@@ -1068,7 +1072,7 @@ function bulkDeleteCenters(){
     +'<div style="font-size:36px;margin-bottom:12px">🗑</div>'
     +'<div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:8px">حذف گروهی مراکز</div>'
     +'<div style="font-size:13px;color:var(--text-muted);margin-bottom:14px">'+keys.length+' مرکز انتخاب شده</div>'
-    +(baseCount?'<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:7px;padding:10px;font-size:12px;color:#991b1b;text-align:right;margin-bottom:8px">'+baseCount+' مرکز از دیتابیس اصلی حذف می‌شود. این عمل قابل بازگشت نیست.</div>':'')
+    +(baseCount?'<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:7px;padding:10px;font-size:12px;color:#991b1b;text-align:right;margin-bottom:8px">'+baseCount+' مرکز از لیست اصلی به سطل زباله منتقل می‌شود (قابل بازیابی).</div>':'')
     +(extraCount?'<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:7px;padding:10px;font-size:12px;color:#92400e;text-align:right">'+extraCount+' مرکز دستی (extra) حذف می‌شود.</div>':'')
     +'</div>';
   var foot='<button class="btn-secondary" onclick="closeModal(\'bulkDelModal\')">لغو</button>'
@@ -1078,54 +1082,58 @@ function bulkDeleteCenters(){
 function _doBulkDelete(){
   var keys=Array.from(_selectedCenters);
   closeModal('bulkDelModal');
+  if(!keys.length)return;
   var deleted=0;
-  var masterDeleted=0;
-  keys.forEach(function(key){
+  var failed=0;
+  function _softDeleteOne(key){
     var parts=key.split('_');var rtype=parts[0];var id=parts.slice(1).join('_');
     var isExtra=(id.indexOf('_new_')>=0);
+    var centerKey=key;
+    var centerName=typeof _getCenterName==='function'?_getCenterName(rtype,id):id;
     _cleanCenterData(rtype,id);
     if(isExtra){
       DB.extra=(DB.extra||[]).filter(function(c){return c.id!==id;});
-      deleteCenterExtraApi(id);
-    }else{
-      masterDeleted++;
-      if(rtype==='center'){
-        for(var _ci=CENTERS.length-1;_ci>=0;_ci--){
-          var _cc=CENTERS[_ci];var _cid='c_'+(_cc.row||_cc.id||'');
-          if(_cid===id||String(_cc.id)===String(id)){CENTERS.splice(_ci,1);break;}
-        }
-      }else{
-        var _provId=id.split('||')[0];var _row=Number(id.split('||')[1]);
-        PROVINCES.forEach(function(p){
-          if(p.id===_provId){
-            var _pname=p.name.replace(/[ي]/g,'ی').replace(/[ك]/g,'ک');
-            if(PC_RAW[_pname]){PC_RAW[_pname]=PC_RAW[_pname].filter(function(r){return(Array.isArray(r)?r[0]:r.row)!==_row;});}
-            if(PC_RAW[p.id]){PC_RAW[p.id]=PC_RAW[p.id].filter(function(r){return(Array.isArray(r)?r[0]:r.row)!==_row;});}
-          }
-        });
+    }else if(rtype==='center'){
+      for(var _ci=CENTERS.length-1;_ci>=0;_ci--){
+        var _cc=CENTERS[_ci];var _cid='c_'+(_cc.row||_cc.id||'');
+        if(_cid===id||String(_cc.id)===String(id)){CENTERS.splice(_ci,1);break;}
       }
+    }else{
+      var _provId=id.split('||')[0];var _row=Number(id.split('||')[1]);
+      PROVINCES.forEach(function(p){
+        if(p.id===_provId){
+          var _pname=p.name.replace(/[ي]/g,'ی').replace(/[ك]/g,'ک');
+          if(PC_RAW[_pname]){PC_RAW[_pname]=PC_RAW[_pname].filter(function(r){return(Array.isArray(r)?r[0]:r.row)!==_row;});}
+          if(PC_RAW[p.id]){PC_RAW[p.id]=PC_RAW[p.id].filter(function(r){return(Array.isArray(r)?r[0]:r.row)!==_row;});}
+        }
+      });
     }
-    deleted++;
-  });
-  clearPCCache();_ALL_PROVS=null;_typeFilterBuilt=false;
-  if(masterDeleted>0){
-    var _newCENTERS=CENTERS.slice();
-    var _newPC_RAW={};Object.keys(PC_RAW).forEach(function(k){_newPC_RAW[k]=PC_RAW[k];});
-    fetch('/api/data/centers/master',{method:'PUT',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({CENTERS:_newCENTERS,PC_RAW:_newPC_RAW})
-    }).then(function(r){
-      if(!r.ok)console.error('[bulk delete] server save failed:',r.status);
-      clearCenterSelection();rebuildFilters();renderTable();
-      showToast('✅ '+deleted+' مرکز حذف شد');
-    }).catch(function(e){
-      console.error('[bulk delete]',e.message);
-      clearCenterSelection();rebuildFilters();renderTable();
-      showToast('✅ '+deleted+' مرکز حذف شد');
-    });
-  }else{
-    clearCenterSelection();rebuildFilters();renderTable();
-    showToast('✅ '+deleted+' مرکز حذف شد');
+    return fetch('/api/data/centers/soft-delete',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      credentials:'same-origin',
+      body:JSON.stringify({
+        centerKey:centerKey,rtype:rtype,id:id,name:centerName,
+        isExtra:isExtra,extraId:isExtra?id:null,
+        provinceId:rtype==='pc'?id.split('||')[0]:null
+      })
+    }).then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d,centerKey:centerKey};});})
+      .then(function(res){
+        if(res.ok)deleted++;
+        else{failed++;console.warn('[bulk soft-delete]',res.centerKey,res.d&&res.d.error);}
+      })
+      .catch(function(e){failed++;console.warn('[bulk soft-delete]',centerKey,e.message);});
   }
+  // Sequential — parallel soft-delete races on centers_master updates
+  var chain=Promise.resolve();
+  keys.forEach(function(key){chain=chain.then(function(){return _softDeleteOne(key);});});
+  clearPCCache();_ALL_PROVS=null;_typeFilterBuilt=false;
+  chain.then(function(){
+    clearCenterSelection();rebuildFilters();renderTable();
+    if(failed&&!deleted)showToast('⚠ حذف انجام نشد — دوباره تلاش کنید');
+    else if(failed)showToast('✅ '+deleted+' مرکز به سطل زباله رفت · '+failed+' خطا');
+    else showToast('✅ '+deleted+' مرکز به سطل زباله منتقل شد — از تنظیمات → سطل زباله بازیابی کنید');
+  });
 }
 
 function applyQuickFilter(f){

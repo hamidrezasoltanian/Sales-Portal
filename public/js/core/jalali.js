@@ -13,4 +13,11 @@ function p2(n){return n<10?'0'+n:String(n);}
 function jMs(jy,jm,jd){var g=j2g(jy,jm,jd);return new Date(g[0],g[1]-1,g[2],12).getTime();}
 function msToJ(ms){if(!ms)return'';var d=new Date(ms);var j=g2j(d.getFullYear(),d.getMonth()+1,d.getDate());return j[0]+'/'+p2(j[1])+'/'+p2(j[2]);}
 function jAdd(jy,jm,jd,n){var g=j2g(jy,jm,jd);var d=new Date(g[0],g[1]-1,g[2]+n,12);return g2j(d.getFullYear(),d.getMonth()+1,d.getDate());}
+function addDaysToJalali(dateStr,days){
+  if(!dateStr)return '';
+  var parts=dateStr.split('/').map(Number);
+  if(parts.length!==3)return dateStr;
+  var d=jAdd(parts[0],parts[1],parts[2],days);
+  return d[0]+'/'+p2(d[1])+'/'+p2(d[2]);
+}
 function wkStart(jy,jm,jd){var dow=jDow(jy,jm,jd);var g=j2g(jy,jm,jd);var d=new Date(g[0],g[1]-1,g[2]-dow,12);return g2j(d.getFullYear(),d.getMonth()+1,d.getDate());}

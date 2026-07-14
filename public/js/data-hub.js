@@ -3,10 +3,18 @@
 var _dhStatus = null;
 var _dhSnapshots = null;
 
+function _dhIsAdmin() {
+  if (typeof crmCanDataAdmin === 'function' && crmCanDataAdmin()) return true;
+  if (typeof _isManager === 'function' && _isManager()) return true;
+  if (typeof _isSuperAdmin === 'function' && _isSuperAdmin()) return true;
+  return false;
+}
+
 function openDataHub() {
-  var isMgr = typeof _isManager === 'function' && _isManager();
+  var isMgr = _dhIsAdmin();
   var tabs = [
     { id: 'auto', label: '⏰ بکاپ خودکار', mgr: true },
+    { id: 'trash', label: '🗑 سطل زباله', mgr: true },
     { id: 'export', label: '⬇️ خروجی', mgr: false },
     { id: 'import', label: '⬆️ ورود', mgr: false },
     { id: 'restore', label: '📂 بازیابی', mgr: true },
@@ -24,6 +32,7 @@ function openDataHub() {
     + tabBtns
     + '</div>'
     + '<div id="dhPanel_auto" class="dh-panel">' + _dhAutoPanelHtml(isMgr) + '</div>'
+    + '<div id="dhPanel_trash" class="dh-panel" style="display:none">' + _dhTrashPanelHtml(isMgr) + '</div>'
     + '<div id="dhPanel_export" class="dh-panel" style="display:none">' + _dhExportPanelHtml(isMgr) + '</div>'
     + '<div id="dhPanel_import" class="dh-panel" style="display:none">' + _dhImportPanelHtml(isMgr) + '</div>'
     + '<div id="dhPanel_restore" class="dh-panel" style="display:none">' + _dhRestorePanelHtml(isMgr) + '</div>'
@@ -39,7 +48,7 @@ function openDataHub() {
 function openUnifiedBackup() { openDataHub(); }
 
 function dhSwitchTab(tab) {
-  ['auto', 'export', 'import', 'restore'].forEach(function (t) {
+  ['auto', 'trash', 'export', 'import', 'restore'].forEach(function (t) {
     var panel = document.getElementById('dhPanel_' + t);
     var link = document.getElementById('dhLink_' + t);
     if (panel) panel.style.display = t === tab ? '' : 'none';
@@ -49,13 +58,106 @@ function dhSwitchTab(tab) {
       link.style.fontWeight = t === tab ? '700' : '400';
     }
   });
-  if (tab === 'restore' && _isManager()) _dhLoadSnapshots();
-  if (tab === 'auto' && _isManager()) _dhLoadBackupStatus();
+  if (tab === 'restore' && _dhIsAdmin()) _dhLoadSnapshots();
+  if (tab === 'auto' && _dhIsAdmin()) _dhLoadBackupStatus();
+  if (tab === 'trash' && _dhIsAdmin()) _dhLoadTrash();
 }
+
+function _dhTrashPanelHtml(isMgr) {
+  if (!isMgr) {
+    return '<div style="font-size:12px;color:var(--text-muted);padding:20px;text-align:center">سطل زباله فقط برای مدیر و سوپر ادمین قابل مشاهده است.</div>';
+  }
+  return '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">حذف‌های اخیر مراکز، وظایف، پزشکان، یادداشت‌ها، فرصت‌ها و فایل‌ها — قابل بازیابی توسط مدیر یا سوپر ادمین.</div>'
+    + '<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">'
+    + '<select id="dhTrashFilter" onchange="_dhLoadTrash()" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px">'
+    + '<option value="">همه انواع</option>'
+    + '<option value="center">مراکز</option>'
+    + '<option value="task">وظایف</option>'
+    + '<option value="hcp">پزشکان</option>'
+    + '<option value="center_note">یادداشت</option>'
+    + '<option value="center_deal">فرصت فروش</option>'
+    + '<option value="center_file">فایل مرکز</option>'
+    + '</select>'
+    + '<button type="button" onclick="_dhLoadTrash()" style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-raised);cursor:pointer;font-family:inherit;font-size:12px">🔄 بروزرسانی</button>'
+    + '</div>'
+    + '<div id="dhTrashList" style="max-height:360px;overflow-y:auto;font-size:12px">⏳ بارگذاری...</div>';
+}
+
+function _dhLoadTrash() {
+  var el = document.getElementById('dhTrashList');
+  if (!el) return;
+  var type = (document.getElementById('dhTrashFilter') || {}).value || '';
+  var url = '/api/trash?limit=100' + (type ? '&type=' + encodeURIComponent(type) : '');
+  el.innerHTML = '⏳ بارگذاری...';
+  fetch(url, { credentials: 'same-origin' })
+    .then(function (r) {
+      return r.json().then(function (d) {
+        if (!r.ok) throw new Error((d && d.error) || ('خطا ' + r.status));
+        return d;
+      });
+    })
+    .then(function (d) {
+      var items = d.items || [];
+      if (!items.length) {
+        el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted)">سطل زباله خالی است ✨</div>';
+        return;
+      }
+      el.innerHTML = '<table style="width:100%;border-collapse:collapse">'
+        + '<thead><tr style="background:var(--bg-raised);text-align:right">'
+        + '<th style="padding:6px 8px">نوع</th><th style="padding:6px 8px">عنوان</th><th style="padding:6px 8px">حذف‌کننده</th><th style="padding:6px 8px">تاریخ</th><th style="padding:6px 8px">عملیات</th>'
+        + '</tr></thead><tbody>'
+        + items.map(function (it) {
+          var dt = it.deletedAt ? String(it.deletedAt).slice(0, 16).replace('T', ' ') : '—';
+          return '<tr style="border-bottom:1px solid var(--border)">'
+            + '<td style="padding:6px 8px;white-space:nowrap">' + esc(it.label || it.entityType) + (it.sensitive ? ' 🔒' : '') + '</td>'
+            + '<td style="padding:6px 8px">' + esc(it.title || it.entityId) + '</td>'
+            + '<td style="padding:6px 8px;font-size:11px">' + esc(it.deletedBy || '—') + '</td>'
+            + '<td style="padding:6px 8px;font-size:11px;white-space:nowrap">' + esc(dt) + '</td>'
+            + '<td style="padding:6px 8px;white-space:nowrap">'
+            + '<button type="button" onclick="_dhRestoreTrash(' + it.id + ')" style="background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:5px;padding:3px 8px;cursor:pointer;font-size:11px;font-family:inherit;margin-left:4px">↩ بازیابی</button>'
+            + '<button type="button" onclick="_dhPurgeTrash(' + it.id + ')" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:5px;padding:3px 8px;cursor:pointer;font-size:11px;font-family:inherit">🗑 دائمی</button>'
+            + '</td></tr>';
+        }).join('')
+        + '</tbody></table>';
+    })
+    .catch(function (e) {
+      el.innerHTML = '<div style="color:#dc2626;padding:12px">خطا: ' + esc(e.message) + '</div>';
+    });
+}
+
+function _dhRestoreTrash(id) {
+  if (!confirm('این مورد بازیابی شود؟')) return;
+  fetch('/api/trash/' + id + '/restore', { method: 'POST', credentials: 'same-origin' })
+    .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+    .then(function (res) {
+      if (!res.ok) { showToast('⚠ ' + (res.d.error || 'خطا در بازیابی')); return; }
+      showToast('✅ بازیابی شد');
+      _dhLoadTrash();
+      if (typeof loadMasterCenters === 'function') loadMasterCenters().then(function () { if (typeof renderTable === 'function') renderTable(); });
+      if (typeof renderTasksPanel === 'function') renderTasksPanel();
+      if (typeof _hcpSearch === 'function') _hcpSearch();
+    })
+    .catch(function () { showToast('⚠ خطا در بازیابی'); });
+}
+
+function _dhPurgeTrash(id) {
+  if (!confirm('حذف دائمی — این عمل غیرقابل بازگشت است. ادامه می‌دهید؟')) return;
+  fetch('/api/trash/' + id + '/purge', { method: 'DELETE', credentials: 'same-origin' })
+    .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+    .then(function (res) {
+      if (!res.ok) { showToast('⚠ ' + (res.d.error || 'خطا')); return; }
+      showToast('🗑 حذف دائمی شد');
+      _dhLoadTrash();
+    })
+    .catch(function () { showToast('⚠ خطا'); });
+}
+window._dhLoadTrash = _dhLoadTrash;
+window._dhRestoreTrash = _dhRestoreTrash;
+window._dhPurgeTrash = _dhPurgeTrash;
 
 function _dhAutoPanelHtml(isMgr) {
   if (!isMgr) {
-    return '<div style="font-size:12px;color:var(--text-muted);padding:20px;text-align:center">بکاپ خودکار فقط برای مدیر قابل مشاهده است.</div>';
+    return '<div style="font-size:12px;color:var(--text-muted);padding:20px;text-align:center">بکاپ خودکار فقط برای مدیر و سوپر ادمین قابل مشاهده است.</div>';
   }
   return '<div id="dhAutoContent" style="font-size:12px;color:var(--text-muted);padding:16px;text-align:center">⏳ در حال بارگذاری وضعیت بکاپ...</div>';
 }
