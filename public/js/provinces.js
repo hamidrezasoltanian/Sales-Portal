@@ -383,7 +383,13 @@ function renderProvTable(){
         +(isOverdue(crtype,r.id)&&rowCls!=='row-stalled'?'<span class="risk-badge" title="پیگیری معوق">🟠</span>':'')
         +(e.biopsyScore?'<span class="biopsy-badge" title="پتانسیل بیوپسی (امتیاز ۶-۱۰+) — '+(e.biopsyReasons||[]).join(' • ')+'">🔬 '+e.biopsyScore+'</span>':'')
         +(typeof centerHasKol==='function'&&centerHasKol(crtype,r.id)?'<span title="مرکز دارای KOL / پزشک کلیدی" style="display:inline-block;background:#fdf4ff;color:#7e22ce;border:1px solid #e9d5ff;border-radius:9px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:3px">👨‍⚕️ KOL</span>':'')
-        +(e.competitor?'<span title="رقیب: '+esc(e.competitor)+'" style="display:inline-block;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:9px;padding:1px 7px;font-size:10px;font-weight:700;cursor:help;margin-right:3px">🤖 '+esc(e.competitor)+'</span>':'')
+        +(function(){
+          var comps=typeof getCenterCompetitorsFromEdit==='function'?getCenterCompetitorsFromEdit(e):[];
+          if(!comps.length&&e.competitor)comps=[e.competitor];
+          return comps.map(function(comp){
+            return '<span title="رقیب: '+esc(comp)+'" style="display:inline-block;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:9px;padding:1px 7px;font-size:10px;font-weight:700;cursor:help;margin-right:3px">🤖 '+esc(comp)+'</span>';
+          }).join('');
+        })()
         +(function(){var _mi=typeof MTR_BY_CENTER!=='undefined'?MTR_BY_CENTER[r.id]:null;if(!_mi||!_mi.length)return '';var _ov=_mi.filter(function(x){return x.od>45;});var _warn=_mi.filter(function(x){return x.od>20&&x.od<=45;});var _col=_ov.length?'#dc2626':_warn.length?'#d97706':'#0ea5e9';return '<span title="مطالبات باز" style="background:'+_col+';color:var(--text-primary);border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:5px;cursor:default">💰 '+_mi.length+'</span>';})()
         +'<button class="ctr-link" onclick="openCenterModal(\''+crtype+'\',\''+r.id+'\')">'+esc(displayName)+'</button>'
         +'<button onclick="event.stopPropagation();openCallFocus(\''+crtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')" title="پانل تماس سریع" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:.55;vertical-align:middle" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.55">📞</button>'
@@ -856,7 +862,11 @@ function renderMobileList(data,rtype,today){
     return'<div class="'+rowCls+'" data-rowid="' + r.id + '">'
       +'<div class="mob-ctr-r1">'
         +'<button class="mob-ctr-name" onclick="openCenterModal(\''+crtype+'\',\''+r.id+'\')" title="باز کردن مرکز">'+esc(displayName)+'</button>'
-        +(e.competitor?'<span title="رقیب: '+esc(e.competitor)+'" style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:9px;padding:1px 6px;font-size:10px;font-weight:700;margin-right:4px">🤖</span>':'')
+        +(function(){
+          var comps=typeof getCenterCompetitorsFromEdit==='function'?getCenterCompetitorsFromEdit(e):[];
+          if(!comps.length&&e.competitor)comps=[e.competitor];
+          return comps.length?'<span title="رقبا: '+esc(comps.join('، '))+'" style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:9px;padding:1px 6px;font-size:10px;font-weight:700;margin-right:4px">🤖'+(comps.length>1?' '+comps.length:'')+'</span>':'';
+        })()
         +(isOverdue(crtype,r.id)?'<span title="پیگیری معوق" style="font-size:11px">🟠</span>':'')
         +(isStalled(crtype,r.id)&&st!=='قرارداد بسته شد'?'<span title="۳۰+ روز بدون فعالیت" style="font-size:11px">🔴</span>':'')
         +(e.biopsyScore?'<span title="امتیاز بیوپسی" style="background:#ecfdf5;color:#065f46;border:1px solid #6ee7b7;border-radius:9px;padding:1px 6px;font-size:10px;font-weight:700">🔬 '+e.biopsyScore+'</span>':'')

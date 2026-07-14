@@ -153,9 +153,10 @@ async function renderProformaPanel() {
     _pfEnsureCenterCache();
     _renderPfPanel(el);
     _pfHandleDeepLink();
-    if (_pfPendingNewCenter) {
+    if (_pfPendingNewCenter || window.__pfPendingNewCenter) {
       _pfConsumePendingNewCenter().catch(function(e) {
         console.error('[proforma] pending new center:', e);
+        if (typeof showToast === 'function') showToast('خطا در باز کردن فرم پیشفاکتور');
       });
     }
   } catch(e) {
@@ -918,6 +919,27 @@ async function _pfLoadWmsProds(force) {
   } catch(e) {}
 }
 
+function _pfWmsProdById(prodId) {
+  if (!prodId) return null;
+  return (_pfWmsProds || []).find(function(x) { return String(x.id) === String(prodId); }) || null;
+}
+
+function _pfResolveUnitCost(prodId) {
+  var p = _pfWmsProdById(prodId);
+  if (!p) return 0;
+  return Number(p.lastPurchasePrice || p.last_purchase_price || p.avgPurchasePrice || p.avg_purchase_price || 0) || 0;
+}
+
+function _pfSyncItemWmsCost(item) {
+  if (!item || !item.prodId) return;
+  var cost = _pfResolveUnitCost(item.prodId);
+  if (cost) item.unitCost = cost;
+}
+
+function _pfSyncAllWmsCosts() {
+  (_pfItems || []).forEach(_pfSyncItemWmsCost);
+}
+
 // Force-refresh products (called after WMS import or from refresh button)
 function pfRefreshProds() {
   _pfWmsProds = [];
@@ -940,6 +962,7 @@ async function pfOpenNew() {
   _pfProdSearch = '';
   _pfActiveCat = null;
   await _pfLoadWmsProds();
+  _pfSyncAllWmsCosts();
   _pfShowModal(null);
 }
 
@@ -954,6 +977,7 @@ async function pfOpenEdit(id) {
     _pfProdSearch = '';
     _pfActiveCat = null;
     await _pfLoadWmsProds();
+    _pfSyncAllWmsCosts();
     _pfShowModal(pf);
   } catch(e) {
     showToast('❌ خطا در باز کردن پیشفاکتور: ' + e.message);
@@ -1048,7 +1072,7 @@ function _pfProdListItem(p) {
   var cat   = esc(p.category || '');
   var code  = esc(p.catalog_code || '');
   var price = Number(p.salePrice || p.sale_price || 0);
-  var cost = Number(p.avgPurchasePrice || p.avg_purchase_price || 0);
+  var cost = Number(p.lastPurchasePrice || p.last_purchase_price || p.avgPurchasePrice || p.avg_purchase_price || 0);
   var priceHtml = price > 0
     ? '<span style="color:#15803d;font-size:11px;font-weight:700;white-space:nowrap;background:#f0fdf4;padding:1px 6px;border-radius:8px">' + price.toLocaleString('fa-IR') + ' \u0631\u06cc\u0627\u0644</span>'
     : '<span style="color:#94a3b8;font-size:10px;white-space:nowrap" title="\u0642\u06cc\u0645\u062a \u0641\u0631\u0648\u0634 \u062f\u0631 \u0627\u0646\u0628\u0627\u0631 \u062a\u0646\u0638\u06cc\u0645 \u0646\u0634\u062f\u0647">&mdash; \u0642\u06cc\u0645\u062a \u0646\u062f\u0627\u0631\u062f</span>';
@@ -1183,6 +1207,67 @@ window._pfSaveNoteTexts = function() {
   showToast('✅ لیست متون با موفقیت ذخیره شد (برای دیدن تغییرات در کشویی‌ها، فرم پیش‌فاکتور را ببندید و دوباره باز کنید)');
 };
 
+window.pfUpdateExpiryPreview = function() {
+  var el = document.getElementById('pfExpiryDisplay');
+  if (!el) return;
+  var dateEl = document.getElementById('pfDate');
+  var validEl = document.getElementById('pfValid');
+  var date = dateEl ? dateEl.value.trim() : '';
+  var valid = validEl ? Number(validEl.value) : 0;
+  var exp = '';
+  if (date && valid > 0 && typeof _pfComputeExpiry === 'function') {
+    exp = _pfComputeExpiry({ jalaliDate: date, validDays: valid });
+  }
+  el.textContent = exp || '—';
+};
+
+window.pfManageFieldOptions = function() {
+  if (typeof _isManager === 'function' && !_isManager()) {
+    showToast('⚠️ فقط مدیران امکان ویرایش گزینه‌های کشویی را دارند.');
+    return;
+  }
+  var channels = typeof _pfGetChannelMap === 'function' ? _pfGetChannelMap() : (typeof PF_CHANNELS !== 'undefined' ? PF_CHANNELS : {});
+  var payments = typeof _pfGetPaymentTermsMap === 'function' ? _pfGetPaymentTermsMap() : (typeof PF_PAYMENT_TERMS !== 'undefined' ? PF_PAYMENT_TERMS : {});
+  var html = '<div style="font-size:12px;color:#475569;margin-bottom:12px;line-height:1.6">هر گزینه در یک خط: <code style="background:#f1f5f9;padding:1px 4px;border-radius:3px">کلید|عنوان</code> — مثال: <code style="background:#f1f5f9;padding:1px 4px;border-radius:3px">direct|تماس مستقیم</code><br>برای حذف یک گزینه، خط مربوطه را پاک کنید.</div>' +
+    '<div><label style="font-size:11px;font-weight:700;color:#6d28d9;display:block;margin-bottom:4px">📥 کانال‌های ورودی</label>' +
+    '<textarea id="mgPfChannels" rows="5" class="form-input" style="resize:vertical;margin-bottom:12px;font-family:monospace;font-size:11px">' + esc(typeof _pfMapToLines === 'function' ? _pfMapToLines(channels) : '') + '</textarea></div>' +
+    '<div><label style="font-size:11px;font-weight:700;color:#6d28d9;display:block;margin-bottom:4px">💳 شرایط پرداخت</label>' +
+    '<textarea id="mgPfPayments" rows="5" class="form-input" style="resize:vertical;margin-bottom:8px;font-family:monospace;font-size:11px">' + esc(typeof _pfMapToLines === 'function' ? _pfMapToLines(payments) : '') + '</textarea></div>' +
+    '<div style="font-size:11px;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px">مسئول فروش و پشتیبان فنی از لیست کاربران فعال سیستم می‌آیند — برای حذف در فرم، گزینه «—» را انتخاب کنید.</div>';
+
+  openModal('pfFieldOptsModal', '⚙️ ویرایش گزینه‌های کشویی', html,
+    '<button onclick="closeModal(\'pfFieldOptsModal\')" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;margin-left:8px">انصراف</button>' +
+    '<button onclick="_pfResetFieldOptions()" style="padding:8px 14px;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;margin-left:8px">↩ پیش‌فرض</button>' +
+    '<button onclick="_pfSaveFieldOptions()" style="padding:8px 18px;background:var(--brand);color:white;border:none;border-radius:8px;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600">💾 ذخیره</button>',
+    { lg: false }
+  );
+};
+
+window._pfSaveFieldOptions = function() {
+  if (!DB.settings) DB.settings = {};
+  var chText = document.getElementById('mgPfChannels') ? document.getElementById('mgPfChannels').value : '';
+  var payText = document.getElementById('mgPfPayments') ? document.getElementById('mgPfPayments').value : '';
+  var chFallback = typeof PF_CHANNELS !== 'undefined' ? PF_CHANNELS : {};
+  var payFallback = typeof PF_PAYMENT_TERMS !== 'undefined' ? PF_PAYMENT_TERMS : {};
+  DB.settings.pfChannels = typeof _pfLinesToMap === 'function' ? _pfLinesToMap(chText, chFallback) : chFallback;
+  DB.settings.pfPaymentTerms = typeof _pfLinesToMap === 'function' ? _pfLinesToMap(payText, payFallback) : payFallback;
+  patchCrmSetting('pfChannels', DB.settings.pfChannels);
+  patchCrmSetting('pfPaymentTerms', DB.settings.pfPaymentTerms);
+  closeModal('pfFieldOptsModal');
+  showToast('✅ گزینه‌ها ذخیره شد — فرم را ببندید و دوباره باز کنید');
+};
+
+window._pfResetFieldOptions = function() {
+  if (!confirm('بازگشت کانال‌ها و شرایط پرداخت به پیش‌فرض؟')) return;
+  if (!DB.settings) DB.settings = {};
+  delete DB.settings.pfChannels;
+  delete DB.settings.pfPaymentTerms;
+  patchCrmSetting('pfChannels', null);
+  patchCrmSetting('pfPaymentTerms', null);
+  closeModal('pfFieldOptsModal');
+  showToast('↩ به پیش‌فرض بازگشت');
+};
+
 // ── Show modal ────────────────────────────────────────────────────────────
 async function _pfShowModal(pf) { try {
   _pfOpenPf = pf || null;
@@ -1211,6 +1296,14 @@ async function _pfShowModal(pf) { try {
   var discVal   = pf ? (pf.discountPct || 0) : 0;
   var noteVal   = pf ? (pf.note || '') : '';
   var validVal  = pf ? (pf.validDays || 3) : 3;
+  var channelMap = typeof _pfGetChannelMap === 'function' ? _pfGetChannelMap() : (typeof PF_CHANNELS !== 'undefined' ? PF_CHANNELS : { direct: 'تماس مستقیم' });
+  var paymentMap = typeof _pfGetPaymentTermsMap === 'function' ? _pfGetPaymentTermsMap() : (typeof PF_PAYMENT_TERMS !== 'undefined' ? PF_PAYMENT_TERMS : { cash: 'نقد' });
+  var channelVal = pf && pf.channel ? pf.channel : '';
+  var salesVal = pf && pf.salesOwner ? pf.salesOwner : '';
+  var supportVal = pf && pf.supportOwner ? pf.supportOwner : '';
+  var expiryPreview = '';
+  if (pf && pf.expiryDate) expiryPreview = pf.expiryDate;
+  else if (typeof _pfComputeExpiry === 'function') expiryPreview = _pfComputeExpiry({ jalaliDate: dateVal, validDays: validVal }) || '';
   var is10      = taxVal === 10;
 
   // New buyer fields & managerNote
@@ -1274,45 +1367,48 @@ async function _pfShowModal(pf) { try {
         '<div id="pfCenterDrop" style="position:fixed;z-index:9999;background:white;border:1px solid #e2e8f0;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.1);display:none;max-height:180px;overflow-y:auto;min-width:260px"></div>' +
       '</div>' +
       '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">تاریخ صدور (شمسی)</label>' +
-        '<input id="pfDate" class="form-input" value="' + esc(dateVal) + '" ' + (readOnly?'disabled':'') + ' placeholder="۱۴۰۴/۰۳/۲۵">' +
+        '<input id="pfDate" class="form-input" value="' + esc(dateVal) + '" ' + (readOnly?'disabled':'') + ' placeholder="۱۴۰۴/۰۳/۲۵" oninput="pfUpdateExpiryPreview()">' +
       '</div>' +
       '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">اعتبار (روز)</label>' +
-        '<input id="pfValid" type="number" class="form-input" value="' + validVal + '" ' + (readOnly?'disabled':'') + ' min="1" max="365">' +
+        '<input id="pfValid" type="number" class="form-input" value="' + validVal + '" ' + (readOnly?'disabled':'') + ' min="1" max="365" oninput="pfUpdateExpiryPreview()">' +
       '</div>' +
     '</div>' +
+    (!readOnly && _pfIsManager() ? '<div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button type="button" onclick="pfManageFieldOptions()" style="padding:3px 10px;font-size:10px;background:#f5f3ff;color:#6d28d9;border:1px solid #ddd6fe;border-radius:6px;cursor:pointer;font-family:inherit">⚙️ ویرایش گزینه‌های کشویی</button></div>' : '') +
     '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:10px;margin-bottom:12px">' +
       '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">کانال ورودی</label>' +
         '<select id="pfChannel" class="form-input" ' + (readOnly?'disabled':'') + '>' +
-          Object.keys(typeof PF_CHANNELS !== 'undefined' ? PF_CHANNELS : {direct:'تماس مستقیم',tender:'مناقصه',visit:'ویزیت',web:'وب'}).map(function(k) {
-            var lbl = (typeof PF_CHANNELS !== 'undefined' ? PF_CHANNELS[k] : k);
-            var sel = (pf && pf.channel === k) || (!pf && k === 'direct') ? ' selected' : '';
+          '<option value="">—</option>' +
+          Object.keys(channelMap).map(function(k) {
+            var lbl = channelMap[k] || k;
+            var sel = channelVal === k ? ' selected' : '';
             return '<option value="' + k + '"' + sel + '>' + lbl + '</option>';
           }).join('') +
         '</select></div>' +
       '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">شرایط پرداخت</label>' +
         '<select id="pfPaymentTerms" class="form-input" ' + (readOnly?'disabled':'') + '>' +
           '<option value="">—</option>' +
-          Object.keys(typeof PF_PAYMENT_TERMS !== 'undefined' ? PF_PAYMENT_TERMS : {cash:'نقد',installment:'اقساط',check:'چک'}).map(function(k) {
-            var lbl = (typeof PF_PAYMENT_TERMS !== 'undefined' ? PF_PAYMENT_TERMS[k] : k);
+          Object.keys(paymentMap).map(function(k) {
+            var lbl = paymentMap[k] || k;
             return '<option value="' + k + '"' + ((pf && pf.paymentTerms === k) ? ' selected' : '') + '>' + lbl + '</option>';
           }).join('') +
         '</select></div>' +
       '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">مسئول فروش</label>' +
         '<select id="pfSalesOwner" class="form-input" ' + (readOnly?'disabled':'') + '>' +
+          '<option value="">—</option>' +
           _pfGetExpertMembers().map(function(m) {
-            var oid = pf ? _pfGetResponsibleId(pf) : currentUser;
-            return '<option value="' + esc(m.id) + '"' + (m.id === oid ? ' selected' : '') + '>' + esc(m.name) + '</option>';
+            return '<option value="' + esc(m.id) + '"' + (m.id === salesVal ? ' selected' : '') + '>' + esc(m.name) + '</option>';
           }).join('') +
         '</select></div>' +
       '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">پشتیبان فنی</label>' +
         '<select id="pfSupportOwner" class="form-input" ' + (readOnly?'disabled':'') + '><option value="">—</option>' +
           _pfGetExpertMembers().map(function(m) {
-            return '<option value="' + esc(m.id) + '"' + ((pf && pf.supportOwner === m.id) ? ' selected' : '') + '>' + esc(m.name) + '</option>';
+            return '<option value="' + esc(m.id) + '"' + (m.id === supportVal ? ' selected' : '') + '>' + esc(m.name) + '</option>';
           }).join('') +
         '</select></div>' +
-      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px">تاریخ انقضا</label>' +
-        '<div id="pfExpiryDisplay" style="padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;color:#64748b">' +
-          (pf ? (pf.expiryDate || '—') : '—') + '</div></div>' +
+      '<div><label style="font-size:11px;font-weight:700;color:#475569;display:block;margin-bottom:4px" title="آخرین روز اعتبار پیش‌فاکتور — از تاریخ صدور + اعتبار (روز) محاسبه می‌شود">تاریخ انقضا</label>' +
+        '<div id="pfExpiryDisplay" style="padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;color:#64748b;min-height:20px">' +
+          esc(expiryPreview || '—') + '</div>' +
+        '<div style="font-size:9px;color:#94a3b8;margin-top:3px;line-height:1.4">آخرین روز اعتبار پیش‌فاکتور؛ پس از آن به‌صورت خودکار «منقضی» می‌شود</div></div>' +
     '</div>' +
     whBlock +
     // ── Buyer Details (مشخصات کامل خریدار)
@@ -1369,7 +1465,7 @@ async function _pfShowModal(pf) { try {
             '<th style="padding:6px 8px;text-align:center;border-bottom:2px solid #e2e8f0;width:120px">قیمت واحد (ریال)</th>' +
             '<th style="padding:6px 8px;text-align:center;border-bottom:2px solid #e2e8f0;width:110px">تخفیف ردیف</th>' +
             '<th style="padding:6px 8px;text-align:center;border-bottom:2px solid #e2e8f0;width:110px">جمع ردیف (ریال)</th>' +
-            (typeof _pfCanSeeMargin === 'function' && _pfCanSeeMargin() ? '<th style="padding:6px 8px;text-align:center;border-bottom:2px solid #e2e8f0;width:90px">حاشیه</th>' : '') +
+            (typeof _pfCanSeeMargin === 'function' && _pfCanSeeMargin() ? '<th style="padding:6px 8px;text-align:center;border-bottom:2px solid #e2e8f0;width:110px" title="قیمت خرید از آخرین ورود انبار و درصد حاشیه">قیمت خرید / حاشیه</th>' : '') +
             (readOnly ? '' : '<th style="padding:6px 8px;text-align:center;border-bottom:2px solid #e2e8f0;width:40px"></th>') +
           '</tr>' +
         '</thead>' +
@@ -1434,6 +1530,7 @@ async function _pfShowModal(pf) { try {
     }, 60);
   }
   pfRecalc();
+  if (typeof pfUpdateExpiryPreview === 'function') pfUpdateExpiryPreview();
 } catch(e) { alert('Error in _pfShowModal: ' + e.message); } }
 
 // ── Item row (table row) ──────────────────────────────────────────────────
@@ -1446,12 +1543,19 @@ function pfToggleCommission() {
 function _pfItemRow(i, item, readOnly) {
   var lineAfterDisc = _pfItemLineTotal(item);
   var showMargin = typeof _pfCanSeeMargin === 'function' && _pfCanSeeMargin();
-  var marginPct = showMargin && typeof _pfItemMarginPct === 'function' ? _pfItemMarginPct(item) : null;
+  var gDisc = Number(document.getElementById('pfDisc') ? document.getElementById('pfDisc').value : 0) || 0;
+  var wmsCost = item.prodId ? _pfResolveUnitCost(item.prodId) : (Number(item.unitCost) || 0);
+  if (item.prodId && wmsCost) item.unitCost = wmsCost;
+  var marginPct = showMargin && typeof _pfItemMarginPct === 'function' ? _pfItemMarginPct(item, gDisc) : null;
   var marginCell = showMargin
     ? '<td style="padding:6px 8px;text-align:center;font-size:11px">' +
         (readOnly
           ? (marginPct != null ? '<span style="color:' + (marginPct >= 15 ? '#15803d' : '#dc2626') + ';font-weight:700">' + marginPct + '٪</span>' : '—')
-          : '<input type="number" class="form-input pf-item-cost" data-idx="' + i + '" value="' + (item.unitCost || 0) + '" min="0" oninput="_pfRowChange(' + i + ',\'unitCost\',this.value)" style="width:80px;text-align:center;font-size:11px" title="بهای تمام‌شده">') +
+          : '<div style="display:flex;flex-direction:column;gap:3px;align-items:center">' +
+              '<span class="pf-item-cost-display" data-idx="' + i + '" style="font-family:monospace;font-size:11px;color:#475569" title="آخرین قیمت خرید از ورود انبار">' + (wmsCost ? fmtNum(wmsCost) : '<span style="color:#94a3b8">—</span>') + '</span>' +
+              '<input type="hidden" class="pf-item-cost" data-idx="' + i + '" value="' + (wmsCost || 0) + '">' +
+              '<span class="pf-margin-pct" data-idx="' + i + '" id="pfMargin_' + i + '">' + _pfMarginLabel(marginPct) + '</span>' +
+            '</div>') +
       '</td>'
     : '';
   return '<tr id="pfRow_' + i + '" style="border-bottom:1px solid #f1f5f9">' +
@@ -1500,9 +1604,36 @@ function _pfItemLineTotal(item) {
   return raw - disc;
 }
 
+function _pfParseNum(val) {
+  if (val === '' || val == null) return 0;
+  var s = String(val).replace(/[۰-۹]/g, function(d) {
+    return '0123456789'['۰۱۲۳۴۵۶۷۸۹'.indexOf(d)];
+  }).replace(/,/g, '').trim();
+  var n = Number(s);
+  return isNaN(n) ? 0 : n;
+}
+
+function _pfMarginLabel(pct) {
+  if (pct == null) return '<span style="color:#94a3b8;font-size:10px">—</span>';
+  var color = pct >= 15 ? '#15803d' : '#dc2626';
+  return '<span style="color:' + color + ';font-weight:700;font-size:11px">' + pct + '٪</span>';
+}
+
+function _pfUpdateMarginCells() {
+  if (typeof _pfCanSeeMargin !== 'function' || !_pfCanSeeMargin()) return;
+  var gDisc = Number(document.getElementById('pfDisc') ? document.getElementById('pfDisc').value : 0) || 0;
+  document.querySelectorAll('.pf-margin-pct').forEach(function(el) {
+    var idx = Number(el.getAttribute('data-idx'));
+    var item = _pfItems[idx];
+    if (!item) return;
+    var pct = typeof _pfItemMarginPct === 'function' ? _pfItemMarginPct(item, gDisc) : null;
+    el.innerHTML = _pfMarginLabel(pct);
+  });
+}
+
 function _pfRowChange(i, field, val) {
   if (!_pfItems[i]) return;
-  if (['qty','unitPrice','discPct','unitCost'].indexOf(field) !== -1) _pfItems[i][field] = Number(val) || 0;
+  if (['qty','unitPrice','discPct','unitCost'].indexOf(field) !== -1) _pfItems[i][field] = _pfParseNum(val);
   else _pfItems[i][field] = val;
   _pfItems[i].lineTotal = _pfItemLineTotal(_pfItems[i]);
   // Update the lineTotal cell in DOM only
@@ -1512,6 +1643,7 @@ function _pfRowChange(i, field, val) {
     var ltCell = cells[4]; // lineTotal column
     if (ltCell) ltCell.innerHTML = fmtNum(_pfItems[i].lineTotal);
   }
+  _pfUpdateMarginCells();
   pfRecalc();
 }
 
@@ -1561,6 +1693,7 @@ function pfRecalc() {
       '<div style="display:flex;justify-content:space-between;margin-bottom:4px;color:#475569"><span>مالیات ' + taxPct + '٪</span><span style="font-family:monospace">+' + fmtNum(taxAmt) + ' ﷼</span></div>' +
       '<div style="display:flex;justify-content:space-between;border-top:1px solid #e2e8f0;padding-top:6px;font-weight:700;font-size:14px"><span>جمع کل</span><span style="font-family:monospace;color:#1d4ed8">' + fmtNum(total) + ' ﷼</span></div>';
   }
+  _pfUpdateMarginCells();
 }
 
 // ── Center search dropdown ────────────────────────────────────────────────
@@ -1683,6 +1816,7 @@ async function pfSave() {
   if (managerNote === null || managerNote === undefined) managerNote = '';
 
   // Sync any un-fired input values from DOM before saving
+  _pfSyncAllWmsCosts();
   _pfItems.forEach(function(item, i) {
     var nameEl  = document.querySelector('.pf-item-name[data-idx="' + i + '"]');
     var qtyEl   = document.querySelector('.pf-item-qty[data-idx="' + i + '"]');
@@ -1691,10 +1825,10 @@ async function pfSave() {
     var costEl  = document.querySelector('.pf-item-cost[data-idx="' + i + '"]');
     if (nameEl)  item.name        = nameEl.value.trim();
     // catalogCode is stored in _pfItems directly when product is selected from WMS
-    if (qtyEl)   item.qty         = Number(qtyEl.value)   || 0;
-    if (priceEl) item.unitPrice   = Number(priceEl.value) || 0;
-    if (discEl)  item.discPct     = Number(discEl.value)  || 0;
-    if (costEl)  item.unitCost    = Number(costEl.value)    || 0;
+    if (qtyEl)   item.qty         = _pfParseNum(qtyEl.value);
+    if (priceEl) item.unitPrice   = _pfParseNum(priceEl.value);
+    if (discEl)  item.discPct     = _pfParseNum(discEl.value);
+    if (costEl)  item.unitCost    = _pfParseNum(costEl.value);
     item.lineTotal = _pfItemLineTotal(item);
   });
 
@@ -2375,15 +2509,22 @@ async function _pfOpenNewForCenterForm(centerKey, centerName) {
   _pfShowModal({ centerKey: centerKey || '', centerName: centerName || '', status: 'draft' });
 }
 
-async function _pfConsumePendingNewCenter() {
-  if (!_pfPendingNewCenter) return;
-  var p = _pfPendingNewCenter;
+function _pfTakePendingNewCenter() {
+  var p = _pfPendingNewCenter || window.__pfPendingNewCenter || null;
   _pfPendingNewCenter = null;
+  window.__pfPendingNewCenter = null;
+  return p;
+}
+
+async function _pfConsumePendingNewCenter() {
+  var p = _pfTakePendingNewCenter();
+  if (!p) return;
   await _pfOpenNewForCenterForm(p.centerKey, p.centerName);
 }
 
 async function pfOpenNewForCenter(centerKey, centerName) {
   _pfPendingNewCenter = { centerKey: centerKey || '', centerName: centerName || '' };
+  window.__pfPendingNewCenter = _pfPendingNewCenter;
   if (typeof ensureTabScripts === 'function') {
     await ensureTabScripts('proforma');
   }
@@ -3036,9 +3177,10 @@ function pfSearchProduct(i, q) {
   drop.innerHTML = results.map(function(r) {
     var n = esc(r.full_name || r.name);
     var u = esc(r.unit || '\u0639\u062f\u062f');
-    var price = Number(r.sale_price || 0);
-    var cc = esc(r.catalog_code || '');
-    return '<div onclick="pfSelectProduct(' + i + ', \'' + n + '\', \'' + u + '\', ' + price + ', \'' + cc + '\')" style="padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid #f1f5f9" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'white\'"><div>' + n + ' <span style="color:#94a3b8;font-size:11px">(' + u + ')</span>' +
+    var pid = esc(r.id || '');
+    var price = Number(r.salePrice || r.sale_price || 0);
+    var cc = esc(r.catalog_code || r.catalogCode || '');
+    return '<div onclick="pfSelectProduct(' + i + ', \'' + pid + '\', \'' + n + '\', \'' + u + '\', ' + price + ', \'' + cc + '\')" style="padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid #f1f5f9" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'white\'"><div>' + n + ' <span style="color:#94a3b8;font-size:11px">(' + u + ')</span>' +
       (cc ? '<span style="color:#0284c7;font-size:10px;margin-right:6px">' + cc + '</span>' : '') + '</div>' +
       (price ? '<span style="color:#6366f1;font-size:11px">' + price.toLocaleString('fa-IR') + ' \u0631\u06cc\u0627\u0644</span>' : '') +
     '</div>';
@@ -3055,25 +3197,33 @@ function pfSearchProduct(i, q) {
   drop.style.display = 'block';
 }
 
-function pfSelectProduct(i, name, unit, price, catalogCode) {
+function pfSelectProduct(i, prodId, name, unit, price, catalogCode) {
   var drop = document.getElementById('pfProdDrop_' + i);
   if (drop) drop.style.display = 'none';
   var inp = document.querySelector('.pf-item-name[data-idx="' + i + '"]');
   if (inp) {
     inp.value = name;
+    _pfItems[i].prodId      = prodId || '';
     _pfItems[i].name        = name;
     _pfItems[i].unit        = unit;
     _pfItems[i].unitPrice   = price || 0;
     _pfItems[i].catalogCode = catalogCode || '';
     _pfItems[i].category    = _pfItemCategory(_pfItems[i]);
+    _pfItems[i].unitCost    = _pfResolveUnitCost(prodId);
     _pfItems[i].lineTotal   = _pfItemLineTotal(_pfItems[i]);
   }
   // Also update price cell
   var priceInp = document.querySelector('.pf-item-price[data-idx="' + i + '"]');
   if (priceInp && price) priceInp.value = price;
+  var costDisplay = document.querySelector('.pf-item-cost-display[data-idx="' + i + '"]');
+  var costHidden = document.querySelector('.pf-item-cost[data-idx="' + i + '"]');
+  var cost = _pfResolveUnitCost(prodId);
+  if (costDisplay) costDisplay.innerHTML = cost ? fmtNum(cost) : '<span style="color:#94a3b8">—</span>';
+  if (costHidden) costHidden.value = cost || 0;
   // Show catalogCode as a small badge next to name input (read-only hint)
   var catDisplay = document.querySelector('.pf-item-cat-display[data-idx="' + i + '"]');
   if (catDisplay) catDisplay.textContent = catalogCode || '';
+  _pfUpdateMarginCells();
   pfRecalc();
 }
 

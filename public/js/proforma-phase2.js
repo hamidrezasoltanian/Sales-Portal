@@ -37,11 +37,15 @@ function _pfCanApproveDiscount() {
   return _pfCanSeeMargin();
 }
 
-function _pfItemMarginPct(item) {
+function _pfItemMarginPct(item, globalDiscPct) {
   var cost = Number(item.unitCost) || 0;
   var price = Number(item.unitPrice) || 0;
   if (!cost || !price) return null;
-  var afterDisc = price * (1 - (Number(item.discPct) || 0) / 100);
+  var afterLineDisc = price * (1 - (Number(item.discPct) || 0) / 100);
+  var gDisc = globalDiscPct != null
+    ? Number(globalDiscPct) || 0
+    : Number(document.getElementById('pfDisc') ? document.getElementById('pfDisc').value : 0) || 0;
+  var afterDisc = afterLineDisc * (1 - gDisc / 100);
   if (!afterDisc) return null;
   return Math.round((afterDisc - cost) / afterDisc * 1000) / 10;
 }
@@ -220,17 +224,9 @@ function _pfPhase2Wrap() {
   if (typeof pfAddProductRow === 'function' && !pfAddProductRow._costWrapped) {
     var origAdd = pfAddProductRow;
     pfAddProductRow = function(prodId, name, unit, salePrice, catalogCode, unitCost) {
-      origAdd(prodId, name, unit, salePrice, catalogCode);
-      if (unitCost != null && unitCost !== '') {
-        var idx = _pfItems.length - 1;
-        if (idx >= 0) _pfItems[idx].unitCost = Number(unitCost) || 0;
-      } else if (_pfWmsProds && _pfWmsProds.length) {
-        var p = _pfWmsProds.find(function(x) { return String(x.id) === String(prodId); });
-        if (p && (p.avgPurchasePrice || p.avg_purchase_price)) {
-          var idx2 = _pfItems.length - 1;
-          if (idx2 >= 0) _pfItems[idx2].unitCost = Number(p.avgPurchasePrice || p.avg_purchase_price) || 0;
-        }
-      }
+      var resolved = Number(unitCost) || 0;
+      if (!resolved && typeof _pfResolveUnitCost === 'function') resolved = _pfResolveUnitCost(prodId);
+      origAdd(prodId, name, unit, salePrice, catalogCode, resolved);
     };
     pfAddProductRow._costWrapped = true;
   }

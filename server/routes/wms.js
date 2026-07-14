@@ -432,13 +432,32 @@ router.get('/products', requireAuth, async (req, res) => {
           SELECT ROUND(AVG(l.purchase_price))::bigint
           FROM wms_lots l
           WHERE l.product_id = p.id AND l.purchase_price > 0
-        ), 0) AS avg_purchase_price
+        ), 0) AS avg_purchase_price,
+        COALESCE((
+          SELECT COALESCE(NULLIF(t.unit_price, 0), l.purchase_price, 0)::bigint
+          FROM wms_transactions t
+          LEFT JOIN wms_lots l ON l.id = t.lot_id
+          WHERE t.product_id = p.id
+            AND t.type = 'entry'
+            AND t.status = 'approved'
+            AND COALESCE(t.txn_type, '') NOT IN ('transfer_in')
+            AND COALESCE(NULLIF(t.unit_price, 0), l.purchase_price, 0) > 0
+          ORDER BY t.txn_date DESC NULLS LAST, t.created_at DESC NULLS LAST
+          LIMIT 1
+        ), (
+          SELECT l.purchase_price::bigint
+          FROM wms_lots l
+          WHERE l.product_id = p.id AND l.purchase_price > 0
+          ORDER BY COALESCE(l.lot_date, l.created_at) DESC NULLS LAST, l.created_at DESC
+          LIMIT 1
+        ), 0) AS last_purchase_price
       FROM wms_products p
       WHERE p.active = true
       ORDER BY p.name`);
     res.json(r.rows.map(function(row) {
       const p = rowToProduct(row);
       p.avgPurchasePrice = Number(row.avg_purchase_price || 0);
+      p.lastPurchasePrice = Number(row.last_purchase_price || 0);
       return p;
     }));
   } catch(e) {

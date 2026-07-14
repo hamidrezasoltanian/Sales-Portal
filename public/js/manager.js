@@ -110,6 +110,15 @@ function openSettings(){
       +'<textarea id="stgLeadList" style="width:100%;height:130px;padding:6px 8px;border:1px solid var(--border-input);border-radius:6px;font-size:11px;direction:rtl;font-family:inherit;resize:none;background:var(--bg-input);color:var(--text-primary);box-sizing:border-box">'+LEAD_LIST.join('\n')+'</textarea></div>'
       +'<div><label style="font-size:11px;font-weight:700;display:block;margin-bottom:4px">🏥 نوع مراکز</label>'
       +'<textarea id="stgTypeList" style="width:100%;height:130px;padding:6px 8px;border:1px solid var(--border-input);border-radius:6px;font-size:11px;direction:rtl;font-family:inherit;resize:none;background:var(--bg-input);color:var(--text-primary);box-sizing:border-box">'+TYPE_LIST.join('\n')+'</textarea></div>'
+      +'</div>'
+      +'<div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin:12px 0 6px">پروفایل مرکز — Prospect و ارسال</div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">'
+      +'<div><label style="font-size:11px;font-weight:700;display:block;margin-bottom:4px">🛒 نحوه خرید</label>'
+      +'<textarea id="stgPurchaseMethodList" style="width:100%;height:110px;padding:6px 8px;border:1px solid var(--border-input);border-radius:6px;font-size:11px;direction:rtl;font-family:inherit;resize:none;background:var(--bg-input);color:var(--text-primary);box-sizing:border-box">'+PURCHASE_METHOD_LIST.join('\n')+'</textarea></div>'
+      +'<div><label style="font-size:11px;font-weight:700;display:block;margin-bottom:4px">💳 شرایط پرداخت (Prospect)</label>'
+      +'<textarea id="stgCenterPaymentTermsList" style="width:100%;height:110px;padding:6px 8px;border:1px solid var(--border-input);border-radius:6px;font-size:11px;direction:rtl;font-family:inherit;resize:none;background:var(--bg-input);color:var(--text-primary);box-sizing:border-box">'+CENTER_PAYMENT_TERMS_LIST.join('\n')+'</textarea></div>'
+      +'<div><label style="font-size:11px;font-weight:700;display:block;margin-bottom:4px">🚚 روش ارسال</label>'
+      +'<textarea id="stgShipMethodList" style="width:100%;height:110px;padding:6px 8px;border:1px solid var(--border-input);border-radius:6px;font-size:11px;direction:rtl;font-family:inherit;resize:none;background:var(--bg-input);color:var(--text-primary);box-sizing:border-box">'+SHIP_METHOD_LIST.join('\n')+'</textarea></div>'
       +'</div></div>';
   }
   var foot='<button class="btn-secondary" onclick="closeModal(\'settingsModal\')">انصراف</button>'
@@ -243,6 +252,12 @@ function saveSettings(){
     if(_ldTa){var _ll=_ldTa.value.split('\n').map(function(l){return l.trim();}).filter(Boolean);if(_ll.length>=2){DB.settings.leadList=_ll;LEAD_LIST=_ll;}}
     var _tpTa=document.getElementById('stgTypeList');
     if(_tpTa){var _tl=_tpTa.value.split('\n').map(function(l){return l.trim();}).filter(Boolean);if(_tl.length>=1){DB.settings.typeList=_tl;TYPE_LIST=_tl;}}
+    var _pmTa=document.getElementById('stgPurchaseMethodList');
+    if(_pmTa){var _pml=_pmTa.value.split('\n').map(function(l){return l.trim();}).filter(Boolean);if(_pml.length>=1){DB.settings.purchaseMethodList=_pml;PURCHASE_METHOD_LIST=_pml;}}
+    var _cptTa=document.getElementById('stgCenterPaymentTermsList');
+    if(_cptTa){var _cptl=_cptTa.value.split('\n').map(function(l){return l.trim();}).filter(Boolean);if(_cptl.length>=1){DB.settings.centerPaymentTermsList=_cptl;CENTER_PAYMENT_TERMS_LIST=_cptl;}}
+    var _smTa=document.getElementById('stgShipMethodList');
+    if(_smTa){var _sml=_smTa.value.split('\n').map(function(l){return l.trim();}).filter(Boolean);if(_sml.length>=1){DB.settings.shipMethodList=_sml;SHIP_METHOD_LIST=_sml;}}
   }
   var _mtrSyncEl=document.getElementById('stgMtrSync');
   if(_mtrSyncEl)DB.settings.mtrSyncEnabled=_mtrSyncEl.checked;
@@ -259,6 +274,9 @@ function saveSettings(){
     if(DB.settings.statusList)settingsPatch.statusList=DB.settings.statusList;
     if(DB.settings.leadList)settingsPatch.leadList=DB.settings.leadList;
     if(DB.settings.typeList)settingsPatch.typeList=DB.settings.typeList;
+    if(DB.settings.purchaseMethodList)settingsPatch.purchaseMethodList=DB.settings.purchaseMethodList;
+    if(DB.settings.centerPaymentTermsList)settingsPatch.centerPaymentTermsList=DB.settings.centerPaymentTermsList;
+    if(DB.settings.shipMethodList)settingsPatch.shipMethodList=DB.settings.shipMethodList;
     if(_mtrSyncEl)settingsPatch.mtrSyncEnabled=DB.settings.mtrSyncEnabled;
   }
 
@@ -717,11 +735,12 @@ function renderManagerPanel(){
       var rt=getProvType(pr.id);
       getProvCenters(pr.id).forEach(function(c){
         var e=getE(rt,c.id);
-        var comp=(e.competitor||'').trim();
+        getCenterCompetitorsFromEdit(e).forEach(function(comp){
         if(!comp)return;
         if(!compMap[comp])compMap[comp]={count:0,names:[]};
         compMap[comp].count++;
         if(compMap[comp].names.length<3)compMap[comp].names.push(e.nameOverride||c.name||'');
+        });
       });
     });
     var comps=Object.keys(compMap).sort(function(a,b){return compMap[b].count-compMap[a].count;}).slice(0,8);
@@ -954,12 +973,13 @@ function renderManagerPanel(){
       var rt=getProvType(pr.id);
       getProvCenters(pr.id).forEach(function(c){
         var e=getE(rt,c.id);
-        var comp=(e.competitor||'').trim();
+        getCenterCompetitorsFromEdit(e).forEach(function(comp){
         if(!comp)return;
         if(!compMap[comp])compMap[comp]={name:comp,centers:[],advantage:'',buyReason:''};
         compMap[comp].centers.push({rtype:rt,id:c.id,name:e.nameOverride||c.name,owner:e.owner||c.owner||''});
         if(e.competitorAdvantage&&!compMap[comp].advantage)compMap[comp].advantage=e.competitorAdvantage;
         if(e.buyReasonFromCompetitor&&!compMap[comp].buyReason)compMap[comp].buyReason=e.buyReasonFromCompetitor;
+        });
       });
     });
     var comps=Object.values(compMap).sort(function(a,b){return b.centers.length-a.centers.length;});
@@ -2291,6 +2311,13 @@ async function init(){
   _initBrowserNotif();
   setTimeout(_sendWeeklyDigest,3000);
   buildUSERS();updateNotifBadge();
+  fetch('/api/inbox/count').then(function(r){return r.json();}).then(function(d){
+    var b=document.getElementById('homeInboxBadge');
+    if(!b)return;
+    var n=Number(d.count)||0;
+    b.textContent=n>99?'99+':String(n);
+    b.style.display=n>0?'inline-block':'none';
+  }).catch(function(){});
   setTimeout(function(){if(typeof _setupAutoReminder==='function')_setupAutoReminder();},5000);
   // Restore tab BEFORE loadMasterCenters so that even if centers fail to load,
   // currentTab is always the right value (default was 'provinces' which was wrong).

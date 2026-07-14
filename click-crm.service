@@ -6,7 +6,7 @@ Wants=postgresql.service
 [Service]
 Type=simple
 User=hamidreza
-WorkingDirectory=/home/hamidreza/Sales-Portal
+WorkingDirectory=/home/hamidreza/Click Pro
 ExecStart=/home/hamidreza/.nvm/versions/node/v20.19.6/bin/node server/index.js
 Restart=always
 RestartSec=5

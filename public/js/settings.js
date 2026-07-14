@@ -5,75 +5,120 @@
 function openUserMgmt(){
   if(!_isManager()){showToast('⚠ فقط مدیران دسترسی دارند');return;}
   _UM_TAB='users';
+  _UM_SEARCH='';
+  _UM_STATUS_FILTER='all';
   var foot='<button class="btn-secondary" onclick="closeModal(\'userMgmtModal\')">بستن</button>';
-  openModal('userMgmtModal','👥 مدیریت کاربران','<div id="umWrap">'+_umBody()+'</div>',foot,{lg:true});
+  openModal('userMgmtModal','👥 مدیریت کاربران','<div id="umWrap" class="um-panel">'+_umBody()+'</div>',foot,{xl:true});
+  var box=document.querySelector('#mo_userMgmtModal .m-box');
+  if(box)box.classList.add('um-modal');
 }
 function openBulkReassign(){_UM_TAB='bulk';openUserMgmt();}
 function umTab(t){_UM_TAB=t;var w=document.getElementById('umWrap');if(w)w.innerHTML=_umBody();}
+function umUserSearch(val){
+  _UM_SEARCH=(val||'').trim().toLowerCase();
+  umRefreshUsersList();
+}
+function umUserFilter(status){
+  _UM_STATUS_FILTER=status||'all';
+  document.querySelectorAll('.um-filter').forEach(function(btn){
+    btn.classList.toggle('active', btn.getAttribute('data-filter')===_UM_STATUS_FILTER);
+  });
+  umRefreshUsersList();
+}
+function umRefreshUsersList(){
+  if(_UM_TAB!=='users')return;
+  var list=document.getElementById('umUsersList');
+  if(!list)return;
+  list.innerHTML=_umUsersRows();
+  var empty=document.getElementById('umUsersEmpty');
+  if(empty)empty.style.display=list.querySelector('tr')?'none':'block';
+}
 function _umTabs(){
   var tabs=[['users','👤 کاربران'],['provinces','🗺 استان‌ها'],['bulk','🔀 جابجایی']];
-  return '<div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid var(--border)">'
+  return '<div class="um-tabs">'
     +tabs.map(function(t){
-      var on=_UM_TAB===t[0];
-      return '<button onclick="umTab(\''+t[0]+'\')" style="padding:8px 18px;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:12.5px;font-weight:'+(on?700:400)+';color:'+(on?'var(--brand)':'var(--text-muted)')+';border-bottom:2.5px solid '+(on?'var(--brand)':'transparent')+';margin-bottom:-2px;transition:all .15s">'+t[1]+'</button>';
+      return '<button type="button" class="um-tab'+(_UM_TAB===t[0]?' active':'')+'" onclick="umTab(\''+t[0]+'\')">'+t[1]+'</button>';
     }).join('')+'</div>';
 }
 function _umBody(){
   return _umTabs()+(_UM_TAB==='users'?_umUsers():_UM_TAB==='provinces'?_umProvinces():_umBulk());
 }
-function _umUsers(){
+function _umUsersRows(){
   var members=umGetMembers().filter(function(m){return m.id!=='guest';});
-  var rows=members.map(function(m,i){
+  if(_UM_SEARCH){
+    members=members.filter(function(m){
+      return (m.name||'').toLowerCase().indexOf(_UM_SEARCH)>=0
+        ||(m.id||'').toLowerCase().indexOf(_UM_SEARCH)>=0
+        ||(m.phone||'').indexOf(_UM_SEARCH)>=0
+        ||(m.role||'').indexOf(_UM_SEARCH)>=0;
+    });
+  }
+  if(_UM_STATUS_FILTER==='active')members=members.filter(function(m){return m.active!==false;});
+  else if(_UM_STATUS_FILTER==='inactive')members=members.filter(function(m){return m.active===false;});
+  if(!members.length)return '';
+  return members.map(function(m,i){
     var active=m.active!==false;
     var centers=umCountCenters(m.id);
     var color=m.color||_UM_COLORS[i%_UM_COLORS.length];
-    var statusBg=active?'#dcfce7':'var(--bg-raised)';
-    var statusTxt=active?'#15803d':'var(--text-muted)';
-    var rowOp=active?1:.55;
     var roles=ALL_ROLES;
-    return '<tr style="opacity:'+rowOp+';border-bottom:1px solid var(--border)">'
-      +'<td style="padding:9px 8px;width:28px"><div id="umdot_'+m.id+'" style="width:16px;height:16px;border-radius:50%;background:'+color+';cursor:pointer;border:2px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,.15)" onclick="umPickColor(\''+m.id+'\',this)" title="تغییر رنگ"></div></td>'
-      +'<td style="padding:9px 6px"><input id="um_name_'+m.id+'" value="'+esc(m.name)+'" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 9px;font-size:12.5px;font-family:inherit;color:var(--text-primary);width:130px"></td>'
-      +(_isSuperAdmin()
-        ? '<td style="padding:9px 6px"><input id="um_id_'+m.id+'" value="'+esc(m.id)+'" dir="ltr" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 8px;font-size:11px;font-family:monospace;color:var(--text-primary);width:130px" placeholder="نام کاربری"></td>'
-        : '<td style="padding:9px 6px"><span dir="ltr" style="font-size:12px;font-family:monospace;color:var(--text-muted);padding:4px 8px;background:var(--bg-raised);border-radius:4px">'+esc(m.id)+'</span></td>')
-      +'<td style="padding:9px 6px"><select id="um_role_'+m.id+'" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 7px;font-size:12px;font-family:inherit;color:var(--text-primary)">'
+    var idCell=_isSuperAdmin()
+      ?'<input id="um_id_'+m.id+'" class="um-inp mono md" value="'+esc(m.id)+'" placeholder="نام کاربری">'
+      :'<span class="um-id-readonly">'+esc(m.id)+'</span>';
+    return '<tr class="'+(active?'':'um-inactive')+'">'
+      +'<td data-label=""><div id="umdot_'+m.id+'" class="um-dot" style="background:'+color+'" onclick="umPickColor(\''+m.id+'\',this)" title="تغییر رنگ"></div></td>'
+      +'<td data-label="نام"><input id="um_name_'+m.id+'" class="um-inp lg" value="'+esc(m.name)+'"></td>'
+      +'<td data-label="کد ورود">'+idCell+'</td>'
+      +'<td data-label="نقش"><select id="um_role_'+m.id+'" class="um-inp" style="min-width:110px">'
         +roles.map(function(r){return'<option'+(crmNormalizeRole(m.role)===r?' selected':'')+'>'+r+'</option>';}).join('')
       +'</select></td>'
-      +'<td style="padding:9px 6px"><select id="um_dept_'+m.id+'" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 7px;font-size:11px;font-family:inherit;color:var(--text-primary);max-width:95px">'
+      +'<td class="um-col-dept" data-label="دپارتمان"><select id="um_dept_'+m.id+'" class="um-inp sm">'
         +'<option value="">—</option>'
         +DEPARTMENTS.map(function(d){return'<option value="'+d+'"'+(m.department===d?' selected':'')+'>'+d+'</option>';}).join('')
       +'</select></td>'
-      +'<td style="padding:9px 6px"><input id="um_phone_'+m.id+'" value="'+esc(m.phone||'')+'" placeholder="09XXXXXXXXX" dir="ltr" style="background:var(--bg-input);border:1px solid var(--border-input);border-radius:5px;padding:5px 8px;font-size:11px;font-family:monospace;color:var(--text-primary);width:115px"></td>'
-      +'<td style="padding:9px 8px;text-align:center"><span style="font-size:11px;color:var(--text-muted)">🏥'+centers+'</span></td>'
-      +'<td style="padding:9px 8px;text-align:center">'
-        +'<span onclick="umToggleActive(\''+m.id+'\')" style="font-size:11px;background:'+statusBg+';color:'+statusTxt+';border-radius:20px;padding:3px 11px;cursor:pointer;font-weight:600;border:1px solid '+(active?'#86efac':'var(--border)')+'">'+( active?'● فعال':'○ غیرفعال')+'</span>'
+      +'<td class="um-col-phone" data-label="موبایل"><input id="um_phone_'+m.id+'" class="um-inp mono" value="'+esc(m.phone||'')+'" placeholder="09…"></td>'
+      +'<td data-label="مراکز"><span class="um-centers">🏥 '+centers+'</span></td>'
+      +'<td data-label="وضعیت">'
+        +'<span class="um-status '+(active?'on':'off')+'" onclick="umToggleActive(\''+m.id+'\')">'+(active?'● فعال':'○ غیرفعال')+'</span>'
       +'</td>'
-      +'<td style="padding:9px 6px;white-space:nowrap">'
-        +'<button onclick="umSaveUser(\''+m.id+'\')" title="ذخیره تغییرات" style="background:var(--brand-bg);color:var(--brand);border:1px solid var(--brand);border-radius:5px;padding:4px 10px;cursor:pointer;font-size:11px;font-family:inherit">💾 ذخیره</button> '
-        +'<button onclick="umResetPassword(\''+m.id+'\')" title="تغییر رمز" style="background:var(--bg-raised);color:var(--text-secondary);border:1px solid var(--border);border-radius:5px;padding:4px 8px;cursor:pointer;font-size:11px">🔑</button>'
-        +' <button onclick="umOpenPermissionsModal(\''+m.id+'\')" title="ویرایش دسترسی‌ها" style="background:#f5f3ff;color:#6d28d9;border:1px solid #c4b5fd;border-radius:5px;padding:4px 8px;cursor:pointer;font-size:11px">🛡 دسترسی‌ها</button>'
-        +(centers>0?' <button onclick="umReassignAll(\''+m.id+'\')" title="جابجایی مراکز" style="background:#fef9c3;color:#854d0e;border:1px solid #fcd34d;border-radius:5px;padding:4px 8px;cursor:pointer;font-size:11px">🔀</button>':'')
-      +'</td>'
+      +'<td class="um-td-actions" data-label="عملیات"><div class="um-actions">'
+        +'<button type="button" class="um-act um-act-save" onclick="umSaveUser(\''+m.id+'\')" title="ذخیره تغییرات">💾 ذخیره</button>'
+        +'<button type="button" class="um-act um-act-key" onclick="umResetPassword(\''+m.id+'\')" title="تغییر رمز">🔑</button>'
+        +'<button type="button" class="um-act um-act-perm" onclick="umOpenPermissionsModal(\''+m.id+'\')" title="دسترسی‌ها">🛡</button>'
+        +(centers>0?'<button type="button" class="um-act um-act-move" onclick="umReassignAll(\''+m.id+'\')" title="جابجایی مراکز">🔀</button>':'')
+      +'</div></td>'
     +'</tr>';
   }).join('');
-  return '<div style="background:var(--brand-bg);border:1px solid #bae6fd;border-radius:7px;padding:8px 14px;margin-bottom:12px;font-size:12px;color:var(--text-secondary)">'
-    +'💡 غیرفعال‌کردن کاربر داده‌هایش را حذف نمی‌کند. برای جانشینی از 🔀 استفاده کنید.</div>'
-    +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
-    +'<thead><tr style="background:var(--bg-raised)">'
-    +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600"></th>'
-    +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">نام</th>'
-    +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">کد ورود</th>'
-    +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">نقش</th>'
-    +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">دپارتمان</th>'
-    +'<th style="padding:8px;text-align:right;font-size:11px;color:var(--text-muted);font-weight:600">موبایل</th>'
-    +'<th style="padding:8px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600">مراکز</th>'
-    +'<th style="padding:8px;text-align:center;font-size:11px;color:var(--text-muted);font-weight:600">وضعیت</th>'
-    +'<th style="padding:8px;font-size:11px;color:var(--text-muted);font-weight:600">عملیات</th>'
-    +'</tr></thead><tbody>'+rows+'</tbody></table></div>'
-    +'<div style="display:flex;gap:8px;margin-top:12px">'
-    +'<button onclick="umAddUser()" style="background:#f0fdf4;color:#15803d;border:1px solid #86efac;border-radius:6px;padding:7px 16px;cursor:pointer;font-size:12px;font-family:inherit">+ افزودن کاربر</button>'
-    +'</div>';
+}
+function _umUsers(){
+  var all=umGetMembers().filter(function(m){return m.id!=='guest';});
+  var activeCount=all.filter(function(m){return m.active!==false;}).length;
+  var inactiveCount=all.length-activeCount;
+  var totalCenters=all.reduce(function(s,m){return s+umCountCenters(m.id);},0);
+  var noPhone=all.filter(function(m){return m.active!==false&&!((m.phone||'').trim());}).length;
+  var rows=_umUsersRows();
+  return '<div class="um-hint">💡 غیرفعال‌کردن کاربر داده‌هایش را حذف نمی‌کند. برای انتقال مراکز از 🔀 یا تب «جابجایی» استفاده کنید.</div>'
+    +(noPhone?'<div class="um-hint" style="background:#fef9c7;border-color:#fde68a;color:#92400e">⚠ '+noPhone+' کاربر فعال شماره موبایل ندارند — برای SMS مطالبات ثبت کنید.</div>':'')
+    +'<div class="um-stats">'
+    +'<div class="um-stat"><div class="um-stat-n">'+all.length+'</div><div class="um-stat-l">کل کاربران</div></div>'
+    +'<div class="um-stat"><div class="um-stat-n" style="color:#15803d">'+activeCount+'</div><div class="um-stat-l">فعال</div></div>'
+    +'<div class="um-stat"><div class="um-stat-n" style="color:#94a3b8">'+inactiveCount+'</div><div class="um-stat-l">غیرفعال</div></div>'
+    +'<div class="um-stat"><div class="um-stat-n" style="color:#0284c7">'+totalCenters+'</div><div class="um-stat-l">مجموع مراکز</div></div>'
+    +'</div>'
+    +'<div class="um-toolbar">'
+    +'<input type="search" id="umSearchInp" class="um-search" placeholder="جستجو: نام، کاربری، موبایل، نقش…" value="'+esc(_UM_SEARCH)+'" oninput="umUserSearch(this.value)">'
+    +'<div class="um-filters">'
+    +['all','active','inactive'].map(function(f){
+      var labels={all:'همه',active:'فعال',inactive:'غیرفعال'};
+      return '<button type="button" class="um-filter'+(_UM_STATUS_FILTER===f?' active':'')+'" data-filter="'+f+'" onclick="umUserFilter(\''+f+'\')">'+labels[f]+'</button>';
+    }).join('')
+  +'</div>'
+    +'<button type="button" class="um-add-btn" onclick="umAddUser()">+ افزودن کاربر</button>'
+    +'</div>'
+    +'<div class="um-table-wrap"><table class="um-table"><thead><tr>'
+    +'<th></th><th>نام</th><th>کد ورود</th><th>نقش</th><th class="um-col-dept">دپارتمان</th><th class="um-col-phone">موبایل</th>'
+    +'<th style="text-align:center">مراکز</th><th style="text-align:center">وضعیت</th><th style="text-align:left">عملیات</th>'
+    +'</tr></thead><tbody id="umUsersList">'+rows+'</tbody></table></div>'
+    +'<div id="umUsersEmpty" class="um-empty"'+(rows?' style="display:none"':'')+'>کاربری با این فیلتر یافت نشد</div>';
 }
 function _countCentersOf(userId){
   var n=0;
@@ -134,6 +179,8 @@ function executeBulkReassign(){
 // ══════════════════════════════════════════════════════════════
 
 var _UM_TAB = 'users';
+var _UM_SEARCH = '';
+var _UM_STATUS_FILTER = 'all';
 var _UM_COLORS = ['#0ea5e9','#8b5cf6','#22c55e','#f59e0b','#ef4444','#06b6d4','#ec4899','#f97316'];
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -712,6 +759,9 @@ function initSettings(){
   if(DB.settings.statusList&&DB.settings.statusList.length>=2)STATUS_LIST=DB.settings.statusList;
   if(DB.settings.leadList&&DB.settings.leadList.length>=2)LEAD_LIST=DB.settings.leadList;
   if(DB.settings.typeList&&DB.settings.typeList.length>=1)TYPE_LIST=DB.settings.typeList;
+  if(DB.settings.purchaseMethodList&&DB.settings.purchaseMethodList.length>=1)PURCHASE_METHOD_LIST=DB.settings.purchaseMethodList;
+  if(DB.settings.centerPaymentTermsList&&DB.settings.centerPaymentTermsList.length>=1)CENTER_PAYMENT_TERMS_LIST=DB.settings.centerPaymentTermsList;
+  if(DB.settings.shipMethodList&&DB.settings.shipMethodList.length>=1)SHIP_METHOD_LIST=DB.settings.shipMethodList;
   buildUSERS();
 }
 
@@ -818,6 +868,68 @@ function saveMasterCenters(centers){
 }
 function recK(type,id){return type+'_'+id;}
 function getE(type,id){return DB.edits[recK(type,id)]||{};}
+
+function _parseCompetitorNames(val) {
+  if (!val) return [];
+  if (Array.isArray(val)) {
+    return val.map(function(c) { return String(c).trim(); }).filter(function(c) { return c.length > 1; });
+  }
+  return String(val).split(/[,،/]+/).map(function(c) { return c.trim(); }).filter(function(c) { return c.length > 1; });
+}
+
+function getCenterCompetitorsFromEdit(e) {
+  e = e || {};
+  if (Array.isArray(e.competitors) && e.competitors.length) {
+    return _parseCompetitorNames(e.competitors);
+  }
+  return _parseCompetitorNames(e.competitor);
+}
+
+function getCenterCompetitors(rtype, rid) {
+  return getCenterCompetitorsFromEdit(getE(rtype, rid));
+}
+
+function setCenterCompetitors(rtype, rid, list, modalId) {
+  var k = recK(rtype, rid);
+  if (!DB.edits[k]) DB.edits[k] = {};
+  var seen = {};
+  var cleaned = (list || []).map(function(c) { return String(c).trim(); }).filter(function(c) {
+    if (c.length <= 1) return false;
+    var low = c.toLowerCase();
+    if (seen[low]) return false;
+    seen[low] = true;
+    return true;
+  });
+  var joined = cleaned.join('، ');
+  if (!_undoSuppressed) {
+    DB.changeLog = DB.changeLog || [];
+    DB.changeLog.push({ at: new Date().toISOString(), by: currentUser, rkey: k, field: 'competitors', val: cleaned });
+    if (DB.changeLog.length > 500) DB.changeLog = DB.changeLog.slice(-500);
+    fetch('/api/changelog', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+      body: JSON.stringify({ at: new Date().toISOString(), by: currentUser, rkey: k, field: 'competitors', val: cleaned })
+    }).catch(function() {});
+  }
+  DB.edits[k].competitors = cleaned;
+  DB.edits[k].competitor = joined;
+  DB.edits[k]._ts = nowTs();
+  _invalidateEditsCache();
+  if (typeof savePatchDB === 'function') {
+    var patch = {}; patch[k] = DB.edits[k];
+    savePatchDB({ edits: patch });
+  } else if (typeof patchCenterField === 'function') {
+    patchCenterField(k, 'competitors', cleaned, { centerName: _getCenterName(rtype, rid) }).catch(function() { saveDB(); });
+    patchCenterField(k, 'competitor', joined, { centerName: _getCenterName(rtype, rid) }).catch(function() {});
+  } else {
+    saveDB();
+  }
+  if (modalId && typeof _cmRefreshCompetitorChips === 'function') {
+    _cmRefreshCompetitorChips(rtype, rid, modalId);
+  }
+}
+window.getCenterCompetitors = getCenterCompetitors;
+window.getCenterCompetitorsFromEdit = getCenterCompetitorsFromEdit;
+window.setCenterCompetitors = setCenterCompetitors;
+
 function _getCenterName(type,id){
   var _over=(DB.edits[recK(type,id)]||{}).nameOverride;if(_over)return _over;
   if(type==='center'){var c=CENTERS.find(function(x){return String(x.id)===String(id);});if(c)return c.name;}

@@ -519,7 +519,7 @@ function openPreCallBrief(rtype,rid){
     +'<div><span style="color:var(--text-muted)">وضعیت: </span><strong>'+(e.status||'بدون تماس')+'</strong></div>'
     +'<div><span style="color:var(--text-muted)">پتانسیل: </span><strong>P'+(e.potential||r.potential||'؟')+'</strong></div>'
     +'<div><span style="color:var(--text-muted)">پیگیری: </span><strong style="color:'+((e.followupDate&&e.followupDate<td)?'#dc2626':'#16a34a')+'">'+( e.followupDate||'—')+'</strong></div>'
-    +'<div><span style="color:var(--text-muted)">رقیب: </span><strong>'+(e.competitor||'ثبت نشده')+'</strong></div>'
+    +'<div><span style="color:var(--text-muted)">رقبا: </span><strong>'+(function(){var c=typeof getCenterCompetitorsFromEdit==='function'?getCenterCompetitorsFromEdit(e):[];return c.length?c.join('، '):'ثبت نشده';})()+'</strong></div>'
     +'</div>'+(e.address?'<div style="margin-top:6px;font-size:11px"><span style="color:var(--text-muted)">آدرس: </span>'+esc(e.address)+'</div>':'')+'</div>';
   if(notes.length){
     body+='<div style="background:var(--bg-raised);border-radius:8px;padding:10px 12px;border:1px solid var(--border)">'

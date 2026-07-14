@@ -1415,6 +1415,9 @@ async function initSchema() {
       avg_score          DECIMAL(5,2),
       gate_passed        BOOLEAN,
       hygiene_bonus      DECIMAL(15,2) DEFAULT 0,
+      final_score        DECIMAL(5,2),
+      dimensions         JSONB,
+      targets            JSONB,
       finalized          BOOLEAN DEFAULT false,
       finalized_at       TIMESTAMPTZ,
       notes              TEXT,
@@ -1437,6 +1440,7 @@ async function initSchema() {
       achieved_at  TEXT,
       approved_by  TEXT,
       notes        TEXT,
+      jalali_month TEXT,
       created_at   TIMESTAMPTZ DEFAULT NOW()
     )
   `);
@@ -1591,6 +1595,9 @@ async function initSchema() {
       software_count INT DEFAULT 0,
       discrepancies TEXT DEFAULT '',
       resolved BOOLEAN DEFAULT false,
+      wms_sku_count INT DEFAULT 0,
+      wms_total_qty INT DEFAULT 0,
+      wms_synced_at TIMESTAMPTZ,
       notes TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(employee, jalali_month)

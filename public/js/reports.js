@@ -364,28 +364,59 @@
   // ── 4. رقبا ────────────────────────────────────────────────────────────────
 
   function _rCompetitor(cont) {
-    cont.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:40px">⏳ بارگذاری از SQL...</p>';
-    fetch('/api/reports/competitor')
+    cont.innerHTML = '<div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+      + '<input id="rptCompSearch" type="text" placeholder="جستجوی رقیب..." style="flex:1;min-width:200px;padding:8px 12px;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px">'
+      + '<button onclick="_rCompetitorSearch()" style="padding:8px 16px;background:var(--brand,#6366f1);color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:inherit;font-size:13px">🔍 جستجو</button>'
+      + '<button onclick="_rCompetitor(document.getElementById(\'rContent\'))" style="padding:8px 12px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-family:inherit;font-size:12px">↻ همه</button>'
+      + '</div><p style="text-align:center;color:#9ca3af;padding:30px">⏳ بارگذاری از SQL...</p>';
+    _rCompetitorLoad(cont, '');
+  }
+
+  window._rCompetitorSearch = function() {
+    var inp = document.getElementById('rptCompSearch');
+    var cont = document.getElementById('rContent');
+    if (!cont) return;
+    _rCompetitorLoad(cont, inp ? inp.value.trim() : '');
+  };
+
+  function _rCompetitorLoad(cont, search) {
+    var url = '/api/reports/competitor' + (search ? '?search=' + encodeURIComponent(search) : '');
+    fetch(url)
       .then(function(res) { return res.ok ? res.json() : Promise.reject(new Error('API error')); })
       .then(function(data) {
         var rows = data.rows || [];
+        var searchBar = '<div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+          + '<input id="rptCompSearch" type="text" value="' + esc(search || '') + '" placeholder="جستجوی رقیب..." style="flex:1;min-width:200px;padding:8px 12px;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:13px" onkeydown="if(event.key===\'Enter\')_rCompetitorSearch()">'
+          + '<button onclick="_rCompetitorSearch()" style="padding:8px 16px;background:var(--brand,#6366f1);color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:inherit;font-size:13px">🔍 جستجو</button>'
+          + '<button onclick="_rCompetitor(document.getElementById(\'rContent\'))" style="padding:8px 12px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-family:inherit;font-size:12px">↻ همه</button>'
+          + '</div>';
         if (!rows.length) {
-          cont.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:40px">هنوز رقیبی ثبت نشده</p>';
+          cont.innerHTML = searchBar + '<p style="text-align:center;color:#9ca3af;padding:40px">' + (search ? 'رقیبی با این نام یافت نشد' : 'هنوز رقیبی ثبت نشده') + '</p>';
           return;
         }
         var totalCenters = rows.reduce(function(s, r) { return s + (parseInt(r.cnt) || 0); }, 0);
         var maxCount = parseInt(rows[0].cnt) || 1;
         var colors = ['#ef4444','#f97316','#f59e0b','#84cc16','#06b6d4','#6366f1','#8b5cf6','#ec4899'];
-        var html = '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">' +
-          _card('رقبای شناسایی‌شده', _fmtNum(rows.length), 'منبع: SQL', '#ef4444') +
-          _card('مراکز با رقیب', _fmtNum(totalCenters), 'از center_edits', '#f97316') +
+        var html = searchBar + '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">' +
+          _card('رقبای شناسایی‌شده', _fmtNum(rows.length), search ? 'فیلتر: ' + search : 'منبع: SQL', '#ef4444') +
+          _card('مراکز با رقیب', _fmtNum(totalCenters), 'هر رقیب جدا شمارش', '#f97316') +
           _card('پرتکرارترین', rows[0].competitor || '—', (rows[0].cnt || 0) + ' مرکز', '#8b5cf6') +
           '</div>';
-        html += _section('رتبه‌بندی رقبا (SQL)',
+        html += _section('رتبه‌بندی رقبا' + (search ? ' — «' + esc(search) + '»' : ''),
           rows.slice(0, 15).map(function(row, i) {
             var cnt = parseInt(row.cnt) || 0;
             var pct = Math.round((cnt / maxCount) * 100);
-            return _barRow(row.competitor || '—', pct, colors[i % colors.length], cnt + ' مرکز');
+            var centers = Array.isArray(row.centers) ? row.centers : [];
+            var centersHtml = centers.slice(0, 8).map(function(c) {
+              var parts = (c.centerKey || '').split('_');
+              var rt = parts[0] || 'pc';
+              var rid = parts.slice(1).join('_');
+              return '<a href="#" onclick="openCenterModal(\'' + rt + '\',\'' + rid + '\');return false;" style="display:inline-block;margin:2px 4px 2px 0;padding:2px 8px;background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;border-radius:6px;font-size:10px;text-decoration:none">' + esc(c.centerName || c.centerKey) + '</a>';
+            }).join('') + (centers.length > 8 ? '<span style="font-size:10px;color:#94a3b8"> +' + (centers.length - 8) + ' مرکز دیگر</span>' : '');
+            return '<div style="margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #f1f5f9">'
+              + _barRow(row.competitor || '—', pct, colors[i % colors.length], cnt + ' مرکز')
+              + (centersHtml ? '<div style="margin-top:6px;line-height:1.8">' + centersHtml + '</div>' : '')
+              + '</div>';
           }).join(''));
         html += '<button onclick="exportTableToXlsx(\'rptCompTbl\',\'competitor-report\')" style="margin-top:10px;padding:6px 14px;background:#ecfdf5;color:#15803d;border:1px solid #86efac;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px">📥 خروجی Excel</button>';
         html += '<table id="rptCompTbl" style="display:none"><thead><tr><th>رقیب</th><th>تعداد</th></tr></thead><tbody>' +
@@ -1011,10 +1042,16 @@
         var grandComm  = rows.reduce(function(s,r){ return s + parseFloat(r.commission_amount||0); }, 0);
 
         var tbody = rows.map(function(r){
+          var kpiInfo = r.kpi_score != null
+            ? '<div style="font-size:.72rem;color:#6366f1">KPI: ' + r.kpi_score + (r.kpi_gate_passed ? ' ✓' : '') + '</div>'
+            : '';
           return '<tr style="border-bottom:1px solid #f1f5f9">' +
-            '<td style="padding:8px 12px;font-weight:600">' + esc(r.display_name||r.employee) + '</td>' +
-            '<td style="padding:8px 12px;color:#6b7280;font-size:.82rem">' + esc(r.department||'—') + '</td>' +
+            '<td style="padding:8px 12px;font-weight:600">' + esc(r.display_name||r.employee) +
+              (r.employee_type === 'trade' ? ' <span style="font-size:.7rem;background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:4px">بازرگانی</span>' : '') +
+            '</td>' +
+            '<td style="padding:8px 12px;color:#6b7280;font-size:.82rem">' + esc(r.department||'—') + kpiInfo + '</td>' +
             '<td style="padding:8px 12px;text-align:left;direction:ltr">' + _fmtMoney(r.base_salary) + '</td>' +
+            '<td style="padding:8px 12px;text-align:left;direction:ltr;color:#0ea5e9">' + _fmtMoney(r.kpi_bonus) + '</td>' +
             '<td style="padding:8px 12px;text-align:left;direction:ltr;color:#6366f1">' + _fmtMoney(r.sales_total) + '</td>' +
             '<td style="padding:8px 12px;text-align:left;direction:ltr">' + (r.commission_pct||0) + '٪</td>' +
             '<td style="padding:8px 12px;text-align:left;direction:ltr;color:#10b981">' + _fmtMoney(r.commission_amount) + '</td>' +
@@ -1034,6 +1071,7 @@
               '<th style="padding:8px 12px;text-align:right;font-size:.8rem">نام</th>' +
               '<th style="padding:8px 12px;text-align:right;font-size:.8rem">دپارتمان</th>' +
               '<th style="padding:8px 12px;text-align:left;font-size:.8rem">حقوق ثابت</th>' +
+              '<th style="padding:8px 12px;text-align:left;font-size:.8rem">پاداش KPI</th>' +
               '<th style="padding:8px 12px;text-align:left;font-size:.8rem">فروش ماه</th>' +
               '<th style="padding:8px 12px;text-align:left;font-size:.8rem">نرخ</th>' +
               '<th style="padding:8px 12px;text-align:left;font-size:.8rem">پورسانت</th>' +

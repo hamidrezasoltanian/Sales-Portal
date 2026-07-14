@@ -130,6 +130,7 @@ router.post('/', requireAuth, requirePermission('tasks', 'edit'), async function
       ]
     );
     res.status(201).json(rowToObj(result.rows[0]));
+    try { require('../lib/inbox-hooks').onTaskChange(id); } catch (_) {}
   } catch (e) {
     if (e.code === '23505') {
       return res.status(409).json({ error: 'وظیفه با این شناسه قبلاً ثبت شده' });
@@ -201,6 +202,7 @@ router.put('/:id', requireAuth, requirePermission('tasks', 'edit'), async functi
       return res.status(404).json({ error: 'وظیفه یافت نشد' });
     }
     res.json(rowToObj(result.rows[0]));
+    try { require('../lib/inbox-hooks').onTaskChange(req.params.id); } catch (_) {}
   } catch (e) {
     console.error('[tasks PUT /:id]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
@@ -217,6 +219,7 @@ router.delete('/:id', requireAuth, requirePermission('tasks', 'edit'), async fun
       return res.status(404).json({ error: 'وظیفه یافت نشد' });
     }
     res.json({ ok: true });
+    try { require('../lib/inbox-hooks').onTaskDelete(req.params.id); } catch (_) {}
   } catch (e) {
     console.error('[tasks DELETE /:id]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
@@ -281,6 +284,8 @@ router.post('/:id/done', requireAuth, requirePermission('tasks', 'edit'), async 
     }
 
     res.json(obj);
+    try { require('../lib/inbox-hooks').onTaskChange(req.params.id); } catch (_) {}
+    if (obj.nextTaskId) try { require('../lib/inbox-hooks').onTaskChange(obj.nextTaskId); } catch (_) {}
   } catch (e) {
     console.error('[tasks POST /:id/done]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });

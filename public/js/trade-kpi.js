@@ -14,6 +14,7 @@
   var _tkMonth = '';
   var _tkScore = null;
   var _tkTargets = null;
+  var _tkMonthRecord = null;
 
   // ── Date helpers ───────────────────────────────────────────────────────────
   function _tkCurrentMonth() {
@@ -140,6 +141,7 @@
 
     var tabs = [
       { id: 'score',     icon: '📊', label: 'نمره KPI' },
+      { id: 'history',   icon: '📈', label: 'تاریخچه' },
       { id: 'kanban',    icon: '📌', label: 'وظایف' },
       { id: 'customs',   icon: '📦', label: 'ترخیص' },
       { id: 'report',    icon: '📋', label: 'گزارش روزانه' },
@@ -147,7 +149,9 @@
       { id: 'supplier',  icon: '🔍', label: 'تامین‌کننده' },
       { id: 'finance',   icon: '💰', label: 'بهبود مالی' },
       { id: 'team',      icon: '👥', label: 'تیمی' },
-      { id: 'warehouse', icon: '🏭', label: 'انبار' }
+      { id: 'warehouse', icon: '🏭', label: 'انبار' },
+      { id: 'milestones', icon: '🏆', label: 'پاداش پروژه' },
+      { id: 'deductions', icon: '➖', label: 'کسورات' }
     ];
 
     var tabBtns = tabs.map(function(t) {
@@ -198,11 +202,15 @@
       _tkAPI('GET', '/targets/' + emp + '/' + mon).catch(function() { return null; })
     ];
 
-    if (_tkTab === 'customs') promises.push(_tkAPI('GET', '/clearances/' + emp + '/' + mon).catch(function() { return []; }));
+    if (_tkTab === 'score' || _tkTab === 'history') {
+      promises.push(_tkAPI('GET', '/kpi-history/' + emp).catch(function() { return []; }));
+    } else if (_tkTab === 'customs') promises.push(_tkAPI('GET', '/clearances/' + emp + '/' + mon).catch(function() { return []; }));
     else if (_tkTab === 'report') promises.push(_tkAPI('GET', '/reports/' + emp + '/' + mon).catch(function() { return []; }));
     else if (_tkTab === 'supplier') promises.push(_tkAPI('GET', '/suppliers/' + emp + '/' + mon).catch(function() { return []; }));
     else if (_tkTab === 'finance') promises.push(_tkAPI('GET', '/finance/' + emp + '/' + mon).catch(function() { return []; }));
     else if (_tkTab === 'warehouse') promises.push(_tkAPI('GET', '/warehouse/' + emp + '/' + mon).catch(function() { return null; }));
+    else if (_tkTab === 'milestones') promises.push(_tkAPI('GET', '/milestones?employee=' + emp).catch(function() { return []; }));
+    else if (_tkTab === 'deductions') promises.push(_tkAPI('GET', '/deductions/' + emp + '/' + mon).catch(function() { return []; }));
     else if (_tkTab === 'kanban' || _tkTab === 'admin' || _tkTab === 'team') promises.push(_tkAPI('GET', '/tasks').catch(function() { return []; }));
 
     Promise.all(promises).then(function(res) {
@@ -210,7 +218,11 @@
       _tkTargets = res[1] || _tkDefaultTargets();
       var extra = res[2];
 
-      if (_tkTab === 'score') _tkRenderScore(cont);
+      if (_tkTab === 'score') {
+        var hist = extra || [];
+        _tkMonthRecord = hist.find(function(h) { return h.month === _tkMonth; }) || null;
+        _tkRenderScore(cont);
+      } else if (_tkTab === 'history') _tkRenderHistory(cont, extra || []);
       else if (_tkTab === 'kanban') _tkRenderKanban(cont, extra || []);
       else if (_tkTab === 'customs') _tkRenderCustoms(cont, extra || []);
       else if (_tkTab === 'report') _tkRenderReport(cont, extra || []);
@@ -219,6 +231,8 @@
       else if (_tkTab === 'warehouse') _tkRenderWarehouse(cont, extra);
       else if (_tkTab === 'admin') _tkRenderAdmin(cont, extra || []);
       else if (_tkTab === 'team') _tkRenderTeam(cont, extra || []);
+      else if (_tkTab === 'milestones') _tkRenderMilestones(cont, extra || []);
+      else if (_tkTab === 'deductions') _tkRenderDeductions(cont, extra || []);
     }).catch(function(e) {
       cont.innerHTML = '<div style="color:#ef4444;padding:20px">خطا: ' + esc(e.message) + '</div>';
     });
@@ -239,7 +253,10 @@
 
     var dims = sc.dimensions || {};
     var final = sc.final || 0;
+    var rawFinal = sc.rawFinal != null ? sc.rawFinal : final;
+    var deductions = sc.deductions || 0;
     var color = _tkScoreColor(final);
+    var isFinalized = _tkMonthRecord && _tkMonthRecord.finalized;
 
     var dimRows = [
       { key: 'customs',   icon: '📦', label: 'ترخیص گمرکی',   d: dims.customs,
@@ -260,10 +277,19 @@
           : '❌ ثبت نشده' }
     ];
 
-    var html = '<div style="background:#fff;border-radius:16px;padding:24px;border:1px solid #e2e8f0;margin-bottom:16px;text-align:center">' +
-      '<div style="font-size:.9rem;color:#6b7280;margin-bottom:8px">نمره کلی · ' + _tkMonth + '</div>' +
+    var html = '';
+    if (isFinalized) {
+      html += '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:.88rem;color:#065f46">' +
+        '🔒 این ماه نهایی شده · نمره قفل‌شده: <b>' + (_tkMonthRecord.final_score || final) + '</b>' +
+        (_tkMonthRecord.finalized_at ? ' · ' + String(_tkMonthRecord.finalized_at).slice(0, 10) : '') +
+        '</div>';
+    }
+
+    html += '<div style="background:#fff;border-radius:16px;padding:24px;border:1px solid #e2e8f0;margin-bottom:16px;text-align:center">' +
+      '<div style="font-size:.9rem;color:#6b7280;margin-bottom:8px">نمره کلی · ' + _tkMonth + (isFinalized ? ' (قفل)' : ' (زنده)') + '</div>' +
       '<div style="font-size:3.5rem;font-weight:800;color:' + color + '">' + final + '</div>' +
-      '<div style="font-size:.85rem;color:#9ca3af;margin-bottom:16px">از ۱۰۰</div>' +
+      '<div style="font-size:.85rem;color:#9ca3af;margin-bottom:8px">از ۱۰۰</div>' +
+      (deductions > 0 ? '<div style="font-size:.8rem;color:#ef4444;margin-bottom:8px">شامل ' + deductions + ' امتیاز کسر · خام: ' + rawFinal + '</div>' : '') +
       '<div style="max-width:400px;margin:0 auto">' + _tkBar(final) + '</div>' +
       (final >= 80
         ? '<div style="margin-top:12px;color:#10b981;font-size:.9rem">✅ آستانه پاداش (۸۰) تکمیل شد</div>'
@@ -296,10 +322,18 @@
     html += '<div style="background:#f8fafc;border-radius:12px;padding:14px;border:1px solid #e2e8f0;font-size:.8rem;color:#64748b;margin-bottom:16px">' +
       '<b>📐 نحوه محاسبه:</b> نمره هر شاخص = (واقعی ÷ هدف) × ۱۰۰ · ' +
       'نمره کلی = جمع (نمره × وزن) ÷ مجموع وزن‌ها · ' +
-      'برای ترخیص: اگر میانگین روزها بیشتر از هدف باشد، نمره کاهش می‌یابد' +
+      'برای ترخیص: اگر میانگین روزها بیشتر از هدف باشد، نمره کاهش می‌یابد · کسورات مدیر از نمره نهایی کم می‌شود' +
       '</div>';
 
     if (_tkIsManager()) {
+      if (!isFinalized) {
+        html += '<div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e2e8f0;margin-bottom:16px">' +
+          '<h3 style="margin:0 0 10px;font-size:.9rem;font-weight:600">🔒 نهایی‌سازی ماه</h3>' +
+          '<p style="margin:0 0 12px;font-size:.8rem;color:#6b7280">پس از نهایی‌سازی، نمره قفل می‌شود و در payroll قابل استفاده است.</p>' +
+          '<textarea id="tk_finalize_notes" rows="2" placeholder="یادداشت مدیر (اختیاری)..." style="' + _tkTextareaStyle() + '"></textarea>' +
+          '<button onclick="window._tkFinalizeMonth()" style="margin-top:10px;padding:8px 18px;background:#10b981;color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:inherit;font-size:.88rem">نهایی‌سازی ' + _tkMonth + '</button>' +
+          '</div>';
+      }
       html += '<div id="tkTargetsWrap">' + _tkTargetsForm() + '</div>';
     }
 
@@ -718,6 +752,17 @@
 
     var d = data || {};
     html += '<div style="background:#fff;border-radius:12px;padding:20px;border:1px solid #e2e8f0">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">' +
+        '<span style="font-size:.88rem;font-weight:600;color:#374151">مقایسه موجودی ماهانه</span>' +
+        '<button onclick="window._tkImportWms()" style="padding:6px 12px;background:#0ea5e9;color:#fff;border:none;border-radius:7px;cursor:pointer;font-family:inherit;font-size:.8rem">📥 بارگذاری از WMS</button>' +
+      '</div>';
+    if (d.wms_synced_at) {
+      html += '<div style="font-size:.78rem;color:#0369a1;background:#f0f9ff;border-radius:8px;padding:8px 10px;margin-bottom:12px">' +
+        'آخرین sync WMS: ' + String(d.wms_synced_at).slice(0, 16).replace('T', ' ') +
+        ' · ' + (d.wms_sku_count || 0) + ' قلم · ' + (d.wms_total_qty || 0) + ' واحد' +
+        '</div>';
+    }
+    html +=
       '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin-bottom:16px">' +
         '<div><label style="font-size:.8rem;color:#6b7280;display:block;margin-bottom:4px">📄 اداره کل (مجازی)</label>' +
         '<input id="tkw_gov" type="number" value="' + (d.gov_count || 0) + '" style="' + _tkInputStyle('100%') + '"></div>' +
@@ -750,6 +795,27 @@
       .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
   };
 
+  window._tkImportWms = function() {
+    _tkAPI('GET', '/warehouse-wms-snapshot')
+      .then(function(snap) {
+        var gov = parseInt((document.getElementById('tkw_gov') || {}).value) || 0;
+        var real = parseInt((document.getElementById('tkw_real') || {}).value) || 0;
+        return _tkAPI('PUT', '/warehouse/' + encodeURIComponent(_tkEmployee) + '/' + encodeURIComponent(_tkMonth), {
+          gov_count: gov,
+          real_count: real || snap.total_qty,
+          software_count: snap.total_qty,
+          discrepancies: (document.getElementById('tkw_disc') || {}).value.trim(),
+          resolved: !!(document.getElementById('tkw_resolved') || {}).checked,
+          import_wms: true
+        }).then(function() { return snap; });
+      })
+      .then(function(snap) {
+        if (typeof showToast === 'function') showToast('✅ WMS: ' + snap.sku_count + ' قلم، ' + snap.total_qty + ' واحد');
+        _tkLoadAndRender();
+      })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
   // ── Admin tasks ────────────────────────────────────────────────────────────
   function _tkRenderAdmin(cont, tasks) {
     var dim = _tkScore && _tkScore.dimensions && _tkScore.dimensions.admin;
@@ -757,7 +823,7 @@
       'وظایف اداری این کارشناس که در سیستم تخصیص داده شده‌اند. وظایف تکمیل‌شده در نمره محاسبه می‌شوند.');
     var myTasks = tasks.filter(function(t) { return t.assigned_to === _tkEmployee; });
     var adminTasks = myTasks.filter(function(t) {
-      return t.category === 'admin' || t.category === 'پیگیری اداری' || !t.category;
+      return !t.category || t.category === 'admin' || t.category === 'پیگیری اداری' || t.category === 'بازرگانی';
     });
     if (!adminTasks.length) {
       html += '<div style="text-align:center;padding:30px;color:#9ca3af;background:#f8fafc;border-radius:12px">' +
@@ -799,5 +865,191 @@
     html += '</div>';
     cont.innerHTML = html;
   }
+
+  // ── KPI History ────────────────────────────────────────────────────────────
+  function _tkRenderHistory(cont, list) {
+    if (!list.length) {
+      cont.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;background:#f8fafc;border-radius:12px">هنوز ماهی نهایی نشده</div>';
+      return;
+    }
+    var html = '<div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e2e8f0">' +
+      '<h3 style="margin:0 0 14px;font-size:.95rem;font-weight:600">📈 تاریخچه ۶ ماه اخیر</h3>';
+    list.forEach(function(row) {
+      var score = row.final_score != null ? parseFloat(row.final_score) : parseFloat(row.avg_score);
+      if (isNaN(score)) score = 0;
+      var color = _tkScoreColor(score);
+      var active = row.month === _tkMonth;
+      html += '<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #f1f5f9;cursor:pointer' + (active ? ';background:#f8fafc;margin:0 -8px;padding-left:8px;padding-right:8px;border-radius:8px' : '') + '" onclick="window._tkSetMonth(\'' + row.month + '\');window._tkSetTab(\'score\')">' +
+        '<div style="min-width:72px;font-size:.88rem;font-weight:700;color:#374151">' + row.month + '</div>' +
+        '<div style="flex:1">' + _tkBar(score) + '</div>' +
+        '<div style="min-width:48px;font-size:1rem;font-weight:800;color:' + color + ';text-align:left">' + score + '</div>' +
+        '<div style="min-width:80px;font-size:.75rem;text-align:left">' +
+          (row.finalized ? (row.gate_passed ? '<span style="color:#10b981">✅ پاداش</span>' : '<span style="color:#f59e0b">🔒 قفل</span>') : '<span style="color:#9ca3af">—</span>') +
+        '</div>' +
+        '</div>';
+    });
+    html += '</div>';
+    cont.innerHTML = html;
+  }
+
+  window._tkFinalizeMonth = function() {
+    if (!_tkIsManager() || !_tkEmployee || !_tkMonth) return;
+    if (!confirm('ماه ' + _tkMonth + ' برای ' + _tkEmployee + ' نهایی شود؟')) return;
+    var notes = (document.getElementById('tk_finalize_notes') || {}).value.trim();
+    _tkAPI('POST', '/finalize/' + encodeURIComponent(_tkEmployee) + '/' + encodeURIComponent(_tkMonth), { notes: notes || null })
+      .then(function(r) {
+        if (typeof showToast === 'function') showToast('✅ ماه نهایی شد · نمره: ' + (r.score && r.score.final));
+        _tkLoadAndRender();
+      })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  // ── Milestones ─────────────────────────────────────────────────────────────
+  var _TK_MS_TYPES = {
+    clearance: 'ترخیص', sourcing: 'تامین', cost_save: 'صرفه‌جویی', project: 'پروژه', other: 'سایر'
+  };
+  var _TK_MS_STATUS = {
+    pending: { label: 'در انتظار', color: '#f59e0b' },
+    approved: { label: 'تأیید شده', color: '#10b981' },
+    paid: { label: 'پرداخت شده', color: '#6366f1' }
+  };
+
+  function _tkRenderMilestones(cont, list) {
+    var html = '<div style="background:#f8fafc;border-radius:12px;padding:14px;border:1px solid #e2e8f0;margin-bottom:14px;font-size:.8rem;color:#64748b">' +
+      'دستاوردهای بزرگ (ترخیص موفق، سورسینگ مهم، صرفه‌جویی قابل توجه) با پاداش جداگانه ثبت می‌شوند.</div>';
+
+    html += '<div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e2e8f0;margin-bottom:14px">' +
+      '<h4 style="margin:0 0 12px;font-size:.9rem">+ ثبت دستاورد</h4>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">' +
+        '<div style="flex:2;min-width:180px"><label style="font-size:.75rem;color:#6b7280;display:block;margin-bottom:3px">عنوان</label>' +
+        '<input id="tkms_title" placeholder="مثلاً: ترخیص محموله X" style="' + _tkInputStyle('100%') + '"></div>' +
+        '<div><label style="font-size:.75rem;color:#6b7280;display:block;margin-bottom:3px">نوع</label>' +
+        '<select id="tkms_type" style="' + _tkInputStyle(120) + '">' +
+        Object.keys(_TK_MS_TYPES).map(function(k) { return '<option value="' + k + '">' + _TK_MS_TYPES[k] + '</option>'; }).join('') +
+        '</select></div>' +
+        '<div><label style="font-size:.75rem;color:#6b7280;display:block;margin-bottom:3px">پاداش (ریال)</label>' +
+        '<input id="tkms_bonus" type="number" placeholder="0" style="' + _tkInputStyle(120) + '"></div>' +
+        '<button onclick="window._tkAddMilestone()" style="' + _tkBtnStyle() + '">ثبت</button>' +
+      '</div></div>';
+
+    if (!list.length) {
+      html += '<div style="text-align:center;padding:30px;color:#9ca3af;background:#f8fafc;border-radius:12px">هنوز دستاوردی ثبت نشده</div>';
+    } else {
+      html += list.map(function(m) {
+        var st = _TK_MS_STATUS[m.status] || _TK_MS_STATUS.pending;
+        return '<div style="background:#fff;border-radius:10px;padding:14px;border:1px solid #e2e8f0;margin-bottom:8px">' +
+          '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap">' +
+            '<div>' +
+              '<div style="font-size:.9rem;font-weight:600">' + esc(m.title) + '</div>' +
+              '<div style="font-size:.78rem;color:#6b7280;margin-top:3px">' +
+                (_TK_MS_TYPES[m.project_type] || m.project_type) +
+                (m.bonus_amount ? ' · ' + _tkFmt(m.bonus_amount) + ' ریال' : '') +
+              '</div>' +
+            '</div>' +
+            '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
+              '<span style="font-size:.75rem;color:' + st.color + ';background:' + st.color + '18;padding:3px 10px;border-radius:99px">' + st.label + '</span>' +
+              (_tkIsManager() && m.status === 'pending' ? '<button onclick="window._tkApproveMilestone(\'' + m.id + '\')" style="padding:4px 10px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;font-size:.75rem">تأیید</button>' : '') +
+              (_tkIsManager() && m.status === 'approved' ? '<button onclick="window._tkPayMilestone(\'' + m.id + '\')" style="padding:4px 10px;background:#6366f1;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;font-size:.75rem">پرداخت</button>' : '') +
+              (_tkIsManager() ? '<button onclick="window._tkDelMilestone(\'' + m.id + '\')" style="border:none;background:none;cursor:pointer;color:#ef4444;font-size:.8rem">حذف</button>' : '') +
+            '</div>' +
+          '</div></div>';
+      }).join('');
+    }
+    cont.innerHTML = html;
+  }
+
+  window._tkAddMilestone = function() {
+    var title = (document.getElementById('tkms_title') || {}).value.trim();
+    var project_type = (document.getElementById('tkms_type') || {}).value;
+    var bonus = parseFloat((document.getElementById('tkms_bonus') || {}).value) || 0;
+    if (!title) { if (typeof showToast === 'function') showToast('عنوان الزامی است'); return; }
+    _tkAPI('POST', '/milestones', { employee: _tkEmployee, project_type: project_type, title: title, bonus_amount: bonus, jalali_month: _tkMonth })
+      .then(function() { _tkLoadAndRender(); })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  window._tkApproveMilestone = function(id) {
+    _tkAPI('PUT', '/milestones/' + id, { status: 'approved' })
+      .then(function() { _tkLoadAndRender(); })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  window._tkPayMilestone = function(id) {
+    _tkAPI('PUT', '/milestones/' + id, { status: 'paid' })
+      .then(function() { _tkLoadAndRender(); })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  window._tkDelMilestone = function(id) {
+    if (!confirm('حذف شود؟')) return;
+    _tkAPI('DELETE', '/milestones/' + id)
+      .then(function() { _tkLoadAndRender(); })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  // ── Deductions ─────────────────────────────────────────────────────────────
+  var _TK_INDICATORS = {
+    customs: 'ترخیص', report: 'گزارش روزانه', admin: 'پیگیری اداری',
+    supplier: 'تامین‌کننده', finance: 'بهبود مالی', team: 'تیمی',
+    warehouse: 'انبار', general: 'عمومی'
+  };
+
+  function _tkRenderDeductions(cont, list) {
+    var total = list.reduce(function(s, d) { return s + (parseInt(d.points) || 0); }, 0);
+    var html = '<div style="background:#fef2f2;border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:.85rem;color:#991b1b">' +
+      'جمع کسورات این ماه: <b>' + total + '</b> امتیاز · از نمره نهایی کم می‌شود</div>';
+
+    if (_tkIsManager()) {
+      html += '<div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e2e8f0;margin-bottom:14px">' +
+        '<h4 style="margin:0 0 12px;font-size:.9rem">+ ثبت کسر امتیاز</h4>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">' +
+          '<div><label style="font-size:.75rem;color:#6b7280;display:block;margin-bottom:3px">شاخص</label>' +
+          '<select id="tkd_ind" style="' + _tkInputStyle(130) + '">' +
+          Object.keys(_TK_INDICATORS).map(function(k) { return '<option value="' + k + '">' + _TK_INDICATORS[k] + '</option>'; }).join('') +
+          '</select></div>' +
+          '<div><label style="font-size:.75rem;color:#6b7280;display:block;margin-bottom:3px">امتیاز کسر</label>' +
+          '<input id="tkd_pts" type="number" min="1" max="100" value="5" style="' + _tkInputStyle(70) + '"></div>' +
+          '<div style="flex:2;min-width:180px"><label style="font-size:.75rem;color:#6b7280;display:block;margin-bottom:3px">دلیل</label>' +
+          '<input id="tkd_reason" placeholder="توضیح کوتاه..." style="' + _tkInputStyle('100%') + '"></div>' +
+          '<button onclick="window._tkAddDeduction()" style="padding:7px 14px;background:#ef4444;color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:inherit;font-size:.85rem">ثبت کسر</button>' +
+        '</div></div>';
+    } else {
+      html += '<div style="font-size:.8rem;color:#6b7280;margin-bottom:12px">کسورات فقط توسط مدیر ثبت می‌شود.</div>';
+    }
+
+    if (!list.length) {
+      html += '<div style="text-align:center;padding:30px;color:#9ca3af;background:#f8fafc;border-radius:12px">کسوراتی ثبت نشده</div>';
+    } else {
+      html += list.map(function(d) {
+        return '<div style="background:#fff;border-radius:10px;padding:12px 14px;border:1px solid #fee2e2;margin-bottom:8px">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
+            '<div>' +
+              '<div style="font-size:.88rem;font-weight:600;color:#991b1b">−' + d.points + ' امتیاز · ' + (_TK_INDICATORS[d.indicator] || d.indicator) + '</div>' +
+              '<div style="font-size:.78rem;color:#6b7280;margin-top:2px">' + esc(d.reason) + '</div>' +
+              '<div style="font-size:.72rem;color:#9ca3af;margin-top:2px">ثبت: ' + esc(d.registered_by || '') + '</div>' +
+            '</div>' +
+            (_tkIsManager() ? '<button onclick="window._tkDelDeduction(\'' + d.id + '\')" style="border:none;background:none;cursor:pointer;color:#ef4444;font-size:.8rem">حذف</button>' : '') +
+          '</div></div>';
+      }).join('');
+    }
+    cont.innerHTML = html;
+  }
+
+  window._tkAddDeduction = function() {
+    var indicator = (document.getElementById('tkd_ind') || {}).value;
+    var points = parseInt((document.getElementById('tkd_pts') || {}).value) || 0;
+    var reason = (document.getElementById('tkd_reason') || {}).value.trim();
+    if (!reason) { if (typeof showToast === 'function') showToast('دلیل الزامی است'); return; }
+    _tkAPI('POST', '/deductions', { employee: _tkEmployee, month: _tkMonth, indicator: indicator, points: points, reason: reason })
+      .then(function() { if (typeof showToast === 'function') showToast('✅ کسر ثبت شد'); _tkLoadAndRender(); window._tkSetTab('score'); })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  window._tkDelDeduction = function(id) {
+    if (!confirm('کسر حذف شود؟')) return;
+    _tkAPI('DELETE', '/deductions/' + id)
+      .then(function() { _tkLoadAndRender(); })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
 
 })();

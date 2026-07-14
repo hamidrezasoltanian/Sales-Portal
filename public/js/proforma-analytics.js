@@ -75,6 +75,40 @@ function _pfApplyPreset(preset) {
   if (el) _renderPfPanel(el);
 }
 
+function _pfGetChannelMap() {
+  if (typeof DB !== 'undefined' && DB.settings && DB.settings.pfChannels && typeof DB.settings.pfChannels === 'object' && Object.keys(DB.settings.pfChannels).length) {
+    return Object.assign({}, DB.settings.pfChannels);
+  }
+  return Object.assign({}, PF_CHANNELS);
+}
+
+function _pfGetPaymentTermsMap() {
+  if (typeof DB !== 'undefined' && DB.settings && DB.settings.pfPaymentTerms && typeof DB.settings.pfPaymentTerms === 'object' && Object.keys(DB.settings.pfPaymentTerms).length) {
+    return Object.assign({}, DB.settings.pfPaymentTerms);
+  }
+  return Object.assign({}, PF_PAYMENT_TERMS);
+}
+
+function _pfMapToLines(map) {
+  return Object.keys(map).map(function(k) { return k + '|' + map[k]; }).join('\n');
+}
+
+function _pfLinesToMap(text, fallback) {
+  var map = {};
+  (text || '').split('\n').forEach(function(line) {
+    line = line.trim();
+    if (!line) return;
+    var pipe = line.indexOf('|');
+    if (pipe > 0) {
+      map[line.slice(0, pipe).trim()] = line.slice(pipe + 1).trim();
+    } else {
+      var key = 'opt_' + Object.keys(map).length;
+      map[key] = line;
+    }
+  });
+  return Object.keys(map).length ? map : Object.assign({}, fallback);
+}
+
 function _pfComputeExpiry(pf) {
   if (pf.expiryDate) return pf.expiryDate;
   if (!pf.jalaliDate || !pf.validDays) return '';
@@ -144,8 +178,8 @@ function _pfClearAllFilters() {
 
 function _pfBuildAdvancedFilterBar() {
   var chOpts = '<option value="">همه کانال‌ها</option>' +
-    Object.keys(PF_CHANNELS).map(function(k) {
-      return '<option value="' + k + '"' + (_pfChannelF === k ? ' selected' : '') + '>' + PF_CHANNELS[k] + '</option>';
+    Object.keys(_pfGetChannelMap()).map(function(k) {
+      return '<option value="' + k + '"' + (_pfChannelF === k ? ' selected' : '') + '>' + _pfGetChannelMap()[k] + '</option>';
     }).join('');
   var saved = _pfLoadSavedFilters();
   var savedOpts = saved.map(function(p, i) {
@@ -277,8 +311,8 @@ function pfExportFiltered() {
       'مبلغ': pf.total,
       'وضعیت': _pfStatusLabel(pf.status),
       'مسئول': _pfGetResponsibleName(pf),
-      'کانال': PF_CHANNELS[pf.channel] || pf.channel || '',
-      'شرایط پرداخت': PF_PAYMENT_TERMS[pf.paymentTerms] || pf.paymentTerms || '',
+      'کانال': (_pfGetChannelMap()[pf.channel] || pf.channel || ''),
+      'شرایط پرداخت': (_pfGetPaymentTermsMap()[pf.paymentTerms] || pf.paymentTerms || ''),
       'ردیف کالا': (pf.items || []).length,
     };
   });

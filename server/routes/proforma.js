@@ -895,117 +895,17 @@ router.post('/:id/action', requireAuth, async (req, res) => {
     const d = validate(ActionSchema, req.body, res);
     if (!d) return;
 
-    const existing = await query('SELECT * FROM proformas WHERE id = $1', [req.params.id]);
-    if (!existing.rows.length) return res.status(404).json({ error: 'پیشفاکتور یافت نشد' });
-    const pf = existing.rows[0];
-
-    if (!canViewProforma(req.user, pf)) {
-      return res.status(403).json({ error: 'دسترسی ندارید' });
-    }
-
-    const allowed = TRANSITIONS[pf.status] || [];
-    if (!allowed.includes(d.action)) {
-      return res.status(400).json({
-        error: `عملیات '${d.action}' در وضعیت '${pf.status}' مجاز نیست`,
-      });
-    }
-
-    const isManager = isManagerRole(req.user.role);
-    const isOwner   = pf.created_by === req.user.username;
-
-    if (d.action === 'send' && !isOwner && !isManager) {
-      return res.status(403).json({ error: 'فقط سازنده می‌تواند ارسال کند' });
-    }
-    if (d.action === 'cancel' && !isOwner && !isManager) {
-      return res.status(403).json({ error: 'دسترسی ندارید' });
-    }
-    if (d.action === 'reopen' && !isOwner && !isManager) {
-      return res.status(403).json({ error: 'دسترسی ندارید' });
-    }
-
-    let updateSQL = '';
-    let params    = [];
-
-    const caps = await loadDiscountCaps();
-    const pfObj = rowToObj(pf);
-
-    if (d.action === 'send') {
-      const overCap = exceedsDiscountCap(pfObj, req.user.role, caps);
-      if (overCap) {
-        updateSQL = `SET status='pending_disc', updated_at=NOW(), manager_note=$2 WHERE id=$1`;
-        params    = [req.params.id, 'تخفیف ' + maxDiscountPct(pfObj) + '٪ — سقف مجاز ' + getDiscountCap(req.user.role, caps) + '٪'];
-      } else {
-        updateSQL = `SET status='sent', sent_at=NOW(), updated_at=NOW() WHERE id=$1`;
-        params    = [req.params.id];
-      }
-    } else if (d.action === 'approve_disc') {
-      if (!canApproveDiscount(req.user)) return res.status(403).json({ error: 'فقط مدیر یا مالی می‌تواند تخفیف را تأیید کند' });
-      updateSQL = `SET status='sent', sent_at=NOW(), updated_at=NOW(), manager_note=COALESCE(NULLIF($2,''), manager_note) WHERE id=$1`;
-      params    = [req.params.id, d.note || 'تأیید تخفیف'];
-    } else if (d.action === 'reject_disc') {
-      if (!canApproveDiscount(req.user)) return res.status(403).json({ error: 'فقط مدیر یا مالی' });
-      updateSQL = `SET status='draft', updated_at=NOW(), manager_note=$2 WHERE id=$1`;
-      params    = [req.params.id, d.note || 'رد تخفیف — بازگشت به پیش‌نویس'];
-    } else if (d.action === 'negotiate') {
-      if (!isManager && !isOwner) return res.status(403).json({ error: 'دسترسی ندارید' });
-      updateSQL = `SET status='negotiating', updated_at=NOW(), manager_note=COALESCE(NULLIF($2,''), manager_note) WHERE id=$1`;
-      params    = [req.params.id, d.note || ''];
-    } else if (d.action === 'approve') {
-      if (!isManager) return res.status(403).json({ error: 'فقط مدیر می‌تواند تأیید کند' });
-      updateSQL = `SET status='approved', responded_at=NOW(), responded_by=$2, manager_note=$3, updated_at=NOW() WHERE id=$1`;
-      params    = [req.params.id, req.user.username, d.note];
-    } else if (d.action === 'reject') {
-      if (!isManager) return res.status(403).json({ error: 'فقط مدیر می‌تواند رد کند' });
-      if (!d.lossReason) return res.status(400).json({ error: 'دلیل رد الزامی است' });
-      updateSQL = `SET status='rejected', responded_at=NOW(), responded_by=$2, manager_note=$3, loss_reason=$4, loss_competitor=$5, updated_at=NOW() WHERE id=$1`;
-      params    = [req.params.id, req.user.username, d.note, d.lossReason, d.lossCompetitor || ''];
-    } else if (d.action === 'expire') {
-      if (!isManager) return res.status(403).json({ error: 'فقط مدیر' });
-      updateSQL = `SET status='expired', updated_at=NOW() WHERE id=$1`;
-      params    = [req.params.id];
-    } else if (d.action === 'cancel') {
-      updateSQL = `SET status='cancelled', updated_at=NOW() WHERE id=$1`;
-      params    = [req.params.id];
-    } else if (d.action === 'reopen') {
-      updateSQL = `SET status='draft', responded_at=NULL, responded_by=NULL, manager_note='', loss_reason=NULL, loss_competitor=NULL, updated_at=NOW() WHERE id=$1`;
-      params    = [req.params.id];
-    }
-
-    const r = await query(`UPDATE proformas ${updateSQL} RETURNING *`, params);
-
-    const updated = rowToObj(r.rows[0]);
-    await appendAuditLog(req.params.id, {
-      action: d.action, by: req.user.username,
-      from: pf.status, to: updated.status, note: d.note || '',
-      lossReason: d.lossReason || '', lossCompetitor: d.lossCompetitor || '',
+    const { executeProformaAction } = require('../lib/proforma-action');
+    const result = await executeProformaAction(req.params.id, d.action, req.user, {
+      note: d.note || '',
+      lossReason: d.lossReason || '',
+      lossCompetitor: d.lossCompetitor || '',
     });
-    await appendProformaEvent(req.params.id, 'status_' + d.action, req.user.username, d.note || '', {
-      from: pf.status, to: updated.status, lossReason: d.lossReason || '',
-    });
-
-    res.json(updated);
-
-    // Push Telegram notifications (non-blocking, only if enabled in settings)
-    try {
-      const settingsRow = await query("SELECT value FROM app_settings WHERE key = 'telegramNotify'");
-      const notifyEnabled = !settingsRow.rows.length || settingsRow.rows[0].value !== false;
-      if (!notifyEnabled) throw new Error('telegram notify disabled');
-      const bot = require('../bot/telegram');
-      if (d.action === 'send' && updated.status === 'sent') {
-        const msg = '📄 پیشفاکتور ' + updated.no + ' از ' + req.user.username +
-          ' در انتظار تأیید است.\n💰 مبلغ: ' + Number(updated.total).toLocaleString('fa-IR') + ' ﷼\n👤 مشتری: ' + (updated.centerName || '—');
-        bot.notifyManagers(msg).catch(function(){});
-      } else if (d.action === 'send' && updated.status === 'pending_disc') {
-        const msg = '⚠️ پیشفاکتور ' + updated.no + ' — تخفیف ' + maxDiscountPct(updated) + '٪ نیاز به تأیید مدیر/مالی دارد\n👤 ' + req.user.username;
-        bot.notifyManagers(msg).catch(function(){});
-        if (bot.notifyFinance) bot.notifyFinance(msg).catch(function(){});
-      } else if (d.action === 'approve' || d.action === 'reject') {
-        const label = d.action === 'approve' ? '✅ تأیید شد' : '❌ رد شد';
-        const msg   = '📄 پیشفاکتور ' + updated.no + ' ' + label + ' توسط ' + req.user.username +
-          (d.note ? '\n📝 ' + d.note : '');
-        bot.notifyAll(msg).catch(function(){});
-      }
-    } catch(e) {}
+    if (!result.ok) {
+      return res.status(result.status).json({ error: result.error });
+    }
+    res.json(result.proforma);
+    try { require('../lib/inbox-hooks').onProformaChange(req.params.id); } catch (_) {}
   } catch(e) {
     console.error('[proforma action]', e.message);
     res.status(500).json({ error: 'خطای سرور' });

@@ -3,6 +3,12 @@ const express = require('express');
 const { query } = require('../db');
 const { requirePermission } = require('../permissions');
 const { requireAuth } = require('../auth');
+const { jalaliToDate } = require('../lib/wms-jalali');
+const {
+  calcTradeHygieneBonus,
+  getCommissionSettings,
+  getWmsInventorySnapshot,
+} = require('../lib/trade-payroll');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -15,6 +21,25 @@ function isManager(role) { return ['مدیر', 'سوپر ادمین'].includes(r
 function isSuperAdmin(role) { return role === 'سوپر ادمین' || role === 'مدیر'; }
 function canAccessTrade(role) { return ['مدیر', 'سوپر ادمین', 'بازرگانی', 'کارشناس بازرگانی'].includes(role); }
 function uid(prefix) { return (prefix || 't') + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6); }
+
+const TRADE_ADMIN_CATEGORIES = ['admin', 'پیگیری اداری', 'بازرگانی'];
+
+function jalaliDaysInclusive(startStr, endStr) {
+  const start = jalaliToDate(startStr);
+  const end = jalaliToDate(endStr);
+  if (!start || !end) return null;
+  const diff = Math.round((end.getTime() - start.getTime()) / 86400000);
+  return Math.max(1, diff + 1);
+}
+
+async function computeClearanceActualDays(clearanceId, endDate, clientDays) {
+  const rowR = await query('SELECT start_date, end_date FROM trade_clearances WHERE id=$1', [clearanceId]);
+  if (!rowR.rows.length) return clientDays || null;
+  const row = rowR.rows[0];
+  const end = endDate || row.end_date;
+  if (!row.start_date || !end) return clientDays || null;
+  return jalaliDaysInclusive(row.start_date, end);
+}
 
 // ── Score Calculation ────────────────────────────────────────────────────────
 async function calcScore(employee, month, targets) {
@@ -50,8 +75,8 @@ async function calcScore(employee, month, targets) {
             COUNT(CASE WHEN status='done' OR completed_at IS NOT NULL THEN 1 END) AS done
      FROM trade_tasks WHERE assigned_to=$1
      AND (LEFT(deadline,7)=$2 OR LEFT(created_at::text,7)=$3)
-     AND (category='admin' OR category='پیگیری اداری' OR category IS NULL)`,
-    [employee, monthDash, monthDash]
+     AND (category = ANY($4) OR category IS NULL)`,
+    [employee, monthDash, monthDash, TRADE_ADMIN_CATEGORIES]
   );
   const adminDone = parseInt(adminTasksR.rows[0] && adminTasksR.rows[0].done) || 0;
   const adminScore = targets.admin_target > 0
@@ -111,8 +136,18 @@ async function calcScore(employee, month, targets) {
       warehouseScore * parseFloat(w.warehouse_weight)) / totalWeight
   ) : 0;
 
+  const dedR = await query(
+    'SELECT COALESCE(SUM(points),0) AS total FROM trade_kpi_deductions WHERE employee=$1 AND month=$2',
+    [employee, month]
+  );
+  const deductions = parseInt(dedR.rows[0] && dedR.rows[0].total) || 0;
+  const rawFinal = Math.round(finalScore * 10) / 10;
+  const adjustedFinal = Math.max(0, Math.round((rawFinal - deductions) * 10) / 10);
+
   return {
-    final: Math.round(finalScore * 10) / 10,
+    final: adjustedFinal,
+    rawFinal: rawFinal,
+    deductions: deductions,
     dimensions: {
       customs: {
         score: Math.round(customsScore),
@@ -265,9 +300,17 @@ router.put('/settings', requireAuth, async function(req, res) {
 router.get('/milestones', requireAuth, async function(req, res) {
   try {
     const user = req.user;
-    const { rows } = isManager(user.role)
-      ? await query('SELECT * FROM trade_milestones ORDER BY created_at DESC')
-      : await query('SELECT * FROM trade_milestones WHERE employee=$1 ORDER BY created_at DESC', [user.username]);
+    const filterEmp = req.query.employee;
+    let rows;
+    if (isManager(user.role)) {
+      if (filterEmp) {
+        rows = (await query('SELECT * FROM trade_milestones WHERE employee=$1 ORDER BY created_at DESC', [filterEmp])).rows;
+      } else {
+        rows = (await query('SELECT * FROM trade_milestones ORDER BY created_at DESC')).rows;
+      }
+    } else {
+      rows = (await query('SELECT * FROM trade_milestones WHERE employee=$1 ORDER BY created_at DESC', [user.username])).rows;
+    }
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -275,14 +318,14 @@ router.get('/milestones', requireAuth, async function(req, res) {
 router.post('/milestones', requireAuth, async function(req, res) {
   try {
     const user = req.user;
-    const { employee, project_type, title, description, metric_value, metric_unit, bonus_amount, achieved_at, notes } = req.body;
+    const { employee, project_type, title, description, metric_value, metric_unit, bonus_amount, achieved_at, notes, jalali_month } = req.body;
     if (!project_type || !title) return res.status(400).json({ error: 'اطلاعات ناقص' });
     const emp = isManager(user.role) ? (employee || user.username) : user.username;
     const id = uid('ms');
     await query(
-      `INSERT INTO trade_milestones (id,employee,project_type,title,description,metric_value,metric_unit,bonus_amount,achieved_at,notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [id, emp, project_type, title, description || null, metric_value || null, metric_unit || null, bonus_amount || null, achieved_at || null, notes || null]
+      `INSERT INTO trade_milestones (id,employee,project_type,title,description,metric_value,metric_unit,bonus_amount,achieved_at,notes,jalali_month)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [id, emp, project_type, title, description || null, metric_value || null, metric_unit || null, bonus_amount || null, achieved_at || null, notes || null, jalali_month || null]
     );
     res.json({ ok: true, id });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -334,18 +377,22 @@ router.post('/finalize/:employee/:month', requireAuth, async function(req, res) 
     const tgR = await query('SELECT * FROM trade_kpi_targets WHERE employee=$1 AND month=$2', [employee, month]);
     const tg = tgR.rows[0] || defaultTargets();
     const scoreData = await calcScore(employee, month, tg);
+    const settings = await getCommissionSettings();
+    const userR = await query('SELECT salary_amount FROM app_users WHERE username=$1', [employee]);
+    const baseSalary = parseFloat(userR.rows[0] && userR.rows[0].salary_amount) || 0;
+    const hygieneBonus = calcTradeHygieneBonus(baseSalary, scoreData.final, settings.kpi_threshold);
     const id = uid('kpim');
     await query(
-      `INSERT INTO trade_kpi_monthly (id,employee,month,final_score,dimensions,targets,gate_passed,finalized,finalized_at,notes)
-       VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,true,NOW(),$8)
+      `INSERT INTO trade_kpi_monthly (id,employee,month,final_score,avg_score,dimensions,targets,gate_passed,hygiene_bonus,finalized,finalized_at,notes)
+       VALUES ($1,$2,$3,$4,$4,$5::jsonb,$6::jsonb,$7,$8,true,NOW(),$9)
        ON CONFLICT (employee,month) DO UPDATE SET
-         final_score=$4,dimensions=$5::jsonb,targets=$6::jsonb,
-         gate_passed=$7,finalized=true,finalized_at=NOW(),notes=$8`,
+         final_score=$4,avg_score=$4,dimensions=$5::jsonb,targets=$6::jsonb,
+         gate_passed=$7,hygiene_bonus=$8,finalized=true,finalized_at=NOW(),notes=$9`,
       [id, employee, month, scoreData.final,
         JSON.stringify(scoreData.dimensions), JSON.stringify(tg),
-        scoreData.final >= 80, notes || null]
+        scoreData.final >= (parseFloat(settings.kpi_threshold) || 80), hygieneBonus, notes || null]
     );
-    res.json({ ok: true, score: scoreData });
+    res.json({ ok: true, score: scoreData, hygiene_bonus: hygieneBonus });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -435,15 +482,10 @@ router.post('/clearances', requireAuth, async function(req, res) {
 
 router.put('/clearances/:id', requireAuth, async function(req, res) {
   try {
-    const { status, end_date, actual_days, notes } = req.body;
-    // Auto-calculate actual_days if completing and start/end known
-    let days = actual_days || null;
-    if (!days && status === 'completed' && end_date) {
-      const rowR = await query('SELECT start_date FROM trade_clearances WHERE id=$1', [req.params.id]);
-      if (rowR.rows[0] && rowR.rows[0].start_date) {
-        // Both are Jalali YYYY/MM/DD strings — approximate via days between
-        // Simple approach: pass actual_days from client; if not provided, leave null
-      }
+    const { status, end_date, notes } = req.body;
+    let days = null;
+    if (status === 'completed') {
+      days = await computeClearanceActualDays(req.params.id, end_date || null, null);
     }
     await query(
       `UPDATE trade_clearances SET
@@ -452,7 +494,7 @@ router.put('/clearances/:id', requireAuth, async function(req, res) {
        WHERE id=$5`,
       [status || null, end_date || null, days, notes || null, req.params.id]
     );
-    res.json({ ok: true });
+    res.json({ ok: true, actual_days: days });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -628,16 +670,42 @@ router.get('/warehouse/:employee/:month', requireAuth, async function(req, res) 
 router.put('/warehouse/:employee/:month', requireAuth, async function(req, res) {
   try {
     const { employee, month } = req.params;
-    const { gov_count, real_count, software_count, discrepancies, resolved } = req.body;
+    const { gov_count, real_count, software_count, discrepancies, resolved, import_wms } = req.body;
+    let soft = software_count || 0;
+    let wmsSku = 0;
+    let wmsQty = 0;
+    let wmsSyncedAt = null;
+    if (import_wms) {
+      const snap = await getWmsInventorySnapshot();
+      wmsSku = parseInt(snap.sku_count) || 0;
+      wmsQty = parseInt(snap.total_qty) || 0;
+      soft = wmsQty;
+      wmsSyncedAt = new Date();
+    }
     const id = 'wrec_' + employee + '_' + month.replace('/', '_');
     await query(
-      `INSERT INTO trade_warehouse_rec (id,employee,jalali_month,gov_count,real_count,software_count,discrepancies,resolved)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      `INSERT INTO trade_warehouse_rec (id,employee,jalali_month,gov_count,real_count,software_count,discrepancies,resolved,wms_sku_count,wms_total_qty,wms_synced_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        ON CONFLICT (employee,jalali_month) DO UPDATE SET
-         gov_count=$4,real_count=$5,software_count=$6,discrepancies=$7,resolved=$8`,
-      [id, employee, month, gov_count || 0, real_count || 0, software_count || 0, discrepancies || '', resolved || false]
+         gov_count=$4,real_count=$5,software_count=$6,discrepancies=$7,resolved=$8,
+         wms_sku_count=COALESCE($9, trade_warehouse_rec.wms_sku_count),
+         wms_total_qty=COALESCE($10, trade_warehouse_rec.wms_total_qty),
+         wms_synced_at=COALESCE($11, trade_warehouse_rec.wms_synced_at)`,
+      [id, employee, month, gov_count || 0, real_count || 0, soft, discrepancies || '', resolved || false,
+        import_wms ? wmsSku : null, import_wms ? wmsQty : null, wmsSyncedAt]
     );
-    res.json({ ok: true });
+    res.json({ ok: true, wms: import_wms ? { sku_count: wmsSku, total_qty: wmsQty } : null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/warehouse-wms-snapshot', requireAuth, async function(req, res) {
+  try {
+    const snap = await getWmsInventorySnapshot();
+    res.json({
+      sku_count: parseInt(snap.sku_count) || 0,
+      total_qty: parseInt(snap.total_qty) || 0,
+      synced_at: new Date().toISOString(),
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -648,6 +716,49 @@ router.get('/employees', requireAuth, async function(req, res) {
       "SELECT username, display_name FROM app_users WHERE active=true ORDER BY display_name"
     );
     res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── KPI Deductions ───────────────────────────────────────────────────────────
+router.get('/deductions/:employee/:month', requireAuth, async function(req, res) {
+  try {
+    const { employee, month } = req.params;
+    if (!isManager(req.user.role) && req.user.username !== employee) {
+      return res.status(403).json({ error: 'دسترسی ندارید' });
+    }
+    const { rows } = await query(
+      'SELECT * FROM trade_kpi_deductions WHERE employee=$1 AND month=$2 ORDER BY created_at DESC',
+      [employee, month]
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/deductions', requireAuth, async function(req, res) {
+  try {
+    if (!isManager(req.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
+    const { employee, month, indicator, points, reason, ref_task_id } = req.body;
+    if (!employee || !month || !indicator || !points || !reason) {
+      return res.status(400).json({ error: 'فیلدهای الزامی ناقص است' });
+    }
+    const pts = parseInt(points, 10);
+    if (!pts || pts < 1 || pts > 100) return res.status(400).json({ error: 'امتیاز کسر باید بین ۱ تا ۱۰۰ باشد' });
+    const id = uid('ded');
+    await query(
+      `INSERT INTO trade_kpi_deductions (id, employee, month, indicator, points, reason, ref_task_id, registered_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [id, employee, month, indicator, pts, reason, ref_task_id || null, req.user.username]
+    );
+    const { rows } = await query('SELECT * FROM trade_kpi_deductions WHERE id=$1', [id]);
+    res.status(201).json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/deductions/:id', requireAuth, async function(req, res) {
+  try {
+    if (!isManager(req.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
+    await query('DELETE FROM trade_kpi_deductions WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

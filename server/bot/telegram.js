@@ -670,7 +670,7 @@ async function doCompleteEntry(chatId, sess, key, outcome, note, nextDate, cente
     await client.query('COMMIT');
 
     // Notify all open web tabs to reload data
-    try { require('./routes/events').broadcast('db-updated', { by: sess.username + ':bot' }); } catch(_) {}
+    try { require('../routes/events').broadcast('db-updated', { by: sess.username + ':bot' }); } catch(_) {}
     if (outcome === 'followup' && nextDate && rid) {
       const newKey = nextDate + ':::' + rkey;
       await query(
@@ -1066,7 +1066,7 @@ async function handleCallback(cb) {
          ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW(), updated_by = $3`,
         [key, JSON.stringify(value), sess.username]
       );
-      try { require('./routes/events').broadcast('db-updated', { by: sess.username + ':bot' }); } catch(_) {}
+      try { require('../routes/events').broadcast('db-updated', { by: sess.username + ':bot' }); } catch(_) {}
       const actLabel = actionType === 'call' ? '📞 تماس تلفنی' : '🚗 بازدید حضوری';
       await sendMsg(chatId,
         '✅ <b>اضافه شد به برنامه!</b>\n\n' +
@@ -1286,7 +1286,7 @@ async function handleCallback(cb) {
          ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW(), updated_by = $3`,
         [key, JSON.stringify(value), sess.username]
       );
-      try { require('./routes/events').broadcast('db-updated', { by: sess.username + ':bot' }); } catch(_) {}
+      try { require('../routes/events').broadcast('db-updated', { by: sess.username + ':bot' }); } catch(_) {}
       const dayLabel = dayOff === 0 ? 'امروز' : dayOff === 1 ? 'فردا' : date;
       await sendMsg(chatId, '✅ <b>' + center.name + '</b>\n📅 اضافه شد به برنامه ' + dayLabel + ' (' + date + ')\n' + (actType === 'call' ? '📞 تماس' : '🚗 بازدید'), { reply_markup: menuFor(sess) });
     } catch(e) {
@@ -1509,67 +1509,63 @@ async function handleCallback(cb) {
 
 // ── Proforma actions ──────────────────────────────────────────────────────
 async function doApprovePf(chatId, msgId, pfId, sess) {
-  const r = await query(
-    `UPDATE proformas SET status='approved', responded_at=NOW(), responded_by=$2, updated_at=NOW()
-     WHERE id=$1 AND status='sent' RETURNING *`,
-    [pfId, sess.username]
-  );
-  if (!r.rows.length) { await sendMsg(chatId, '⚠️ این پیشفاکتور قابل تأیید نیست.'); return; }
-  const pf = r.rows[0];
-  try {
-    const { createDispatchFromProforma } = require('../lib/wms-dispatch');
-    const dispatch = await createDispatchFromProforma({
-      id: pf.id, no: pf.no, centerName: pf.center_name, items: pf.items,
-    }, sess.username);
-    if (dispatch.transactionIds && dispatch.transactionIds.length) {
-      await sendMsg(chatId, '📦 ' + dispatch.transactionIds.length + ' حواله انبار صادر شد (در انتظار تأیید WMS).');
-    }
-  } catch (e) {
-    console.error('[telegram approve dispatch]', e.message);
+  const { executeProformaAction } = require('../lib/proforma-action');
+  const result = await executeProformaAction(pfId, 'approve', { username: sess.username, role: sess.role }, { skipTelegram: true });
+  if (!result.ok) {
+    await sendMsg(chatId, '⚠️ ' + result.error);
+    return;
+  }
+  const pf = result.proforma;
+  if (result.dispatch && result.dispatch.transactionIds && result.dispatch.transactionIds.length) {
+    await sendMsg(chatId, '📦 ' + result.dispatch.transactionIds.length + ' حواله انبار صادر شد (در انتظار تأیید WMS).');
   }
   await editMsg(chatId, msgId,
     '✅ <b>پیشفاکتور ' + pf.no + ' تأیید شد.</b>\n' +
-    '👤 مشتری: ' + (pf.center_name || '—') + '\n' +
+    '👤 مشتری: ' + (pf.centerName || '—') + '\n' +
     '💰 مبلغ: ' + fmtN(pf.total) + ' ﷼\n' +
     '👑 تأیید: ' + sess.name
   );
-  await notifyUser(pf.created_by, '✅ پیشفاکتور ' + pf.no + ' توسط ' + sess.name + ' تأیید شد.');
+  await notifyUser(pf.createdBy, '✅ پیشفاکتور ' + pf.no + ' توسط ' + sess.name + ' تأیید شد.');
 }
 
 async function doRejectPf(chatId, pfId, note, sess) {
   const managerNote = (note === '-' ? '' : note);
-  const r = await query(
-    `UPDATE proformas SET status='rejected', responded_at=NOW(), responded_by=$2, manager_note=$3, updated_at=NOW()
-     WHERE id=$1 AND status='sent' RETURNING *`,
-    [pfId, sess.username, managerNote]
-  );
-  if (!r.rows.length) { await sendMsg(chatId, '⚠️ این پیشفاکتور قابل رد نیست.', { reply_markup: menuFor(sess) }); return; }
-  const pf = r.rows[0];
+  const { executeProformaAction } = require('../lib/proforma-action');
+  const result = await executeProformaAction(pfId, 'reject', { username: sess.username, role: sess.role }, {
+    note: managerNote,
+    lossReason: 'other',
+    lossCompetitor: '',
+    skipTelegram: true,
+  });
+  if (!result.ok) {
+    await sendMsg(chatId, '⚠️ ' + result.error, { reply_markup: menuFor(sess) });
+    return;
+  }
+  const pf = result.proforma;
   await sendMsg(chatId,
     '❌ <b>پیشفاکتور ' + pf.no + ' رد شد.</b>' + (managerNote ? '\n📝 دلیل: ' + managerNote : ''),
     { reply_markup: menuFor(sess) }
   );
-  await notifyUser(pf.created_by,
+  await notifyUser(pf.createdBy,
     '❌ پیشفاکتور ' + pf.no + ' رد شد.' + (managerNote ? '\nدلیل: ' + managerNote : '')
   );
 }
 
 async function doSendPf(chatId, msgId, pfId, sess) {
-  const r = await query(
-    `UPDATE proformas SET status='sent', sent_at=NOW(), updated_at=NOW()
-     WHERE id=$1 AND status='draft' AND created_by=$2 RETURNING *`,
-    [pfId, sess.username]
-  );
-  if (!r.rows.length) { await sendMsg(chatId, '⚠️ این پیشفاکتور قبلاً ارسال شده.'); return; }
-  const pf = r.rows[0];
+  const { executeProformaAction } = require('../lib/proforma-action');
+  const result = await executeProformaAction(pfId, 'send', { username: sess.username, role: sess.role }, {});
+  if (!result.ok) {
+    await sendMsg(chatId, '⚠️ ' + result.error);
+    return;
+  }
+  const pf = result.proforma;
+  const statusMsg = pf.status === 'pending_disc'
+    ? '📤 <b>پیشفاکتور ' + pf.no + ' ارسال شد — در انتظار تأیید تخفیف</b>'
+    : '📤 <b>پیشفاکتور ' + pf.no + ' برای تأیید ارسال شد.</b>';
   await editMsg(chatId, msgId,
-    '📤 <b>پیشفاکتور ' + pf.no + ' برای تأیید ارسال شد.</b>\n' +
-    '👤 مشتری: ' + (pf.center_name || '—') + '\n' +
+    statusMsg + '\n' +
+    '👤 مشتری: ' + (pf.centerName || '—') + '\n' +
     '💰 مبلغ: ' + fmtN(pf.total) + ' ﷼'
-  );
-  await notifyManagers(
-    '📄 پیشفاکتور ' + pf.no + ' از ' + sess.name + ' در انتظار تأیید\n' +
-    '💰 ' + fmtN(pf.total) + ' ﷼ | 👤 ' + (pf.center_name || '—')
   );
 }
 
@@ -2017,7 +2013,7 @@ async function doCreateTask(chatId, sess, title, priority, dueDate) {
        VALUES ($1, $2, $3, $3, $4, 'todo', $5, NOW(), false)`,
       [id, title, sess.username, priority, dueDate || null]
     );
-    try { require('./routes/events').broadcast('db-updated', { by: sess.username + ':bot' }); } catch(_) {}
+    try { require('../routes/events').broadcast('db-updated', { by: sess.username + ':bot' }); } catch(_) {}
     let text = '✅ <b>وظیفه ایجاد شد!</b>\n\n📌 ' + title + '\n⚡ اولویت: ' + (priLabel[priority] || '—');
     if (dueDate) text += '\n📅 مهلت: ' + dueDate;
     await sendMsg(chatId, text, { reply_markup: menuFor(sess) });
@@ -3307,7 +3303,7 @@ async function sendWeeklyDigest() {
         try {
           const uStats = perExpert[s.username] || { calls: 0, visits: 0, overdue: 0 };
           const uDone  = doneCounts[s.username] || 0;
-          const uSales = (stats && stats[s.username] && stats[s.username].sales) || 0;
+          const uSales = 0; // sales count per expert — reserved for future sales_log aggregation
           let expertKpi =
             '\ud83d\udcca <b>خلاصه هفته شما — ' + (s.name || s.username) + '</b>\n' +
             '\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n' +
@@ -3331,6 +3327,37 @@ async function sendWeeklyDigest() {
 }
 
 let _lastWeeklyDate = '';
+let _lastReminderDate = '';
+
+async function sendExpertReminders() {
+  try {
+    const todayStr = toJalali(new Date());
+    const overdueRes = await query(
+      `SELECT COALESCE(data->>'owner','') AS owner, COUNT(*)::int AS cnt
+       FROM center_edits
+       WHERE (data->>'followupDate') IS NOT NULL
+         AND (data->>'followupDate') < $1
+         AND COALESCE(data->>'status','') NOT IN ('غیرفعال','قرارداد بسته شد','عدم نیاز فاکتور کنسل شد','lost','inactive')
+       GROUP BY data->>'owner'`,
+      [todayStr]
+    );
+    const byUser = {};
+    overdueRes.rows.forEach(function (row) {
+      if (row.owner) byUser[row.owner] = row.cnt;
+    });
+    const stored = await loadBotSessions();
+    for (const [chatIdStr, s] of Object.entries(stored)) {
+      if (!s.username || isManagerRole(s.role) || s.state !== ST.IDLE) continue;
+      const cnt = byUser[s.username] || 0;
+      if (!cnt) continue;
+      await sendMsg(parseInt(chatIdStr, 10),
+        '⚠️ <b>یادآوری صبح</b>\n' + cnt + ' مرکز با پیگیری معوق دارید.\n/mycenters یا /today'
+      ).catch(function () {});
+    }
+  } catch (e) {
+    console.error('[bot] expert reminders error:', e.message);
+  }
+}
 
 function startDailyScheduler() {
   setInterval(async function() {

@@ -1,6 +1,6 @@
 /* ═══ Lazy tab script loader (Phase 2) ═══ */
 (function () {
-  var V = '20260713n';
+  var V = '20260713ad';
   var _loaded = {};
 
   var TAB_SCRIPTS = {
@@ -19,7 +19,7 @@
     reports: ['reports.js'],
     'week-planner': ['week-planner.js'],
     'faradis-match': ['faradis-match.js', 'faradis-data.js'],
-    home: ['expert-dashboard.js'],
+    home: ['home-cartable.js'],
     pricing: [],
     weekplan: [],
     manager: ['tasks.js'],
@@ -50,5 +50,32 @@
 
   window.preloadTabScripts = function (tab) {
     ensureTabScripts(tab).catch(function (e) { console.warn('[tab-loader]', e.message); });
+  };
+
+  /** Open proforma tab from center profile (works before proforma.js is loaded). */
+  window.openProformaForCenter = function (centerKey, centerName, mode) {
+    var ck = centerKey || '';
+    var nm = centerName || '';
+    var wantNew = mode !== 'list';
+    if (wantNew) {
+      window.__pfPendingNewCenter = { centerKey: ck, centerName: nm };
+    }
+    function _open() {
+      if (wantNew && typeof pfOpenNewForCenter === 'function') {
+        return pfOpenNewForCenter(ck, nm);
+      }
+      if (!wantNew && typeof pfOpenForCenter === 'function') {
+        return pfOpenForCenter(ck, nm);
+      }
+      if (wantNew) window.__pfPendingNewCenter = { centerKey: ck, centerName: nm };
+      if (typeof switchTab === 'function') switchTab('proforma');
+    }
+    if (typeof ensureTabScripts === 'function') {
+      return ensureTabScripts('proforma').then(_open).catch(function (e) {
+        console.warn('[openProformaForCenter]', e.message);
+        _open();
+      });
+    }
+    _open();
   };
 })();

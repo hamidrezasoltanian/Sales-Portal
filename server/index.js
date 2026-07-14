@@ -29,6 +29,8 @@ try { compression = require('compression'); } catch(e) {}
 
 const app = express();
 
+const behindHttpsProxy = process.env.BEHIND_HTTPS_PROXY === '1';
+
 // Security & perf middleware
 if (helmet) {
   app.use(helmet({
@@ -44,8 +46,13 @@ if (helmet) {
         frameSrc: ["'self'", 'blob:', 'cdn.jsdelivr.net'],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
+        upgradeInsecureRequests: behindHttpsProxy ? [] : null,
       },
     },
+    strictTransportSecurity: behindHttpsProxy,
+    crossOriginOpenerPolicy: behindHttpsProxy,
+    crossOriginResourcePolicy: behindHttpsProxy ? { policy: 'same-origin' } : false,
+    originAgentCluster: behindHttpsProxy,
   }));
 }
 if (compression) {
@@ -80,16 +87,8 @@ app.use(function (req, res, next) {
   next();
 });
 
-const publicDir = path.join(__dirname, '..', 'public');
-if (fs.existsSync(publicDir)) {
-  app.use(function(req, res, next) {
-    if (/\.(js|css|html)$/.test(req.path) || req.path === '/') res.setHeader('Cache-Control', 'no-cache');
-    next();
-  });
-  app.use(express.static(publicDir));
-}
-
-// Routes
+// Routes (must be registered before static + SPA fallback)
+app.use('/api/inbox', require('./routes/inbox'));
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/data', require('./routes/data'));
 app.use('/api/centers', require('./routes/centers'));
@@ -194,6 +193,7 @@ app.get('/api/health/details', requireManager, async function (req, res) {
 });
 
 app.get('/wms', function (req, res) {
+  const publicDir = path.join(__dirname, '..', 'public');
   const wmsPath = path.join(publicDir, 'wms.html');
   if (fs.existsSync(wmsPath)) {
     res.sendFile(wmsPath);
@@ -202,7 +202,19 @@ app.get('/wms', function (req, res) {
   }
 });
 
+const publicDir = path.join(__dirname, '..', 'public');
+if (fs.existsSync(publicDir)) {
+  app.use(function(req, res, next) {
+    if (/\.(js|css|html)$/.test(req.path) || req.path === '/') res.setHeader('Cache-Control', 'no-cache');
+    next();
+  });
+  app.use(express.static(publicDir));
+}
+
 app.get('*', function (req, res) {
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'مسیر API یافت نشد' });
+  }
   const indexPath = path.join(publicDir, 'index.html');
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
@@ -274,6 +286,13 @@ async function start() {
       const bot = require('./bot/telegram');
       bot.poll().catch(function(e){ console.error('[bot] fatal:', e.message); });
     }
+    setImmediate(function () {
+      try {
+        require('./lib/inbox-hooks').rebuildAll();
+      } catch (e) {
+        console.warn('[inbox-index] rebuild not started:', e.message);
+      }
+    });
   } catch (e) {
     console.error('[Atena CRM] Startup failed:', e.message);
     process.exit(1);

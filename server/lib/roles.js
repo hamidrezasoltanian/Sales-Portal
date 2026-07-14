@@ -53,7 +53,7 @@ const ROLE_DEFAULTS = {
     modules: {
       provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
       activity: 'view', tasks: 'view', mtr: 'none', pricing: 'none',
-      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'none',
+      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'view',
       'trade-kpi': 'edit', kpi: 'none', manager: 'none', changelog: 'none', wms: 'edit', letters: 'edit',
       workflows: 'edit'
     }
@@ -71,7 +71,7 @@ const ROLE_DEFAULTS = {
     modules: {
       provinces: 'view', weekplan: 'edit', calendar: 'edit', checklist: 'edit',
       activity: 'view', tasks: 'edit', mtr: 'none', pricing: 'view',
-      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'none',
+      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'view',
       'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'none', letters: 'edit',
       workflows: 'edit'
     }

@@ -269,13 +269,47 @@ router.get('/activity-summary', requireAuth, requireManager, async (req, res) =>
 // GET /api/reports/competitor
 router.get('/competitor', requireAuth, requireManager, async (req, res) => {
   try {
+    const search = (req.query.search || req.query.q || '').trim();
     const r = await query(
-      `SELECT data->>'competitor' AS competitor, COUNT(*)::int AS cnt
-       FROM center_edits
-       WHERE COALESCE(data->>'competitor','') != ''
-       GROUP BY 1 ORDER BY cnt DESC LIMIT 30`
+      `WITH comp_rows AS (
+         SELECT ce.center_key,
+                trim(c.competitor) AS competitor,
+                COALESCE(ce.data->>'nameOverride', ce.data->>'name', ce.center_key) AS center_name,
+                COALESCE(ce.data->>'owner', '') AS owner
+         FROM center_edits ce
+         CROSS JOIN LATERAL (
+           SELECT jsonb_array_elements_text(ce.data->'competitors') AS competitor
+           WHERE jsonb_typeof(ce.data->'competitors') = 'array'
+             AND jsonb_array_length(ce.data->'competitors') > 0
+           UNION ALL
+           SELECT trim(x) AS competitor
+           FROM unnest(
+             string_to_array(
+               regexp_replace(COALESCE(ce.data->>'competitor', ''), '[،/]', ',', 'g'),
+               ','
+             )
+           ) AS x
+           WHERE (jsonb_typeof(ce.data->'competitors') IS DISTINCT FROM 'array'
+                  OR COALESCE(jsonb_array_length(ce.data->'competitors'), 0) = 0)
+             AND trim(x) <> ''
+         ) c
+         WHERE trim(c.competitor) <> ''
+       )
+       SELECT competitor,
+              COUNT(DISTINCT center_key)::int AS cnt,
+              jsonb_agg(DISTINCT jsonb_build_object(
+                'centerKey', center_key,
+                'centerName', center_name,
+                'owner', owner
+              )) AS centers
+       FROM comp_rows
+       WHERE ($1 = '' OR competitor ILIKE '%' || $1 || '%')
+       GROUP BY competitor
+       ORDER BY cnt DESC, competitor
+       LIMIT 50`,
+      [search]
     ).catch(() => ({ rows: [] }));
-    res.json({ ok: true, rows: r.rows });
+    res.json({ ok: true, rows: r.rows, search });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

@@ -172,6 +172,7 @@ router.post('/', requireAuth, requirePermission('weekplan', 'edit'), async funct
     );
     notifyWeekChange(req, { action: 'create', id: result.rows[0].id, weekId });
     res.status(201).json(rowToObj(result.rows[0]));
+    try { require('../lib/inbox-hooks').onWeekChange(result.rows[0].id); } catch (_) {}
   } catch (e) {
     console.error('[week-entries POST /]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
@@ -241,6 +242,7 @@ router.put('/:id', requireAuth, requirePermission('weekplan', 'edit'), async fun
     );
     notifyWeekChange(req, { action: 'update', id: req.params.id, weekId: result.rows[0].week_id });
     res.json(rowToObj(result.rows[0]));
+    try { require('../lib/inbox-hooks').onWeekChange(req.params.id); } catch (_) {}
   } catch (e) {
     console.error('[week-entries PUT /:id]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
@@ -257,6 +259,7 @@ router.delete('/:id', requireAuth, requirePermission('weekplan', 'edit'), async 
     }
     notifyWeekChange(req, { action: 'delete', id: req.params.id });
     res.json({ ok: true });
+    try { require('../lib/inbox-hooks').onWeekDelete(req.params.id); } catch (_) {}
   } catch (e) {
     console.error('[week-entries DELETE /:id]', e.message);
     res.status(e.status || 500).json({ error: e.status ? e.message : 'خطای داخلی سرور' });

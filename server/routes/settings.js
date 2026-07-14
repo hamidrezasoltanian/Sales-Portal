@@ -10,12 +10,14 @@ const router = express.Router();
 // Keys stored in app_settings (users/members come from app_users SQL table)
 const SETTINGS_KEYS = new Set([
   'companyName', 'companyInfo', 'sipDomain', 'anthropicKey', 'notifPrefs',
-  'ckItems', 'statusList', 'leadList', 'typeList', 'onboardingDisabled',
+  'ckItems', 'statusList', 'leadList', 'typeList', 'purchaseMethodList',
+  'centerPaymentTermsList', 'shipMethodList', 'onboardingDisabled',
   'firstUse', 'taskColumns', 'mtrSyncEnabled', 'telegramNotify', 'pricing_buy_costs',
 ]);
 
 const MANAGER_ONLY_KEYS = new Set([
-  'statusList', 'leadList', 'typeList', 'mtrSyncEnabled', 'anthropicKey',
+  'statusList', 'leadList', 'typeList', 'purchaseMethodList',
+  'centerPaymentTermsList', 'shipMethodList', 'mtrSyncEnabled', 'anthropicKey',
 ]);
 
 function maskSettings(row) {

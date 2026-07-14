@@ -8,12 +8,14 @@ const { requireAuth, JWT_SECRET, invalidateAuthCache } = require('../auth');
 
 const router = express.Router();
 
+const behindHttpsProxy = process.env.BEHIND_HTTPS_PROXY === '1';
+
 const COOKIE_OPTIONS = {
   httpOnly: true,
   sameSite: 'lax',
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
 };
-if (process.env.NODE_ENV === 'production') {
+if (behindHttpsProxy) {
   COOKIE_OPTIONS.secure = true;
 }
 

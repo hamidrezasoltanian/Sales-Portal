@@ -80,7 +80,11 @@ var CM_BUYER_FA={
 };
 var CM_PAY_FA={d30:'۳۰ روزه',d60:'۶۰ روزه',cash:'نقدی'};
 var CM_TIER_FA=['تا ۲۰ عدد','۲۱–۵۰ عدد','۵۱–۱۰۰ عدد','بیش از ۱۰۰'];
-var CM_SHIP_METHODS=['','پیک','پست','باربری','تحویل حضوری','تیپاکس','اسنپ','باربری مطمئن'];
+function _cmSelectOpts(list, current) {
+  var opts = [''].concat(list || []);
+  if (current && opts.indexOf(current) < 0) opts.push(current);
+  return opts;
+}
 
 function openCenterShipPrint(rtype, rid, cname) {
   var e = getE(rtype, rid);
@@ -1112,6 +1116,38 @@ function _openTaskModalLazy(tid, prefill) {
   }).catch(function() { showToast('خطا در بارگذاری وظایف'); });
 }
 
+function _cmSetFollowupDate(rtype, rid, mid, v) {
+  var inp = document.getElementById('mfd_' + mid);
+  if (inp) {
+    inp.value = v;
+    inp.className = 'fd-inp' + (v && v < todayStr() ? ' ov' : '');
+  }
+  setE(rtype, rid, 'followupDate', v);
+  var lbl = document.getElementById('mfd_wk_' + mid);
+  if (lbl) lbl.textContent = v ? ' (' + getWeekLabelForDate(v) + ')' : '';
+  renderBanner();
+  if (currentTab === 'provinces' && _currentProvId) renderTable();
+  if (currentTab === 'weekplan') setTimeout(renderWeekPlan, 80);
+}
+function _cmClearFollowupDate(rtype, rid, mid) {
+  var inp = document.getElementById('mfd_' + mid);
+  if (inp && !inp.value) {
+    showToast('تاریخ پیگیری ثبت نشده');
+    return;
+  }
+  closeJDP();
+  setE(rtype, rid, 'followupDate', '');
+  if (inp) { inp.value = ''; inp.className = 'fd-inp'; }
+  var lbl = document.getElementById('mfd_wk_' + mid);
+  if (lbl) lbl.textContent = '';
+  renderBanner();
+  if (currentTab === 'provinces' && _currentProvId) renderTable();
+  if (currentTab === 'weekplan') setTimeout(renderWeekPlan, 80);
+  showToast('تاریخ پیگیری حذف شد');
+}
+window._cmSetFollowupDate = _cmSetFollowupDate;
+window._cmClearFollowupDate = _cmClearFollowupDate;
+
 function convertFollowupToTask(rtype, rid) {
   var e = getE(rtype, rid);
   var name = typeof _getCenterName === 'function' ? _getCenterName(rtype, rid) : (rtype + '_' + rid);
@@ -1682,15 +1718,52 @@ function _updateExtraCenterProv(id,newProvId){
 function _getCompetitorList(){
   var comps={};
   Object.values(DB.edits||{}).forEach(function(e){
-    if(e&&e.competitor&&e.competitor.trim()){
-      e.competitor.trim().split(/[,،/]+/).forEach(function(c){
-        c=c.trim();
-        if(c.length>1)comps[c]=(comps[c]||0)+1;
-      });
-    }
+    getCenterCompetitorsFromEdit(e).forEach(function(c){
+      comps[c]=(comps[c]||0)+1;
+    });
   });
   return Object.keys(comps).sort(function(a,b){return comps[b]-comps[a];});
 }
+
+function _cmCompetitorChipsHtml(rtype, rid, modalId) {
+  return getCenterCompetitors(rtype, rid).map(function(c, idx) {
+    return '<span style="display:inline-flex;align-items:center;gap:4px;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:16px;padding:3px 10px;font-size:11px;font-weight:700">'
+      + esc(c)
+      + '<button type="button" onclick="_cmRemoveCompetitorIdx(\'' + rtype + '\',\'' + rid + '\',\'' + modalId + '\',' + idx + ')" '
+      + 'style="background:rgba(0,0,0,.08);border:none;color:#c2410c;width:16px;height:16px;border-radius:50%;cursor:pointer;font-size:11px;line-height:1;padding:0">×</button>'
+      + '</span>';
+  }).join('');
+}
+
+window._cmRefreshCompetitorChips = function(rtype, rid, modalId) {
+  var el = document.getElementById('cmCompList_' + modalId);
+  if (el) el.innerHTML = _cmCompetitorChipsHtml(rtype, rid, modalId);
+};
+
+window._cmAddCompetitor = function(rtype, rid, modalId) {
+  var inp = document.getElementById('cmCompInp_' + modalId);
+  if (!inp) return;
+  var val = inp.value.trim();
+  if (!val) { showToast('نام رقیب را وارد کنید'); return; }
+  var list = getCenterCompetitors(rtype, rid);
+  if (list.some(function(c) { return c.toLowerCase() === val.toLowerCase(); })) {
+    showToast('این رقیب قبلاً ثبت شده');
+    inp.value = '';
+    return;
+  }
+  list.push(val);
+  setCenterCompetitors(rtype, rid, list, modalId);
+  inp.value = '';
+  showToast('✓ رقیب اضافه شد');
+};
+
+window._cmRemoveCompetitorIdx = function(rtype, rid, modalId, idx) {
+  var list = getCenterCompetitors(rtype, rid);
+  if (idx < 0 || idx >= list.length) return;
+  list.splice(idx, 1);
+  setCenterCompetitors(rtype, rid, list, modalId);
+  showToast('رقیب حذف شد');
+};
 
 // ── Playbook gap: lead-change & status-change helpers ──────────
 var ACTION_TYPE_LABELS={'call':'📞 تماس','visit':'🤝 ملاقات','price_send':'📄 ارسال قیمت','sample_send':'🧪 ارسال نمونه','committee':'🏛 کمیته','meeting':'👥 جلسه','followup':'🔄 پیگیری'};
@@ -1723,7 +1796,7 @@ function _onLeadChange(id,newLead,rtype,rid,selectEl){
       if((!e.contacts||!e.contacts.length)&&!hcpCount)missing.push('اطلاعات تماس / پزشک مرتبط');
     }
     if(newLead==='فرصت'){
-      if(!e.competitor)missing.push('رقیب اصلی');
+      if(!getCenterCompetitors(rtype,rid).length)missing.push('حداقل یک رقیب');
       if(!e.oppGrade)missing.push('درجه فرصت (A/B/C)');
     }
     if(newLead==='مشتری'){
@@ -1958,9 +2031,8 @@ function openCenterModal(rtype,id){
     +'<label>تاریخ پیگیری بعدی</label>'
     +'<div style="display:flex;gap:5px;align-items:center">'
     +'<input id="mfd_'+id+'" type="text" value="'+fd+'" readonly class="fd-inp'+(fd&&fd<today?' ov':'')+'" style="cursor:pointer;flex:1" '
-    +'onclick="openJDP(this,function(v){var _in=document.getElementById(\'mfd_'+id+'\');if(_in){_in.value=v;_in.className=\'fd-inp\'+(v&&v<todayStr()?\'ov\':\'\');}setE(\''+rtype+'\',\''+r.id+'\',\'followupDate\',v);var _lbl=document.getElementById(\'mfd_wk_'+id+'\');if(_lbl){_lbl.textContent=v?\' (\'+getWeekLabelForDate(v)+\')\':\'\';}renderBanner();if(currentTab===\'provinces\'&&_currentProvId)renderTable();if(currentTab===\'weekplan\')setTimeout(renderWeekPlan,80);})">'
-    +(fd?'<button onclick="setE(\''+rtype+'\',\''+r.id+'\',\'followupDate\',\'\');document.getElementById(\'mfd_'+id+'\').value=\'\';document.getElementById(\'mfd_'+id+'\').className=\'fd-inp\';var _lbl=document.getElementById(\'mfd_wk_'+id+'\');if(_lbl){_lbl.textContent=\'\';}renderBanner();if(currentTab===\'provinces\'&&_currentProvId)renderTable();if(currentTab===\'weekplan\')setTimeout(renderWeekPlan,80);" title="حذف تاریخ" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:4px;cursor:pointer;padding:3px 8px;font-size:11px;white-space:nowrap">✕ حذف</button>':'')
-    +'<button onclick="convertFollowupToTask(\''+esc(rtype)+'\',\''+esc(r.id)+'\')" title="تبدیل به وظیفه" style="background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;border-radius:4px;cursor:pointer;padding:3px 8px;font-size:11px;white-space:nowrap">📌 وظیفه</button>'
+    +'onclick="event.stopPropagation();openJDP(this,function(v){_cmSetFollowupDate(\''+rtype+'\',\''+r.id+'\',\''+id+'\',v);})">'
+    +'<button type="button" onclick="event.stopPropagation();_cmClearFollowupDate(\''+rtype+'\',\''+r.id+'\',\''+id+'\')" title="حذف تاریخ پیگیری" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:4px;cursor:pointer;padding:3px 8px;font-size:11px;white-space:nowrap'+(fd?'':' opacity:.5')+'">📅 حذف تاریخ پیگیری</button>'
     +'</div>'
     +'<div id="mfd_wk_'+id+'" style="font-size:11px;color:var(--text-muted);margin-top:2px;font-weight:700">'+(fd?' ('+getWeekLabelForDate(fd)+')':'')+'</div>'
     +'<label>برچسب‌ها</label>'
@@ -1983,8 +2055,17 @@ function openCenterModal(rtype,id){
     +'<div class="cm-profile-section" data-cm-panel="overview">'
     +'<div class="cm-profile-section-title">🤖 رقبا و Prospect</div>'
     +'<div class="cm-form-grid cm-form-grid-2">'
-    +'<div class="cm-field"><label>🤖 رقیب اصلی</label>'
-    +'<input type="text" class="cm-inp" list="compDatalist_'+r.id+'" value="'+esc(e.competitor||'')+'" placeholder="نام رقیب / برند..." onchange="setE(\''+rtype+'\',\''+r.id+'\',\'competitor\',this.value)"><datalist id="compDatalist_'+r.id+'">'+_getCompetitorList().map(function(c){return'<option value="'+esc(c)+'">';}).join('')+'</datalist></div>'
+    +'<div class="cm-field" style="grid-column:1/-1">'
+    +'<label>🤖 رقبا <span style="font-size:10px;color:#94a3b8;font-weight:400">(چند رقیب قابل ثبت است)</span></label>'
+    +'<div id="cmCompList_'+id+'" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:28px">'+_cmCompetitorChipsHtml(rtype,r.id,id)+'</div>'
+    +'<div style="display:flex;gap:6px;align-items:center">'
+    +'<input type="text" class="cm-inp" id="cmCompInp_'+id+'" list="compDatalist_'+r.id+'" placeholder="نام رقیب / برند..." style="flex:1" '
+    +'onkeydown="if(event.key===\'Enter\'){_cmAddCompetitor(\''+rtype+'\',\''+r.id+'\',\''+id+'\');event.preventDefault();}">'
+    +'<button type="button" class="cm-foot-btn" style="background:#fff7ed;color:#c2410c;border-color:#fed7aa;white-space:nowrap" '
+    +'onclick="_cmAddCompetitor(\''+rtype+'\',\''+r.id+'\',\''+id+'\')">+ افزودن رقیب</button>'
+    +'</div>'
+    +'<datalist id="compDatalist_'+r.id+'">'+_getCompetitorList().map(function(c){return'<option value="'+esc(c)+'">';}).join('')+'</datalist>'
+    +'</div>'
     +'<div class="cm-field"><label>💪 مزیت رقیب</label>'
     +'<input type="text" class="cm-inp" value="'+(e.competitorAdvantage||'')+'" placeholder="مثلاً: قیمت پایین‌تر" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'competitorAdvantage\',this.value)"></div>'
     +'<div class="cm-field"><label>⚠ ضعف رقیب</label>'
@@ -2004,10 +2085,10 @@ function openCenterModal(rtype,id){
         +'<input type="text" class="cm-inp" value="'+(e.approxConsumption||'')+'" placeholder="مثلاً: ۵۰ عدد/ماه" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'approxConsumption\',this.value)"></div>'
         +'<div class="cm-field"><label>🛒 نحوه خرید</label>'
         +'<select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'purchaseMethod\',this.value)">'
-        +['','مستقیم','توزیع‌کننده','بیمارستانی','مناقصه'].map(function(v){return'<option'+(v===pm?' selected':'')+'>'+v+'</option>';}).join('')+'</select></div>'
+        +_cmSelectOpts(PURCHASE_METHOD_LIST, pm).map(function(v){return'<option'+(v===pm?' selected':'')+'>'+v+'</option>';}).join('')+'</select></div>'
         +'<div class="cm-field"><label>💳 شرایط پرداخت</label>'
         +'<select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'paymentTerms\',this.value)">'
-        +['','نقدی','۳۰ روزه','۶۰ روزه','۹۰ روزه','اعتباری'].map(function(v){return'<option'+(v===pt?' selected':'')+'>'+v+'</option>';}).join('')+'</select></div>'
+        +_cmSelectOpts(CENTER_PAYMENT_TERMS_LIST, pt).map(function(v){return'<option'+(v===pt?' selected':'')+'>'+v+'</option>';}).join('')+'</select></div>'
         +'<div class="cm-field"><label>📅 زمان تقریبی سفارش</label>'
         +'<input type="text" class="cm-inp" value="'+(e.approxOrderTime||'')+'" placeholder="مثلاً: اسفند ۱۴۰۳" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'approxOrderTime\',this.value)"></div>'
         +'</div></div>';
@@ -2018,7 +2099,7 @@ function openCenterModal(rtype,id){
     +'<div class="cm-form-grid cm-form-grid-2">'
     +'<div class="cm-field"><label>🚚 روش ارسال</label>'
     +'<select class="ed-sel" onchange="setE(\''+rtype+'\',\''+r.id+'\',\'shipMethod\',this.value)">'
-    +CM_SHIP_METHODS.map(function(m){return'<option value="'+m+'"'+((e.shipMethod||'')===m?' selected':'')+'>'+(m||'— انتخاب —')+'</option>';}).join('')
+    +_cmSelectOpts(SHIP_METHOD_LIST, e.shipMethod || '').map(function(m){return'<option value="'+m+'"'+((e.shipMethod||'')===m?' selected':'')+'>'+(m||'— انتخاب —')+'</option>';}).join('')
     +'</select></div>'
     +'<div class="cm-field"><label>👤 شخص تحویل‌گیرنده</label>'
     +'<input type="text" class="cm-inp" value="'+esc(e.deliveryRecipient||'')+'" placeholder="نام و سمت تحویل‌گیرنده..." onchange="setE(\''+rtype+'\',\''+r.id+'\',\'deliveryRecipient\',this.value)"></div>'
@@ -2173,9 +2254,20 @@ function openCenterModal(rtype,id){
       var _pfBtn=document.getElementById('pfBtn_'+_mid4);
       if(_pfBtn){
         _pfBtn.addEventListener('click',function(){
-          if(typeof pfOpenNewForCenter==='function')pfOpenNewForCenter(_ck4,_nm4);
-          else if(typeof pfOpenForCenter==='function')pfOpenForCenter(_ck4,_nm4);
           if(typeof closeModal==='function')closeModal('cm_'+_mid4);
+          if(typeof openProformaForCenter==='function'){
+            openProformaForCenter(_ck4,_nm4,'new');
+          }else if(typeof pfOpenNewForCenter==='function'){
+            pfOpenNewForCenter(_ck4,_nm4);
+          }else if(typeof ensureTabScripts==='function'){
+            window.__pfPendingNewCenter={centerKey:_ck4,centerName:_nm4};
+            ensureTabScripts('proforma').then(function(){
+              if(typeof pfOpenNewForCenter==='function')pfOpenNewForCenter(_ck4,_nm4);
+              else if(typeof switchTab==='function')switchTab('proforma');
+            });
+          }else if(typeof switchTab==='function'){
+            switchTab('proforma');
+          }
         });
       }
       // Append mini proforma list section
@@ -2195,8 +2287,19 @@ function openCenterModal(rtype,id){
       _lnk.textContent='مشاهده همه ←';
       _lnk.style.cssText='font-size:11px;color:#6d28d9;background:none;border:none;cursor:pointer;text-decoration:underline';
       _lnk.addEventListener('click',function(){
-        if(typeof pfOpenForCenter==='function')pfOpenForCenter(_ck4,_nm4);
         if(typeof closeModal==='function')closeModal('cm_'+_mid4);
+        if(typeof openProformaForCenter==='function'){
+          openProformaForCenter(_ck4,_nm4,'list');
+        }else if(typeof pfOpenForCenter==='function'){
+          pfOpenForCenter(_ck4,_nm4);
+        }else if(typeof ensureTabScripts==='function'){
+          ensureTabScripts('proforma').then(function(){
+            if(typeof pfOpenForCenter==='function')pfOpenForCenter(_ck4,_nm4);
+            else if(typeof switchTab==='function')switchTab('proforma');
+          });
+        }else if(typeof switchTab==='function'){
+          switchTab('proforma');
+        }
       });
       _hdr.appendChild(_ttl); _hdr.appendChild(_lnk);
       var _body=document.createElement('div');

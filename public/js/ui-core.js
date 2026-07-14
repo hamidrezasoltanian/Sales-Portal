@@ -40,7 +40,8 @@ function switchTab(tab){
   });
   document.getElementById('dash').style.display=(tab==='provinces')?'':'none';
   var _hp=document.getElementById('homePanel');if(_hp)_hp.style.display=(tab==='home')?'':'none';
-  if(tab==='home'&&typeof renderExpertDashboard==='function')renderExpertDashboard();
+  if(tab==='home'&&typeof renderHomeCartable==='function')renderHomeCartable();
+  if(typeof updateHomeInboxBadge==='function')updateHomeInboxBadge();
   var _udp=document.getElementById('userDashPanel');if(_udp)_udp.style.display=(tab==='provinces')?'':'none';
   document.getElementById('banner').style.display='none';
   document.getElementById('filtersBar').style.display=(tab==='provinces')?'flex':'none';
@@ -107,7 +108,7 @@ function switchTab(tab){
   }
   else if(tab==='manager')_safeRender(renderManagerPanel,'manager');
   else if(tab==='kpi')_safeRender(renderKPIPanel,'kpi');
-  else if(tab==='home')_safeRender(renderHome,'home');
+  else if(tab==='home')_safeRender(function(){ if(typeof renderHomeCartable==='function')renderHomeCartable(); else if(typeof renderHome==='function')renderHome(); },'home');
   else if(tab==='mtr'&&typeof mtrLazyInit==='function')_safeRender(mtrLazyInit,'mtr');
   else if(tab==='pricing'&&typeof pricingLazyInit==='function')_safeRender(pricingLazyInit,'pricing');
   else if(tab==='proforma'&&typeof renderProformaPanel==='function')_safeRender(renderProformaPanel,'proforma');

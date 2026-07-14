@@ -28,7 +28,7 @@ function openJDP(inp,cb){
     var w=document.getElementById('jdpWrap');
     if(w&&!w.contains(e.target)&&e.target!==inp)closeJDP();
   };
-  setTimeout(function(){document.addEventListener('click',_jdpOutsideHandler);},150);
+  setTimeout(function(){document.addEventListener('click',_jdpOutsideHandler,true);},150);
 }
 function buildJDP(){
   if(!_jdpDate)return'';
@@ -87,7 +87,7 @@ function jdpSelectOther(jy,jm,jd){
 }
 function closeJDP(){
   var w=document.getElementById('jdpWrap');if(w)w.remove();
-  if(_jdpOutsideHandler){document.removeEventListener('click',_jdpOutsideHandler);_jdpOutsideHandler=null;}
+  if(_jdpOutsideHandler){document.removeEventListener('click',_jdpOutsideHandler,true);_jdpOutsideHandler=null;}
   _jdpCb=null;_jdpInp=null;
 }
 

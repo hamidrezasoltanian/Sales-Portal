@@ -3,11 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>
+/* Bardeen و برخی افزونه‌ها روی keydown بدون e.key کرش می‌کنند (page-events.js) */
+document.addEventListener('keydown', function (e) {
+  if (typeof e.key === 'string' && e.key) return;
+  var fb = e.code || '';
+  if (!fb || fb === 'Unidentified') return;
+  try { Object.defineProperty(e, 'key', { value: fb, configurable: true }); } catch (_) {}
+}, true);
+</script>
 <title>پورتال فروش آتنا زیست درمان v2.1</title>
 <!-- cache-bust: v2.1 -->
 <script>if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(function(){});}</script>
 <!-- Vazirmatn از jsDelivr — npm package، بدون Google dependency -->
-<link rel="stylesheet" href="/css/app.css?v=20260712m">
+<link rel="stylesheet" href="/css/app.css?v=20260713w">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" onerror="console.warn('XLSX CDN failed - only TSV format supported offline')"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
 </head>
@@ -54,7 +63,7 @@
     <button class="sb-collapse-btn" id="sbCollapseBtn" onclick="toggleSidebar()" title="جمع/باز کردن منو" aria-label="جمع کردن منو">⟩</button>
   </div>
   <div class="sb-nav">
-    <button class="tab-btn" id="tab_home" onclick="switchTab('home')" title="خانه"><span class="sb-icon">🏠</span><span class="sb-label">خانه</span></button>
+    <button class="tab-btn" id="tab_home" onclick="switchTab('home')" title="خانه"><span class="sb-icon">🏠</span><span class="sb-label">خانه<span id="homeInboxBadge" class="sb-tab-badge"></span></span></button>
     <button class="tab-btn active" id="tab_provinces" onclick="switchTab('provinces')" title="استان‌ها"><span class="sb-icon">🗺</span><span class="sb-label">استان‌ها</span></button>
     <button class="tab-btn" id="tab_weekplan" onclick="switchTab('weekplan')" title="برنامه هفته"><span class="sb-icon">📋</span><span class="sb-label">برنامه هفته<span id="wpDueBadge" class="sb-tab-badge"></span></span></button>
     <button class="tab-btn" id="tab_calendar" onclick="switchTab('calendar')" title="تقویم"><span class="sb-icon">📅</span><span class="sb-label">تقویم</span></button>
@@ -225,32 +234,31 @@
 
 <!-- WEEK PLAN PANEL -->
 <div id="wpPanel" class="wp-panel" style="display:none">
-  <!-- ردیف فیلتر کارشناس + جستجو -->
-  <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg-raised);border-bottom:1px solid var(--border);flex-wrap:wrap">
-    <span style="font-size:11px;font-weight:700;color:var(--text-secondary)">🔍 فیلتر:</span>
-    <select id="wpOwnerFilter" onchange="_wpFclFilters.owner=this.value;renderWeekPlan()" style="padding:5px 10px;border:1px solid var(--border-input);border-radius:6px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary);min-width:140px">
+  <div class="wp-filter-bar">
+    <span class="wp-filter-label">🔍 فیلتر</span>
+    <select id="wpOwnerFilter" class="wp-filter-select" onchange="_wpFclFilters.owner=this.value;renderWeekPlan()">
       <option value="">همه کارشناسان</option>
     </select>
-    <input id="wpSearch" type="text" placeholder="جستجوی نام مرکز..." oninput="renderWeekPlan()" style="padding:5px 10px;border:1px solid var(--border-input);border-radius:6px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary);min-width:180px;flex:1;max-width:280px">
-    <button onclick="wpClearFilters()" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:11px;font-family:inherit;background:var(--bg-card);color:var(--text-secondary);cursor:pointer">✕ پاک</button>
+    <input id="wpSearch" class="wp-filter-search" type="search" placeholder="جستجوی نام مرکز..." oninput="renderWeekPlan()">
+    <button type="button" class="wp-filter-clear" onclick="wpClearFilters()">✕ پاک</button>
   </div>
-  <div class="wp-toolbar" style="flex-wrap:wrap;gap:8px">
-    <!-- انتخاب سال -->
-    <div style="display:flex;gap:4px;align-items:center">
-      <button class="cal-nb" onclick="wpYearNav(-1)">◀</button>
-      <span id="wpYearLabel" style="font-weight:700;font-size:13px;min-width:70px;text-align:center"></span>
-      <button class="cal-nb" onclick="wpYearNav(1)">▶</button>
+  <div class="wp-toolbar">
+    <div class="wp-toolbar-year">
+      <button type="button" class="cal-nb" onclick="wpYearNav(-1)">◀</button>
+      <span id="wpYearLabel" class="wp-year-label"></span>
+      <button type="button" class="cal-nb" onclick="wpYearNav(1)">▶</button>
     </div>
-    <!-- انتخاب هفته -->
-    <div style="display:flex;gap:4px;align-items:center;flex:1;min-width:200px">
-      <button class="cal-nb" onclick="wpNav(-1)" title="هفته قبل">‹</button>
-      <select id="wpSel" onchange="renderWeekPlan()" style="flex:1;padding:6px 8px;border:1px solid var(--border-input);border-radius:5px;font-size:12px"></select>
-      <button class="cal-nb" onclick="wpNav(1)" title="هفته بعد">›</button>
+    <div class="wp-toolbar-week">
+      <button type="button" class="cal-nb" onclick="wpNav(-1)" title="هفته قبل">‹</button>
+      <select id="wpSel" class="wp-week-select" onchange="renderWeekPlan()"></select>
+      <button type="button" class="cal-nb" onclick="wpNav(1)" title="هفته بعد">›</button>
     </div>
-    <button class="cal-nb cal-today-btn" onclick="wpGoThisWeek()" style="font-size:11px;padding:5px 10px">این هفته</button>
-    <button onclick="wpOpenTodayPlanModal()" style="background:rgba(99,102,241,.85);color:#fff;border:none;border-radius:5px;padding:5px 10px;cursor:pointer;font-size:11px;font-family:inherit" title="برنامه امروز با جزئیات بیشتر">📋 برنامه امروز</button>
-    <button onclick="wpExportExcel()" style="background:#16a34a;color:#fff;border:none;border-radius:5px;padding:5px 10px;cursor:pointer;font-size:11px;font-family:inherit" title="دانلود Excel برنامه هفته">⬇ Excel</button>
-    <button id="wpDailyMonBtn" onclick="openDailyMonitor()" style="background:rgba(139,92,246,.85);color:#fff;border:none;border-radius:5px;padding:5px 10px;cursor:pointer;font-size:11px;font-family:inherit;display:none" title="گزارش فعالیت امروز">📊 گزارش امروز</button>
+    <div class="wp-toolbar-btns">
+      <button type="button" class="cal-nb cal-today-btn wp-tbtn" onclick="wpGoThisWeek()">این هفته</button>
+      <button type="button" class="wp-tbtn wp-tbtn-indigo" onclick="wpOpenTodayPlanModal()" title="برنامه امروز با جزئیات بیشتر">📋 امروز</button>
+      <button type="button" class="wp-tbtn wp-tbtn-green" onclick="wpExportExcel()" title="دانلود Excel برنامه هفته">⬇ Excel</button>
+      <button type="button" id="wpDailyMonBtn" class="wp-tbtn wp-tbtn-purple" onclick="openDailyMonitor()" style="display:none" title="گزارش فعالیت امروز">📊 گزارش</button>
+    </div>
   </div>
   <div id="wpBulkBar">
     <span id="wpBulkCount"></span>
@@ -324,24 +332,24 @@
 
 <!-- DATA — core modules; tab-specific scripts load on demand via tab-loader.js -->
 <script src="/js/safe-dom.js?v=20260710c"></script>
-<script src="/js/tab-loader.js?v=20260713n"></script>
+<script src="/js/tab-loader.js?v=20260713q"></script>
 <script src="/js/roles.js?v=20260710c"></script>
-<script src="/js/core.js?v=20260712k"></script>
-<script src="/js/settings.js?v=20260712d"></script>
+<script src="/js/core.js?v=20260713t"></script>
+<script src="/js/settings.js?v=20260713u"></script>
 <script src="/js/data.js?v=20260712c"></script>
 <script src="/js/ui-core.js?v=20260710c"></script>
 <script src="/js/kpi.js?v=20260712b"></script>
 <script src="/js/dashboard.js?v=20260712b"></script>
 <script src="/js/provinces.js?v=20260712h"></script>
-<script src="/js/center-modal.js?v=20260710c"></script>
+<script src="/js/center-modal.js?v=20260713s"></script>
 <script src="/js/global-search.js?v=20260710c"></script>
 <script src="/js/center-deals.js?v=20260710a"></script>
 <script src="/js/center-files.js?v=20260710a"></script>
 <script src="/js/workflows.js?v=20260710b"></script>
-<script src="/js/pricing.js?v=20260713n"></script>
+<script src="/js/pricing.js?v=20260713t"></script>
 <script src="/js/weekplan.js?v=20260713a"></script>
 <script src="/js/tasks.js?v=20260712j"></script>
-<script src="/js/manager.js?v=20260712h"></script>
+<script src="/js/manager.js?v=20260713t"></script>
 <script src="/js/payroll.js?v=20260713a"></script>
 <script src="/js/crm-complete.js?v=20260711a"></script>
 <script src="/js/onboarding.js?v=20260710c"></script>
