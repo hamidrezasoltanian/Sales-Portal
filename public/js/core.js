@@ -130,7 +130,7 @@ function initSSE() {
   _sse.onmessage = function(e) {
     try {
       var data = JSON.parse(e.data);
-      if (data.type === 'connected') return;
+      if (data.type === 'connected' || data.type === 'heartbeat') return;
       if (data.type === 'db-updated') {
         _sseReloadDB(data.by);
       } else if (data.type === 'app-reload') {

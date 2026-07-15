@@ -9,6 +9,7 @@ function sseWrite(res, chunk) {
   if (!res || res.writableEnded || res.destroyed) return false;
   try {
     res.write(chunk);
+    if (typeof res.flush === 'function') res.flush();
     return true;
   } catch (_) {
     return false;
@@ -20,6 +21,7 @@ router.get('/stream', requireAuth, (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('Content-Encoding', 'identity');
   res.flushHeaders();
 
   if (req.socket) {
@@ -38,11 +40,11 @@ router.get('/stream', requireAuth, (req, res) => {
       _clients.delete(client);
       return;
     }
-    if (!sseWrite(res, ': heartbeat\n\n')) {
+    if (!sseWrite(res, `data: ${JSON.stringify({ type: 'heartbeat', at: Date.now() })}\n\n`)) {
       clearInterval(hb);
       _clients.delete(client);
     }
-  }, 25000);
+  }, 15000);
 
   const cleanup = () => {
     _clients.delete(client);

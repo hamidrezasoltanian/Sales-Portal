@@ -58,7 +58,8 @@ if (helmet) {
 if (compression) {
   app.use(compression({
     filter: function (req, res) {
-      if (req.path === '/api/events/stream' || (req.headers.accept || '').indexOf('text/event-stream') !== -1) {
+      if (req.path === '/api/events/stream' || (req.originalUrl || '').indexOf('/api/events/stream') === 0
+        || (req.headers.accept || '').indexOf('text/event-stream') !== -1) {
         return false;
       }
       return compression.filter(req, res);
