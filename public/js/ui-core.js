@@ -78,7 +78,8 @@ function switchTab(tab){
   function _safeRender(fn, tabName) {
     try { fn(); } catch(err) {
       console.error('[switchTab] خطا در رندر تب '+tabName+':', err);
-      var panel = document.getElementById(tabName+'Panel') || document.getElementById('dash');
+      var panelId = tabName === 'trade-kpi' ? 'tradeKPIPanel' : (tabName + 'Panel');
+      var panel = document.getElementById(panelId) || document.getElementById('dash');
       if(panel) panel.innerHTML = '<div style="padding:32px;text-align:center;color:#ef4444;font-size:14px">⚠ خطا در بارگذاری این بخش — لطفاً صفحه را رفرش کنید<br><small style="color:#94a3b8;font-size:11px">' + esc(err.message||String(err)) + '</small></div>';
     }
   }

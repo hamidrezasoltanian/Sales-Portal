@@ -143,6 +143,8 @@ function initSSE() {
         if (typeof _wpOnWeekEntryChanged === 'function') _wpOnWeekEntryChanged(data);
       } else if (data.type === 'letter-changed') {
         if (typeof window._lettersOnSSE === 'function') window._lettersOnSSE(data);
+      } else if (data.type === 'trade-case-changed') {
+        if (typeof window._tkOnTradeCaseSSE === 'function') window._tkOnTradeCaseSSE(data);
       }
     } catch(err) {}
   };

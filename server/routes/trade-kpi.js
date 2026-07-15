@@ -713,9 +713,33 @@ router.get('/warehouse-wms-snapshot', requireAuth, async function(req, res) {
 router.get('/employees', requireAuth, async function(req, res) {
   try {
     const { rows } = await query(
-      "SELECT username, display_name FROM app_users WHERE active=true ORDER BY display_name"
+      `SELECT username, display_name, role, department FROM app_users
+       WHERE active=true
+         AND (
+           role IN ('بازرگانی', 'کارشناس بازرگانی')
+           OR department ILIKE '%بازرگانی%'
+         )
+       ORDER BY display_name`
     );
-    res.json(rows);
+    if (rows.length) return res.json(rows);
+
+    const settingsR = await query("SELECT value FROM app_data WHERE key='main' LIMIT 1");
+    const members = (settingsR.rows[0] && settingsR.rows[0].value && settingsR.rows[0].value.settings)
+      ? settingsR.rows[0].value.settings.members || [] : [];
+    const trade = members.filter(function(m) {
+      return m && m.active !== false && m.id && (
+        m.role === 'بازرگانی' || m.role === 'کارشناس بازرگانی' ||
+        String(m.role || '').indexOf('بازرگانی') >= 0
+      );
+    }).map(function(m) {
+      return { username: m.id, display_name: m.name || m.id, role: m.role || '', department: '' };
+    });
+    if (trade.length) return res.json(trade);
+
+    const { rows: all } = await query(
+      "SELECT username, display_name, role, department FROM app_users WHERE active=true ORDER BY display_name"
+    );
+    res.json(all);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

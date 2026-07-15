@@ -1338,7 +1338,10 @@ function ubSwitchTab(tab){
 
 // Keyboard shortcut — delegated to data-hub.js if loaded
 document.addEventListener('keydown',function(e){
-  if((e.ctrlKey||e.metaKey)&&e.key==='b'&&!e.target.matches('input,textarea')){
+  if(!e||typeof e.key!=='string')return;
+  var tgt=e.target;
+  var inInput=tgt&&typeof tgt.matches==='function'&&tgt.matches('input,textarea');
+  if((e.ctrlKey||e.metaKey)&&e.key==='b'&&!inInput){
     if(typeof openDataHub==='function'){ e.preventDefault(); openDataHub(); return; }
     e.preventDefault(); if(typeof openUnifiedBackup==='function')openUnifiedBackup();
   }

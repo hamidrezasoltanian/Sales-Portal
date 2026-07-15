@@ -364,7 +364,10 @@ function dhExportUnified() {
 function ubSwitchTab(tab) { dhSwitchTab(tab === 'export' ? 'export' : 'restore'); }
 
 document.addEventListener('keydown', function (e) {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'b' && !e.target.matches('input,textarea,select')) {
+  if (!e || typeof e.key !== 'string') return;
+  var tgt = e.target;
+  var inInput = tgt && typeof tgt.matches === 'function' && tgt.matches('input,textarea,select');
+  if ((e.ctrlKey || e.metaKey) && e.key === 'b' && !inInput) {
     e.preventDefault();
     openDataHub();
   }

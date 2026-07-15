@@ -2450,6 +2450,7 @@ async function init(){
   },3000);
 
   document.addEventListener('keydown',function(e){
+    if(!e||typeof e.key!=='string')return;
     if(e.key==='Escape'){closeAllModals();closeQS();}
     if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openGSearch();}
     if((e.ctrlKey||e.metaKey)&&e.key==='z'&&!e.shiftKey){var ae=document.activeElement;var isInput=ae&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA');if(!isInput){e.preventDefault();undoEdit();}}

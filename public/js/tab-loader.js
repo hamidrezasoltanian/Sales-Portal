@@ -1,6 +1,6 @@
 /* ═══ Lazy tab script loader (Phase 2) ═══ */
 (function () {
-  var V = '20260714t';
+  var V = '20260715f';
   var _loaded = {};
 
   var TAB_SCRIPTS = {
@@ -15,7 +15,7 @@
     hcp: ['hcp.js'],
     support: ['support.js'],
     hr: ['hr.js'],
-    'trade-kpi': ['trade-kpi.js'],
+    'trade-kpi': ['trade-kpi.js', 'trade-cases-ui.js'],
     reports: ['reports.js'],
     'week-planner': ['week-planner.js'],
     'faradis-match': ['faradis-match.js', 'faradis-data.js'],

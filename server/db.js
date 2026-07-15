@@ -1614,6 +1614,65 @@ async function initSchema() {
   await query(`CREATE INDEX IF NOT EXISTS idx_tkpi_warehec_emp_month ON trade_warehouse_rec(employee,jalali_month)`).catch(()=>{});
 
   // ════════════════════════════════════════
+  // TRADE CASES — EZ Dashboard merge (پرونده‌های بازرگانی)
+  // ════════════════════════════════════════
+  await query(`
+    CREATE TABLE IF NOT EXISTS trade_process_templates (
+      id          TEXT PRIMARY KEY,
+      name        TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      category    TEXT DEFAULT '',
+      steps       JSONB NOT NULL DEFAULT '[]',
+      is_active   BOOLEAN DEFAULT TRUE,
+      version     INT DEFAULT 1,
+      created_by  TEXT,
+      created_at  TIMESTAMPTZ DEFAULT NOW(),
+      updated_at  TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_tpt_active ON trade_process_templates(is_active, name)`).catch(()=>{});
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS trade_cases (
+      id            TEXT PRIMARY KEY,
+      case_number   TEXT UNIQUE,
+      title         TEXT NOT NULL,
+      template_id   TEXT REFERENCES trade_process_templates(id),
+      template_version INT DEFAULT 1,
+      assigned_to   TEXT,
+      steps_data    JSONB NOT NULL DEFAULT '{}',
+      is_finalized  BOOLEAN DEFAULT FALSE,
+      finalized_at  TIMESTAMPTZ,
+      jalali_month  TEXT,
+      proforma_id   TEXT,
+      center_key    TEXT,
+      priority      TEXT DEFAULT 'normal',
+      notes         TEXT DEFAULT '',
+      status        TEXT DEFAULT 'active',
+      created_by    TEXT,
+      created_at    TIMESTAMPTZ DEFAULT NOW(),
+      updated_at    TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_tc_assigned ON trade_cases(assigned_to, status)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_tc_month ON trade_cases(jalali_month)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_tc_template ON trade_cases(template_id)`).catch(()=>{});
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS trade_case_activities (
+      id        TEXT PRIMARY KEY,
+      case_id   TEXT NOT NULL REFERENCES trade_cases(id) ON DELETE CASCADE,
+      user_id   TEXT,
+      action    TEXT NOT NULL,
+      details   TEXT DEFAULT '',
+      at        TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_tca_case ON trade_case_activities(case_id, at DESC)`).catch(()=>{});
+
+  await _seedTradeProcessTemplates();
+
+  // ════════════════════════════════════════
   // INVOICES — from approved proformas
   // ════════════════════════════════════════
   await query(`
@@ -2426,6 +2485,40 @@ async function _migrateWMSFromBlob() {
                 'transactions:', (S.transactions||[]).length);
   } catch(e) {
     console.error('[DB] WMS migration error:', e.message);
+  }
+}
+
+async function _seedTradeProcessTemplates() {
+  try {
+    const cnt = await query('SELECT COUNT(*)::int AS n FROM trade_process_templates WHERE is_active=TRUE');
+    if (cnt.rows[0].n > 0) return;
+    const id = 'tpt_default_import';
+    const steps = [
+      { id: 'step_req', title: 'درخواست و ثبت', order: 0, fields: [
+        { id: 'f1', name: 'title', label: 'عنوان محموله', type: 'text', required: true, width: 'full' },
+        { id: 'f2', name: 'start_date', label: 'تاریخ شروع', type: 'date', required: false, width: 'half' },
+      ]},
+      { id: 'step_clr', title: 'ترخیص گمرکی', order: 1, fields: [
+        { id: 'f3', name: 'title', label: 'عنوان ترخیص', type: 'text', required: true, width: 'full' },
+        { id: 'f4', name: 'start_date', label: 'تاریخ شروع', type: 'date', required: true, width: 'half' },
+      ]},
+      { id: 'step_sup', title: 'تامین‌کننده', order: 2, fields: [
+        { id: 'f5', name: 'company_name', label: 'نام شرکت', type: 'text', required: true, width: 'full' },
+        { id: 'f6', name: 'country', label: 'کشور', type: 'text', required: false, width: 'half' },
+      ]},
+      { id: 'step_rep', title: 'گزارش روزانه', order: 3, fields: [
+        { id: 'f7', name: 'summary', label: 'خلاصه', type: 'textarea', required: true, width: 'full' },
+      ]},
+    ];
+    await query(
+      `INSERT INTO trade_process_templates (id, name, description, category, steps, created_by)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+       ON CONFLICT (id) DO NOTHING`,
+      [id, 'واردات کالا (پیش‌فرض)', 'قالب پیش‌فرض ادغام EZ → Click CRM', 'import', JSON.stringify(steps), 'system']
+    );
+    console.log('[DB] Default trade process template seeded');
+  } catch (e) {
+    console.warn('[DB] trade template seed:', e.message);
   }
 }
 

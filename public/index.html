@@ -4,13 +4,18 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script>
-/* Bardeen و برخی افزونه‌ها روی keydown بدون e.key کرش می‌کنند (page-events.js) */
-document.addEventListener('keydown', function (e) {
-  if (typeof e.key === 'string' && e.key) return;
-  var fb = e.code || '';
-  if (!fb || fb === 'Unidentified') return;
-  try { Object.defineProperty(e, 'key', { value: fb, configurable: true }); } catch (_) {}
-}, true);
+/* Bardeen و افزونه‌ها (page-events.js) گاهی e.key ندارند → .length روی undefined */
+(function () {
+  function _kbdPatchKey(e) {
+    if (!e || typeof e !== 'object') return;
+    var k = e.key;
+    if (typeof k === 'string' && k.length) return;
+    var fb = (e.code && e.code !== 'Unidentified') ? e.code : 'Unidentified';
+    try { Object.defineProperty(e, 'key', { value: fb, configurable: true }); } catch (_) {}
+  }
+  document.addEventListener('keydown', _kbdPatchKey, true);
+  document.addEventListener('keyup', _kbdPatchKey, true);
+})();
 </script>
 <title>پورتال فروش آتنا زیست درمان v2.1</title>
 <!-- cache-bust: v2.1 -->
@@ -41,7 +46,7 @@ setTimeout(function(){
   if((tb&&tb.offsetHeight>=8)||(lo&&lo.style.display==='flex'))return;
   __showBootError('صفحه کامل بارگذاری نشد. Hard Refresh بزنید (Ctrl+Shift+R) یا کش مرورگر را پاک کنید.');
 },12000);
-window.__APP_BUILD='20260714t';
+window.__APP_BUILD='20260715b';
 if('serviceWorker' in navigator){
   navigator.serviceWorker.getRegistrations().then(function(regs){
     regs.forEach(function(r){r.unregister();});
@@ -790,7 +795,7 @@ if('serviceWorker' in navigator){
 </nav>
 <!-- DATA — core modules; tab-specific scripts load on demand via tab-loader.js -->
 <script src="/js/safe-dom.js?v=20260714s"></script>
-<script src="/js/tab-loader.js?v=20260714t"></script>
+<script src="/js/tab-loader.js?v=20260715b"></script>
 <script src="/js/roles.js?v=20260714s"></script>
 <script src="/js/core.js?v=20260714s"></script>
 <script src="/js/settings.js?v=20260714s"></script>

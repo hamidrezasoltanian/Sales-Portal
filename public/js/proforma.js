@@ -1869,6 +1869,18 @@ async function pfSave() {
     if (!r.ok) { showToast('❌ ' + (data.error || 'خطا')); return; }
     var _pfM=document.getElementById('pfModal'); if(_pfM) _pfM.style.display='none';
     _pfEditId = data.id;
+    var _tcId = window.__pfPendingTradeCaseId;
+    if (_tcId && data.id) {
+      window.__pfPendingTradeCaseId = null;
+      fetch('/api/trade-cases/' + encodeURIComponent(_tcId), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ proformaId: data.id, centerKey: centerKey || undefined }),
+      }).then(function() {
+        if (typeof showToast === 'function') showToast('🔗 پیش‌فاکتور به پرونده بازرگانی وصل شد');
+      }).catch(function() {});
+    }
     showToast('✅ پیشفاکتور ' + (method === 'PUT' ? 'ویرایش' : 'ایجاد') + ' شد — شماره: ' + data.no);
     await pfLoad();
     var el = document.getElementById('pfVanillaRoot');

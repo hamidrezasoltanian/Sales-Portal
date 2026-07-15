@@ -15,6 +15,11 @@
   var _tkScore = null;
   var _tkTargets = null;
   var _tkMonthRecord = null;
+  var _tkTradeEmployees = null;
+  var _tkTemplates = [];
+  var _tkCases = [];
+  var _tkCaseFilter = 'active';
+  var _tkWmsImporting = false;
 
   // ── Date helpers ───────────────────────────────────────────────────────────
   var _TK_JMONTHS = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور',
@@ -71,12 +76,71 @@
   }
 
   function _tkAPI(method, path, body) {
-    var opts = { method: method, headers: { 'Content-Type': 'application/json' } };
+    var opts = { method: method, headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin' };
     if (body) opts.body = JSON.stringify(body);
     return fetch('/api/trade-kpi' + path, opts).then(function(r) {
       if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || r.status); });
       return r.json();
     });
+  }
+
+  function _tkTradeAPI(method, resource, path, body) {
+    var opts = { method: method, headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin' };
+    if (body) opts.body = JSON.stringify(body);
+    return fetch('/api/' + resource + path, opts).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || r.status); });
+      return r.json();
+    });
+  }
+
+  function _tkGetTradeMembers() {
+    var out = [];
+    var seen = {};
+    function add(id, name) {
+      if (!id || seen[id]) return;
+      seen[id] = true;
+      out.push({ id: id, name: name || id });
+    }
+    var members = (typeof DB !== 'undefined' && DB.settings && DB.settings.members) ? DB.settings.members : [];
+    if (!members.length && typeof _DEFAULT_MEMBERS !== 'undefined') members = _DEFAULT_MEMBERS;
+    members.forEach(function(m) {
+      if (m.active === false) return;
+      var role = m.role || '';
+      if (role === 'بازرگانی' || role === 'کارشناس بازرگانی' || role.indexOf('بازرگانی') >= 0) {
+        add(m.id, m.name);
+      }
+    });
+    if (!out.length && Array.isArray(_tkTradeEmployees) && _tkTradeEmployees.length) {
+      _tkTradeEmployees.forEach(function(m) {
+        add(m.username, m.display_name || (typeof USERS !== 'undefined' ? USERS[m.username] : m.username));
+      });
+    }
+    if (!out.length && typeof USERS !== 'undefined') {
+      Object.keys(USERS).forEach(function(uid) { add(uid, USERS[uid]); });
+    }
+    return out;
+  }
+
+  function _tkBuildEmpSelect() {
+    var members = _tkGetTradeMembers();
+    if (!_tkIsManager()) return '';
+    if (!members.length) {
+      return '<span style="font-size:.82rem;color:#f59e0b">کارشناس بازرگانی تعریف نشده — از تنظیمات نقش «بازرگانی» اضافه کنید</span>';
+    }
+    if (!_tkEmployee) _tkEmployee = members[0].id;
+    var html = '<select onchange="window._tkSetEmployee(this.value)" style="' + _tkInputStyle() + 'min-width:160px">' +
+      '<option value="">انتخاب کارشناس</option>';
+    members.forEach(function(m) {
+      html += '<option value="' + esc(m.id) + '"' + (m.id === _tkEmployee ? ' selected' : '') + '>' + esc(m.name) + '</option>';
+    });
+    html += '</select>';
+    return html;
+  }
+
+  function _tkRefreshTradeEmployees() {
+    _tkAPI('GET', '/employees').then(function(rows) {
+      if (rows && rows.length) _tkTradeEmployees = rows;
+    }).catch(function() { /* keep local members */ });
   }
 
   function _tkFmt(n) {
@@ -151,22 +215,11 @@
         return '<option value="' + o.value + '"' + (o.value === _tkMonth ? ' selected' : '') + '>' + o.label + '</option>';
       }).join('') + '</select>';
 
-    var empSel = '';
-    if (_tkIsManager() && typeof USERS !== 'undefined') {
-      var _tradeMembers = (typeof _DEFAULT_MEMBERS !== 'undefined' && _DEFAULT_MEMBERS.length)
-        ? _DEFAULT_MEMBERS.filter(function(m) { return (m.role === 'بازرگانی' || m.role === 'کارشناس بازرگانی') && m.active !== false; })
-        : Object.keys(USERS).map(function(uid) { return { id: uid, name: USERS[uid] }; });
-      if (_tradeMembers.length) {
-        empSel = '<select onchange="window._tkSetEmployee(this.value)" style="' + _tkInputStyle() + '">' +
-          '<option value="">انتخاب کارشناس بازرگانی</option>';
-        _tradeMembers.forEach(function(m) {
-          empSel += '<option value="' + m.id + '"' + (m.id === _tkEmployee ? ' selected' : '') + '>' + esc(m.name || m.id) + '</option>';
-        });
-        empSel += '</select>';
-      }
-    }
+    var empSel = _tkBuildEmpSelect();
+    _tkRefreshTradeEmployees();
 
     var tabs = [
+      { id: 'cases',     icon: '📂', label: 'پرونده‌ها' },
       { id: 'score',     icon: '📊', label: 'نمره KPI' },
       { id: 'history',   icon: '📈', label: 'تاریخچه' },
       { id: 'kanban',    icon: '📌', label: 'وظایف' },
@@ -178,8 +231,12 @@
       { id: 'team',      icon: '👥', label: 'تیمی' },
       { id: 'warehouse', icon: '🏭', label: 'انبار' },
       { id: 'milestones', icon: '🏆', label: 'پاداش پروژه' },
-      { id: 'deductions', icon: '➖', label: 'کسورات' }
+      { id: 'deductions', icon: '➖', label: 'کسورات' },
+      { id: 'treports',  icon: '📈', label: 'گزارش بازرگانی' }
     ];
+    if (_tkIsManager()) {
+      tabs.splice(2, 0, { id: 'templates', icon: '⚙️', label: 'فرآیندها' });
+    }
 
     var tabBtns = tabs.map(function(t) {
       var active = t.id === _tkTab;
@@ -208,15 +265,21 @@
     if (_tkEmployee && _tkMonth) {
       _tkLoadAndRender();
     } else {
+      var msg = !_tkMonth
+        ? 'خطا در تنظیم ماه'
+        : (_tkIsManager() ? 'لطفاً یک کارشناس انتخاب کنید' : 'در حال بارگذاری هویت کاربر...');
       document.getElementById('tkContent').innerHTML =
-        '<div style="text-align:center;padding:40px;color:#9ca3af;background:#f8fafc;border-radius:12px">' +
-        (_tkIsManager() ? 'لطفاً یک کارشناس انتخاب کنید' : 'در حال بارگذاری...') + '</div>';
+        '<div style="text-align:center;padding:40px;color:#9ca3af;background:#f8fafc;border-radius:12px">' + msg + '</div>';
     }
   };
 
   window._tkSetTab = function(id) { _tkTab = id; window.renderTradeKPIPanel(); };
   window._tkSetMonth = function(m) { _tkMonth = m; _tkScore = null; window.renderTradeKPIPanel(); };
-  window._tkSetEmployee = function(e) { _tkEmployee = e; _tkScore = null; window.renderTradeKPIPanel(); };
+  window._tkSetEmployee = function(e) {
+    _tkEmployee = e || '';
+    _tkScore = null;
+    window.renderTradeKPIPanel();
+  };
 
   function _tkLoadAndRender() {
     var cont = document.getElementById('tkContent');
@@ -224,23 +287,47 @@
     var emp = encodeURIComponent(_tkEmployee);
     var mon = encodeURIComponent(_tkMonth);
 
-    var promises = [
-      _tkAPI('GET', '/score/' + emp + '/' + mon).catch(function() { return null; }),
-      _tkAPI('GET', '/targets/' + emp + '/' + mon).catch(function() { return null; })
-    ];
-
-    if (_tkTab === 'score' || _tkTab === 'history') {
-      promises.push(_tkAPI('GET', '/kpi-history/' + emp).catch(function() { return []; }));
-    } else if (_tkTab === 'customs') promises.push(_tkAPI('GET', '/clearances/' + emp + '/' + mon).catch(function() { return []; }));
-    else if (_tkTab === 'report') promises.push(_tkAPI('GET', '/reports/' + emp + '/' + mon).catch(function() { return []; }));
-    else if (_tkTab === 'supplier') promises.push(_tkAPI('GET', '/suppliers/' + emp + '/' + mon).catch(function() { return []; }));
-    else if (_tkTab === 'finance') promises.push(_tkAPI('GET', '/finance/' + emp + '/' + mon).catch(function() { return []; }));
-    else if (_tkTab === 'warehouse') promises.push(_tkAPI('GET', '/warehouse/' + emp + '/' + mon).catch(function() { return null; }));
-    else if (_tkTab === 'milestones') promises.push(_tkAPI('GET', '/milestones?employee=' + emp).catch(function() { return []; }));
-    else if (_tkTab === 'deductions') promises.push(_tkAPI('GET', '/deductions/' + emp + '/' + mon).catch(function() { return []; }));
-    else if (_tkTab === 'kanban' || _tkTab === 'admin' || _tkTab === 'team') promises.push(_tkAPI('GET', '/tasks').catch(function() { return []; }));
+    var promises;
+    if (_tkTab === 'cases') {
+      promises = [
+        _tkTradeAPI('GET', 'trade-templates', '/').catch(function() { return { templates: [] }; }),
+        _tkTradeAPI('GET', 'trade-cases', '/?month=' + mon + '&assigned_to=' + emp + '&status=' + encodeURIComponent(_tkCaseFilter)).catch(function() { return { cases: [] }; })
+      ];
+    } else if (_tkTab === 'templates' || _tkTab === 'treports') {
+      promises = [];
+    } else {
+      promises = [
+        _tkAPI('GET', '/score/' + emp + '/' + mon).catch(function() { return null; }),
+        _tkAPI('GET', '/targets/' + emp + '/' + mon).catch(function() { return null; })
+      ];
+      if (_tkTab === 'score' || _tkTab === 'history') {
+        promises.push(_tkAPI('GET', '/kpi-history/' + emp).catch(function() { return []; }));
+      } else if (_tkTab === 'customs') promises.push(_tkAPI('GET', '/clearances/' + emp + '/' + mon).catch(function() { return []; }));
+      else if (_tkTab === 'report') promises.push(_tkAPI('GET', '/reports/' + emp + '/' + mon).catch(function() { return []; }));
+      else if (_tkTab === 'supplier') promises.push(_tkAPI('GET', '/suppliers/' + emp + '/' + mon).catch(function() { return []; }));
+      else if (_tkTab === 'finance') promises.push(_tkAPI('GET', '/finance/' + emp + '/' + mon).catch(function() { return []; }));
+      else if (_tkTab === 'warehouse') promises.push(_tkAPI('GET', '/warehouse/' + emp + '/' + mon).catch(function() { return null; }));
+      else if (_tkTab === 'milestones') promises.push(_tkAPI('GET', '/milestones?employee=' + emp).catch(function() { return []; }));
+      else if (_tkTab === 'deductions') promises.push(_tkAPI('GET', '/deductions/' + emp + '/' + mon).catch(function() { return []; }));
+      else if (_tkTab === 'kanban' || _tkTab === 'admin' || _tkTab === 'team') promises.push(_tkAPI('GET', '/tasks').catch(function() { return []; }));
+    }
 
     Promise.all(promises).then(function(res) {
+      if (_tkTab === 'cases') {
+        _tkTemplates = (res[0] && res[0].templates) || [];
+        _tkCases = (res[1] && res[1].cases) || [];
+        _tkRenderCases(cont);
+        return;
+      }
+      if (_tkTab === 'templates' && typeof window._tkRenderTemplates === 'function') {
+        window._tkRenderTemplates(cont);
+        return;
+      }
+      if (_tkTab === 'treports' && typeof window._tkRenderTradeReports === 'function') {
+        window._tkRenderTradeReports(cont);
+        return;
+      }
+
       _tkScore = res[0];
       _tkTargets = res[1] || _tkDefaultTargets();
       var extra = res[2];
@@ -264,6 +351,115 @@
       cont.innerHTML = '<div style="color:#ef4444;padding:20px">خطا: ' + esc(e.message) + '</div>';
     });
   }
+
+  // ── Trade cases (EZ merge) ─────────────────────────────────────────────────
+  function _tkCaseProgress(c, tpl) {
+    if (!tpl || !tpl.steps || !tpl.steps.length) return 0;
+    if (c.isFinalized) return 100;
+    var done = 0;
+    tpl.steps.forEach(function(s) {
+      if (c.stepsData && c.stepsData[s.id] && c.stepsData[s.id].completed_at) done++;
+    });
+    return Math.round((done / tpl.steps.length) * 100);
+  }
+
+  function _tkRenderCases(cont) {
+    var tplMap = {};
+    _tkTemplates.forEach(function(t) { tplMap[t.id] = t; });
+
+    var html = '<div style="background:#f8fafc;border-radius:12px;padding:14px;border:1px solid #e2e8f0;margin-bottom:14px;font-size:.8rem;color:#64748b;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">' +
+      '<span>پرونده‌های بازرگانی — کلیک برای جزئیات. تکمیل مرحله → KPI خودکار.</span>' +
+      '<select onchange="window._tkSetCaseFilter(this.value)" style="' + _tkInputStyle(130) + 'font-size:.78rem">' +
+      '<option value="active"' + (_tkCaseFilter === 'active' ? ' selected' : '') + '>فعال</option>' +
+      '<option value="finalized"' + (_tkCaseFilter === 'finalized' ? ' selected' : '') + '>نهایی‌شده</option>' +
+      '<option value="all"' + (_tkCaseFilter === 'all' ? ' selected' : '') + '>همه</option>' +
+      '</select></div>';
+
+    if (_tkTemplates.length) {
+      html += '<div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e2e8f0;margin-bottom:14px">' +
+        '<h4 style="margin:0 0 12px;font-size:.9rem">+ پرونده جدید</h4>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">' +
+        '<div style="flex:2;min-width:180px"><label style="font-size:.75rem;color:#6b7280;display:block;margin-bottom:3px">عنوان</label>' +
+        '<input id="tkc_new_title" placeholder="مثلاً: ترخیص محموله X" style="' + _tkInputStyle('100%') + '"></div>' +
+        '<div><label style="font-size:.75rem;color:#6b7280;display:block;margin-bottom:3px">فرآیند</label>' +
+        '<select id="tkc_new_tpl" style="' + _tkInputStyle(180) + '">' +
+        _tkTemplates.map(function(t) {
+          return '<option value="' + esc(t.id) + '">' + esc(t.name) + '</option>';
+        }).join('') + '</select></div>' +
+        '<button onclick="window._tkAddCase()" style="' + _tkBtnStyle() + '">+ ایجاد</button>' +
+        '</div></div>';
+    } else {
+      html += '<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:14px;margin-bottom:14px;font-size:.85rem;color:#9a3412">' +
+        'هنوز قالب فرآیندی تعریف نشده. مدیر می‌تواند با <code>migrate-ez-to-crm.js</code> یا API <code>/api/trade-templates</code> قالب اضافه کند.</div>';
+    }
+
+    if (!_tkCases.length) {
+      html += '<div style="text-align:center;padding:40px;color:#9ca3af;background:#f8fafc;border-radius:12px">پرونده‌ای برای این ماه ثبت نشده</div>';
+    } else {
+      html += '<div style="background:#fff;border-radius:12px;padding:16px;border:1px solid #e2e8f0">';
+      _tkCases.forEach(function(c) {
+        var tpl = tplMap[c.templateId];
+        var pct = _tkCaseProgress(c, tpl);
+        var stLabel = c.isFinalized ? '✅ نهایی' : (pct >= 100 ? '⏳ آماده نهایی' : '🔄 ' + pct + '٪');
+        html += '<div style="padding:12px 0;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:12px;flex-wrap:wrap;cursor:pointer" onclick="window._tkOpenCase(\'' + c.id + '\')">' +
+          '<div style="flex:1;min-width:200px">' +
+          '<div style="font-size:.9rem;font-weight:600;color:#1e293b">' + esc(c.title) + '</div>' +
+          '<div style="font-size:.75rem;color:#6b7280;margin-top:3px">' + esc(c.caseNumber || '') +
+          (tpl ? ' · ' + esc(tpl.name) : '') + '</div></div>' +
+          '<div style="min-width:120px;flex:1">' + _tkBar(pct) + '</div>' +
+          '<span style="font-size:.8rem;white-space:nowrap">' + stLabel + '</span>' +
+          (!c.isFinalized ? '<button onclick="event.stopPropagation();window._tkFinalizeCase(\'' + c.id + '\')" style="padding:4px 10px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;font-size:.75rem">نهایی</button>' : '') +
+          '</div>';
+      });
+      html += '</div>';
+    }
+    cont.innerHTML = html;
+  }
+
+  window._tkAddCase = function() {
+    var title = (document.getElementById('tkc_new_title') || {}).value.trim();
+    var templateId = (document.getElementById('tkc_new_tpl') || {}).value;
+    if (!title) { if (typeof showToast === 'function') showToast('عنوان الزامی است'); return; }
+    if (!templateId) { if (typeof showToast === 'function') showToast('قالب الزامی است'); return; }
+    _tkTradeAPI('POST', 'trade-cases', '/', {
+      title: title,
+      templateId: templateId,
+      assignedTo: _tkEmployee,
+      jalaliMonth: _tkMonth
+    }).then(function(created) {
+      if (typeof showToast === 'function') showToast('✅ پرونده ایجاد شد');
+      _tkLoadAndRender();
+      if (created && created.id && typeof window._tkOpenCase === 'function') {
+        setTimeout(function() { window._tkOpenCase(created.id); }, 300);
+      }
+    }).catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  window._tkFinalizeCase = function(id) {
+    if (!confirm('پرونده نهایی شود؟')) return;
+    _tkTradeAPI('POST', 'trade-cases', '/' + id + '/finalize', {})
+      .then(function(res) {
+        var msg = '✅ پرونده نهایی شد';
+        if (res && res.kpiSynced) msg += ' · KPI: ' + res.kpiSynced + ' مرحله';
+        if (typeof showToast === 'function') showToast(msg);
+        _tkLoadAndRender();
+      })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  window._tkSetCaseFilter = function(f) {
+    _tkCaseFilter = f || 'active';
+    _tkLoadAndRender();
+  };
+
+  window._tkOnTradeCaseSSE = function(data) {
+    if (typeof currentTab !== 'undefined' && currentTab !== 'trade-kpi') return;
+    if (_tkTab === 'cases' && typeof _tkLoadAndRender === 'function') _tkLoadAndRender();
+    if (_tkTab === 'treports' && typeof window._tkRenderTradeReports === 'function') {
+      var cont = document.getElementById('tkContent');
+      if (cont) window._tkRenderTradeReports(cont);
+    }
+  };
 
   // ── Score dashboard ────────────────────────────────────────────────────────
   function _tkRenderScore(cont) {
@@ -781,7 +977,9 @@
     html += '<div style="background:#fff;border-radius:12px;padding:20px;border:1px solid #e2e8f0">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">' +
         '<span style="font-size:.88rem;font-weight:600;color:#374151">مقایسه موجودی ماهانه</span>' +
-        '<button onclick="window._tkImportWms()" style="padding:6px 12px;background:#0ea5e9;color:#fff;border:none;border-radius:7px;cursor:pointer;font-family:inherit;font-size:.8rem">📥 بارگذاری از WMS</button>' +
+        '<button onclick="window._tkImportWms()" id="tkw_import_btn"' + (_tkWmsImporting ? ' disabled' : '') +
+        ' style="padding:6px 12px;background:' + (_tkWmsImporting ? '#94a3b8' : '#0ea5e9') + ';color:#fff;border:none;border-radius:7px;cursor:pointer;font-family:inherit;font-size:.8rem">' +
+        (_tkWmsImporting ? '⏳ در حال بارگذاری...' : '📥 بارگذاری از WMS') + '</button>' +
       '</div>';
     if (d.wms_synced_at) {
       html += '<div style="font-size:.78rem;color:#0369a1;background:#f0f9ff;border-radius:8px;padding:8px 10px;margin-bottom:12px">' +
@@ -823,6 +1021,10 @@
   };
 
   window._tkImportWms = function() {
+    if (_tkWmsImporting) return;
+    _tkWmsImporting = true;
+    var btn = document.getElementById('tkw_import_btn');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ در حال بارگذاری...'; btn.style.background = '#94a3b8'; }
     _tkAPI('GET', '/warehouse-wms-snapshot')
       .then(function(snap) {
         var gov = parseInt((document.getElementById('tkw_gov') || {}).value) || 0;
@@ -838,9 +1040,14 @@
       })
       .then(function(snap) {
         if (typeof showToast === 'function') showToast('✅ WMS: ' + snap.sku_count + ' قلم، ' + snap.total_qty + ' واحد');
+        _tkWmsImporting = false;
         _tkLoadAndRender();
       })
-      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+      .catch(function(e) {
+        _tkWmsImporting = false;
+        if (typeof showToast === 'function') showToast('خطا: ' + e.message);
+        _tkLoadAndRender();
+      });
   };
 
   // ── Admin tasks ────────────────────────────────────────────────────────────
@@ -1077,6 +1284,20 @@
     _tkAPI('DELETE', '/deductions/' + id)
       .then(function() { _tkLoadAndRender(); })
       .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  window._tkLoadAndRender = _tkLoadAndRender;
+
+  window._tkExpose = {
+    tradeAPI: _tkTradeAPI,
+    api: _tkAPI,
+    dateInput: _tkDateInput,
+    inputStyle: _tkInputStyle,
+    textareaStyle: _tkTextareaStyle,
+    btnStyle: _tkBtnStyle,
+    isManager: _tkIsManager,
+    employee: function() { return _tkEmployee; },
+    month: function() { return _tkMonth; }
   };
 
 })();
