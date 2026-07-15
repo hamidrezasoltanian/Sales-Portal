@@ -230,7 +230,7 @@ function umSaveUser(userId){
         var nu=payload.new_username;
         Object.keys(DB.edits||{}).forEach(function(k){if(DB.edits[k].owner===userId)DB.edits[k].owner=nu;});
         getAllProvinces().forEach(function(p){var e=getE(getProvType(p.id),p.id);if(e.owner===userId)setE(getProvType(p.id),p.id,'owner',nu);});
-        saveDB();
+        if(typeof savePatchDB==='function')savePatchDB({edits:DB.edits});
       }
       if(d.role_changed)showToast('⚠ نقش تغییر کرد — کاربر باید دوباره وارد شود',4000);
       else showToast('✅ «'+newName+'» ذخیره شد');
@@ -256,16 +256,29 @@ var _UM_MODULES=[
   {key:'letters',    label:'دبیرخانه'},
   {key:'mtr',        label:'مطالبات'},
   {key:'hr',         label:'منابع انسانی'},
+  {key:'payroll',    label:'حقوق و پورسانت'},
+  {key:'workflows',  label:'گردش‌کار'},
   {key:'trade-kpi',  label:'بازرگانی'},
   {key:'kpi',        label:'KPI مدیر'},
   {key:'manager',    label:'بررسی مدیر'},
   {key:'changelog',  label:'لاگ تغییرات'},
 ];
 function _umPermLevel(perms, role, modKey){
-  if(perms&&perms[modKey]!==undefined)return perms[modKey];
+  if(perms&&perms[modKey]!==undefined){
+    return typeof crmNormalizePermLevel==='function'?crmNormalizePermLevel(perms[modKey]):'none';
+  }
   var roleDef=CRM_ROLE_DEFAULTS[crmNormalizeRole(role)];
-  if(roleDef&&roleDef.modules)return roleDef.modules[modKey]||'none';
+  if(roleDef&&roleDef.modules&&roleDef.modules[modKey]!==undefined){
+    return typeof crmNormalizePermLevel==='function'?crmNormalizePermLevel(roleDef.modules[modKey]):'none';
+  }
   return 'none';
+}
+function _umPermOptions(modKey){
+  var base=[{v:'none',l:'بدون دسترسی'},{v:'view',l:'فقط مشاهده'},{v:'edit',l:'ویرایش'}];
+  if(modKey==='payroll'){
+    base.splice(2,0,{v:'manage',l:'مدیریت گردش‌کار'},{v:'approve',l:'تأیید مالی'});
+  }
+  return base;
 }
 function umOpenPermissionsModal(userId){
   var members=umGetMembers();
@@ -276,11 +289,10 @@ function umOpenPermissionsModal(userId){
 
   var rows=_UM_MODULES.map(function(mod){
     var cur=_umPermLevel(perms,m.role,mod.key);
-    var opts=['none','view','edit'];
-    var labels=['بدون دسترسی','فقط مشاهده','ویرایش'];
-    var radios=opts.map(function(v,i){
+    var opts=_umPermOptions(mod.key);
+    var radios=opts.map(function(o){
       return '<label style="display:inline-flex;align-items:center;gap:3px;margin-left:10px;cursor:pointer;font-size:11.5px">'
-        +'<input type="radio" name="perm_'+mod.key+'" value="'+v+'"'+(cur===v?' checked':'')+' style="cursor:pointer"> '+labels[i]
+        +'<input type="radio" name="perm_'+mod.key+'" value="'+o.v+'"'+(cur===o.v?' checked':'')+' style="cursor:pointer"> '+o.l
         +'</label>';
     }).join('');
     return '<tr style="border-bottom:1px solid var(--border)">'
@@ -595,7 +607,7 @@ function umProvOwnerChanged(provId){
     var toName=newOwner?(members.find(function(m){return m.id===newOwner;})||{name:newOwner}).name:'بدون مسئول';
     if(!DB.provHistory)DB.provHistory=[];
     DB.provHistory.push({provId:provId,provName:prov?prov.name:provId,from:fromOwner,fromName:fromName,to:newOwner,toName:toName,at:todayStr(),ts:Date.now()});
-    saveDB();
+    postProvHistory(DB.provHistory[DB.provHistory.length-1]);
   }
   setE(getProvType(provId),provId,'owner',newOwner);
   var dot=document.getElementById('pdot_'+provId);
@@ -656,7 +668,7 @@ function showProvHistory(){
     html+='</div></div>';
   });
   html+='</div>';
-  var foot='<button onclick="if(confirm(\'پاک کردن کل تاریخچه؟\')){DB.provHistory=[];saveDB();closeModal(\'provHistModal\');showToast(\'تاریخچه پاک شد\')}" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5;border-radius:5px;padding:5px 14px;cursor:pointer;font-size:11px;font-family:inherit">🗑 پاک کردن</button>'
+  var foot='<button onclick="if(confirm(\'پاک کردن کل تاریخچه؟\')){DB.provHistory=[];fetch(\'/api/prov-history\',{method:\'DELETE\'}).catch(function(){});closeModal(\'provHistModal\');showToast(\'تاریخچه پاک شد\')}" style="background:#fef2f2;color:#dc2626;border:1px solid #fca5a5;border-radius:5px;padding:5px 14px;cursor:pointer;font-size:11px;font-family:inherit">🗑 پاک کردن</button>'
     +'<button class="btn-secondary" onclick="closeModal(\'provHistModal\')" style="margin-right:8px">بستن</button>';
   openModal('provHistModal','📋 تاریخچه تغییرات مسئولین استان',html,foot,{lg:true});
 }
@@ -914,15 +926,10 @@ function setCenterCompetitors(rtype, rid, list, modalId) {
   DB.edits[k].competitor = joined;
   DB.edits[k]._ts = nowTs();
   _invalidateEditsCache();
-  if (typeof savePatchDB === 'function') {
-    var patch = {}; patch[k] = DB.edits[k];
-    savePatchDB({ edits: patch });
-  } else if (typeof patchCenterField === 'function') {
-    patchCenterField(k, 'competitors', cleaned, { centerName: _getCenterName(rtype, rid) }).catch(function() { saveDB(); });
-    patchCenterField(k, 'competitor', joined, { centerName: _getCenterName(rtype, rid) }).catch(function() {});
-  } else {
-    saveDB();
-  }
+  patchCenterField(k, 'competitors', cleaned, { centerName: _getCenterName(rtype, rid) }).catch(function () {
+    showToast('⚠ خطا در ذخیره رقبا', 2500);
+  });
+  patchCenterField(k, 'competitor', joined, { centerName: _getCenterName(rtype, rid) }).catch(function () {});
   if (modalId && typeof _cmRefreshCompetitorChips === 'function') {
     _cmRefreshCompetitorChips(rtype, rid, modalId);
   }
@@ -952,6 +959,7 @@ function getCenterById(rtype,id){
   return (DB.extra||[]).find(function(x){return x.id===id;})||null;
 }
 function setE(type,id,field,val){var k=recK(type,id);if(!DB.edits[k])DB.edits[k]={};
+  var _oldTs=DB.edits[k]._ts;
   if(!_undoSuppressed){var _prevVal=DB.edits[k][field];_undoStack.push({type:type,id:id,field:field,val:_prevVal});if(_undoStack.length>MAX_UNDO)_undoStack.shift();_redoStack=[];}
   if(!_undoSuppressed){DB.changeLog=DB.changeLog||[];DB.changeLog.push({at:new Date().toISOString(),by:currentUser,rkey:type+'_'+id,field:field,val:val});if(DB.changeLog.length>500)DB.changeLog=DB.changeLog.slice(-500);
     fetch('/api/changelog',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:JSON.stringify({at:new Date().toISOString(),by:currentUser,rkey:type+'_'+id,field:field,val:val})}).catch(function(){});}
@@ -972,19 +980,15 @@ function setE(type,id,field,val){var k=recK(type,id);if(!DB.edits[k])DB.edits[k]
     wpReconcileFollowupDates();
   }
   if(typeof patchCenterField==='function'){
-    patchCenterField(k, field, val, { centerName: _getCenterName(type, id), oldValue: _oldV }).catch(function(){
+    patchCenterField(k, field, val, { centerName: _getCenterName(type, id), oldValue: _oldV, expectedTs: _oldTs }).catch(function(){
       showToast('خطا در ذخیره فیلد مرکز');
     });
-  } else if(typeof savePatchDB==='function'){
-    var _patchEdits={};_patchEdits[k]=DB.edits[k];
-    savePatchDB({edits:_patchEdits});
-  } else {
-    saveDB();
   }
   flashRow(id);
   if(currentTab==='kpi'&&(field==='status'||field==='lead'||field==='owner'))setTimeout(renderKPIPanel,300);
   if(currentTab==='manager'&&(field==='status'||field==='lead'||field==='owner'||field==='followupDate'))setTimeout(renderManagerPanel,300);
   if(field==='followupDate'&&currentTab==='weekplan')setTimeout(renderWeekPlan,50);
+  if((field==='followupDate'||field==='status')&&typeof _scheduleInboxRefresh==='function')_scheduleInboxRefresh();
   if(field==='owner'&&val&&typeof sendNotif==='function'){
     (function(){
       var _oldOwner=(DB.edits[k]||{})._prevOwner||'';
@@ -1054,11 +1058,8 @@ function _saveLostReason(rtype,id){
   var reason=(document.getElementById('lrReason')||{}).value||'';
   var note=(document.getElementById('lrNote')||{}).value||'';
   if(!reason){showToast('لطفاً یک دلیل انتخاب کنید');return;}
-  var k=recK(rtype,id);
-  if(!DB.edits[k])DB.edits[k]={};
-  DB.edits[k].lostReason=reason;
-  if(note)DB.edits[k].lostNote=note;
-  saveDB();
+  setE(rtype,id,'lostReason',reason);
+  if(note)setE(rtype,id,'lostNote',note);
   closeModal('lostReasonModal');
   showToast('✅ دلیل ثبت شد',2000);
 }

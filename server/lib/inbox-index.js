@@ -10,8 +10,9 @@ const {
   fallbackLabel,
 } = require('./center-names');
 const {
-  todayJalaliStr, compareJalali, parseJalali, j2g, addJalaliDays,
+  todayJalaliStr, compareJalali, parseJalali, formatJalali, j2g, addJalaliDays,
 } = require('./jalali-mini');
+const { buildOwnerMaps, resolveCenterOwner } = require('./center-ownership');
 
 const MANAGER_POOL = '@manager';
 const CLOSED_STATUSES = ['غیرفعال', 'قرارداد بسته شد', 'عدم نیاز فاکتور کنسل شد', 'lost', 'inactive'];
@@ -67,13 +68,16 @@ function computeSeverity(row, today) {
 
 function rowToApiItem(row, today) {
   const s = computeSeverity(row, today);
+  const dueRaw = row.due_at || null;
+  const dueParsed = dueRaw ? parseJalali(dueRaw) : null;
+  const dueAt = dueParsed ? formatJalali(dueParsed) : dueRaw;
   return {
     id: row.id,
     type: row.source_type,
     typeLabel: TYPE_LABELS[row.source_type] || row.source_type,
     title: row.title,
     subtitle: row.subtitle || '',
-    dueAt: row.due_at || null,
+    dueAt,
     priority: row.priority != null ? row.priority : 2,
     urgency: s.urgency,
     overdueDays: s.overdueDays,
@@ -157,6 +161,9 @@ async function listAuthorizedSubordinates(managerUsername, managerRole) {
 
 async function resolveTargetUser(user, scope, ownerParam) {
   const isMgr = isManagerRole(user.role);
+  if (scope === 'all' && isMgr) {
+    return { targetUser: null, scope: 'all', isMgr };
+  }
   const effectiveScope = scope === 'team' && isMgr ? 'team' : 'mine';
   let targetUser = user.username;
   if (effectiveScope === 'team') {
@@ -166,6 +173,128 @@ async function resolveTargetUser(user, scope, ownerParam) {
     targetUser = String(ownerParam);
   }
   return { targetUser, scope: effectiveScope, isMgr };
+}
+
+function inboxLimitCap(scope, rawLimit) {
+  const n = Math.max(parseInt(rawLimit, 10) || 50, 1);
+  if (scope === 'all') return Math.min(n, 2000);
+  return Math.min(n, 500);
+}
+
+function filterInboxSearch(items, search) {
+  if (!search) return items;
+  const q = String(search).trim().toLowerCase();
+  if (!q) return items;
+  return items.filter(function (item) {
+    return (item.title || '').toLowerCase().includes(q)
+      || (item.subtitle || '').toLowerCase().includes(q)
+      || (item.centerKey || '').toLowerCase().includes(q)
+      || (item.owner || '').toLowerCase().includes(q);
+  });
+}
+
+async function buildInboxResponse(items, opts, today, meta) {
+  const filter = opts.filter || 'all';
+  const limit = inboxLimitCap(meta.scope, opts.limit);
+  const offset = Math.max(parseInt(opts.offset, 10) || 0, 0);
+  const weekAhead = Math.min(Math.max(parseInt(opts.weekAhead, 10) || 0, 0), 14);
+  const calendarRange = !!opts.calendarRange;
+
+  items = items.filter(function (item) { return matchesFilter(item, filter, today); });
+  items = filterInboxSearch(items, opts.search);
+
+  items.sort(function (a, b) {
+    if (b.severityScore !== a.severityScore) return b.severityScore - a.severityScore;
+    if (a.dueAt && b.dueAt && a.dueAt !== b.dueAt) return compareJalali(a.dueAt, b.dueAt);
+    return (a.title || '').localeCompare(b.title || '', 'fa');
+  });
+
+  const total = items.length;
+  let page = items.slice(offset, offset + limit);
+  const pageIds = new Set(page.map(function (i) { return i.id; }));
+
+  function tryAddExtra(item) {
+    if (pageIds.has(item.id)) return;
+    page.push(item);
+    pageIds.add(item.id);
+  }
+
+  if (weekAhead > 0 && offset === 0) {
+    items.forEach(function (item) {
+      if (pageIds.has(item.id)) return;
+      if (!matchesFilter(item, filter, today)) return;
+      if (!item.dueAt || item.urgency === 'overdue' || item.urgency === 'today') return;
+      if (compareJalali(item.dueAt, today) <= 0) return;
+      if (jalaliDaysDiff(today, item.dueAt) <= weekAhead) tryAddExtra(item);
+    });
+  }
+
+  if (calendarRange && offset === 0) {
+    const rangeEnd = addJalaliDays(today, 14);
+    const rangeStart = addJalaliDays(today, -90);
+    items.forEach(function (item) {
+      if (pageIds.has(item.id)) return;
+      if (!matchesFilter(item, filter, today)) return;
+      if (item.type === 'notification') return;
+      if (!item.dueAt) return;
+      if (compareJalali(item.dueAt, rangeEnd) > 0) return;
+      if (compareJalali(item.dueAt, rangeStart) < 0) return;
+      tryAddExtra(item);
+    });
+  }
+
+  const enrichedPage = await enrichInboxItems(page);
+  const warnings = await queryInboxWarnings(meta.isMgr);
+
+  const counts = {
+    all: total,
+    overdue: items.filter(function (i) { return i.urgency === 'overdue'; }).length,
+    today: items.filter(function (i) { return i.urgency === 'today'; }).length,
+    approval: items.filter(function (i) {
+      return i.action === 'proforma_approve' || i.action === 'hr_leave' || i.action === 'letter_sign';
+    }).length,
+  };
+
+  return {
+    items: enrichedPage,
+    counts,
+    total,
+    limit,
+    offset,
+    hasMore: offset + limit < total,
+    today,
+    targetUser: meta.targetUser,
+    scope: meta.scope,
+    filter,
+    isManager: meta.isMgr,
+    partial: false,
+    warnings,
+  };
+}
+
+async function queryInboxCombined(user, opts, today) {
+  const subs = await listAuthorizedSubordinates(user.username, user.role);
+  const owners = [user.username];
+  subs.forEach(function (u) { if (owners.indexOf(u) < 0) owners.push(u); });
+
+  const types = opts.types && opts.types.length ? opts.types : null;
+  const params = [owners, today];
+  let where = `active = TRUE AND (snoozed_until IS NULL OR snoozed_until = '' OR snoozed_until <= $2)
+    AND ((owner = ANY($1) AND visibility = 'owner')
+    OR (visibility = 'manager' AND owner = '${MANAGER_POOL}'))`;
+
+  if (types && types.length) {
+    params.push(types);
+    where += ` AND source_type = ANY($${params.length})`;
+  }
+
+  const r = await query(`SELECT * FROM inbox_items WHERE ${where} ORDER BY updated_at DESC`, params);
+  const items = r.rows.map(function (row) { return rowToApiItem(row, today); });
+  return buildInboxResponse(items, opts, today, {
+    targetUser: null,
+    scope: 'all',
+    isMgr: true,
+  });
 }
 
 // ── Sync helpers ────────────────────────────────────────────────────────────
@@ -381,6 +510,76 @@ async function syncProforma(pfId) {
   }
 }
 
+async function loadOwnerMapsForSync() {
+  const [masterR, extraR, editsR] = await Promise.all([
+    query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS', 'PC_RAW')"),
+    query('SELECT id, row_num as row, province_id, owner FROM center_extras'),
+    query('SELECT center_key, data FROM center_edits'),
+  ]);
+  const centersMaster = {};
+  masterR.rows.forEach(function (r) { centersMaster[r.key] = r.data; });
+  const edits = {};
+  editsR.rows.forEach(function (r) { edits[r.center_key] = r.data || {}; });
+  return { ownerMaps: buildOwnerMaps(centersMaster, extraR.rows), edits };
+}
+
+async function syncFollowupCenter(centerKey) {
+  if (!centerKey) return { active: false };
+  const id = 'followup:' + centerKey;
+  const today = todayJalaliStr();
+  const r = await query(
+    `SELECT center_key, data AS edit_data, data->>'owner' AS owner, data->>'followupDate' AS followup_date,
+            COALESCE(data->>'status', '') AS status
+     FROM center_edits WHERE center_key = $1`,
+    [centerKey]
+  );
+  if (!r.rows.length) {
+    await deactivateInboxItem(id);
+    return { active: false, reason: 'no_edit', centerKey };
+  }
+  const row = r.rows[0];
+  const fdRaw = row.followup_date;
+  const parsedFd = parseJalali(fdRaw);
+  const fd = parsedFd ? formatJalali(parsedFd) : fdRaw;
+  const status = row.status || '';
+  if (!fd) {
+    await deactivateInboxItem(id);
+    return { active: false, reason: 'no_followup', centerKey };
+  }
+  if (CLOSED_STATUSES.indexOf(status) >= 0) {
+    await deactivateInboxItem(id);
+    return { active: false, reason: 'closed_status', centerKey };
+  }
+
+  let owner = row.owner;
+  if (!owner) {
+    const ctx = await loadOwnerMapsForSync();
+    owner = resolveCenterOwner(centerKey, ctx.edits, ctx.ownerMaps);
+  }
+  if (!owner) {
+    await deactivateInboxItem(id);
+    return { active: false, reason: 'no_owner', centerKey };
+  }
+
+  const u = computeUrgency(fd, today);
+  const subPrefix = u.urgency === 'overdue' ? 'معوق: ' : (u.urgency === 'today' ? 'امروز: ' : 'پیگیری: ');
+  const cname = await resolveCenterDisplayName(centerKey);
+  await upsertInboxItem({
+    id,
+    sourceType: 'followup',
+    sourceId: centerKey,
+    owner,
+    title: cname + ' — پیگیری',
+    subtitle: subPrefix + fd + (status ? ' · ' + status : ''),
+    dueAt: fd,
+    priority: u.urgency === 'overdue' ? 1 : (u.urgency === 'today' ? 2 : 3),
+    centerKey,
+    action: 'followup',
+    meta: { centerKey },
+  });
+  return { active: true, urgency: u.urgency, dueAt: fd, centerKey, owner };
+}
+
 async function rebuildAll() {
   const today = todayJalaliStr();
   console.log('[inbox-index] full rebuild started');
@@ -402,37 +601,15 @@ async function rebuildAll() {
   }
 
   const fuRes = await query(
-    `SELECT center_key, data->>'owner' AS owner FROM center_edits
+    `SELECT center_key FROM center_edits
      WHERE (data->>'followupDate') IS NOT NULL AND (data->>'followupDate') != ''
-       AND (data->>'followupDate') <= $1
-       AND COALESCE(data->>'status', '') NOT IN ('غیرفعال','قرارداد بسته شد','عدم نیاز فاکتور کنسل شد','lost','inactive')`,
-    [today]
+       AND COALESCE(data->>'status', '') NOT IN ('غیرفعال','قرارداد بسته شد','عدم نیاز فاکتور کنسل شد','lost','inactive')`
   );
   for (const r of fuRes.rows) {
     const key = r.center_key || '';
-    if (!r.owner) continue;
-    const id = 'followup:' + key;
-    activeIds.add(id);
-    const fd = (await query(
-      `SELECT data->>'followupDate' AS followup_date, COALESCE(data->>'status', '') AS status,
-              data->>'nameOverride' AS name_override
-       FROM center_edits WHERE center_key = $1`,
-      [key]
-    )).rows[0];
-    if (!fd) continue;
-    const u = computeUrgency(fd.followup_date, today);
-    const overdue = u.urgency === 'overdue';
-    const cname = await resolveCenterDisplayName(key);
-    await upsertInboxItem({
-      id, sourceType: 'followup', sourceId: key, owner: r.owner,
-      title: cname + ' — پیگیری',
-      subtitle: (overdue ? 'معوق: ' : 'امروز: ') + fd.followup_date + (fd.status ? ' · ' + fd.status : ''),
-      dueAt: fd.followup_date,
-      priority: overdue ? 1 : 2,
-      centerKey: key,
-      action: 'center',
-      meta: { centerKey: key },
-    });
+    if (!key) continue;
+    await syncFollowupCenter(key);
+    activeIds.add('followup:' + key);
   }
 
   const notifs = await query('SELECT id FROM notifications WHERE read = false');
@@ -566,18 +743,45 @@ function matchesFilter(item, filter, today) {
   return true;
 }
 
+async function queryInboxWarnings(isMgr) {
+  const warnings = [];
+  if (!isMgr) return warnings;
+  try {
+    const r = await query(
+      `SELECT COUNT(*)::int AS c FROM center_edits ce
+       WHERE (ce.data->>'followupDate') IS NOT NULL AND (ce.data->>'followupDate') != ''
+         AND COALESCE(ce.data->>'status', '') NOT IN ('غیرفعال','قرارداد بسته شد','عدم نیاز فاکتور کنسل شد','lost','inactive')
+         AND NOT EXISTS (
+           SELECT 1 FROM inbox_items ii
+           WHERE ii.id = 'followup:' || ce.center_key AND ii.active = TRUE
+         )`
+    );
+    const n = r.rows[0] && r.rows[0].c ? r.rows[0].c : 0;
+    if (n > 0) {
+      warnings.push({
+        code: 'followup_not_in_inbox',
+        count: n,
+        message: n + ' مرکز تاریخ پیگیری دارند ولی در کارتابل نیستند (معمولاً بدون کارشناس مسئول). از پروفایل مرکز، «مسئول» را تعیین کنید.',
+      });
+    }
+  } catch (e) {
+    console.error('[inbox-index] queryInboxWarnings', e.message);
+  }
+  return warnings;
+}
+
 async function queryInbox(user, opts) {
   const today = opts.today || todayJalaliStr();
+  if (opts.scope === 'all' && isManagerRole(user.role)) {
+    return queryInboxCombined(user, opts, today);
+  }
+
   const resolved = await resolveTargetUser(user, opts.scope, opts.owner);
   if (resolved.error) return { error: resolved.error, status: resolved.status };
 
   const { targetUser, scope, isMgr } = resolved;
-  const filter = opts.filter || 'all';
   const includeMgr = isMgr && scope === 'mine';
   const types = opts.types && opts.types.length ? opts.types : null;
-  const search = (opts.search || '').trim().toLowerCase();
-  const limit = Math.min(Math.max(parseInt(opts.limit, 10) || 50, 1), 500);
-  const offset = Math.max(parseInt(opts.offset, 10) || 0, 0);
 
   const params = [targetUser, today];
   let where = `active = TRUE AND (snoozed_until IS NULL OR snoozed_until = '' OR snoozed_until <= $2)
@@ -593,49 +797,8 @@ async function queryInbox(user, opts) {
   }
 
   const r = await query(`SELECT * FROM inbox_items WHERE ${where} ORDER BY updated_at DESC`, params);
-  let items = r.rows.map(function (row) { return rowToApiItem(row, today); });
-  items = items.filter(function (item) { return matchesFilter(item, filter, today); });
-
-  if (search) {
-    items = items.filter(function (item) {
-      return (item.title || '').toLowerCase().includes(search)
-        || (item.subtitle || '').toLowerCase().includes(search);
-    });
-  }
-
-  items.sort(function (a, b) {
-    if (b.severityScore !== a.severityScore) return b.severityScore - a.severityScore;
-    if (a.dueAt && b.dueAt && a.dueAt !== b.dueAt) return compareJalali(a.dueAt, b.dueAt);
-    return (a.title || '').localeCompare(b.title || '', 'fa');
-  });
-
-  const total = items.length;
-  const page = items.slice(offset, offset + limit);
-  const enrichedPage = await enrichInboxItems(page);
-
-  const counts = {
-    all: total,
-    overdue: items.filter(function (i) { return i.urgency === 'overdue'; }).length,
-    today: items.filter(function (i) { return i.urgency === 'today'; }).length,
-    approval: items.filter(function (i) {
-      return i.action === 'proforma_approve' || i.action === 'hr_leave' || i.action === 'letter_sign';
-    }).length,
-  };
-
-  return {
-    items: enrichedPage,
-    counts,
-    total,
-    limit,
-    offset,
-    hasMore: offset + limit < total,
-    today,
-    targetUser,
-    scope,
-    filter,
-    isManager: isMgr,
-    partial: false,
-  };
+  const items = r.rows.map(function (row) { return rowToApiItem(row, today); });
+  return buildInboxResponse(items, opts, today, { targetUser, scope, isMgr });
 }
 
 async function queryInboxCount(user) {
@@ -860,10 +1023,13 @@ async function queryInboxTreeTeam(user) {
   const today = todayJalaliStr();
   const subs = await listAuthorizedSubordinates(user.username, user.role);
   const experts = [];
+  const users = [user.username].concat(subs.filter(function (u) { return u !== user.username; }));
 
-  for (const username of subs) {
+  for (const username of users) {
     const data = await queryInbox(user, {
-      scope: 'team', owner: username, filter: 'all', limit: 5000, offset: 0, today,
+      scope: username === user.username ? 'mine' : 'team',
+      owner: username === user.username ? undefined : username,
+      filter: 'all', limit: 5000, offset: 0, today,
     });
     if (data.error) continue;
     experts.push({
@@ -871,6 +1037,7 @@ async function queryInboxTreeTeam(user) {
       displayName: username,
       centers: await groupItemsByCenterAsync(data.items || []),
       stats: summarizeInboxItems(data.items || [], today),
+      isSelf: username === user.username,
     });
   }
 
@@ -892,6 +1059,7 @@ module.exports = {
   syncPayrollVariable,
   syncNotification,
   syncProforma,
+  syncFollowupCenter,
   deactivateInboxItem,
   deactivateBySource,
   queryInbox,

@@ -2137,6 +2137,29 @@ async function initSchema() {
   `);
 
   await query(`
+    CREATE TABLE IF NOT EXISTS center_interactions (
+      id TEXT PRIMARY KEY,
+      idempotency_key VARCHAR(128) UNIQUE NOT NULL,
+      center_key TEXT NOT NULL,
+      username TEXT NOT NULL,
+      occurred_date TEXT NOT NULL,
+      action_type TEXT NOT NULL DEFAULT 'call',
+      mode TEXT NOT NULL DEFAULT 'quick',
+      outcome TEXT,
+      result_text TEXT,
+      note TEXT,
+      followup_date TEXT,
+      week_entry_id TEXT,
+      corrects_interaction_id TEXT,
+      payload JSONB NOT NULL DEFAULT '{}',
+      projections JSONB NOT NULL DEFAULT '{}',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_ci_center ON center_interactions(center_key, created_at DESC)`).catch(() => {});
+  await query(`CREATE INDEX IF NOT EXISTS idx_ci_user_date ON center_interactions(username, occurred_date)`).catch(() => {});
+
+  await query(`
     CREATE TABLE IF NOT EXISTS center_tags (
       center_key TEXT PRIMARY KEY,
       tags       JSONB NOT NULL DEFAULT '[]',

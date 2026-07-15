@@ -29,6 +29,7 @@ function rowToObj(r) {
     updatedAt: r.updated_at,
     recurring: r.recurring || 'none',
     activity:  r.activity || [],
+    department: r.department || '',
   };
 }
 

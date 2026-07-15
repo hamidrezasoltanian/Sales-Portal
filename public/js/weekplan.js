@@ -237,24 +237,34 @@ function _isExpert(){return !_isManager();}
 var _ROLE_DEFAULTS = CRM_ROLE_DEFAULTS;
 
 function _getPermLevel(module){
-  if(_isManager())return 'edit';
+  if(_isManager()&&typeof crmManagerBypassAllowed==='function'&&crmManagerBypassAllowed(module))return 'edit';
   var perms=window._myPermissions||{};
   var modules=perms.modules||{};
   var level=modules[module];
-  if(level===undefined){
-    var r=window._authUserRole||'کارشناس فروش';
-    var def=_ROLE_DEFAULTS[r];
-    if(def)level=def.modules[module];
+  if(level!==undefined){
+    return typeof crmNormalizePermLevel==='function'?crmNormalizePermLevel(level):'none';
   }
-  return level||'none';
+  var r=window._authUserRole||'کارشناس فروش';
+  var def=_ROLE_DEFAULTS[r];
+  if(def&&def.modules&&def.modules[module]!==undefined){
+    return typeof crmNormalizePermLevel==='function'?crmNormalizePermLevel(def.modules[module]):'none';
+  }
+  return 'none';
 }
 function _hasAccess(module){
   var lvl=_getPermLevel(module);
-  return lvl==='edit'||lvl==='view';
+  return lvl==='edit'||lvl==='view'||lvl==='approve'||lvl==='manage';
 }
 function _canEdit(module){
+  return _getPermLevel(module)==='edit';
+}
+function _canManage(module){
   var lvl=_getPermLevel(module);
-  return lvl==='edit';
+  return lvl==='manage'||lvl==='edit';
+}
+function _canApprove(module){
+  var lvl=_getPermLevel(module);
+  return lvl==='approve'||lvl==='edit';
 }
 function _getAllowedProvinces(allProvs){
   if(_isManager())return allProvs;
@@ -1086,103 +1096,23 @@ function wpDoBulkMove(targetWeekId){
 }
 
 function wpMarkDoneKey(eKey){
-  if(!DB.weekEntries[eKey])return;
-  var we=DB.weekEntries[eKey];
-  var rtype=we.rtype||(we.recKey?we.recKey.split('_')[0]:'');
-  var rid=we.rid||(we.recKey?we.recKey.split('_').slice(1).join('_'):'');
-  var cname=we.centerName||'';
-  if(!cname&&rtype&&rid){var c=getCenterById(rtype,rid);if(c)cname=c.name||c.hosp_name||'';}
-  var td=todayStr();var tdp=td.split('/').map(Number);
-  var defNext=jAddDays(tdp[0],tdp[1],tdp[2],7);
-  var defNextStr=defNext[0]+'/'+(defNext[1]<10?'0'+defNext[1]:defNext[1])+'/'+(defNext[2]<10?'0'+defNext[2]:defNext[2]);
-  var actLabel=typeof wpActLabel==='function'?wpActLabel(we.actionType||'call'):(we.actionType==='visit'?'مراجعه':'تماس');
-  var pfCtx=we.pfNo||we.pfId||'';
-  var body='<div style="padding:4px 0">'
-    +'<div style="margin-bottom:12px;padding:8px 12px;background:var(--bg-raised);border-radius:7px;font-size:13px">مرکز: <b>'+esc(cname)+'</b> &nbsp;|&nbsp; نوع: <b>'+actLabel+'</b></div>'
-    +(pfCtx?'<div style="margin-bottom:10px;padding:6px 10px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;font-size:12px">📄 پیشفاکتور: <b>'+esc(we.pfNo||String(we.pfId))+'</b></div>':'')
-    +'<div style="font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">نتیجه این '+actLabel+' چه بود؟ <span style="color:#dc2626">*</span></div>'
-    +'<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">'
-    +'<label style="display:flex;align-items:flex-start;gap:8px;padding:9px 12px;border:1.5px solid var(--border);border-radius:7px;cursor:pointer;transition:border-color .15s" onclick="_mdkSelectOutcome(this,\'followup\')">'
-    +'<input type="radio" name="_mdk_outcome" value="followup" style="margin-top:2px;flex-shrink:0"> '
-    +'<div><div style="font-weight:600;font-size:12px">🔄 نیاز به پیگیری دارد</div><div style="font-size:10px;color:var(--text-muted)">جلسه / تماس بعدی برنامه‌ریزی می‌شه</div></div></label>'
-    +'<label style="display:flex;align-items:flex-start;gap:8px;padding:9px 12px;border:1.5px solid var(--border);border-radius:7px;cursor:pointer;transition:border-color .15s" onclick="_mdkSelectOutcome(this,\'won\')">'
-    +'<input type="radio" name="_mdk_outcome" value="won" style="margin-top:2px;flex-shrink:0"> '
-    +'<div><div style="font-weight:600;font-size:12px">✅ قرارداد / فروش بسته شد</div><div style="font-size:10px;color:var(--text-muted)">وضعیت مرکز به «قرارداد بسته شد» تغییر می‌کند</div></div></label>'
-    +'<label style="display:flex;align-items:flex-start;gap:8px;padding:9px 12px;border:1.5px solid var(--border);border-radius:7px;cursor:pointer;transition:border-color .15s" onclick="_mdkSelectOutcome(this,\'inactive\')">'
-    +'<input type="radio" name="_mdk_outcome" value="inactive" style="margin-top:2px;flex-shrink:0"> '
-    +'<div><div style="font-weight:600;font-size:12px">❌ غیرفعال / رد شد</div><div style="font-size:10px;color:var(--text-muted)">وضعیت مرکز به «غیرفعال» تغییر می‌کند</div></div></label>'
-    +'</div>'
-    +'<div id="_mdk_followup_sec" style="display:none;margin-bottom:10px;padding:10px 12px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:7px">'
-    +'<label style="font-size:12px;font-weight:700;color:#0369a1;display:block;margin-bottom:6px">📅 تاریخ پیگیری بعدی <span style="color:#dc2626">*</span></label>'
-    +'<input id="_mdk_nextdate" type="text" value="" readonly class="fd-inp" placeholder="برای ثبت انتخاب کنید" style="width:100%;box-sizing:border-box;cursor:pointer;border-color:#7dd3fc" onclick="openJDP(this,function(v){document.getElementById(\'_mdk_nextdate\').value=v;_mdkCheckSubmit();})">'
-    +'</div>'
-    +'<div id="_mdk_won_sec" style="display:none;margin-bottom:10px;padding:10px 12px;background:#f0fdf4;border:1px solid #86efac;border-radius:7px">'
-    +'<label style="font-size:12px;font-weight:700;color:#166534;display:block;margin-bottom:6px">💰 مبلغ قرارداد (میلیون تومان) — اختیاری</label>'
-    +'<input id="_mdk_amount" type="number" min="0" step="0.1" placeholder="مثلاً: 12.5" style="width:100%;box-sizing:border-box;padding:5px 8px;border:1px solid #86efac;border-radius:5px;font-size:12px;font-family:inherit">'
-    +'</div>'
-    +'<div id="_mdk_inactive_sec" style="display:none;margin-bottom:10px;padding:10px 12px;background:#fef2f2;border:1px solid #fca5a5;border-radius:7px">'
-    +'<label style="font-size:12px;font-weight:700;color:#991b1b;display:block;margin-bottom:6px">❌ دلیل غیرفعال شدن — اختیاری</label>'
-    +'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">'
-    +['رقیب برد','قیمت بالا','نیاز نداشتن','زمان‌بندی نامناسب','عدم دسترسی به تصمیم‌گیر','سایر'].map(function(r){return'<button type="button" onclick="_mdkLostSelect(this,\''+r+'\')" data-lrb="1" style="padding:4px 10px;border-radius:20px;border:1px solid #fca5a5;background:#fee2e2;color:#991b1b;cursor:pointer;font-size:11px;font-family:inherit">'+r+'</button>';}).join('')
-    +'</div>'
-    +'<input type="hidden" id="_mdk_lost_reason">'
-    +'</div>'
-    +'<label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:3px">📝 یادداشت (اختیاری)</label>'
-    +'<textarea id="_mdk_note" rows="2" placeholder="خلاصه مکالمه یا نتیجه..." style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;resize:vertical"></textarea>'
-    +'</div>';
-  var footer='<button id="_mdk_submit" class="btn-primary" onclick="_wpFinishDone(\''+eKey+'\')" disabled style="opacity:.45;cursor:not-allowed">✅ ثبت</button>'
-    +'<button class="btn-secondary" onclick="closeModal(\'wpDoneModal\')">انصراف</button>';
-  var modalTitle=pfCtx?('✅ پیگیری پیشفاکتور '+esc(we.pfNo||'')):('✅ نتیجه '+actLabel);
-  openModal('wpDoneModal',modalTitle,body,footer);
-  var preset=window._wpDonePreset;
-  window._wpDonePreset=null;
-  if(preset){
-    setTimeout(function(){
-      var lbl=document.querySelector('label[onclick*="_mdkSelectOutcome"][onclick*="\''+preset+'\'"]');
-      _mdkSelectOutcome(lbl,preset);
-    },60);
+  if(typeof openCenterInteraction==='function'){
+    if(!DB.weekEntries[eKey])return;
+    var we=DB.weekEntries[eKey];
+    var rtype=we.rtype||(we.recKey?we.recKey.split('_')[0]:'center');
+    var rid=we.rid||(we.recKey?we.recKey.split('_').slice(1).join('_'):'');
+    var cname=we.centerName||'';
+    if(!cname&&rtype&&rid){var c=getCenterById(rtype,rid);if(c)cname=c.name||c.hosp_name||'';}
+    openCenterInteraction({
+      rtype:rtype,rid:rid,centerName:cname,weekEntryKey:eKey,
+      actionType:we.actionType||'call',pfNo:we.pfNo,pfId:we.pfId
+    });
+    return;
   }
 }
-function _mdkSelectOutcome(lbl,val){
-  // Highlight selected option
-  document.querySelectorAll('[name="_mdk_outcome"]').forEach(function(r){
-    var p=r.closest('label');if(p)p.style.borderColor='var(--border)';
-  });
-  if(lbl)lbl.style.borderColor=val==='won'?'#22c55e':val==='inactive'?'#ef4444':'#38bdf8';
-  var r=document.querySelector('[name="_mdk_outcome"][value="'+val+'"]');
-  if(r)r.checked=true;
-  document.getElementById('_mdk_followup_sec').style.display=val==='followup'?'':'none';
-  document.getElementById('_mdk_won_sec').style.display=val==='won'?'':'none';
-  document.getElementById('_mdk_inactive_sec').style.display=val==='inactive'?'':'none';
-  if(val==='followup'){
-    // pre-fill default date if empty
-    var nd=document.getElementById('_mdk_nextdate');
-    if(nd&&!nd.value){
-      var td=todayStr();var tdp=td.split('/').map(Number);
-      var df=jAddDays(tdp[0],tdp[1],tdp[2],7);
-      nd.value=df[0]+'/'+(df[1]<10?'0'+df[1]:df[1])+'/'+(df[2]<10?'0'+df[2]:df[2]);
-    }
-  }
-  _mdkCheckSubmit();
-}
-function _mdkLostSelect(btn,reason){
-  document.querySelectorAll('[data-lrb]').forEach(function(b){b.style.background='#fee2e2';b.style.borderColor='#fca5a5';});
-  btn.style.background='#dc2626';btn.style.color='#fff';btn.style.borderColor='#dc2626';
-  var inp=document.getElementById('_mdk_lost_reason');if(inp)inp.value=reason;
-}
-function _mdkCheckSubmit(){
-  var r=document.querySelector('[name="_mdk_outcome"]:checked');
-  var btn=document.getElementById('_mdk_submit');
-  if(!btn)return;
-  var ok=!!r;
-  if(r&&r.value==='followup'){
-    var nd=document.getElementById('_mdk_nextdate');
-    ok=!!(nd&&nd.value);
-  }
-  btn.disabled=!ok;
-  btn.style.opacity=ok?'1':'.45';
-  btn.style.cursor=ok?'pointer':'not-allowed';
-}
+function _mdkSelectOutcome(lbl,val){if(typeof _ciSelectOutcome==='function')_ciSelectOutcome(lbl,val);}
+function _mdkLostSelect(btn,reason){if(typeof _ciLostSelect==='function')_ciLostSelect(btn,reason);}
+function _mdkCheckSubmit(){if(typeof _ciCheckSubmit==='function')_ciCheckSubmit();}
 function jAddDays(jy,jm,jd,days){
   var g=j2g(jy,jm,jd);var ts=new Date(g[0],g[1]-1,g[2],12);
   ts.setDate(ts.getDate()+days);
@@ -1195,126 +1125,137 @@ function _wpFinishDone(eKey){
   var rid=we.rid||(we.recKey?we.recKey.split('_').slice(1).join('_'):'');
   var cname=we.centerName||getRecLabel(rtype+'_'+rid)||'';
   var actionType=we.actionType||'call';
-  var outcomeEl=document.querySelector('[name="_mdk_outcome"]:checked');
+  var outcomeEl=document.querySelector('[name="ci_outcome"]:checked')||document.querySelector('[name="_mdk_outcome"]:checked');
   var outcome=outcomeEl?outcomeEl.value:'followup';
-  var note=(document.getElementById('_mdk_note')||{}).value||'';
-  var nextDate=(document.getElementById('_mdk_nextdate')||{}).value||'';
-  var amount=parseFloat((document.getElementById('_mdk_amount')||{}).value||'')||0;
-  var lostReason=(document.getElementById('_mdk_lost_reason')||{}).value||'';
+  var note=(document.getElementById('ci_note')||document.getElementById('_mdk_note')||{}).value||'';
+  var nextDate=(document.getElementById('ci_nextdate')||document.getElementById('_mdk_nextdate')||{}).value||'';
+  var amount=parseFloat((document.getElementById('ci_amount')||document.getElementById('_mdk_amount')||{}).value||'')||0;
+  var lostReason=(document.getElementById('ci_lost_reason')||document.getElementById('_mdk_lost_reason')||{}).value||'';
+  var centerKey=typeof recK==='function'?recK(rtype,rid):(rtype+'_'+rid);
 
-  // Mark week entry done
-  we.done=true;we.doneDate=todayStr();we.doneResult=outcome;we.doneNote=note;
-  if(amount>0)we.doneAmount=amount;
+  function _wpFinishDoneAfterProjections(skipCenterPatch){
+    we.done=true;we.doneDate=todayStr();we.doneResult=outcome;we.doneNote=note;
+    if(amount>0)we.doneAmount=amount;
 
-  // ── Auto-log to KPI callLog / visitLog ───────────────────────────────────
-  ensureKPIDB();
-  var logEntry={id:Date.now(),date:todayStr(),userId:currentUser||'',centerName:cname,centerKey:rtype+'_'+rid,note:note,count:1,outcome:outcome};
-  if(actionType==='visit'){DB.visitLog.push(logEntry);}
-  else if(actionType==='call'){DB.callLog.push(logEntry);}
-  if(typeof _postActivityLog==='function'&&(actionType==='visit'||actionType==='call')){
-    _postActivityLog(actionType, logEntry);
-  }
-
-  // ── Mirror to DB.changeLog so _getTodayActivities() finds this entry ──────
-  DB.changeLog=DB.changeLog||[];
-  var _clEntry={at:new Date().toISOString(),by:currentUser||'',rkey:rtype+'_'+rid,field:actionType,val:outcome+(note?' — '+note:'')};
-  DB.changeLog.push(_clEntry);
-  if(DB.changeLog.length>500)DB.changeLog=DB.changeLog.slice(-500);
-  fetch('/api/changelog',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(_clEntry)}).catch(function(){});
-
-  // ── Mirror note to DB.notes ───────────────────────────────────────────────
-  if(rtype&&rid){
-    if(!DB.notes)DB.notes={};
-    var _dnKey=rtype+'_'+rid;
-    if(!DB.notes[_dnKey])DB.notes[_dnKey]=[];
-    var pfx=(typeof wpActLabel==='function'?wpActLabel(actionType): (actionType==='visit'?'🤝 مراجعه':'📞 تماس'))+' انجام شد: ';
-    if(we.pfNo)pfx='📄 PF '+we.pfNo+' — '+pfx;
-    var outcomeText = '';
+    var _foundWeekLabel='';
     if(outcome==='won'){
-      outcomeText = 'قرارداد / فروش بسته شد' + (amount > 0 ? ' (مبلغ: ' + amount + ' میلیون تومان)' : '');
+      if(rtype&&rid&&!skipCenterPatch){setE(rtype,rid,'status','قرارداد بسته شد');}
     } else if(outcome==='inactive'){
-      outcomeText = 'غیرفعال / رد شد' + (lostReason ? ' (دلیل: ' + lostReason + ')' : '');
+      if(rtype&&rid&&!skipCenterPatch){
+        var _ik=recK(rtype,rid);if(!DB.edits[_ik])DB.edits[_ik]={};DB.edits[_ik].lostReason=lostReason||'—';
+        setE(rtype,rid,'status','غیرفعال');
+      }
     } else {
-      outcomeText = 'نیاز به پیگیری دارد' + (nextDate ? ' (تاریخ پیگیری بعدی: ' + nextDate + ')' : '');
-    }
-    var fullNoteText = pfx + outcomeText + (note ? '\nتوضیح: ' + note : '');
-    DB.notes[_dnKey].push({
-      text: fullNoteText,
-      date: todayStr(),
-      user: USERS[currentUser]||currentUser,
-      ts: Date.now()
-    });
-  }
-
-  var _foundWeekLabel='';
-  // ── Handle outcome ────────────────────────────────────────────────────────
-  if(outcome==='won'){
-    if(rtype&&rid){setE(rtype,rid,'status','قرارداد بسته شد');}
-    if(amount>0){
-      ensureKPIDB();
-      var saleEntry={id:Date.now()+1,date:todayStr(),userId:currentUser||'',centerName:cname,centerKey:rtype+'_'+rid,amount:amount,isCash:false};
-      DB.salesLog.push(saleEntry);
-      if(typeof _postActivityLog==='function')_postActivityLog('sales',saleEntry);
-    }
-  } else if(outcome==='inactive'){
-    if(rtype&&rid){
-      // pre-fill lostReason before setE so _promptLostReason() skips its modal
-      var _ik=recK(rtype,rid);if(!DB.edits[_ik])DB.edits[_ik]={};DB.edits[_ik].lostReason=lostReason||'—';
-      setE(rtype,rid,'status','غیرفعال');
-    }
-  } else {
-    // followup: schedule next contact
-    if(nextDate&&rtype&&rid){
-      setE(rtype,rid,'followupDate',nextDate);
-      var ndp=nextDate.split('/').map(Number);
-      if(ndp.length===3&&ndp[0]){
-        var ndMs=jMs(ndp[0],ndp[1],ndp[2]);
-        var foundWeek=null;
-        [ndp[0]-1,ndp[0],ndp[0]+1].forEach(function(yr){
-          if(foundWeek)return;
-          getYearWeeks(yr).forEach(function(wk){
+      if(nextDate&&rtype&&rid){
+        if(!skipCenterPatch)setE(rtype,rid,'followupDate',nextDate);
+        var ndp=nextDate.split('/').map(Number);
+        if(ndp.length===3&&ndp[0]){
+          var ndMs=jMs(ndp[0],ndp[1],ndp[2]);
+          var foundWeek=null;
+          [ndp[0]-1,ndp[0],ndp[0]+1].forEach(function(yr){
             if(foundWeek)return;
-            var wsMs=jMs(wk.wsArr[0],wk.wsArr[1],wk.wsArr[2]);
-            var weMs=jMs(wk.weArr[0],wk.weArr[1],wk.weArr[2]);
-            if(ndMs>=wsMs&&ndMs<=weMs)foundWeek=wk;
+            getYearWeeks(yr).forEach(function(wk){
+              if(foundWeek)return;
+              var wsMs=jMs(wk.wsArr[0],wk.wsArr[1],wk.wsArr[2]);
+              var weMs=jMs(wk.weArr[0],wk.weArr[1],wk.weArr[2]);
+              if(ndMs>=wsMs&&ndMs<=weMs)foundWeek=wk;
+            });
           });
-        });
-        if(foundWeek){
-          var newKey=wpEntryKey(foundWeek.id,rtype,rid);
-          if(newKey===eKey){
-            // same week: reset done so the new followup shows as pending
-            DB.weekEntries[eKey].scheduledDate=nextDate;
-            DB.weekEntries[eKey].done=false;
-            DB.weekEntries[eKey].doneDate=null;
-            DB.weekEntries[eKey].doneResult=null;
-            DB.weekEntries[eKey].doneNote=null;
-          } else {
-            DB.weekEntries[newKey]={scheduledDate:nextDate,done:false,doneDate:null,rtype:rtype,rid:rid,recKey:rtype+'_'+rid,centerName:cname,actionType:actionType,addedBy:currentUser};
-            wpRemoveFromOtherWeeks(rtype+'_'+rid, foundWeek.id).then(function(){
-              return saveWeekEntryApi(newKey, DB.weekEntries[newKey]);
-            }).catch(function(){});
+          if(foundWeek){
+            var newKey=wpEntryKey(foundWeek.id,rtype,rid);
+            if(newKey===eKey){
+              DB.weekEntries[eKey].scheduledDate=nextDate;
+              DB.weekEntries[eKey].done=false;
+              DB.weekEntries[eKey].doneDate=null;
+              DB.weekEntries[eKey].doneResult=null;
+              DB.weekEntries[eKey].doneNote=null;
+            } else {
+              DB.weekEntries[newKey]={scheduledDate:nextDate,done:false,doneDate:null,rtype:rtype,rid:rid,recKey:rtype+'_'+rid,centerName:cname,actionType:actionType,addedBy:currentUser};
+              wpRemoveFromOtherWeeks(rtype+'_'+rid, foundWeek.id).then(function(){
+                return saveWeekEntryApi(newKey, DB.weekEntries[newKey]);
+              }).catch(function(){});
+            }
+            _wpYear=foundWeek.jYear;
+            var _sel=document.getElementById('wpSel');
+            if(_sel){wpBuildSelect();_sel.value=foundWeek.id;}
+            _foundWeekLabel=foundWeek.label;
           }
-          _wpYear=foundWeek.jYear;
-          var _sel=document.getElementById('wpSel');
-          if(_sel){wpBuildSelect();_sel.value=foundWeek.id;}
-          _foundWeekLabel=foundWeek.label;
         }
       }
     }
+
+    if(we.pfId&&typeof window._pfOnOutcomeDone==='function'){
+      window._pfOnOutcomeDone(we.pfId,{outcome:outcome,note:note,nextDate:nextDate,lostReason:lostReason,amount:amount,pfNo:we.pfNo||''});
+    }
+    closeModal('centerInteractionModal');
+    closeModal('wpDoneModal');
+    if(we.sqlId){
+      fetch('/api/week-entries/'+encodeURIComponent(we.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({done:we.done,doneDate:we.doneDate||null,scheduledDate:we.scheduledDate||null,doneResult:we.doneResult||null,doneNote:we.doneNote||null,doneAmount:we.doneAmount||null})}).catch(function(){});
+    }
+    _debouncedRenderWeekPlan();renderDashboard();
+    if(currentTab==='provinces'&&_currentProvId)setTimeout(renderTable,100);
+    var msg=outcome==='won'?'🎉 قرارداد ثبت شد! — '+cname
+      :outcome==='inactive'?'❌ غیرفعال شد — '+cname
+      :_foundWeekLabel?'✅ ثبت شد — پیگیری در '+_foundWeekLabel:'✅ ثبت شد!';
+    showToast(msg,3000);
+    if(currentTab==='kpi')setTimeout(renderKPIPanel,300);
   }
 
-  if(we.pfId&&typeof window._pfOnOutcomeDone==='function'){
-    window._pfOnOutcomeDone(we.pfId,{outcome:outcome,note:note,nextDate:nextDate,lostReason:lostReason,amount:amount,pfNo:we.pfNo||''});
+  if(typeof postCenterInteraction==='function'&&rtype&&rid){
+    postCenterInteraction(centerKey,{
+      mode:'done',
+      actionType:actionType,
+      outcome:outcome,
+      note:note,
+      followupDate:nextDate||null,
+      weekEntryId:we.sqlId||null,
+      centerName:cname,
+      lostReason:lostReason,
+      amount:amount,
+      pfNo:we.pfNo||'',
+      occurredDate:todayStr(),
+      idempotencyKey:typeof _ciNewIdempotencyKey==='function'?_ciNewIdempotencyKey():('done_'+eKey+'_'+Date.now()),
+    }).then(function(res){
+      if(typeof _ciApplyInteractionResult==='function')_ciApplyInteractionResult(centerKey,rtype,rid,res);
+      _wpFinishDoneAfterProjections(true);
+    }).catch(function(err){
+      showToast('⚠ '+((err&&err.error)||'خطا در ثبت نتیجه'),3500);
+    });
+    return;
   }
-  closeModal('wpDoneModal');
-  (function(){var _we3=DB.weekEntries[eKey];if(_we3&&_we3.sqlId){fetch('/api/week-entries/'+encodeURIComponent(_we3.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({done:_we3.done,doneDate:_we3.doneDate||null,scheduledDate:_we3.scheduledDate||null,doneResult:_we3.doneResult||null,doneNote:_we3.doneNote||null,doneAmount:_we3.doneAmount||null})}).catch(function(){});}})();
-  _debouncedRenderWeekPlan();renderDashboard();
-  if(currentTab==='provinces'&&_currentProvId)setTimeout(renderTable,100);
-  var msg=outcome==='won'?'🎉 قرارداد ثبت شد! — '+cname
-    :outcome==='inactive'?'❌ غیرفعال شد — '+cname
-    :_foundWeekLabel?'✅ ثبت شد — پیگیری در '+_foundWeekLabel:'✅ ثبت شد!';
-  showToast(msg,3000);
-  if(currentTab==='kpi')setTimeout(renderKPIPanel,300);
+
+  // ── Fallback: client-only projections (بدون interactions API) ──
+  we.done=true;we.doneDate=todayStr();we.doneResult=outcome;we.doneNote=note;
+  if(amount>0)we.doneAmount=amount;
+  ensureKPIDB();
+  var logEntry={id:Date.now(),date:todayStr(),userId:currentUser||'',centerName:cname,centerKey:centerKey,note:note,count:1,outcome:outcome};
+  if(actionType==='visit'){DB.visitLog.push(logEntry);}
+  else if(actionType==='call'){DB.callLog.push(logEntry);}
+  if(typeof _postActivityLog==='function'&&(actionType==='visit'||actionType==='call')){_postActivityLog(actionType, logEntry);}
+  DB.changeLog=DB.changeLog||[];
+  var _clEntry={at:new Date().toISOString(),by:currentUser||'',rkey:centerKey,field:actionType,val:outcome+(note?' — '+note:'')};
+  DB.changeLog.push(_clEntry);
+  if(DB.changeLog.length>500)DB.changeLog=DB.changeLog.slice(-500);
+  fetch('/api/changelog',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(_clEntry)}).catch(function(){});
+  if(rtype&&rid){
+    if(!DB.notes)DB.notes={};
+    if(!DB.notes[centerKey])DB.notes[centerKey]=[];
+    var pfx=(typeof wpActLabel==='function'?wpActLabel(actionType): (actionType==='visit'?'🤝 مراجعه':'📞 تماس'))+' انجام شد: ';
+    if(we.pfNo)pfx='📄 PF '+we.pfNo+' — '+pfx;
+    var outcomeText = outcome==='won'?'قرارداد / فروش بسته شد'+(amount>0?' (مبلغ: '+amount+' میلیون تومان)':'')
+      :outcome==='inactive'?'غیرفعال / رد شد'+(lostReason?' (دلیل: '+lostReason+')':'')
+      :'نیاز به پیگیری دارد'+(nextDate?' (تاریخ پیگیری بعدی: '+nextDate+')':'');
+    var fullNoteText=pfx+outcomeText+(note?'\nتوضیح: '+note:'');
+    DB.notes[centerKey].push({text:fullNoteText,date:todayStr(),user:USERS[currentUser]||currentUser,ts:Date.now()});
+    postCenterNote(centerKey, fullNoteText, { user: USERS[currentUser]||currentUser });
+  }
+  if(outcome==='won'&&amount>0){
+    ensureKPIDB();
+    var saleEntry={id:Date.now()+1,date:todayStr(),userId:currentUser||'',centerName:cname,centerKey:centerKey,amount:amount,isCash:false};
+    DB.salesLog.push(saleEntry);
+    if(typeof _postActivityLog==='function')_postActivityLog('sales',saleEntry);
+  }
+  _wpFinishDoneAfterProjections();
 }
 var _wpDragging = null;
 
@@ -2069,15 +2010,7 @@ function sendNotif(toUser, message, centerKey, centerKeys, type, meta) {
       read: false, from: currentUser
     });
   }).catch(function() {
-    // Fallback: add to blob so at least something is stored
-    if (!DB.notifications) DB.notifications = [];
-    var n = { id: id, to: toUser, from: currentUser, at: new Date().toISOString(),
-              message: message, msg: message, centerKey: centerKey || '',
-              centerKeys: centerKeys || null, read: false, type: type || 'general', meta: meta || null };
-    DB.notifications.push(n);
-    _notifCache.unshift(n);
-    if (DB.notifications.length > 300) DB.notifications = DB.notifications.slice(-300);
-    saveDB();
+    console.warn('[sendNotif] API failed for', toUser);
   });
   showToast('\U0001f4e9 اعلان برای ' + (USERS[toUser] || toUser) + ' ارسال شد', 2000);
 }

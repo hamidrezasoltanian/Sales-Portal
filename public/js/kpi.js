@@ -11,12 +11,10 @@ function saveKPISnapshot(userId, month){
   var snap={userId:userId,month:month,overall:data.overall,savedAt:new Date().toISOString(),
     scores:{}};
   data.kpis.forEach(function(k){snap.scores[k.id]=Math.round(k.score);});
-  // remove old entry for same user+month and replace
   DB.kpiHistory=DB.kpiHistory.filter(function(s){return !(s.userId===userId&&s.month===month);});
   DB.kpiHistory.push(snap);
-  // keep max 24 months × N users
   DB.kpiHistory=DB.kpiHistory.slice(-100);
-  saveDB();
+  postKpiSnapshot(snap);
   return snap;
 }
 function getKPIHistory(userId,nMonths){
@@ -114,13 +112,13 @@ function saveKPITarget(userId,month,targets){
   var k=userId+':'+month;
   DB.kpiTargets[k]=targets;
   var o={};o[k]=targets;
-  savePatchDB({kpiTargets:o});
+  postKpiUserTargetApi(userId, month, targets);
 }
 
-// ── داده‌های ماه ──────────────────────────────────────────────────
+// ── داده‌های ماه — projection از call_log / visit_log (SQL via DB.* پس از reload) ──
 function getCallsMonth(userId,month){
   ensureKPIDB();var b=jMonthBounds(month);
-  return DB.callLog.filter(function(l){var ts=dateStrToTs(l.date);return l.userId===userId&&ts>=b.startTs&&ts<=b.endTs;});
+  return (DB.callLog||[]).filter(function(l){var ts=dateStrToTs(l.date);return l.userId===userId&&ts>=b.startTs&&ts<=b.endTs;});
 }
 
 function getSalesMonth(userId,month){
@@ -161,28 +159,18 @@ function _getOwnerForRecKey(recKey){
 }
 function getVisitsMonth(userId,month){
   ensureKPIDB();var b=jMonthBounds(month);
-  var autoV=Object.values(DB.weekEntries||{}).filter(function(we){
-    if(we.actionType!=='visit'||!we.done||!we.doneDate)return false;
-    var ts=dateStrToTs(we.doneDate);if(ts<b.startTs||ts>b.endTs)return false;
-    return _getOwnerForRecKey(we.recKey||'')=== userId;
-  });
   var manV=(DB.visitLog||[]).filter(function(l){
     var ts=dateStrToTs(l.date);return l.userId===userId&&ts>=b.startTs&&ts<=b.endTs;
   });
   var manTotal=manV.reduce(function(s,l){return s+(l.count||1);},0);
-  return{auto:autoV,manual:manV,total:autoV.length+manTotal,manTotal:manTotal};
+  return{auto:[],manual:manV,total:manTotal,manTotal:manTotal};
 }
 function getWeekVisits(userId){
   ensureKPIDB();var wb=currentWeekBounds();
-  var autoV=Object.values(DB.weekEntries||{}).filter(function(we){
-    if(we.actionType!=='visit'||!we.done||!we.doneDate)return false;
-    var ts=dateStrToTs(we.doneDate);if(ts<wb.startTs||ts>wb.endTs)return false;
-    return _getOwnerForRecKey(we.recKey||'')=== userId;
-  }).length;
   var manV=(DB.visitLog||[]).filter(function(l){
     var ts=dateStrToTs(l.date);return l.userId===userId&&ts>=wb.startTs&&ts<=wb.endTs;
-  }).length;
-  return autoV+manV;
+  });
+  return manV.reduce(function(s,l){return s+(l.count||1);},0);
 }
 
 // ── محاسبه KPI ───────────────────────────────────────────────────
@@ -219,7 +207,7 @@ function calcKPIs(userId,month){
   var avgCalls=wd>0?totalCalls/wd:0;
   var totalVisits=visits.total;
   var avgVisits=totalVisits/4.3;
-  var visitsTip='این ماه: '+totalVisits+' ویزیت ('+visits.auto.length+' از برنامه هفته'+(visits.manual.length?' + '+visits.manual.length+' دستی':'')+')  •  این هفته: '+weekV;
+  var visitsTip='این ماه: '+totalVisits+' ویزیت (از activity-log)'+(visits.manual.length?' — '+visits.manual.length+' ردیف':'')+'  •  این هفته: '+weekV;
   var totalSalesCnt=sales.length+autoCnv;
   var totalSalesAmt=sales.reduce(function(s,l){return s+(l.amount||0);},0);
   var cashCnt=sales.filter(function(l){return l.isCash;}).length;
@@ -385,12 +373,10 @@ function saveTeamKPITargets(month){
     });
     DB.kpiTargets.weights=weights;
   }
-  var kpiPatch={};
+  if(DB.kpiTargets.weights)postKpiWeightsApi(DB.kpiTargets.weights);
   userKeys.forEach(function(u){
-    kpiPatch[u+':'+month]=DB.kpiTargets[u+':'+month];
+    postKpiUserTargetApi(u, month, DB.kpiTargets[u+':'+month]);
   });
-  if(DB.kpiTargets.weights)kpiPatch.weights=DB.kpiTargets.weights;
-  savePatchDB({kpiTargets:kpiPatch});
   closeModal('teamKpiModal');
   showToast('✅ اهداف '+saved+' کارشناس ذخیره شد',2500);
   if(typeof renderKPIPanel==='function')renderKPIPanel();
@@ -403,6 +389,33 @@ function _kpiUserChange(v){
   renderKPIPanel();
 }
 
+function loadKpiActualsFromApi(userId, month) {
+  userId = userId || currentUser;
+  month = month || (typeof currentJMonth === 'function' ? currentJMonth() : '');
+  if (!userId || !month) return Promise.resolve();
+  return fetch('/api/kpi-data/actuals?user=' + encodeURIComponent(userId) + '&month=' + encodeURIComponent(month))
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (body) {
+      if (!body || !body.ok) return;
+      ensureKPIDB();
+      var b = jMonthBounds(month);
+      DB.callLog = (DB.callLog || []).filter(function (l) {
+        var ts = dateStrToTs(l.date);
+        return l.userId !== userId || ts < b.startTs || ts > b.endTs;
+      }).concat(body.calls || []);
+      DB.visitLog = (DB.visitLog || []).filter(function (l) {
+        var ts = dateStrToTs(l.date);
+        return l.userId !== userId || ts < b.startTs || ts > b.endTs;
+      }).concat(body.visits || []);
+      DB.salesLog = (DB.salesLog || []).filter(function (l) {
+        var ts = dateStrToTs(l.date);
+        return l.userId !== userId || ts < b.startTs || ts > b.endTs;
+      }).concat(body.sales || []);
+    })
+    .catch(function () {});
+}
+window.loadKpiActualsFromApi = loadKpiActualsFromApi;
+
 function getProvKPITarget(provId) {
   var pt = (DB.kpiTargets && DB.kpiTargets.provinces) || {};
   return Object.assign({ contracts: 0, visits: 0 }, pt[provId] || {});
@@ -412,9 +425,7 @@ function saveProvKPITarget(provId, targets) {
   if (!DB.kpiTargets) DB.kpiTargets = {};
   if (!DB.kpiTargets.provinces) DB.kpiTargets.provinces = {};
   DB.kpiTargets.provinces[provId] = targets;
-  var o = { provinces: {} };
-  o.provinces[provId] = targets;
-  savePatchDB({ kpiTargets: o });
+  postKpiProvinceTargetApi(provId, targets);
 }
 
 function openProvTargetsModal() {
@@ -673,7 +684,7 @@ function _discImport(cid) {
       biopsyScore: c.score,
       biopsyDoctors: (c.doctors||[]).map(function(d){ return d.label+': '+d.name; }).join(', '),
     });
-    savePatchDB({extra:[DB.extra[DB.extra.length-1]]});
+    saveCenterExtraApi(DB.extra[DB.extra.length - 1]);
   }
   fetch('/api/discovery/' + cid, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'imported'})});
   _discoveredCenters = (_discoveredCenters||[]).map(function(x){ return x.id===cid ? Object.assign({},x,{status:'imported'}) : x; });
@@ -1247,7 +1258,7 @@ function _msSave(done) {
   ensureKPIDB();
   DB.missionLog = DB.missionLog.filter(function(l) { return !(l.userId === ms.userId && l.month === _msCurrent.month); });
   DB.missionLog.push(ms);
-  saveDB();
+  postMissionLog({ id: ms.id || Date.now(), userId: ms.userId, month: _msCurrent.month, done: done, note: ms.note || '' });
   showToast(done ? '✅ ماموریت انجام‌شده ثبت شد' : '⏳ ماموریت برنامه‌ریزی شد');
   closeModal('missionDetailModal');
   if (typeof renderKPIPanel === 'function') renderKPIPanel();
@@ -1255,13 +1266,11 @@ function _msSave(done) {
 
 function _msDelete() {
   if (!_msCurrent) return;
-  // Use the month/userId frozen at open-time (_msCurrent.month), not the edited
-  // form field, so the correct DB record is always targeted.
   var userId = _msCurrent.ms.userId;
   var month  = _msCurrent.month;
   ensureKPIDB();
   DB.missionLog = DB.missionLog.filter(function(l) { return !(l.userId === userId && l.month === month); });
-  saveDB();
+  deleteMissionLog(userId, month);
   showToast('ماموریت حذف شد');
   closeModal('missionDetailModal');
   if (typeof renderKPIPanel === 'function') renderKPIPanel();

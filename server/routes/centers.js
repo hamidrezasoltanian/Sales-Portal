@@ -1,7 +1,8 @@
 'use strict';
 
 const express = require('express');
-const { query } = require('../db');
+const { query, pool } = require('../db');
+const { createInteraction, rowToResponse } = require('../lib/center-interaction-service');
 const { requireAuth } = require('../auth');
 const {
   buildOwnerMaps,
@@ -11,6 +12,31 @@ const {
   applyProvinceRestriction,
 } = require('../lib/center-ownership');
 const { softDeleteCenterNote, filterActiveNotes, activeNoteIndexToRaw } = require('../lib/soft-delete');
+const { parseJalali, formatJalali } = require('../lib/jalali-mini');
+const inboxIndex = require('../lib/inbox-index');
+
+const INBOX_SYNC_WARNINGS = {
+  no_owner: 'این مرکز کارشناس مسئول ندارد — در کارتابل نمایش داده نمی‌شود. لطفاً در پروفایل مرکز، مسئول را تعیین کنید.',
+};
+
+async function syncInboxAfterFollowupChange(req, centerKey, field) {
+  let syncResult = null;
+  try {
+    syncResult = await inboxIndex.syncFollowupCenter(centerKey);
+    if (_broadcast) {
+      _broadcast('inbox-changed', { centerKey, field: field || 'followupDate', by: req.user.username, sync: syncResult }, req.headers['x-cid'] || '');
+    }
+  } catch (e) {
+    console.error('[centers] inbox sync failed for', centerKey, e.message);
+    syncResult = { active: false, reason: 'sync_error', error: e.message };
+  }
+  return syncResult;
+}
+
+function inboxWarningFromSync(syncResult) {
+  if (!syncResult || syncResult.active || !syncResult.reason) return null;
+  return INBOX_SYNC_WARNINGS[syncResult.reason] || null;
+}
 
 const router = express.Router();
 router.use(requireAuth);
@@ -53,6 +79,113 @@ async function assertCenterAccess(req, centerKey) {
   return owner === req.user.username;
 }
 
+// ── Interactions (قبل از /:key برای تطبیق قطعی مسیر) ─────────────────────
+router.get('/:key/interactions', async function (req, res) {
+  try {
+    const centerKey = decodeURIComponent(req.params.key);
+    if (!(await assertCenterAccess(req, centerKey))) {
+      return res.status(403).json({ error: 'دسترسی غیرمجاز' });
+    }
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+    const r = await query(
+      `SELECT * FROM center_interactions
+       WHERE center_key = $1
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [centerKey, limit]
+    );
+    res.json({
+      ok: true,
+      centerKey,
+      interactions: r.rows.map(rowToResponse),
+    });
+  } catch (e) {
+    console.error('[centers GET /:key/interactions]', e.message);
+    res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
+
+router.post('/:key/interactions', async function (req, res) {
+  const centerKey = decodeURIComponent(req.params.key);
+  let client;
+  try {
+    if (!(await assertCenterAccess(req, centerKey))) {
+      return res.status(403).json({ error: 'دسترسی غیرمجاز' });
+    }
+
+    const idempotencyKey = (req.headers['x-idempotency-key'] || (req.body && req.body.idempotencyKey) || '').trim();
+    if (!idempotencyKey) {
+      return res.status(400).json({ error: 'X-Idempotency-Key الزامی است' });
+    }
+
+    const body = req.body || {};
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const result = await createInteraction(client, {
+      centerKey,
+      username: req.user.username,
+      displayName: req.user.name || req.user.username,
+      idempotencyKey,
+      body,
+    });
+
+    await client.query('COMMIT');
+
+    const notesR = await query('SELECT notes FROM center_notes WHERE center_key = $1', [centerKey]);
+    const activeNotes = filterActiveNotes(notesR.rows.length ? notesR.rows[0].notes : []);
+
+    notifyCenterChange(req, { centerKey, field: 'interaction', interactionId: result.interaction.id });
+    const inboxSync = await syncInboxAfterFollowupChange(req, centerKey, 'interaction');
+    const inboxWarning = inboxWarningFromSync(inboxSync);
+    try {
+      if (_broadcast) {
+        _broadcast('activity-log-changed', { type: 'interaction', centerKey, by: req.user.username }, req.headers['x-cid'] || '');
+        if (body.weekEntryId) {
+          _broadcast('week-entry-changed', { action: 'update', id: body.weekEntryId, by: req.user.username }, req.headers['x-cid'] || '');
+        }
+      }
+    } catch (e) {
+      console.error('[centers POST interactions] broadcast', e.message);
+    }
+
+    res.status(result.replay ? 200 : 201).json({
+      ok: true,
+      replay: result.replay,
+      interaction: result.interaction,
+      notes: activeNotes,
+      centerKey,
+      inboxSync,
+      inboxWarning,
+    });
+  } catch (e) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+    }
+    const status = e.status || 500;
+    console.error('[centers POST /:key/interactions]', e.message);
+    res.status(status).json({ error: e.message || 'خطای داخلی سرور' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+router.get('/:key/notes', async function (req, res) {
+  try {
+    const centerKey = decodeURIComponent(req.params.key);
+    if (!(await assertCenterAccess(req, centerKey))) {
+      return res.status(403).json({ error: 'دسترسی غیرمجاز' });
+    }
+    const existing = await query('SELECT notes FROM center_notes WHERE center_key = $1', [centerKey]);
+    const notes = filterActiveNotes(existing.rows.length ? (existing.rows[0].notes || []) : []);
+    res.json({ ok: true, centerKey, notes });
+  } catch (e) {
+    console.error('[centers GET /:key/notes]', e.message);
+    res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
+
 router.get('/:key', async function (req, res) {
   try {
     const centerKey = decodeURIComponent(req.params.key);
@@ -80,13 +213,27 @@ router.patch('/:key', async function (req, res) {
     if (!(await assertCenterAccess(req, centerKey))) {
       return res.status(403).json({ error: 'دسترسی غیرمجاز' });
     }
-    const { field, val, centerName, oldValue } = req.body || {};
+    const { field, val, centerName, oldValue, expectedTs } = req.body || {};
     if (!field || typeof field !== 'string') {
       return res.status(400).json({ error: 'field الزامی است' });
     }
 
+    var patchVal = val;
+    if (field === 'followupDate' && patchVal) {
+      const j = parseJalali(patchVal);
+      if (j) patchVal = formatJalali(j);
+    }
+
+    if (expectedTs != null) {
+      const cur = await query('SELECT data FROM center_edits WHERE center_key = $1', [centerKey]);
+      if (cur.rows.length && cur.rows[0].data && cur.rows[0].data._ts != null
+          && Number(cur.rows[0].data._ts) !== Number(expectedTs)) {
+        return res.status(409).json({ error: 'تغییرات مرکز توسط کاربر دیگری ذخیره شده است', centerKey, field });
+      }
+    }
+
     const _ts = Date.now();
-    const patch = { [field]: val, _ts };
+    const patch = { [field]: patchVal, _ts };
     if (field === 'status' || field === 'lead' || field === 'potential') patch._lastActivity = _ts;
     if (field === 'status') patch._statusChangedTs = _ts;
 
@@ -101,27 +248,35 @@ router.patch('/:key', async function (req, res) {
       [centerKey, JSON.stringify(patch), req.user.username]
     );
 
-    const valStr = val !== undefined && val !== null ? JSON.stringify(val) : null;
+    const valStr = patchVal !== undefined && patchVal !== null ? JSON.stringify(patchVal) : null;
     await query(
       'INSERT INTO change_log (at, "by", rkey, field, val) VALUES (NOW(), $1, $2, $3, $4)',
       [req.user.username, centerKey, field, valStr]
     );
 
-    if (AUDIT_FIELDS.indexOf(field) >= 0 && String(oldValue ?? '') !== String(val ?? '')) {
+    if (AUDIT_FIELDS.indexOf(field) >= 0 && String(oldValue ?? '') !== String(patchVal ?? '')) {
       await query(
         `INSERT INTO center_audit (center_key, center_name, field, old_value, new_value, changed_by)
          VALUES ($1, $2, $3, $4, $5, $6)`,
-        [centerKey, centerName || '', field, String(oldValue ?? ''), String(val ?? ''), req.user.username]
+        [centerKey, centerName || '', field, String(oldValue ?? ''), String(patchVal ?? ''), req.user.username]
       ).catch(function () {});
     }
 
     notifyCenterChange(req, { centerKey, field });
+    let inboxSync = null;
+    let inboxWarning = null;
+    if (field === 'followupDate' || field === 'status') {
+      inboxSync = await syncInboxAfterFollowupChange(req, centerKey, field);
+      inboxWarning = inboxWarningFromSync(inboxSync);
+    }
     res.json({
       ok: true,
       centerKey,
       _ts,
       data: result.rows[0].data,
       updatedAt: result.rows[0].updated_at,
+      inboxSync,
+      inboxWarning,
     });
   } catch (e) {
     console.error('[centers PATCH /:key]', e.message);

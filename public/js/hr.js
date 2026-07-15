@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var _hrView = 'employees'; // employees | leave | delegation | disciplinary | documents | attendance
+  var _hrView = 'employees'; // employees | leave | delegation | disciplinary | documents | attendance | payroll
   var _hrLeaveFilter = 'all'; // all | pending | approved | rejected | mine
   var _hrUsersCache = null;
 
@@ -20,18 +20,32 @@
       }
     } catch (_) {}
 
+    if (window._hrPreferredView) {
+      _hrView = window._hrPreferredView;
+      window._hrPreferredView = null;
+    }
+
+    var canHr = typeof _hasAccess === 'function' && _hasAccess('hr');
+    var canPayroll = typeof _hasAccess === 'function' && _hasAccess('payroll');
+    if (!canHr && !canPayroll) {
+      root.innerHTML = '<p style="text-align:center;color:#6b7280;padding:40px">دسترسی به منابع انسانی ندارید.</p>';
+      return;
+    }
+    if (!canHr && canPayroll && _hrView !== 'payroll') _hrView = 'payroll';
+
     root.innerHTML =
-      '<div style="max-width:1100px;margin:0 auto">' +
+      '<div style="max-width:' + (_hrView === 'payroll' ? '100%' : '1100px') + ';margin:0 auto">' +
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">' +
           '<h2 style="margin:0;font-size:1.25rem;font-weight:700">👥 منابع انسانی</h2>' +
           '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
-            '<button onclick="window._hrSetView(\'employees\')" class="btn-pill' + (_hrView === 'employees' ? ' active' : '') + '" id="hrVEmployees">👤 کارمندان</button>' +
-            '<button onclick="window._hrSetView(\'leave\')" class="btn-pill' + (_hrView === 'leave' ? ' active' : '') + '" id="hrVLeave">📅 مرخصی</button>' +
-            (isManager ? '<button onclick="window._hrSetView(\'delegation\')" class="btn-pill' + (_hrView === 'delegation' ? ' active' : '') + '">🔀 جانشینی</button>' : '') +
-            (isManager ? '<button onclick="window._hrSetView(\'disciplinary\')" class="btn-pill' + (_hrView === 'disciplinary' ? ' active' : '') + '">⚠️ انضباطی</button>' : '') +
-            (isManager ? '<button onclick="window._hrSetView(\'documents\')" class="btn-pill' + (_hrView === 'documents' ? ' active' : '') + '">📎 مدارک</button>' : '') +
-            (isManager ? '<button onclick="window._hrSetView(\'attendance\')" class="btn-pill' + (_hrView === 'attendance' ? ' active' : '') + '">🕐 حضور</button>' : '') +
-            (isManager ? '<button onclick="window._hrOpenNewEmployee()" style="background:#6366f1;color:#fff;border:none;padding:7px 16px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:.9rem">+ کارمند جدید</button>' : '') +
+            (canHr ? '<button onclick="window._hrSetView(\'employees\')" class="btn-pill' + (_hrView === 'employees' ? ' active' : '') + '" id="hrVEmployees">👤 کارمندان</button>' : '') +
+            (canHr ? '<button onclick="window._hrSetView(\'leave\')" class="btn-pill' + (_hrView === 'leave' ? ' active' : '') + '" id="hrVLeave">📅 مرخصی</button>' : '') +
+            (canPayroll ? '<button onclick="window._hrSetView(\'payroll\')" class="btn-pill' + (_hrView === 'payroll' ? ' active' : '') + '" id="hrVPayroll">💵 حقوق و پورسانت</button>' : '') +
+            (isManager && canHr ? '<button onclick="window._hrSetView(\'delegation\')" class="btn-pill' + (_hrView === 'delegation' ? ' active' : '') + '">🔀 جانشینی</button>' : '') +
+            (isManager && canHr ? '<button onclick="window._hrSetView(\'disciplinary\')" class="btn-pill' + (_hrView === 'disciplinary' ? ' active' : '') + '">⚠️ انضباطی</button>' : '') +
+            (isManager && canHr ? '<button onclick="window._hrSetView(\'documents\')" class="btn-pill' + (_hrView === 'documents' ? ' active' : '') + '">📎 مدارک</button>' : '') +
+            (isManager && canHr ? '<button onclick="window._hrSetView(\'attendance\')" class="btn-pill' + (_hrView === 'attendance' ? ' active' : '') + '">🕐 حضور</button>' : '') +
+            (isManager && canHr ? '<button onclick="window._hrOpenNewEmployee()" style="background:#6366f1;color:#fff;border:none;padding:7px 16px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:.9rem">+ کارمند جدید</button>' : '') +
           '</div>' +
         '</div>' +
         '<div id="hrContent"></div>' +
@@ -59,7 +73,12 @@
 
   window._hrSetView = function (v) {
     _hrView = v;
-    document.querySelectorAll('.btn-pill').forEach(function (b) { b.classList.remove('active'); });
+    var root = document.getElementById('hrRoot');
+    if (root) {
+      var inner = root.firstElementChild;
+      if (inner) inner.style.maxWidth = (v === 'payroll' ? '100%' : '1100px');
+      root.querySelectorAll('.btn-pill').forEach(function (b) { b.classList.remove('active'); });
+    }
     var btn = document.getElementById('hrV' + v.charAt(0).toUpperCase() + v.slice(1));
     if (btn) btn.classList.add('active');
     _hrRenderContent();
@@ -68,10 +87,34 @@
   function _hrRenderContent() {
     if (_hrView === 'employees') _hrLoadEmployees();
     else if (_hrView === 'leave') _hrLoadLeave();
+    else if (_hrView === 'payroll') _hrLoadPayroll();
     else if (_hrView === 'delegation') _hrLoadDelegations();
     else if (_hrView === 'disciplinary') _hrLoadDisciplinary();
     else if (_hrView === 'documents') _hrLoadDocuments();
     else if (_hrView === 'attendance') _hrLoadAttendance();
+  }
+
+  function _hrLoadPayroll() {
+    var cont = document.getElementById('hrContent');
+    if (!cont) return;
+    cont.innerHTML = '<div id="payrollWrap" style="padding:4px 0"></div>';
+    if (typeof renderPayrollPanel === 'function') {
+      renderPayrollPanel(document.getElementById('payrollWrap'));
+      return;
+    }
+    cont.innerHTML = '<p style="color:#6b7280;text-align:center;padding:24px">در حال بارگذاری ماژول حقوق...</p>';
+    if (typeof ensureTabScripts === 'function') {
+      ensureTabScripts('hr').then(function () {
+        var wrap = document.getElementById('payrollWrap');
+        if (!wrap) {
+          cont.innerHTML = '<div id="payrollWrap" style="padding:4px 0"></div>';
+          wrap = document.getElementById('payrollWrap');
+        }
+        if (typeof renderPayrollPanel === 'function' && wrap) renderPayrollPanel(wrap);
+      }).catch(function () {
+        cont.innerHTML = '<p style="color:#ef4444;padding:20px">خطا در بارگذاری حقوق و پورسانت</p>';
+      });
+    }
   }
 
   function _hrNormDigits(s) {

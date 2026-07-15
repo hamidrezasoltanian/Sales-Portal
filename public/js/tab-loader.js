@@ -1,6 +1,6 @@
 /* ═══ Lazy tab script loader (Phase 2) ═══ */
 (function () {
-  var V = (typeof window !== 'undefined' && window.__APP_BUILD) ? window.__APP_BUILD : '20260715g';
+  var V = (typeof window !== 'undefined' && window.__APP_BUILD) ? window.__APP_BUILD : '20260715x';
   var _loaded = {};
 
   var TAB_SCRIPTS = {
@@ -14,8 +14,8 @@
     proforma: ['proforma.js', 'proforma-analytics.js', 'proforma-phase2.js'],
     hcp: ['hcp.js'],
     support: ['support.js'],
-    hr: ['hr.js'],
-    'trade-kpi': ['trade-kpi.js', 'trade-cases-ui.js'],
+    hr: ['hr.js', 'payroll.js'],
+    'trade-kpi': ['trade-kpi.js', 'trade-cases-ui.js', 'tasks.js'],
     reports: ['reports.js'],
     'week-planner': ['week-planner.js'],
     'faradis-match': ['faradis-match.js', 'faradis-data.js'],

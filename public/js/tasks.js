@@ -5,6 +5,8 @@ var _taskFilter='all'; // all | mine | overdue | created | assigned_by_me
 var _taskView='kanban'; // kanban | list
 var _taskSearch=''; // keyword filter
 var _taskTeamMode=false; // toggle: false=personal, true=department team
+/** Embedded render inside trade-kpi tab: { active, container, department, owner } */
+window._tasksEmbed=null;
 var _TK_STATUSES=[
   {id:'todo',label:'انجام نشده',color:'#64748b'},
   {id:'doing',label:'در حال انجام',color:'#6366f1'},
@@ -47,10 +49,10 @@ function openTkColumnsModal(){
   var footer='<button class="btn-primary" onclick="'
     +'if(!DB.settings.taskColumns)DB.settings.taskColumns={};'
     +'DB.settings.taskColumns[currentUser]=JSON.parse(JSON.stringify(window._tkColsPending));'
-    +'if(typeof patchCrmSetting===\'function\'){patchCrmSetting(\'taskColumns\',DB.settings.taskColumns);}else{saveDB();}'
+    +'patchCrmSetting(\'taskColumns\',DB.settings.taskColumns);'
     +"closeModal('tkColsMgr');showToast('ستون\u200cها ذخیره شد \u2705');renderTasksPanel();"
     +'">ذخیره</button>'
-    +'<button onclick="if(confirm(\'\u0628ازگشت به پیشفرض?\')){delete DB.settings.taskColumns[currentUser];if(typeof patchCrmSetting===\'function\'){patchCrmSetting(\'taskColumns\',DB.settings.taskColumns);}else{saveDB();}closeModal(\'tkColsMgr\');showToast(\'\u0628ازگشت شد\');renderTasksPanel();}" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit">بازگشت پیشفرض</button>'
+    +'<button onclick="if(confirm(\'\u0628ازگشت به پیشفرض?\')){delete DB.settings.taskColumns[currentUser];patchCrmSetting(\'taskColumns\',DB.settings.taskColumns);closeModal(\'tkColsMgr\');showToast(\'\u0628ازگشت شد\');renderTasksPanel();}" style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit">بازگشت پیشفرض</button>'
     +'<button class="btn-secondary" onclick="closeModal(\'tkColsMgr\')">بستن</button>';
   openModal('tkColsMgr','⚙️ مدیریت ستون‌های وظایف',body,footer,{lg:false});
 }
@@ -117,9 +119,32 @@ function _tkFindSub(subs,sid){
   return null;
 }
 
+function _tasksPanelEl(){
+  if(window._tasksEmbed&&window._tasksEmbed.active&&window._tasksEmbed.container){
+    return window._tasksEmbed.container;
+  }
+  return document.getElementById('tasksPanel');
+}
+
 function _tkFilteredTasks(){
   _ensureTasks();
   var today=todayStr();
+  // Trade tab embed: filter by department + selected trade employee
+  if(window._tasksEmbed&&window._tasksEmbed.active){
+    var emb=window._tasksEmbed;
+    var dept=emb.department||'بازرگانی';
+    var tasks=DB.tasks.filter(function(t){return(t.department||'')===dept;});
+    if(emb.owner){
+      tasks=tasks.filter(function(t){return t.owner===emb.owner;});
+    }
+    if(_taskSearch&&_taskSearch.trim()){
+      var _qE=fNorm(_taskSearch.trim());
+      tasks=tasks.filter(function(t){
+        return fNorm(t.title||'').indexOf(_qE)>=0||fNorm(t.note||'').indexOf(_qE)>=0;
+      });
+    }
+    return tasks;
+  }
   // Team mode: show all tasks in same department
   if(_taskTeamMode&&window._myDepartment){
     var deptTasks=DB.tasks.filter(function(t){return(t.department||'')===(window._myDepartment||'');});
@@ -143,11 +168,20 @@ function _tkFilteredTasks(){
 }
 
 function renderTasksPanel(){
-  var el=document.getElementById('tasksPanel');if(!el)return;
+  var el=_tasksPanelEl();if(!el)return;
   _ensureTasks();
   var tasks=_tkFilteredTasks();
+  var isEmbed=!!(window._tasksEmbed&&window._tasksEmbed.active);
 
   var html='<div class="task-wrap">';
+  if(isEmbed){
+    var empName=(window._tasksEmbed.owner&&typeof USERS!=='undefined'&&USERS[window._tasksEmbed.owner])
+      ?USERS[window._tasksEmbed.owner]:window._tasksEmbed.owner||'';
+    html+='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;font-size:.8rem;color:#64748b">'
+      +'<span>📌 وظایف بازرگانی — همگام با <b>تب وظایف</b> اصلی'+(empName?' · '+esc(empName):'')+'</span>'
+      +'<button type="button" onclick="window._tasksEmbed=null;if(typeof switchTab===\'function\')switchTab(\'tasks\')" style="padding:4px 10px;background:#eef2ff;color:#6366f1;border:1px solid #c7d2fe;border-radius:6px;cursor:pointer;font-family:inherit;font-size:.75rem">باز کردن در تب وظایف</button>'
+      +'</div>';
+  }
   // toolbar
   html+='<div class="task-filters">'
     +'<span style="display:inline-flex;gap:2px;background:var(--bg-raised);border-radius:8px;padding:3px;border:1px solid var(--border)">'
@@ -288,7 +322,7 @@ function tkColDrop(ev,targetColId){
   if(!DB.settings)DB.settings={};
   if(!DB.settings.taskColumns)DB.settings.taskColumns={};
   DB.settings.taskColumns[currentUser]=cols;
-  if(typeof patchCrmSetting==='function'){patchCrmSetting('taskColumns',DB.settings.taskColumns);}else{saveDB();}
+  patchCrmSetting('taskColumns',DB.settings.taskColumns);
   _tkColDragging=null;renderTasksPanel();
   showToast('↕ ترتیب ستون‌ها ذخیره شد',1500);
 }
@@ -440,7 +474,12 @@ function tkSaveTask(tid){
   t.note=(document.getElementById('tkd_note')||{}).value||'';
   t.recurring=(document.getElementById('tkd_recurring')||{}).value||'none';
   t.centerKey=(document.getElementById('tkd_centerKey')||{}).value||'';
-  if(!tid) t.department=window._myDepartment||'';
+  if(!tid){
+    t.department=(window._tasksEmbed&&window._tasksEmbed.department)||window._myDepartment||'';
+    if(window._tasksEmbed&&window._tasksEmbed.owner){
+      t.owner=window._tasksEmbed.owner;
+    }
+  }
   if(!t.activity)t.activity=[];
   if(tid&&_prevStatus!==status){
     var _statuses=_getTkStatuses();
@@ -716,7 +755,7 @@ function _setupAutoReminder(){
     if(!DB.settings) DB.settings = {};
     if((DB.settings.lastMorningReminder||'') === today) return;
     DB.settings.lastMorningReminder = today;
-    if(typeof patchCrmSetting==='function')patchCrmSetting('lastMorningReminder',today);else saveDB();
+    if(typeof patchCrmSetting==='function')patchCrmSetting('lastMorningReminder',today);
     _runMorningBriefing(today);
   }, 60000);
 
@@ -729,7 +768,7 @@ function _setupAutoReminder(){
     if(!DB.settings) DB.settings = {};
     if((DB.settings.lastAfternoonReminder||'') === today) return;
     DB.settings.lastAfternoonReminder = today;
-    if(typeof patchCrmSetting==='function')patchCrmSetting('lastAfternoonReminder',today);else saveDB();
+    if(typeof patchCrmSetting==='function')patchCrmSetting('lastAfternoonReminder',today);
     _runTodayReminders(today);
   }, 60000);
 
@@ -740,7 +779,7 @@ function _setupAutoReminder(){
     if(!DB.settings) DB.settings = {};
     if((DB.settings.lastStartupReminder||'') === today) return;
     DB.settings.lastStartupReminder = today;
-    if(typeof patchCrmSetting==='function')patchCrmSetting('lastStartupReminder',today);else saveDB();
+    if(typeof patchCrmSetting==='function')patchCrmSetting('lastStartupReminder',today);
     _runOverdueAndUndatedReminders(today);
   }, 8000);
 }

@@ -6,6 +6,22 @@ const { requireAuth } = require('../auth');
 
 const router = express.Router();
 
+let _broadcast = null;
+try { _broadcast = require('./events').broadcast; } catch (e) {}
+
+function notifyChecklistChange(req, date, username) {
+  try {
+    if (_broadcast) {
+      _broadcast('checklist-changed', {
+        at: Date.now(),
+        by: req.user.username,
+        date: date,
+        username: username,
+      }, req.headers['x-cid'] || '');
+    }
+  } catch (e) {}
+}
+
 const _UPSERT = `INSERT INTO daily_checklists (date, username, items, note, updated_at, updated_by)
   VALUES ($1, $2, $3, $4, NOW(), $5)
   ON CONFLICT (date, username) DO UPDATE SET
@@ -30,6 +46,7 @@ router.post('/', requireAuth, async function (req, res) {
       req.user.username,
     ]);
     const row = result.rows[0];
+    notifyChecklistChange(req, date, username);
     res.json({
       ok: true,
       key: date + '_' + username,

@@ -10,38 +10,95 @@ function _payrollFmt(n){
   return Math.round(n).toLocaleString('fa-IR');
 }
 
+function _payrollCanView(){
+  return typeof _hasAccess==='function'&&_hasAccess('payroll');
+}
+function _payrollCanEdit(){
+  return (typeof _canManage==='function'&&_canManage('payroll'))||(typeof _isSuperAdmin==='function'&&_isSuperAdmin());
+}
+function _payrollCanApprove(){
+  return typeof _canApprove==='function'&&_canApprove('payroll');
+}
+
+function _payrollCanManagerEdit(){
+  return (typeof _isManager==='function'&&_isManager())||(typeof _isSuperAdmin==='function'&&_isSuperAdmin());
+}
+
 function openPayrollPanel(){
-  if(typeof _isSuperAdmin==='function'&&!_isSuperAdmin()){showToast('⚠ فقط سوپر ادمین دسترسی دارد');return;}
+  if(!_payrollCanView()){showToast('⚠ دسترسی به حقوق و پورسانت ندارید');return;}
+  window._hrPreferredView='payroll';
+  if(typeof switchTab==='function'){
+    switchTab('hr');
+    setTimeout(function(){
+      if(currentTab==='hr'&&typeof window._hrSetView==='function')window._hrSetView('payroll');
+    },100);
+    return;
+  }
+  _openPayrollModal();
+}
+
+function _openPayrollModal(){
   if(!_payrollMonth){
     var t=todayStr().split('/');
     _payrollMonth=t[0]+'/'+t[1];
   }
   var m=openModal('payrollModal','💰 گزارش حقوق و پورسانت','<div id="payrollWrap">'+_payrollLoading()+'</div>','',{lg:true});
-  if(m&&m.foot){
+  if(m&&m.foot)_payrollModalFooter(m.foot);
+  renderPayrollPanel(document.getElementById('payrollWrap'));
+}
+
+function _payrollModalFooter(foot){
+  if(!foot)return;
+  foot.innerHTML='';
+  if(_payrollCanEdit()){
     var settingsBtn=document.createElement('button');
     settingsBtn.type='button';
     settingsBtn.textContent='⚙️ تنظیمات پورسانت';
     settingsBtn.style.cssText='background:#f5f3ff;color:#7c3aed;border:1px solid #c4b5fd;border-radius:5px;padding:6px 14px;cursor:pointer;font-size:12px;font-family:inherit';
     settingsBtn.addEventListener('click',function(){openPayrollSettings();});
-    m.foot.appendChild(settingsBtn);
-    var closeBtn=document.createElement('button');
-    closeBtn.type='button';
-    closeBtn.className='btn-secondary';
-    closeBtn.style.marginRight='8px';
-    closeBtn.textContent='بستن';
-    closeBtn.addEventListener('click',function(){closeModal('payrollModal');});
-    m.foot.appendChild(closeBtn);
+    foot.appendChild(settingsBtn);
   }
-  renderPayrollPanel();
+  if(_payrollCanView()){
+    var reconBtn=document.createElement('button');
+    reconBtn.type='button';
+    reconBtn.textContent='⚖️ تطبیق پورسانت';
+    reconBtn.style.cssText='background:#ecfdf5;color:#047857;border:1px solid #86efac;border-radius:5px;padding:6px 14px;cursor:pointer;font-size:12px;font-family:inherit;margin-right:8px';
+    reconBtn.addEventListener('click',function(){_payrollReconciliation();});
+    foot.appendChild(reconBtn);
+  }
+  var closeBtn=document.createElement('button');
+  closeBtn.type='button';
+  closeBtn.className='btn-secondary';
+  closeBtn.style.marginRight='8px';
+  closeBtn.textContent='بستن';
+  closeBtn.addEventListener('click',function(){closeModal('payrollModal');});
+  foot.appendChild(closeBtn);
 }
 
 function _payrollLoading(){
   return '<div style="text-align:center;padding:40px;color:var(--text-muted)">⏳ در حال بارگذاری...</div>';
 }
 
-function renderPayrollPanel(){
-  var wrap=document.getElementById('payrollWrap');
+function renderPayrollPanel(container){
+  var wrap=container;
+  if(!wrap)wrap=document.getElementById('payrollWrap');
   if(!wrap)return;
+  if(!_payrollMonth){
+    var t=todayStr().split('/');
+    _payrollMonth=t[0]+'/'+t[1];
+  }
+
+  var toolbar='';
+  if(_payrollCanEdit()||_payrollCanView()){
+    toolbar='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">';
+    if(_payrollCanEdit()){
+      toolbar+='<button type="button" onclick="openPayrollSettings()" style="background:#f5f3ff;color:#7c3aed;border:1px solid #c4b5fd;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:12px;font-family:inherit">⚙️ تنظیمات پورسانت</button>';
+    }
+    if(_payrollCanView()){
+      toolbar+='<button type="button" onclick="_payrollReconciliation()" style="background:#ecfdf5;color:#047857;border:1px solid #86efac;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:12px;font-family:inherit">⚖️ تطبیق پورسانت</button>';
+    }
+    toolbar+='</div>';
+  }
 
   var monthInput='<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#166534;line-height:1.6">'
     +'💡 <strong>ثبت حقوق:</strong> از تب <strong>منابع انسانی → کارمندان → ویرایش</strong> بخش «حقوق و قرارداد» را پر کنید '
@@ -52,10 +109,13 @@ function renderPayrollPanel(){
     +'<input id="payrollMonthInp" type="text" value="'+esc(_payrollMonth)+'" placeholder="1403/01" dir="ltr" '
     +'style="width:110px;padding:7px 10px;border:1.5px solid var(--border-input);border-radius:6px;font-size:13px;font-family:monospace;background:var(--bg-input);color:var(--text-primary)">'
     +'<button onclick="_payrollCalc()" style="background:var(--brand);color:#fff;border:none;border-radius:6px;padding:7px 16px;cursor:pointer;font-size:12px;font-family:inherit">📊 محاسبه</button>'
-    +'<button onclick="_payrollDraft()" style="background:#f59e0b;color:#fff;border:none;border-radius:6px;padding:7px 16px;cursor:pointer;font-size:12px;font-family:inherit">📝 پیش‌نویس</button>'
+    +(_payrollCanEdit()?'<button onclick="_payrollDraft()" style="background:#f59e0b;color:#fff;border:none;border-radius:6px;padding:7px 16px;cursor:pointer;font-size:12px;font-family:inherit">📝 پیش‌نویس</button>':'')
+    +'</div>'
+    +'<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:11px;color:#1e40af">'
+    +'مسیر تأیید: <b>پیش‌نویس</b> → <b>بررسی مدیر</b> → <b>تأیید مالی</b> → <b>قفل</b>. قفل مستقیم از پیش‌نویس مجاز نیست.'
     +'</div>';
 
-  wrap.innerHTML=monthInput+'<div id="payrollTable">'+_payrollLoading()+'</div>';
+  wrap.innerHTML=toolbar+monthInput+'<div id="payrollTable">'+_payrollLoading()+'</div>';
   _payrollCalc();
 }
 
@@ -86,6 +146,29 @@ function _payrollRenderTable(data){
     +'</div>';
 
   var statusLabels={draft:'پیش‌نویس',manager_review:'بررسی مدیر',financial_approval:'تأیید مالی',locked:'قفل',published:'منتشر'};
+  function _wfBtn(emp,mon,st,to,label,color){
+    if(!label)return '';
+    return '<button onclick="_payrollWorkflow(\''+esc(emp)+'\',\''+mon+'\',\''+to+'\')" style="background:'+color+'20;color:'+color+';border:1px solid '+color+'55;border-radius:4px;padding:3px 7px;cursor:pointer;font-size:10px;font-family:inherit;margin:2px">'+label+'</button>';
+  }
+  function _rowActions(r){
+    var st=r.status||'draft';
+    var html='';
+    if(_payrollCanManagerEdit()&&(st==='locked'||st==='published'||st==='financial_approval'||st==='manager_review'||(r.finalized&&st!=='draft'))){
+      html+=_wfBtn(r.employee,_payrollMonth,st,'draft','✏️ ویرایش','#b45309');
+      html+='<button onclick="_payrollRecalc(\''+esc(r.employee)+'\',\''+_payrollMonth+'\')" style="background:#fef3c720;color:#b45309;border:1px solid #fdba7455;border-radius:4px;padding:3px 7px;cursor:pointer;font-size:10px;font-family:inherit;margin:2px">🔄 محاسبه مجدد</button>';
+    }
+    if(st==='locked'||st==='published'){
+      if(!_payrollCanManagerEdit()){
+        return '<span style="font-size:11px;background:#dcfce7;color:#15803d;border-radius:4px;padding:3px 8px">✅ '+statusLabels[st]+'</span>';
+      }
+      if(html)return html;
+    }
+    if(_payrollCanEdit()&&st==='draft')html+=_wfBtn(r.employee,_payrollMonth,st,'manager_review','→ مدیر','#6366f1');
+    if(_payrollCanEdit()&&st==='manager_review')html+=_wfBtn(r.employee,_payrollMonth,st,'financial_approval','→ مالی','#0ea5e9');
+    if(_payrollCanApprove()&&st==='financial_approval')html+=_wfBtn(r.employee,_payrollMonth,st,'locked','🔒 قفل','#15803d');
+    if(_payrollCanEdit()&&st==='locked')html+=_wfBtn(r.employee,_payrollMonth,st,'published','انتشار','#7c3aed');
+    return html||'<span style="font-size:10px;color:#9ca3af">—</span>';
+  }
   var cols=['نام','وضعیت','پایه','پاداش','فروش تسویه','کارکرد','تارگت','پورسانت','ناخالص','بیمه','مالیات','خالص'];
   var thead='<thead><tr style="background:var(--bg-raised)">'
     +cols.map(function(c){return'<th style="padding:9px 10px;text-align:right;font-size:11px;font-weight:600;color:var(--text-muted);white-space:nowrap">'+c+'</th>';}).join('')
@@ -114,12 +197,7 @@ function _payrollRenderTable(data){
       +'<td style="padding:8px 10px;font-size:12px;color:#dc2626;font-family:monospace;direction:ltr;text-align:left">'+_payrollFmt(r.insurance)+'</td>'
       +'<td style="padding:8px 10px;font-size:12px;color:#dc2626;font-family:monospace;direction:ltr;text-align:left">'+_payrollFmt(r.tax)+'</td>'
       +'<td style="padding:8px 10px;font-size:13px;font-weight:800;color:var(--brand);font-family:monospace;direction:ltr;text-align:left">'+_payrollFmt(r.net_pay!=null?r.net_pay:r.total_pay)+'</td>'
-      +'<td style="padding:8px 10px;text-align:center">'
-        +(r.finalized
-          ?'<span style="font-size:11px;background:#dcfce7;color:#15803d;border-radius:4px;padding:3px 8px">✅ نهایی</span>'
-          :'<button onclick="_payrollFinalize(\''+esc(r.employee)+'\',\''+_payrollMonth+'\')" style="background:#f0fdf4;color:#15803d;border:1px solid #86efac;border-radius:5px;padding:4px 9px;cursor:pointer;font-size:11px;font-family:inherit">🔒 نهایی</button>'
-        )
-      +'</td>'
+      +'<td style="padding:8px 10px;text-align:center">'+_rowActions(r)+'</td>'
       +'</tr>';
   }).join('');
 
@@ -151,8 +229,10 @@ function _payrollRenderTable(data){
   return settingsSummary
     +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
     +thead+'<tbody>'+rows+'</tbody>'+tfoot+'</table></div>'
-    +'<div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">'
-    +'<button onclick="_payrollFinalizeAll()" style="background:#15803d;color:#fff;border:none;border-radius:6px;padding:8px 20px;cursor:pointer;font-size:12px;font-family:inherit">🔒 نهایی کردن همه</button>'
+    +'<div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">'
+    +(_payrollCanEdit()?'<button onclick="_payrollWorkflowAll(\'manager_review\')" style="background:#eef2ff;color:#6366f1;border:1px solid #c7d2fe;border-radius:6px;padding:8px 14px;cursor:pointer;font-size:12px;font-family:inherit">→ ارسال همه به مدیر</button>':'')
+    +(_payrollCanEdit()?'<button onclick="_payrollWorkflowAll(\'financial_approval\')" style="background:#f0f9ff;color:#0369a1;border:1px solid #bae6fd;border-radius:6px;padding:8px 14px;cursor:pointer;font-size:12px;font-family:inherit">→ ارسال همه به مالی</button>':'')
+    +(_payrollCanApprove()?'<button onclick="_payrollWorkflowAll(\'locked\')" style="background:#15803d;color:#fff;border:none;border-radius:6px;padding:8px 20px;cursor:pointer;font-size:12px;font-family:inherit">🔒 قفل همه (تأیید مالی)</button>':'')
     +'</div>';
 }
 
@@ -163,6 +243,68 @@ function _payrollDraft(){
     .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||r.status);return d;});})
     .then(function(d){showToast('📝 پیش‌نویس '+d.count+' نفر ذخیره شد');_payrollCalc();})
     .catch(function(e){showToast('❌ خطا: '+e.message);});
+}
+
+function _payrollRecalc(employee,month){
+  if(!confirm('محاسبه مجدد حقوق «'+employee+'»؟ رکورد به پیش‌نویس بازمی‌گردد و اعداد تازه ذخیره می‌شود.'))return;
+  fetch('/api/payroll/recalc/'+encodeURIComponent(employee)+'/'+encodeURIComponent(month),{
+    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})
+  }).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||r.status);return d;});})
+    .then(function(){showToast('✅ محاسبه مجدد ذخیره شد');_payrollCalc();})
+    .catch(function(e){showToast('❌ '+e.message);});
+}
+
+function _payrollWorkflow(employee,month,status){
+  var msg=status==='draft'?'بازگشت به پیش‌نویس برای ویرایش؟ مسیر تأیید از نو شروع می‌شود.':'تغییر وضعیت؟';
+  if(status==='draft'&&!confirm(msg))return;
+  fetch('/api/payroll/workflow/'+encodeURIComponent(employee)+'/'+encodeURIComponent(month),{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({status:status})
+  }).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||r.status);return d;});})
+    .then(function(){showToast('✅ وضعیت به‌روز شد');_payrollCalc();})
+    .catch(function(e){showToast('❌ '+e.message);});
+}
+
+function _payrollWorkflowAll(status){
+  if(!confirm('تغییر وضعیت همه رکوردهای قابل انتقال به «'+status+'»؟'))return;
+  fetch('/api/payroll/workflow-all/'+encodeURIComponent(_payrollMonth),{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({status:status})
+  }).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||r.status);return d;});})
+    .then(function(d){
+      var msg='✅ '+d.count+' نفر';
+      if(d.skipped&&d.skipped.length)msg+=' · '+d.skipped.length+' رد شد';
+      if(d.errors&&d.errors.length)msg+=' · '+d.errors.length+' خطا';
+      showToast(msg);_payrollCalc();
+    })
+    .catch(function(e){showToast('❌ '+e.message);});
+}
+
+function _payrollReconciliation(){
+  var tbl=document.getElementById('payrollTable');
+  if(tbl)tbl.innerHTML=_payrollLoading();
+  fetch('/api/payroll/reconciliation/'+encodeURIComponent(_payrollMonth))
+    .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||r.status);return d;});})
+    .then(function(data){
+      if(!tbl)return;
+      var rows=(data.rows||[]).filter(function(x){return x.payroll_commission>0||x.pricing_commission_on_paid>0||x.sales_total_paid>0;});
+      if(!rows.length){tbl.innerHTML='<div style="padding:20px;color:#6b7280">داده‌ای برای تطبیق نیست</div>';return;}
+      var body=rows.map(function(r){
+        var gap=parseFloat(r.gap)||0;
+        var gapColor=Math.abs(gap)<1?'#6b7280':(gap>0?'#b45309':'#dc2626');
+        return '<tr><td style="padding:8px">'+esc(r.display_name||r.employee)+'</td>'
+          +'<td style="padding:8px;direction:ltr;text-align:left">'+_payrollFmt(r.sales_total_paid)+'</td>'
+          +'<td style="padding:8px;direction:ltr;text-align:left;color:#15803d">'+_payrollFmt(r.payroll_commission)+'</td>'
+          +'<td style="padding:8px;direction:ltr;text-align:left;color:#6366f1">'+_payrollFmt(r.pricing_commission_on_paid)+'</td>'
+          +'<td style="padding:8px;direction:ltr;text-align:left;color:'+gapColor+'">'+_payrollFmt(gap)+'</td></tr>';
+      }).join('');
+      tbl.innerHTML='<div style="margin-bottom:10px;font-size:12px;color:#374151"><b>⚖️ تطبیق پورسانت pricing vs payroll</b> — دو مدل جدا تا یکپارچه‌سازی</div>'
+        +'<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#f8fafc">'
+        +'<th style="padding:8px;text-align:right">نام</th><th>فروش تسویه</th><th>پورسانت payroll</th><th>پورسانت pricing</th><th>اختلاف</th>'
+        +'</tr></thead><tbody>'+body+'</tbody></table>'
+        +'<button onclick="_payrollCalc()" style="margin-top:12px;padding:6px 12px;background:#6366f1;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;font-size:12px">بازگشت به جدول حقوق</button>';
+    })
+    .catch(function(e){if(tbl)tbl.innerHTML='<div style="color:#dc2626">'+esc(e.message)+'</div>';});
 }
 
 function _payrollFinalize(employee, month){
@@ -182,6 +324,7 @@ function _payrollFinalizeAll(){
 }
 
 function openPayrollSettings(){
+  if(!_payrollCanEdit()){showToast('⚠ فقط مدیر می‌تواند تنظیمات را تغییر دهد');return;}
   fetch('/api/payroll/settings')
     .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||('خطای '+r.status));return d;});})
     .then(function(s){
@@ -237,6 +380,11 @@ function savePayrollSettings(){
     .catch(function(e){showToast('❌ خطا: '+e.message);});
 }
 
+window._payrollRecalc=_payrollRecalc;
+window._payrollWorkflow=_payrollWorkflow;
+window._payrollWorkflowAll=_payrollWorkflowAll;
+window._payrollReconciliation=_payrollReconciliation;
+window.renderPayrollPanel=renderPayrollPanel;
 window.openPayrollPanel=openPayrollPanel;
 window.openPayrollSettings=openPayrollSettings;
 window.savePayrollSettings=savePayrollSettings;

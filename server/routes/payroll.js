@@ -5,24 +5,28 @@ const { query } = require('../db');
 const { requirePermission } = require('../permissions');
 const { requireAuth } = require('../auth');
 const payrollEngine = require('../lib/payroll-engine');
+const payrollWorkflow = require('../lib/payroll-workflow');
+const { isManagerRole } = require('../lib/roles');
 
 const router = express.Router();
 router.use(requireAuth);
-router.use((req, res, next) => {
-  const level = req.method === 'GET' ? 'view' : 'edit';
-  requirePermission('hr', level)(req, res, next);
-});
 
-function requireSuperAdmin(req, res, next) {
-  const role = req.user && req.user.role;
-  if (role === 'سوپر ادمین' || role === 'مدیر') return next();
-  return res.status(403).json({ error: 'فقط مدیر دسترسی دارد' });
+function requirePayrollView(req, res, next) {
+  return requirePermission('payroll', 'view')(req, res, next);
+}
+
+function requirePayrollEdit(req, res, next) {
+  return requirePermission('payroll', 'manage')(req, res, next);
+}
+
+function requirePayrollApprove(req, res, next) {
+  return requirePermission('payroll', 'approve')(req, res, next);
 }
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
 // GET /api/payroll/settings
-router.get('/settings', requireAuth, requireSuperAdmin, async (req, res) => {
+router.get('/settings', requirePayrollEdit, async (req, res) => {
   try {
     const r = await query(`SELECT * FROM commission_settings WHERE id='default'`);
     res.json(r.rows[0] || { base_pct: 1.0, tier_threshold: 2000000000, tier_step_amount: 500000000, tier_step_pct: 0.1, kpi_threshold: 80, kpi_multiplier: 2.0 });
@@ -33,7 +37,7 @@ router.get('/settings', requireAuth, requireSuperAdmin, async (req, res) => {
 });
 
 // PUT /api/payroll/settings
-router.put('/settings', requireAuth, requireSuperAdmin, async (req, res) => {
+router.put('/settings', requirePayrollEdit, async (req, res) => {
   const { base_pct, tier_threshold, tier_step_amount, tier_step_pct, kpi_threshold, kpi_multiplier } = req.body || {};
   try {
     await query(
@@ -54,7 +58,7 @@ router.put('/settings', requireAuth, requireSuperAdmin, async (req, res) => {
 });
 
 // GET /api/payroll/calculate/:month
-router.get('/calculate/:month', requireAuth, requireSuperAdmin, async (req, res) => {
+router.get('/calculate/:month', requirePayrollView, async (req, res) => {
   const { month } = req.params;
   if (!month || !/^\d{4}\/\d{2}$/.test(month)) {
     return res.status(400).json({ error: 'فرمت ماه نادرست است (YYYY/MM)' });
@@ -68,8 +72,20 @@ router.get('/calculate/:month', requireAuth, requireSuperAdmin, async (req, res)
   }
 });
 
+// GET /api/payroll/reconciliation/:month — pricing commission_amt vs payroll tier commission
+router.get('/reconciliation/:month', requirePayrollView, async (req, res) => {
+  const { month } = req.params;
+  if (!/^\d{4}\/\d{2}$/.test(month)) return res.status(400).json({ error: 'فرمت ماه نادرست' });
+  try {
+    const data = await payrollEngine.calcCommissionReconciliation(month);
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/payroll/draft/:month — freeze draft records (روز ۲۵)
-router.post('/draft/:month', requireAuth, requireSuperAdmin, async (req, res) => {
+router.post('/draft/:month', requirePayrollEdit, async (req, res) => {
   const { month } = req.params;
   if (!/^\d{4}\/\d{2}$/.test(month)) return res.status(400).json({ error: 'فرمت ماه نادرست' });
   try {
@@ -85,13 +101,14 @@ router.post('/draft/:month', requireAuth, requireSuperAdmin, async (req, res) =>
   }
 });
 
-// POST /api/payroll/workflow/:employee/:month
-router.post('/workflow/:employee/:month', requireAuth, requireSuperAdmin, async (req, res) => {
+// POST /api/payroll/reopen/:employee/:month — مدیر/سوپرادمین: بازگشت به پیش‌نویس پس از تأیید
+router.post('/reopen/:employee/:month', requirePayrollEdit, async (req, res) => {
   const { employee, month } = req.params;
-  const { status, note } = req.body || {};
-  if (!status) return res.status(400).json({ error: 'status الزامی است' });
+  if (!/^\d{4}\/\d{2}$/.test(month)) return res.status(400).json({ error: 'فرمت ماه نادرست' });
   try {
-    const result = await payrollEngine.transitionStatus(employee, month, status, req.user.username, note);
+    const result = await payrollEngine.reopenPayrollRecord(
+      employee, month, req.user.username, (req.body && req.body.note) || '', req.user
+    );
     if (result.error) return res.status(result.status || 400).json({ error: result.error });
     res.json(result);
   } catch (e) {
@@ -99,19 +116,107 @@ router.post('/workflow/:employee/:month', requireAuth, requireSuperAdmin, async 
   }
 });
 
-// POST /api/payroll/finalize/:employee/:month — lock record
-router.post('/finalize/:employee/:month', requireAuth, requireSuperAdmin, async (req, res) => {
+// POST /api/payroll/recalc/:employee/:month — محاسبه مجدد + ذخیره (پس از تأیید)
+router.post('/recalc/:employee/:month', requirePayrollEdit, async (req, res) => {
+  const { employee, month } = req.params;
+  if (!/^\d{4}\/\d{2}$/.test(month)) return res.status(400).json({ error: 'فرمت ماه نادرست' });
+  try {
+    const result = await payrollEngine.recalcAndSaveEmployee(
+      employee, month, req.user.username, { user: req.user, note: req.body && req.body.note }
+    );
+    if (result.error) return res.status(result.status || 400).json({ error: result.error });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/payroll/workflow/:employee/:month — role-based transitions
+router.post('/workflow/:employee/:month', async (req, res, next) => {
+  const { status } = req.body || {};
+  const to = status;
+  if (to === payrollEngine.WORKFLOW.DRAFT || to === payrollEngine.WORKFLOW.MANAGER_REVIEW || to === payrollEngine.WORKFLOW.FINANCIAL) {
+    return requirePayrollEdit(req, res, next);
+  }
+  if (to === payrollEngine.WORKFLOW.LOCKED) {
+    return requirePayrollApprove(req, res, next);
+  }
+  if (to === payrollEngine.WORKFLOW.PUBLISHED) {
+    return requirePayrollEdit(req, res, next);
+  }
+  return requirePayrollEdit(req, res, next);
+}, async (req, res) => {
+  const { employee, month } = req.params;
+  const { status, note, force } = req.body || {};
+  if (!status) return res.status(400).json({ error: 'status الزامی است' });
+  try {
+    const result = await payrollEngine.transitionStatus(
+      employee, month, status, req.user.username, note, { user: req.user, force: !!force }
+    );
+    if (result.error) return res.status(result.status || 400).json({ error: result.error });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/payroll/workflow-all/:month — bulk transition (same status for all draft records)
+router.post('/workflow-all/:month', requirePayrollEdit, async (req, res) => {
+  const { month } = req.params;
+  const { status, note } = req.body || {};
+  if (!status || !/^\d{4}\/\d{2}$/.test(month)) {
+    return res.status(400).json({ error: 'ماه و status الزامی است' });
+  }
+  try {
+    const recs = await query(
+      `SELECT employee, status FROM payroll_records WHERE month = $1 AND status != $2`,
+      [month, payrollEngine.WORKFLOW.PUBLISHED]
+    );
+    let count = 0;
+    const errors = [];
+    for (const row of recs.rows) {
+      const result = await payrollEngine.transitionStatus(
+        row.employee, month, status, req.user.username, note, { user: req.user }
+      );
+      if (result.error) errors.push({ employee: row.employee, error: result.error });
+      else count++;
+    }
+    res.json({ ok: true, count, errors });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/payroll/finalize/:employee/:month — deprecated alias: must be financial_approval → locked
+router.post('/finalize/:employee/:month', requirePayrollApprove, async (req, res) => {
   const { employee, month } = req.params;
   if (!month || !/^\d{4}\/\d{2}$/.test(month)) {
     return res.status(400).json({ error: 'فرمت ماه نادرست است' });
   }
   try {
+    const stored = await query(
+      'SELECT status FROM payroll_records WHERE employee = $1 AND month = $2',
+      [employee, month]
+    );
+    const current = stored.rows[0] ? stored.rows[0].status : payrollEngine.WORKFLOW.DRAFT;
+    if (current !== payrollEngine.WORKFLOW.FINANCIAL) {
+      const calcData = await payrollEngine.calcMonthPayroll(month);
+      const row = calcData.rows.find(function (r) { return r.employee === employee; });
+      if (!row) return res.status(404).json({ error: 'کارمند یافت نشد' });
+      await payrollEngine.upsertDraftRecord(row, month, req.user.username);
+      return res.status(400).json({
+        error: 'قفل مستقیم مجاز نیست. ابتدا: پیش‌نویس → بررسی مدیر → تأیید مالی. وضعیت فعلی: ' + current,
+        current_status: current,
+        next_actions: payrollWorkflow.nextActionsFor(req.user, current),
+      });
+    }
     const calcData = await payrollEngine.calcMonthPayroll(month);
     const row = calcData.rows.find(function (r) { return r.employee === employee; });
     if (!row) return res.status(404).json({ error: 'کارمند یافت نشد' });
     await payrollEngine.upsertDraftRecord(row, month, req.user.username);
     const result = await payrollEngine.transitionStatus(
-      employee, month, payrollEngine.WORKFLOW.LOCKED, req.user.username, 'نهایی‌سازی'
+      employee, month, payrollEngine.WORKFLOW.LOCKED, req.user.username, 'تأیید مالی و قفل',
+      { user: req.user }
     );
     if (result.error) return res.status(result.status || 400).json({ error: result.error });
     res.json({ ok: true });
@@ -121,21 +226,34 @@ router.post('/finalize/:employee/:month', requireAuth, requireSuperAdmin, async 
   }
 });
 
-// POST /api/payroll/finalize-all/:month
-router.post('/finalize-all/:month', requireAuth, requireSuperAdmin, async (req, res) => {
+// POST /api/payroll/finalize-all/:month — bulk lock only if all at financial_approval
+router.post('/finalize-all/:month', requirePayrollApprove, async (req, res) => {
   const { month } = req.params;
   if (!month || !/^\d{4}\/\d{2}$/.test(month)) {
     return res.status(400).json({ error: 'فرمت ماه نادرست است' });
   }
   try {
     const calcData = await payrollEngine.calcMonthPayroll(month);
+    let count = 0;
+    const skipped = [];
     for (const row of calcData.rows) {
-      await payrollEngine.upsertDraftRecord(row, month, req.user.username);
-      await payrollEngine.transitionStatus(
-        row.employee, month, payrollEngine.WORKFLOW.LOCKED, req.user.username, 'نهایی‌سازی گروهی'
+      const st = await query(
+        'SELECT status FROM payroll_records WHERE employee = $1 AND month = $2',
+        [row.employee, month]
       );
+      const current = st.rows[0] ? st.rows[0].status : payrollEngine.WORKFLOW.DRAFT;
+      if (current !== payrollEngine.WORKFLOW.FINANCIAL) {
+        skipped.push({ employee: row.employee, status: current });
+        continue;
+      }
+      await payrollEngine.upsertDraftRecord(row, month, req.user.username);
+      const result = await payrollEngine.transitionStatus(
+        row.employee, month, payrollEngine.WORKFLOW.LOCKED, req.user.username, 'تأیید مالی گروهی',
+        { user: req.user }
+      );
+      if (!result.error) count++;
     }
-    res.json({ ok: true, count: calcData.rows.length });
+    res.json({ ok: true, count, skipped });
   } catch (e) {
     console.error('[payroll/finalize-all]', e.message);
     res.status(500).json({ error: 'خطای سرور' });
@@ -144,7 +262,7 @@ router.post('/finalize-all/:month', requireAuth, requireSuperAdmin, async (req, 
 
 // ── Contracts ────────────────────────────────────────────────────────────────
 
-router.get('/contracts', requireAuth, requireSuperAdmin, async (req, res) => {
+router.get('/contracts', requirePayrollEdit, async (req, res) => {
   try {
     const params = [];
     let sql = 'SELECT c.*, u.display_name FROM employee_contracts c LEFT JOIN app_users u ON u.username = c.employee WHERE c.active = TRUE';
@@ -160,7 +278,7 @@ router.get('/contracts', requireAuth, requireSuperAdmin, async (req, res) => {
   }
 });
 
-router.post('/contracts', requireAuth, requireSuperAdmin, async (req, res) => {
+router.post('/contracts', requirePayrollEdit, async (req, res) => {
   try {
     const b = req.body || {};
     if (!b.employee) return res.status(400).json({ error: 'کارمند الزامی است' });
@@ -175,7 +293,7 @@ router.post('/contracts', requireAuth, requireSuperAdmin, async (req, res) => {
 
 // ── Monthly variables (مساعده / پاداش / جریمه) ─────────────────────────────
 
-router.get('/variables', requireAuth, requireSuperAdmin, async (req, res) => {
+router.get('/variables', requirePayrollEdit, async (req, res) => {
   try {
     const { month, employee, status } = req.query;
     const params = [];
@@ -191,18 +309,20 @@ router.get('/variables', requireAuth, requireSuperAdmin, async (req, res) => {
   }
 });
 
-router.post('/variables', requireAuth, requireSuperAdmin, async (req, res) => {
+router.post('/variables', requirePayrollEdit, async (req, res) => {
   try {
     const b = req.body || {};
     if (!b.employee || !b.month || !b.var_type || b.amount == null) {
       return res.status(400).json({ error: 'کارمند، ماه، نوع و مبلغ الزامی است' });
     }
+    const mutable = await payrollEngine.assertPayrollMonthEditable(b.employee, b.month);
+    if (mutable.error) return res.status(mutable.status || 403).json({ error: mutable.error });
     const id = uid();
     const r = await query(
-      `INSERT INTO payroll_monthly_variables (id, employee, month, var_type, amount, title, notes, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      `INSERT INTO payroll_monthly_variables (id, employee, month, var_type, amount, title, notes, disciplinary_action_id, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
       [id, b.employee, b.month, b.var_type, parseFloat(b.amount) || 0,
-        b.title || null, b.notes || null, req.user.username]
+        b.title || null, b.notes || null, b.disciplinary_action_id || null, req.user.username]
     );
     try {
       require('../lib/inbox-hooks').onPayrollVariableChange(id);
@@ -213,7 +333,7 @@ router.post('/variables', requireAuth, requireSuperAdmin, async (req, res) => {
   }
 });
 
-router.post('/variables/:id/approve', requireAuth, requireSuperAdmin, async (req, res) => {
+router.post('/variables/:id/approve', requirePayrollApprove, async (req, res) => {
   try {
     const approve = req.body && req.body.approve !== false;
     const r = await query(
@@ -230,7 +350,7 @@ router.post('/variables/:id/approve', requireAuth, requireSuperAdmin, async (req
 });
 
 // GET /api/payroll/targets?month=YYYY/MM
-router.get('/targets', requireAuth, async (req, res) => {
+router.get('/targets', requirePayrollView, async (req, res) => {
   try {
     const { month } = req.query;
     if (!month) return res.status(400).json({ error: 'پارامتر month الزامی است' });
@@ -242,9 +362,9 @@ router.get('/targets', requireAuth, async (req, res) => {
   }
 });
 
-router.put('/targets/:employee/:month', requireAuth, async (req, res) => {
+router.put('/targets/:employee/:month', requirePayrollEdit, async (req, res) => {
   try {
-    if (!['مدیر', 'سوپر ادمین'].includes(req.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
+    if (!isManagerRole(req.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
     const { employee, month } = req.params;
     const { target_amount } = req.body;
     if (target_amount === undefined) return res.status(400).json({ error: 'target_amount الزامی است' });
@@ -263,7 +383,7 @@ router.put('/targets/:employee/:month', requireAuth, async (req, res) => {
 });
 
 // GET /api/payroll/actuals?month= — commission-eligible sales
-router.get('/actuals', requireAuth, async (req, res) => {
+router.get('/actuals', requirePayrollView, async (req, res) => {
   try {
     const { month } = req.query;
     if (!month) return res.status(400).json({ error: 'پارامتر month الزامی است' });
@@ -276,7 +396,10 @@ router.get('/actuals', requireAuth, async (req, res) => {
         display_name: u.display_name,
         actual_amount: sales.salesTotal,
         source: sales.source,
+        rule: sales.rule,
         proforma_count: sales.invoiceCount,
+        pricing_commission_total: sales.pricing_commission_total,
+        lines: sales.lines,
       });
     }
     rows.sort(function (a, b) { return b.actual_amount - a.actual_amount; });
@@ -287,7 +410,7 @@ router.get('/actuals', requireAuth, async (req, res) => {
   }
 });
 
-router.get('/records', requireAuth, requireSuperAdmin, async (req, res) => {
+router.get('/records', requirePayrollView, async (req, res) => {
   const { month, employee } = req.query;
   const conds = []; const params = [];
   if (month) { conds.push(`month=$${params.length + 1}`); params.push(month); }

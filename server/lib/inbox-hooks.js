@@ -23,5 +23,8 @@ module.exports = {
   onPayrollVariableChange: function (id) {
     return safeHook(inboxIndex.syncPayrollVariable)(id);
   },
+  onCenterFollowupChange: function (centerKey) {
+    return inboxIndex.syncFollowupCenter(centerKey);
+  },
   rebuildAll: safeHook(inboxIndex.rebuildAll),
 };

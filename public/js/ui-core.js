@@ -14,7 +14,8 @@ function showToast(msg,dur){
 
 // ════════════════════════ USER ═════════════════════════
 function onUserChange(u){
-  currentUser=u;DB._lastUser=u;saveDB();
+  currentUser=u;DB._lastUser=u;
+  if(typeof patchCrmSetting==='function')patchCrmSetting('_lastUser',u);
   var _dot=document.getElementById('uSelDot');
   if(_dot&&typeof umGetColor!=='undefined')_dot.style.background=umGetColor(u);
   // تغییر کاربر = تغییر هویت، نه فیلتر — داده‌ها محو نمی‌شوند
@@ -36,7 +37,7 @@ function switchTab(tab){
   currentTab=tab;
   try{localStorage.setItem('_st',tab);}catch(e){}
   _navPush(tab, null);
-  ['home','provinces','weekplan','calendar','checklist','activity','changelog','tasks','manager','kpi','mtr','pricing','proforma','reports','hcp','letters','workflows'].forEach(function(t){
+  ['home','provinces','weekplan','calendar','checklist','activity','changelog','tasks','manager','kpi','mtr','pricing','proforma','reports','hcp','letters','workflows','hr','support','trade-kpi'].forEach(function(t){
     var b=document.getElementById('tab_'+t);if(b)b.classList.toggle('active',t===tab);
   });
   document.getElementById('dash').style.display=(tab==='provinces')?'':'none';

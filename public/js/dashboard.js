@@ -553,61 +553,7 @@ function openPreCallBrief(rtype,rid){
 }
 
 var _QCL_TPLS=['علاقه‌مند به بررسی محصول — پیگیری بعدی تعیین شد','نیاز به بررسی بیشتر — ارسال بروشور درخواست شد','پاسخگو نبود — پیگیری مجدد لازم است','ویزیت انجام شد — نتیجه مثبت / منتظر تصمیم نهایی'];
-function _qclTemplate(i){var el=document.getElementById('qcl_note');if(el){var t=_QCL_TPLS[i]||'';el.value=(el.value?el.value+'\n':'')+t;el.focus();}}
-function quickCallLog(rtype,rid,centerName){
-  var id='qcl_'+rid;
-  var e=getE(rtype,rid);
-  var body='<div style="display:flex;flex-direction:column;gap:10px">'
-    +'<div><label style="font-size:11px;font-weight:700;display:block;margin-bottom:4px">🎯 نوع فعالیت</label>'
-    +'<select id="qcl_type" style="width:100%;padding:6px 8px;border:1px solid var(--border-input);border-radius:6px;font-family:inherit;font-size:12px">'
-    +'<option value="call">📞 تماس</option>'
-    +'<option value="visit">🤝 ملاقات</option>'
-    +'<option value="price_send">📄 ارسال قیمت</option>'
-    +'<option value="sample_send">🧪 ارسال نمونه</option>'
-    +'<option value="committee">🏛 پیگیری کمیته</option>'
-    +'<option value="meeting">👥 جلسه</option>'
-    +'<option value="followup">🔄 پیگیری</option>'
-    +'</select></div>'
-    +'<div><label style="font-size:11px;font-weight:700;display:block;margin-bottom:4px">📊 نتیجه</label>'
-    +'<select id="qcl_result" style="width:100%;padding:6px 8px;border:1px solid var(--border-input);border-radius:6px;font-family:inherit;font-size:12px;background:var(--bg-input);color:var(--text-primary)">'
-    +'<option value="">-- انتخاب --</option>'
-    +'<option>تماس موفق - علاقه‌مند</option>'
-    +'<option>تماس موفق - بی‌علاقه</option>'
-    +'<option>قرار ویزیت گذاشته شد</option>'
-    +'<option>پیگیری بعدی لازم است</option>'
-    +'<option>عدم پاسخگویی</option>'
-    +'<option>مشغول / بعداً تماس</option>'
-    +'</select></div>'
-    +'<div><label style="font-size:11px;font-weight:700;display:block;margin-bottom:4px">📝 یادداشت سریع</label>'
-    +'<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:5px">'
-    +'<button type="button" onclick="_qclTemplate(0)" style="font-size:10px;padding:3px 7px;background:var(--bg-raised);border:1px solid var(--border);border-radius:5px;cursor:pointer;font-family:inherit;color:var(--text-primary)">✅ علاقه‌مند</button>'
-    +'<button type="button" onclick="_qclTemplate(1)" style="font-size:10px;padding:3px 7px;background:var(--bg-raised);border:1px solid var(--border);border-radius:5px;cursor:pointer;font-family:inherit;color:var(--text-primary)">📄 ارسال بروشور</button>'
-    +'<button type="button" onclick="_qclTemplate(2)" style="font-size:10px;padding:3px 7px;background:var(--bg-raised);border:1px solid var(--border);border-radius:5px;cursor:pointer;font-family:inherit;color:var(--text-primary)">📵 عدم پاسخ</button>'
-    +'<button type="button" onclick="_qclTemplate(3)" style="font-size:10px;padding:3px 7px;background:var(--bg-raised);border:1px solid var(--border);border-radius:5px;cursor:pointer;font-family:inherit;color:var(--text-primary)">🤝 پس از ویزیت</button>'
-    +'</div>'
-    +'<textarea id="qcl_note" rows="3" placeholder="خلاصه مکالمه..." style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid var(--border-input);border-radius:6px;font-family:inherit;font-size:12px;resize:vertical;background:var(--bg-input);color:var(--text-primary)"></textarea></div>'
-    +'<div><label style="font-size:11px;font-weight:700;display:block;margin-bottom:4px">📅 پیگیری بعدی</label>'
-    +'<input type="text" id="qcl_fd" readonly placeholder="انتخاب تاریخ..." onclick="openJDP(this,function(v){document.getElementById(\'qcl_fd\').value=v;})" style="width:100%;padding:6px 8px;border:1px solid var(--border-input);border-radius:6px;font-family:inherit;font-size:12px;cursor:pointer;background:var(--bg-input);color:var(--text-primary)" value="'+esc(e.followupDate||'')+'">'
-    +'</div></div>';
-  var foot='<button class="btn-secondary" onclick="closeModal(\''+id+'\')">لغو</button>'
-    +'<button class="btn-primary" onclick="_submitQCL(\''+rtype+'\',\''+rid+'\',\''+id+'\')">ثبت تماس</button>';
-  openModal(id,'📞 ثبت سریع — '+esc(centerName),body,foot);
-}
-function _submitQCL(rtype,rid,modalId){
-  var result=((document.getElementById('qcl_result')||{}).value||'');
-  var note=((document.getElementById('qcl_note')||{}).value||'').trim();
-  var fd=((document.getElementById('qcl_fd')||{}).value||'');
-  var actType=((document.getElementById('qcl_type')||{}).value||'call');
-  if(!result&&!note){showToast('نتیجه یا یادداشت را وارد کنید');return;}
-  var actLabel=(ACTION_TYPE_LABELS&&ACTION_TYPE_LABELS[actType])||'📞 تماس';
-  var txt=(result?'['+actLabel+'] نتیجه: '+result+(note?'\n'+note:''):'['+actLabel+'] '+note);
-  if(txt){
-    addNote(rtype,rid,txt,null);
-  }
-  if(fd)setE(rtype,rid,'followupDate',fd);
-  closeModal(modalId);showToast('✓ تماس ثبت شد');
-  if(typeof renderExpertDashboard==='function')renderExpertDashboard();
-}
+/* quickCallLog / openCenterInteraction → center-interactions.js */
 function _renderExpertDash(el){
   if(!el)return;
   _buildPCCache();
@@ -715,7 +661,7 @@ function _renderExpertDash(el){
         +'<button onclick="openCenterModal(\''+esc(it.rtype)+'\',\''+esc(it.id)+'\')" style="background:none;border:none;cursor:pointer;font-size:11px;font-weight:600;color:#0369a1;padding:0;text-align:right">'+esc(it.name)+'</button>'
         +'<div style="display:flex;gap:4px;align-items:center">'
         +'<span style="font-size:10px;background:#e0f2fe;padding:1px 6px;border-radius:5px">'+ic+'</span>'
-        +'<button onclick="quickCallLog(\''+esc(it.rtype)+'\',\''+esc(it.id)+'\',\''+esc(it.name)+'\')" style="background:#0ea5e9;color:#fff;border:none;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;font-family:inherit">ثبت نتیجه</button>'
+        +'<button onclick="openCenterInteraction({rtype:\''+esc(it.rtype)+'\',rid:\''+esc(it.id)+'\',centerName:\''+esc(it.name)+'\',weekEntryKey:\''+esc(it.eKey)+'\',actionType:\''+esc(it.actType||'call')+'\'})" style="background:#0ea5e9;color:#fff;border:none;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;font-family:inherit">ثبت نتیجه</button>'
         +'</div></div>';
     });
     _tHtml+='</div></div>';
@@ -887,7 +833,7 @@ function renderHome(){
         var wid2=k.split(':::')[0];
         if(wid2!==weekId)return;
         var schDate=we.scheduledDate||'';
-        if(schDate===today)todayEntries.push(we);
+        if(schDate===today)todayEntries.push(Object.assign({},we,{_eKey:k}));
       });
       if(!todayEntries.length){
         boxContent='<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:8px">برنامه‌ای برای امروز ندارید ✓</div>';
@@ -898,7 +844,7 @@ function renderHome(){
           var act=we.actionType==='visit'?'🚶 ویزیت':'📞 تماس';
           boxContent+='<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background:var(--bg-raised);border-radius:6px;font-size:12px">'
             +'<span>'+act+' — <b>'+esc(nm)+'</b></span>'
-            +'<button onclick="quickCallLog(\''+esc(we.rtype||'center')+'\',\''+esc(we.rid||we.recKey||'')+'\',\''+esc(nm)+'\')" style="font-size:10px;padding:2px 8px;background:#6366f1;color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit">📞 ثبت</button>'
+            +'<button onclick="openCenterInteraction({rtype:\''+esc(we.rtype||(we.recKey?we.recKey.split('_')[0]:'center'))+'\',rid:\''+esc(we.rid||(we.recKey?we.recKey.split('_').slice(1).join('_'):''))+'\',centerName:\''+esc(nm)+'\',weekEntryKey:\''+esc(we._eKey||'')+'\',actionType:\''+esc(we.actionType||'call')+'\'})" style="font-size:10px;padding:2px 8px;background:#6366f1;color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit">📞 ثبت</button>'
             +'</div>';
         });
         if(todayEntries.length>8)boxContent+='<div style="font-size:11px;color:var(--text-muted);text-align:center">+ '+(todayEntries.length-8)+' مورد دیگر</div>';

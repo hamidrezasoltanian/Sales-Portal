@@ -68,17 +68,16 @@ async function calcScore(employee, month, targets) {
   const workingDays = 26;
   const reportScore = Math.min(100, (reportCount / workingDays) * 100);
 
-  // 3. Admin tasks
-  const monthDash = month.replace('/', '-');
+  // 3. Admin tasks (main CRM tasks module — department بازرگانی)
   const adminTasksR = await query(
-    `SELECT COUNT(*) AS total,
-            COUNT(CASE WHEN status='done' OR completed_at IS NOT NULL THEN 1 END) AS done
-     FROM trade_tasks WHERE assigned_to=$1
-     AND (LEFT(deadline,7)=$2 OR LEFT(created_at::text,7)=$3)
-     AND (category = ANY($4) OR category IS NULL)`,
-    [employee, monthDash, monthDash, TRADE_ADMIN_CATEGORIES]
+    `SELECT COUNT(*)::int AS total,
+            COUNT(CASE WHEN status='done' OR done=true THEN 1 END)::int AS done
+     FROM tasks
+     WHERE owner=$1 AND deleted_at IS NULL AND department='بازرگانی'
+     AND (due_date LIKE $2 || '%' OR due_date IS NULL OR due_date = '')`,
+    [employee, month]
   );
-  const adminDone = parseInt(adminTasksR.rows[0] && adminTasksR.rows[0].done) || 0;
+  const adminDone = adminTasksR.rows[0] ? adminTasksR.rows[0].done : 0;
   const adminScore = targets.admin_target > 0
     ? Math.min(100, (adminDone / targets.admin_target) * 100) : 0;
 
@@ -100,15 +99,17 @@ async function calcScore(employee, month, targets) {
   const financeScore = parseFloat(targets.finance_target) > 0
     ? Math.min(100, (financeTotal / parseFloat(targets.finance_target)) * 100) : 0;
 
-  // 6. Team tasks
+  // 6. Team tasks (same pool — completion ratio for trade department)
   const teamTasksR = await query(
-    `SELECT COUNT(*) AS total,
-            COUNT(CASE WHEN status='done' THEN 1 END) AS done
-     FROM trade_tasks WHERE assigned_to=$1 AND LEFT(created_at::text,7)=$2`,
-    [employee, monthDash]
+    `SELECT COUNT(*)::int AS total,
+            COUNT(CASE WHEN status='done' OR done=true THEN 1 END)::int AS done
+     FROM tasks
+     WHERE owner=$1 AND deleted_at IS NULL AND department='بازرگانی'
+     AND (due_date LIKE $2 || '%' OR due_date IS NULL OR due_date = '')`,
+    [employee, month]
   );
-  const teamTotal = parseInt(teamTasksR.rows[0] && teamTasksR.rows[0].total) || 0;
-  const teamDone = parseInt(teamTasksR.rows[0] && teamTasksR.rows[0].done) || 0;
+  const teamTotal = teamTasksR.rows[0] ? teamTasksR.rows[0].total : 0;
+  const teamDone = teamTasksR.rows[0] ? teamTasksR.rows[0].done : 0;
   const teamScore = teamTotal > 0 ? Math.min(100, (teamDone / teamTotal) * 100) : 100;
 
   // 7. Warehouse reconciliation

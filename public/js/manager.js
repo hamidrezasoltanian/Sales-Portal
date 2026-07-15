@@ -281,7 +281,10 @@ function saveSettings(){
   }
 
   function _finishSave(){
-    saveDB();
+    if(typeof saveGlobalTagsApi==='function')saveGlobalTagsApi(DB.tags||[]);
+    if(typeof patchCrmSetting==='function'){
+      Object.keys(settingsPatch).forEach(function(k){patchCrmSetting(k,settingsPatch[k]);});
+    }
     if(typeof _mtrStartSyncPoll==='function')_mtrStartSyncPoll();
     buildUSERS();
     closeModal('settingsModal');
@@ -305,7 +308,7 @@ function addTagRow(){
   if(!DB.tags)DB.tags=[];
   var colors=['#0ea5e9','#8b5cf6','#f59e0b','#22c55e','#ef4444','#06b6d4','#ec4899','#84cc16'];
   var newTag={id:'tag_'+Date.now(),name:'برچسب جدید',color:colors[DB.tags.length%colors.length]};
-  DB.tags.push(newTag);saveDB();
+  DB.tags.push(newTag);saveGlobalTagsApi(DB.tags);
   var list=document.getElementById('tagsSettingsList');
   if(!list)return;
   var div=document.createElement('div');
@@ -323,7 +326,7 @@ function deleteTagFromSettings(tagId){
   Object.keys(DB.rTags||{}).forEach(function(k){
     DB.rTags[k]=(DB.rTags[k]||[]).filter(function(id){return id!==tagId;});
   });
-  saveDB();
+  saveGlobalTagsApi(DB.tags);
   var el=document.getElementById('tagcolor_'+tagId);
   if(el&&el.closest('div'))el.closest('div').remove();
 }
@@ -1304,7 +1307,6 @@ function overdueSnooze(rtype,id,days,listMemberId){
   var nj=g2j(d.getFullYear(),d.getMonth()+1,d.getDate());
   var newDate=nj[0]+'/'+p2(nj[1])+'/'+p2(nj[2]);
   setE(rtype,id,'followupDate',newDate);
-  saveDB(); // Save changes to DB & sync to server!
   renderBanner();
   showToast('⏰ تعویق تا '+newDate,2000);
   closeModal('overdueList');
@@ -1319,7 +1321,6 @@ function overduePickDate(rtype,id,listMemberId){
     inp.remove();
     if(!v)return;
     setE(rtype,id,'followupDate',v);
-    saveDB(); // Save changes to DB & sync to server!
     renderBanner();
     showToast('📅 تاریخ جدید: '+v,2000);
     closeModal('overdueList');
@@ -1341,7 +1342,6 @@ function overdueBulkSnooze(days){
     var newDate=nj[0]+'/'+p2(nj[1])+'/'+p2(nj[2]);
     setE(c.rtype,c.id,'followupDate',newDate);
   });
-  saveDB();
   renderBanner();
   showToast('✅ '+_odLastItems.length+' مرکز '+days+' روز تعویق افتاد',2500);
   closeModal('overdueList');
@@ -2185,10 +2185,10 @@ function doImportCenters(rows, nameIdx, provIdx, typeIdx, ownerIdx, potIdx) {
       if (matchedOwner) entry.owner = matchedOwner;
     }
     DB.extra.push(entry);
+    saveCenterExtraApi(entry);
     added++;
   });
   
-  saveDB();
   closeModal('importCentersModal');
   renderTable();
   showToast('✅ ' + added + ' مرکز وارد شد', 3000);
@@ -2287,7 +2287,7 @@ function _sendWeeklyDigest(){
   sendNotif(currentUser,msg,'');
   if(!DB.settings)DB.settings={};
   DB.settings.lastWeeklyDigest=today;
-  saveDB();
+  patchCrmSetting('lastWeeklyDigest',today);
 }
 
 async function init(){
@@ -2343,16 +2343,13 @@ async function init(){
     if(_hasAccess('trade-kpi')){
       document.querySelectorAll('.sb-trade-wrap').forEach(function(el){el.style.display='';});
     }
-    if(_hasAccess('hr')){
+    if(_hasAccess('hr')||_hasAccess('payroll')){
       document.querySelectorAll('#tab_hr').forEach(function(el){el.style.display='';});
-    }
-    if(_isSuperAdmin()){
-      document.querySelectorAll('.sb-super-wrap').forEach(function(el){el.style.display='';});
     }
   })();
   // Apply granular permission hiding (additive — only hides, never shows what role already hides)
   (function(){
-    var _allMods=['provinces','weekplan','calendar','checklist','activity','tasks','mtr','pricing','proforma','support','hcp','hr','trade-kpi','kpi','manager','changelog','wms','letters','workflows'];
+    var _allMods=['provinces','weekplan','calendar','checklist','activity','tasks','mtr','pricing','proforma','support','hcp','hr','payroll','trade-kpi','kpi','manager','changelog','wms','letters','workflows'];
     _allMods.forEach(function(mod){
       if(!_hasAccess(mod)){
         var btnId='tab_'+mod.replace(/-/g,'_');

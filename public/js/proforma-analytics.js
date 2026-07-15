@@ -364,7 +364,7 @@ function _pfAutoTaskOnSend(pf) {
     createdAt: new Date().toISOString(),
   };
   DB.tasks.push(task);
-  if (typeof saveDB === 'function') saveDB();
+  fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(task)}).catch(function(){});
   if (typeof sendNotif === 'function') sendNotif(owner, '📌 تسک پیگیری پیش‌فاکتور ' + pf.no + ' ساخته شد', pf.centerKey);
 }
 

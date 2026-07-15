@@ -508,7 +508,8 @@ async function test12_checklistUpsertNotWiped() {
   assert(getDb.status === 200, 'GET /db returns 200');
   const cl = getDb.body && getDb.body.checklist;
   assert(cl && cl[key1] && cl[key1].note === 'note A', 'checklist key1 survived second save');
-  assert(cl && cl[key2] && cl[key2].note === 'note B', 'checklist key2 persisted');
+  const get2 = await req('GET', '/api/data/collections/checklist/' + encodeURIComponent(date) + '/' + encodeURIComponent(TEST_USERS[1]), null, tok);
+  assert(get2.status === 200 && get2.body.note === 'note B', 'checklist key2 persisted');
 
   await query('DELETE FROM daily_checklists WHERE date = $1 AND username IN ($2, $3)',
     [date, TEST_USERS[0], TEST_USERS[1]]);
@@ -529,7 +530,7 @@ async function test14_centerNotePost() {
   const post = await req('POST', '/api/centers/' + encodeURIComponent(centerKey) + '/notes',
     { text: 'test note from behavioral test' }, tok);
   assert(post.status === 200, 'POST notes returns 200');
-  assert(post.body && post.body.note && post.body.note.text, 'note returned');
+  assert(post.body && post.body.notes && post.body.notes.length && post.body.notes[0].text, 'note returned');
   await query('DELETE FROM center_notes WHERE center_key = $1', [centerKey]);
 }
 
@@ -787,6 +788,17 @@ async function test27_reportsUpgradeApis() {
 
   const kpiHistory = await req('GET', '/api/kpi-data/history', null, tok);
   assert(kpiHistory.status === 200, 'GET /api/kpi-data/history → 200');
+
+  const kpiActuals = await req('GET', '/api/kpi-data/actuals?month=1404/04', null, tok);
+  assert(kpiActuals.status === 200, 'GET /api/kpi-data/actuals → 200');
+  assert(kpiActuals.body.ok === true, 'kpi-data/actuals ok:true');
+
+  const ixKey = 'center_behavior_' + Date.now();
+  const ixIdem = 'idem_behavior_' + Date.now();
+  const ixPost = await req('POST', '/api/centers/' + encodeURIComponent(ixKey) + '/interactions', {
+    mode: 'quick', actionType: 'call', note: 'behavioral test', idempotencyKey: ixIdem,
+  }, tok);
+  assert(ixPost.status === 201 || ixPost.status === 200, 'POST center interactions → ' + ixPost.status);
 
   const activity = await req('GET', '/api/reports/activity-summary?months=3', null, tok);
   assert(activity.status === 200, 'GET /api/reports/activity-summary → 200');

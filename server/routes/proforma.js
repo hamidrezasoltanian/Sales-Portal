@@ -729,11 +729,11 @@ router.post('/:id/restore', requireAuth, async (req, res) => {
          buyer_phone=$18, buyer_postal=$19,
          has_commission=$20, commission_amt=$21, commission_note=$22,
          wms_warehouse_id=$23,
-         expiry_date=$26, channel=$27, currency=$28, exchange_rate=$29, payment_terms=$30,
-         sales_owner=$31, support_owner=$32, parent_proforma_id=$33,
+         expiry_date=$24, channel=$25, currency=$26, exchange_rate=$27, payment_terms=$28,
+         sales_owner=$29, support_owner=$30, parent_proforma_id=$31,
          updated_at=NOW(),
-         versions = versions || $34::jsonb
-       WHERE id=$35 RETURNING *`,
+         versions = versions || $32::jsonb
+       WHERE id=$33 RETURNING *`,
       [
         snap.jalaliDate || row.jalali_date, snap.validDays || row.valid_days,
         snap.centerKey || row.center_key, snap.centerName || row.center_name,
@@ -751,6 +751,14 @@ router.post('/:id/restore', requireAuth, async (req, res) => {
         snap.commissionAmt != null ? snap.commissionAmt : Number(row.commission_amt || 0),
         snap.commissionNote != null ? snap.commissionNote : (row.commission_note || ''),
         snap.wmsWarehouseId != null ? (snap.wmsWarehouseId || null) : (row.wms_warehouse_id || null),
+        snap.expiryDate || row.expiry_date || null,
+        snap.channel || row.channel || 'direct',
+        snap.currency || row.currency || 'IRR',
+        snap.exchangeRate != null ? snap.exchangeRate : (Number(row.exchange_rate) || 1),
+        snap.paymentTerms != null ? snap.paymentTerms : (row.payment_terms || ''),
+        snap.salesOwner || row.sales_owner || row.created_by,
+        snap.supportOwner != null ? snap.supportOwner : (row.support_owner || ''),
+        snap.parentProformaId || row.parent_proforma_id || null,
         JSON.stringify([snapshot]),
         req.params.id,
       ]
@@ -799,6 +807,9 @@ router.put('/:id', requireAuth, async (req, res) => {
     const taxAmt    = Math.round((subtotal - discAmt) * taxPct / 100);
     const total     = subtotal - discAmt + taxAmt;
 
+    const ext = pfExtendedFields(Object.assign({}, pf, d), pf.salesOwner || pf.createdBy);
+    if (d.expiryDate) ext.expiry = d.expiryDate;
+
     const r = await query(
       `UPDATE proformas SET
          jalali_date=$1, valid_days=$2, center_key=$3, center_name=$4,
@@ -808,35 +819,38 @@ router.put('/:id', requireAuth, async (req, res) => {
          buyer_phone=$18, buyer_postal=$19,
          has_commission=$20, commission_amt=$21, commission_note=$22,
          wms_warehouse_id=$23,
+         expiry_date=$24, channel=$25, currency=$26, exchange_rate=$27, payment_terms=$28,
+         sales_owner=$29, support_owner=$30, parent_proforma_id=$31,
          updated_at=NOW(),
-         versions = versions || $24::jsonb
-       WHERE id=$25 RETURNING *`,
-      (function(){
-        var ext = pfExtendedFields(Object.assign({}, pf, d), pf.salesOwner || pf.createdBy);
-        if (d.expiryDate) ext.expiry = d.expiryDate;
-        return [d.jalaliDate||pf.jalaliDate, d.validDays||pf.validDays,
-       d.centerKey||pf.centerKey, d.centerName||pf.centerName,
-       JSON.stringify(items), subtotal, discPct, discAmt,
-       taxPct, taxAmt, total, d.note!==undefined?d.note:pf.note,
-       d.managerNote!==undefined?d.managerNote:pf.managerNote,
-       d.buyerNatId!==undefined?d.buyerNatId:pf.buyerNatId,
-       d.buyerEcoCode!==undefined?d.buyerEcoCode:pf.buyerEcoCode,
-       d.buyerRegId!==undefined?d.buyerRegId:pf.buyerRegId,
-       d.buyerAddress!==undefined?d.buyerAddress:pf.buyerAddress,
-       d.buyerPhone!==undefined?d.buyerPhone:pf.buyerPhone,
-       d.buyerPostal!==undefined?d.buyerPostal:pf.buyerPostal,
-       d.hasCommission!==undefined?d.hasCommission:pf.hasCommission,
-       d.commissionAmt!==undefined?d.commissionAmt:pf.commissionAmt,
-       d.commissionNote!==undefined?d.commissionNote:pf.commissionNote,
-       d.wmsWarehouseId !== undefined ? (d.wmsWarehouseId || null) : (pf.wmsWarehouseId || null),
-       ext.expiry, d.channel||pf.channel||'direct', d.currency||pf.currency||'IRR',
-       d.exchangeRate!=null?d.exchangeRate:(pf.exchangeRate||1),
-       d.paymentTerms!=null?d.paymentTerms:(pf.paymentTerms||''),
-       d.salesOwner||pf.salesOwner||pf.createdBy, d.supportOwner!=null?d.supportOwner:(pf.supportOwner||''),
-       d.parentProformaId||pf.parentProformaId||null,
-       JSON.stringify([snapshot]),
-       req.params.id];
-      })()
+         versions = versions || $32::jsonb
+       WHERE id=$33 RETURNING *`,
+      [
+        d.jalaliDate || pf.jalaliDate, d.validDays || pf.validDays,
+        d.centerKey || pf.centerKey, d.centerName || pf.centerName,
+        JSON.stringify(items), subtotal, discPct, discAmt,
+        taxPct, taxAmt, total, d.note !== undefined ? d.note : pf.note,
+        d.managerNote !== undefined ? d.managerNote : pf.managerNote,
+        d.buyerNatId !== undefined ? d.buyerNatId : pf.buyerNatId,
+        d.buyerEcoCode !== undefined ? d.buyerEcoCode : pf.buyerEcoCode,
+        d.buyerRegId !== undefined ? d.buyerRegId : pf.buyerRegId,
+        d.buyerAddress !== undefined ? d.buyerAddress : pf.buyerAddress,
+        d.buyerPhone !== undefined ? d.buyerPhone : pf.buyerPhone,
+        d.buyerPostal !== undefined ? d.buyerPostal : pf.buyerPostal,
+        d.hasCommission !== undefined ? d.hasCommission : pf.hasCommission,
+        d.commissionAmt !== undefined ? d.commissionAmt : pf.commissionAmt,
+        d.commissionNote !== undefined ? d.commissionNote : pf.commissionNote,
+        d.wmsWarehouseId !== undefined ? (d.wmsWarehouseId || null) : (pf.wmsWarehouseId || null),
+        ext.expiry,
+        d.channel || pf.channel || 'direct',
+        d.currency || pf.currency || 'IRR',
+        d.exchangeRate != null ? d.exchangeRate : (pf.exchangeRate || 1),
+        d.paymentTerms != null ? d.paymentTerms : (pf.paymentTerms || ''),
+        d.salesOwner || pf.salesOwner || pf.createdBy,
+        d.supportOwner != null ? d.supportOwner : (pf.supportOwner || ''),
+        d.parentProformaId || pf.parentProformaId || null,
+        JSON.stringify([snapshot]),
+        req.params.id,
+      ]
     );
     res.json(rowToObj(r.rows[0]));
   } catch(e) {

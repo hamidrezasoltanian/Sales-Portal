@@ -34,8 +34,10 @@ router.get('/', requireManager, async function (req, res) {
 const USER_PATCH_KEYS = new Set([
   'taskColumns', '_lastUser', 'firstUse', 'onboardingDisabled',
   'lastMorningReminder', 'lastAfternoonReminder', 'lastStartupReminder',
+  'lastWeeklyDigest', 'kpi_weights', 'provOverrides',
   'homeWidgets', 'pinnedCenters', 'filterPresets',
   'pfNoteTemplates', 'pfPrintTemplates', 'sellerInfo', 'hiddenProvs',
+  'mtrSyncIntervalMinutes',
 ]);
 
 function isManagerRole(role) {

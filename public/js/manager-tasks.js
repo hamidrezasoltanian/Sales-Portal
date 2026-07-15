@@ -57,7 +57,6 @@ function _migrateManagerTasksBlob(){
     fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(task)}).catch(function(){});
   });
   delete DB.managerTasks;
-  saveDB();
 }
 
 function mgrOpenAssign(recKey, rtype, id, name){
@@ -108,8 +107,7 @@ function mgrSaveTask(recKey, rtype, id, name){
       centerKey:recKey,note:existing.note,title:existing.title,activity:existing.activity
     })}).then(function(r){return r.ok?r.json():null;}).then(function(saved){
       if(saved){var idx=DB.tasks.findIndex(function(x){return String(x.id)===String(saved.id);});if(idx>=0)DB.tasks[idx]=saved;}
-      saveDB();
-    }).catch(function(){saveDB();});
+    }).catch(function(){showToast('⚠ خطا در ذخیره وظیفه',2500);});
   } else {
     var task={
       id:Date.now()+'_'+Math.random().toString(36).slice(2,6),
@@ -124,8 +122,8 @@ function mgrSaveTask(recKey, rtype, id, name){
     }
     fetch('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(task)})
       .then(function(r){return r.ok?r.json():null;})
-      .then(function(saved){if(saved){var idx=DB.tasks.findIndex(function(x){return String(x.id)===String(saved.id);});if(idx>=0)DB.tasks[idx]=saved;else DB.tasks.push(saved);saveDB();}})
-      .catch(function(){saveDB();});
+      .then(function(saved){if(saved){var idx=DB.tasks.findIndex(function(x){return String(x.id)===String(saved.id);});if(idx>=0)DB.tasks[idx]=saved;else DB.tasks.push(saved);}})
+      .catch(function(){showToast('⚠ خطا در ایجاد وظیفه',2500);});
   }
   closeModal('mgrAssignModal');
   showToast('✅ وظیفه پیگیری به '+(USERS[assignedTo]||assignedTo)+' ارجاع داده شد',2500);
@@ -137,7 +135,6 @@ function mgrRemoveTask(recKey){
   var t=_mgrFindTaskByCenter(recKey,true);
   if(t){
     DB.tasks=DB.tasks.filter(function(x){return String(x.id)!==String(t.id);});
-    saveDB();
     fetch('/api/tasks/'+encodeURIComponent(String(t.id)),{method:'DELETE'}).catch(function(){});
   }
   if(currentTab==='kpi')renderKPIPanel();
@@ -150,7 +147,6 @@ function mgrDoneTask(recKey){
     t.done=true;t.status='done';t.doneAt=todayStr();
     if(!t.activity)t.activity=[];
     t.activity.push({type:'status',text:'انجام شد ✓',by:currentUser,at:new Date().toISOString()});
-    saveDB();
     fetch('/api/tasks/'+encodeURIComponent(String(t.id)),{method:'PUT',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({status:'done',done:true,doneAt:t.doneAt,activity:t.activity})}).catch(function(){});
   }
@@ -235,6 +231,7 @@ function renderKPIPanel(){
   ensureKPIDB();
   if(!_kpiUser||!USERS[_kpiUser])_kpiUser=USERS[currentUser]?currentUser:Object.keys(USERS)[0];
   if(!_kpiMonth)_kpiMonth=currentJMonth();
+  var _renderBody=function(){
   var data;
   try{data=calcKPIs(_kpiUser,_kpiMonth);}catch(err){
     var el=document.getElementById('kpiPanel');
@@ -616,6 +613,10 @@ function renderKPIPanel(){
       }
     }).catch(function() {});
   }
+  };
+  if(typeof loadKpiActualsFromApi==='function'){
+    loadKpiActualsFromApi(_kpiUser,_kpiMonth).then(_renderBody);
+  }else{_renderBody();}
 }
 
 function _renderKPIHistory(userId,month){
@@ -626,7 +627,7 @@ function _renderKPIHistory(userId,month){
   getCallsMonth(userId,month).forEach(function(l){
     entries.push({ts:dateStrToTs(l.date),date:l.date,icon:'📞',
       text:'تماس: '+l.count+' تماس'+(l.note?' — '+esc(l.note):''),
-      del:function(){DB.callLog=DB.callLog.filter(function(x){return x.id!==l.id;});saveDB();renderKPIPanel();}});
+      del:function(){DB.callLog=DB.callLog.filter(function(x){return x.id!==l.id;});deleteActivityLog('call',l.id).then(function(){renderKPIPanel();});}});
   });
   var visitsData=getVisitsMonth(userId,month);
   // ویزیت‌های خودکار از برنامه هفته
@@ -639,12 +640,12 @@ function _renderKPIHistory(userId,month){
   visitsData.manual.forEach(function(l){
     entries.push({ts:dateStrToTs(l.date),date:l.date,icon:'🚗',
       text:'ویزیت (دستی): '+(l.centerName?esc(l.centerName):'حضوری')+(l.note?' — '+esc(l.note):''),
-      del:function(){DB.visitLog=DB.visitLog.filter(function(x){return x.id!==l.id;});saveDB();renderKPIPanel();}});
+      del:function(){DB.visitLog=DB.visitLog.filter(function(x){return x.id!==l.id;});deleteActivityLog('visit',l.id).then(function(){renderKPIPanel();});}});
   });
   getSalesMonth(userId,month).forEach(function(l){
     entries.push({ts:dateStrToTs(l.date),date:l.date,icon:l.isCash?'💵':'💳',
       text:'فروش: '+(l.centerName?esc(l.centerName):'')+(l.amount?' — '+Number(l.amount).toLocaleString('fa-IR')+' ریال':'')+(l.isCash?' (نقدی)':' (اعتباری)'),
-      del:function(){DB.salesLog=DB.salesLog.filter(function(x){return x.id!==l.id;});saveDB();renderKPIPanel();}});
+      del:function(){DB.salesLog=DB.salesLog.filter(function(x){return x.id!==l.id;});deleteActivityLog('sales',l.id).then(function(){renderKPIPanel();});}});
   });
   var ms=getMissionMonth(userId,month);
   if(ms)entries.push({ts:b.startTs,date:month,icon:'✈️',
@@ -684,10 +685,11 @@ function _kpiDelEntry(i){
   getVisitsMonth(userId,month).manual.forEach(function(l){entries.push({id:l.id,type:'visit'});});
   getSalesMonth(userId,month).forEach(function(l){entries.push({id:l.id,type:'sale'});});
   var e=entries[i];if(!e)return;
+  var apiType=e.type==='sale'?'sales':e.type;
   if(e.type==='call')DB.callLog=DB.callLog.filter(function(x){return x.id!==e.id;});
   else if(e.type==='visit')DB.visitLog=DB.visitLog.filter(function(x){return x.id!==e.id;});
   else if(e.type==='sale')DB.salesLog=DB.salesLog.filter(function(x){return x.id!==e.id;});
-  saveDB();renderKPIPanel();
+  deleteActivityLog(apiType,e.id).then(function(){renderKPIPanel();});
 }
 
 // ── Modal ثبت فعالیت ──────────────────────────────────────────────
@@ -763,8 +765,10 @@ function _saveCallLog(userId){
   var note=(document.getElementById('lc_note').value||'').trim();
   if(!date||count<1){showToast('تاریخ و تعداد تماس را وارد کنید');return;}
   ensureKPIDB();
-  DB.callLog.push({id:Date.now(),date:date,userId:userId,count:count,note:note});
-  saveDB();showToast('✅ '+count+' تماس ثبت شد');closeModal('kpiLogModal');renderKPIPanel();
+  var entry={id:Date.now(),date:date,userId:userId,count:count,note:note};
+  DB.callLog.push(entry);
+  postActivityLog('call',entry).catch(function(){showToast('⚠ خطا در ثبت تماس',2500);});
+  showToast('✅ '+count+' تماس ثبت شد');closeModal('kpiLogModal');renderKPIPanel();
 }
 
 function _setVisitMode(mode){
@@ -788,23 +792,25 @@ function _saveVisitLog(userId){
   ensureKPIDB();
   var centerRow=document.getElementById('lv_center_row');
   var isCenterMode=centerRow&&centerRow.style.display!=='none';
+  var entry;
   if(isCenterMode){
-    // مرکز خاص
     var date=(((document.getElementById('lv_date2')||document.getElementById('lv_date'))||{}).value||'').trim();
     var center=(document.getElementById('lv_center').value||'').trim();
     var note=(document.getElementById('lv_note2')||document.getElementById('lv_note')).value.trim();
     if(!date){showToast('تاریخ را وارد کنید');return;}
-    DB.visitLog.push({id:Date.now(),date:date,userId:userId,centerName:center,note:note,count:1});
+    entry={id:Date.now(),date:date,userId:userId,centerName:center,note:note,count:1};
+    DB.visitLog.push(entry);
   } else {
-    // تعداد کل
     var date=(document.getElementById('lv_date')||{}).value.trim();
     var countVal=parseInt((document.getElementById('lv_count')||{}).value)||1;
     var note=(document.getElementById('lv_note')||{}).value.trim();
     if(!date){showToast('تاریخ را وارد کنید');return;}
     if(countVal<1){showToast('تعداد باید حداقل ۱ باشد');return;}
-    DB.visitLog.push({id:Date.now(),date:date,userId:userId,centerName:'',note:note,count:countVal});
+    entry={id:Date.now(),date:date,userId:userId,centerName:'',note:note,count:countVal};
+    DB.visitLog.push(entry);
   }
-  saveDB();showToast('✅ ویزیت ثبت شد');closeModal('kpiLogModal');renderKPIPanel();
+  postActivityLog('visit',entry).catch(function(){showToast('⚠ خطا در ثبت ویزیت',2500);});
+  showToast('✅ ویزیت ثبت شد');closeModal('kpiLogModal');renderKPIPanel();
 }
 function _saveSaleLog(userId){
   var date=((document.getElementById('ls_date')||{}).value||'').trim();
@@ -813,22 +819,27 @@ function _saveSaleLog(userId){
   var isCash=document.getElementById('ls_cash').value==='1';
   if(!date){showToast('تاریخ را وارد کنید');return;}
   ensureKPIDB();
-  DB.salesLog.push({id:Date.now(),date:date,userId:userId,centerName:center,amount:amount,isCash:isCash});
-  saveDB();showToast('✅ فروش ثبت شد — '+(isCash?'نقدی':'اعتباری'));closeModal('kpiLogModal');renderKPIPanel();
+  var entry={id:Date.now(),date:date,userId:userId,centerName:center,amount:amount,isCash:isCash};
+  DB.salesLog.push(entry);
+  postActivityLog('sales',entry).catch(function(){showToast('⚠ خطا در ثبت فروش',2500);});
+  showToast('✅ فروش ثبت شد — '+(isCash?'نقدی':'اعتباری'));closeModal('kpiLogModal');renderKPIPanel();
 }
 function _saveMissionLog(userId,done){
   var month=document.getElementById('lm_month').value;
   var note=(document.getElementById('lm_note').value||'').trim();
   ensureKPIDB();
   DB.missionLog=DB.missionLog.filter(function(l){return!(l.userId===userId&&l.month===month);});
-  DB.missionLog.push({id:Date.now(),userId:userId,month:month,done:done,note:note});
-  saveDB();showToast(done?'✅ ماموریت انجام‌شده ثبت شد':'⏳ ماموریت برنامه‌ریزی شد');closeModal('kpiLogModal');renderKPIPanel();
+  var entry={id:Date.now(),userId:userId,month:month,done:done,note:note};
+  DB.missionLog.push(entry);
+  postMissionLog(entry);
+  showToast(done?'✅ ماموریت انجام‌شده ثبت شد':'⏳ ماموریت برنامه‌ریزی شد');closeModal('kpiLogModal');renderKPIPanel();
 }
 function _delMissionLog(userId){
   var month=document.getElementById('lm_month').value;
   ensureKPIDB();
   DB.missionLog=DB.missionLog.filter(function(l){return!(l.userId===userId&&l.month===month);});
-  saveDB();showToast('ماموریت حذف شد');closeModal('kpiLogModal');renderKPIPanel();
+  deleteMissionLog(userId,month);
+  showToast('ماموریت حذف شد');closeModal('kpiLogModal');renderKPIPanel();
 }
 
 // ── Modal تنظیم هدف ───────────────────────────────────────────────
@@ -1055,7 +1066,7 @@ function unifiedRestore(ev){
       if(data.mtrMeta) msg += '\nداده‌های مطالبات هم بازیابی می‌شود.'+(data.mtrData&&data.mtrData.rows?' ('+data.mtrData.rows.length+' ردیف اکسل)':'');
       if(!confirm(msg)) return;
       // ── 1. CRM DB ──────────────────────────────────────────────
-      if(data.db){ Object.assign(DB,data.db); saveDB(); }
+      if(data.db){ Object.assign(DB,data.db); if(typeof saveDBFull==='function')saveDBFull(); }
       // ── 2. Centers: convert flat array → {CENTERS, PC_RAW} ────
       var p = Promise.resolve();
       if(data.centersDB&&data.centersDB.centers){
@@ -1185,20 +1196,35 @@ function ubCalcMergeStats(data){
 function ubApplyMerge(data){
   // CRM merge
   var idb = data.db||{};
-  Object.keys(idb.edits||{}).forEach(function(k){ if(!DB.edits[k])DB.edits[k]={}; Object.assign(DB.edits[k],idb.edits[k]); });
-  (idb.notes||[]).forEach(function(n){ if(n&&n.id){ if(!DB.notes)DB.notes=[]; if(!DB.notes.some(function(x){return x.id===n.id&&x.text===n.text;}))DB.notes.push(n); }});
-  ['callLog','visitLog','salesLog','missionLog'].forEach(function(log){
-    if(!DB[log])DB[log]=[];
-    (idb[log]||[]).forEach(function(x){ if(x&&x.id&&!DB[log].some(function(y){return y.id===x.id;}))DB[log].push(x); });
+  var patchEdits={};
+  Object.keys(idb.edits||{}).forEach(function(k){
+    if(!DB.edits[k])DB.edits[k]={};
+    Object.assign(DB.edits[k],idb.edits[k]);
+    patchEdits[k]=DB.edits[k];
   });
-  Object.keys(idb.weekEntries||{}).forEach(function(k){
-    if(!DB.weekEntries)DB.weekEntries={};
-    if(!DB.weekEntries[k])DB.weekEntries[k]=[];
-    (idb.weekEntries[k]||[]).forEach(function(x){
-      if(x&&x.id&&!DB.weekEntries[k].some(function(y){return y.id===x.id;}))DB.weekEntries[k].push(x);
+  if(Object.keys(patchEdits).length&&typeof savePatchDB==='function')savePatchDB({edits:patchEdits});
+  ['call','visit','sales'].forEach(function(t){
+    var logKey=t==='call'?'callLog':t==='visit'?'visitLog':'salesLog';
+    var apiType=t;
+    if(!DB[logKey])DB[logKey]=[];
+    (idb[logKey]||[]).forEach(function(x){
+      if(!x||!x.id||DB[logKey].some(function(y){return y.id===x.id;}))return;
+      DB[logKey].push(x);
+      if(typeof postActivityLog==='function')postActivityLog(apiType,x).catch(function(){});
     });
   });
-  saveDB();
+  if(idb.missionLog&&idb.missionLog.length&&typeof postMissionLog==='function'){
+    idb.missionLog.forEach(function(x){
+      if(x&&x.userId&&x.month)postMissionLog(x).catch(function(){});
+    });
+  }
+  Object.keys(idb.weekEntries||{}).forEach(function(k){
+    var we=idb.weekEntries[k];
+    if(!we) return;
+    if(!DB.weekEntries)DB.weekEntries={};
+    if(!DB.weekEntries[k])DB.weekEntries[k]=we;
+    if(typeof saveWeekEntryApi==='function')saveWeekEntryApi(k,we).catch(function(){});
+  });
   // MTR merge
   var bm = data.mtrMeta||data.meta||{};
   Object.keys(bm).forEach(function(inv){

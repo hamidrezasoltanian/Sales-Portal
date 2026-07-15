@@ -35,7 +35,9 @@ router.get('/tree-team', requireAuth, async function (req, res) {
 router.get('/', requireAuth, async function (req, res) {
   try {
     const isMgr = isManagerRole(req.user.role);
-    const scope = req.query.scope === 'team' && isMgr ? 'team' : 'mine';
+    let scope = 'mine';
+    if (req.query.scope === 'all' && isMgr) scope = 'all';
+    else if (req.query.scope === 'team' && isMgr) scope = 'team';
     const filter = ['all', 'overdue', 'today', 'approval', 'week'].includes(req.query.filter)
       ? req.query.filter
       : 'all';
@@ -51,6 +53,8 @@ router.get('/', requireAuth, async function (req, res) {
       types,
       limit: req.query.limit,
       offset: req.query.offset,
+      weekAhead: req.query.weekAhead,
+      calendarRange: req.query.calendar === '1' || req.query.calendar === 'true',
     });
 
     if (data.error) return res.status(data.status || 400).json({ error: data.error });

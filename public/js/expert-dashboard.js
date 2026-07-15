@@ -311,7 +311,7 @@
       if (!we || we.done) return;
       var owner = we.addedBy || we.owner || '';
       if (!isMgr && owner !== user) return;
-      if (we.scheduledDate === today) todayEntries.push(we);
+      if (we.scheduledDate === today) todayEntries.push(Object.assign({}, we, { _eKey: k }));
     });
 
     var weekPlan = [];
@@ -321,7 +321,7 @@
       var owner = we.addedBy || we.owner || '';
       if (!isMgr && owner !== user) return;
       var d = we.scheduledDate || '';
-      if (d >= week.start && d <= week.end) weekPlan.push(we);
+      if (d >= week.start && d <= week.end) weekPlan.push(Object.assign({}, we, { _eKey: k }));
     });
     weekPlan.sort(function(a,b){ return (a.scheduledDate||'') < (b.scheduledDate||'') ? -1 : 1; });
 
@@ -383,7 +383,7 @@
       '</div>' +
       '<div style="display:flex;align-items:center;gap:12px">' +
         '<span style="font-size:.78rem;color:var(--text-muted)">' + dayLbl + '</span>' +
-        '<button class="db-quick-dial" onclick="event.stopPropagation();quickCallLog(\'' + esc(we.rtype || 'center') + '\',\'' + esc(we.rid || we.recKey || '') + '\',\'' + esc(name) + '\')" title="ثبت سریع نتیجه و تماس">' +
+        '<button class="db-quick-dial" onclick="event.stopPropagation();openCenterInteraction({rtype:\'' + esc(we.rtype || (we.recKey ? we.recKey.split('_')[0] : 'center')) + '\',rid:\'' + esc(we.rid || (we.recKey ? we.recKey.split('_').slice(1).join('_') : '')) + '\',centerName:\'' + esc(name) + '\',weekEntryKey:\'' + esc(we._eKey || '') + '\',actionType:\'' + esc(we.actionType || 'call') + '\'})" title="ثبت نتیجه">' +
           '📞' +
         '</button>' +
       '</div>' +

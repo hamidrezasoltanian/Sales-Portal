@@ -359,7 +359,11 @@ function plSaveAll(){
   DB.pricingProducts=_plP;
   DB.pricingComm=_plCOMM;
   DB.pricingSettings=_plSETT;
-  saveDB();
+  if(typeof patchCrmSetting==='function'){
+    patchCrmSetting('pricingProducts',_plP);
+    patchCrmSetting('pricingComm',_plCOMM);
+    patchCrmSetting('pricingSettings',_plSETT);
+  }
 }
 function plFmt(n){return n>0?n.toLocaleString():'—';}
 function plPct(b,p){var d=(b-p)/b*100;return d>0.01?d.toFixed(1)+'%':null;}
@@ -1712,7 +1716,8 @@ function _updateExtraCenterProv(id,newProvId){
   if(idx<0)return;
   DB.extra[idx].province_id=newProvId;
   clearPCCache();_ALL_PROVS=null;
-  saveDB();showToast('✅ استان به‌روز شد');
+  saveCenterExtraApi(DB.extra[idx]);
+  showToast('✅ استان به‌روز شد');
 }
 
 function _getCompetitorList(){
@@ -1867,9 +1872,9 @@ function _cmSetLastPurch(rtype,rid,id,v){
   var cs=_computeCustomerStatus(rtype,rid);
   if(cs)setE(rtype,rid,'customerStatus',cs);
 }
-function openCenterModal(rtype,id){
+function openCenterModal(rtype,id,centerKeyHint){
   // Track recent centers
-  var _rcKey=rtype+'_'+id;
+  var _rcKey=centerKeyHint||(typeof recK==='function'?recK(rtype,id):(rtype+'_'+id));
   _recentCenters=_recentCenters.filter(function(x){return x.key!==_rcKey;});
   _recentCenters.unshift({key:_rcKey,rtype:rtype,id:id,name:_getCenterName(rtype,id),ts:Date.now()});
   if(_recentCenters.length>8)_recentCenters=_recentCenters.slice(0,8);
@@ -1922,12 +1927,34 @@ function openCenterModal(rtype,id){
     }
     if(!r){r=(DB.extra||[]).find(function(x){return String(x.id)===String(id);})||null;}
   }
-  if(!r){showToast('مرکز یافت نشد');return;}
+  if(!r){
+    var _ckOnly=centerKeyHint||(typeof recK==='function'?recK(rtype,id):(rtype+'_'+id));
+    var _editOnly=(DB.edits||{})[_ckOnly];
+    if(_editOnly){
+      r={id:id,name:_editOnly.nameOverride||_editOnly.name||id,lead:_editOnly.lead||'سرنخ',potential:_editOnly.potential,type:_editOnly.type||'مرکز',owner:_editOnly.owner||''};
+    }
+  }
+  if(!r){
+    var _fetchKey=centerKeyHint||(typeof recK==='function'?recK(rtype,id):(rtype+'_'+id));
+    fetch('/api/centers/'+encodeURIComponent(_fetchKey),{credentials:'same-origin'})
+      .then(function(resp){return resp.ok?resp.json():null;})
+      .then(function(j){
+        if(j&&j.data&&Object.keys(j.data).length){
+          if(!DB.edits)DB.edits={};
+          DB.edits[_fetchKey]=Object.assign({},DB.edits[_fetchKey]||{},j.data);
+          openCenterModal(rtype,id,centerKeyHint||_fetchKey);
+        }else{
+          showToast('مرکز یافت نشد');
+        }
+      })
+      .catch(function(){showToast('مرکز یافت نشد');});
+    return;
+  }
   var e=getE(rtype,r.id);
   var st=e.status||'بدون تماس';var lead=e.lead||r.lead||'سرنخ';
   var pot=e.potential!==undefined?e.potential:r.potential;
   var fd=e.followupDate||'';var today=todayStr();
-  var notes=DB.notes[recK(rtype,r.id)]||[];
+  var notes=DB.notes[recK(rtype,id)]||DB.notes[recK(rtype,r.id)]||[];
   var tgs=rTags(rtype,r.id);
   var wkEntries=Object.values(DB.weekEntries||{}).filter(function(we){return we.recKey===rtype+'_'+id;});
   var displayName=e.nameOverride||r.name;
@@ -2210,6 +2237,9 @@ function openCenterModal(rtype,id){
   }
   body+='</div>'; // .cm-profile
   openModal('cm_'+id,'🏥 '+esc(displayName),body,foot,{xl:true});
+  if (typeof ensureCenterNotesLoaded === 'function') {
+    ensureCenterNotesLoaded(recK(rtype, id), rtype, id);
+  }
   (function(_rid){
     setTimeout(function(){
       var mo=document.getElementById('mo_cm_'+_rid);
@@ -2460,7 +2490,7 @@ function _doChangeProvince(rtype,id){
   if(newProv)DB.provOverrides[rkey]=newProv;
   else delete DB.provOverrides[rkey];
   clearPCCache();
-  saveDB();
+  if(typeof patchCrmSetting==='function')patchCrmSetting('provOverrides',DB.provOverrides);
   closeModal('_cprovModal');
   closeModal('cm_' + id);
   showToast('\u2705 \u0627\u0633\u062a\u0627\u0646 \u062a\u063a\u06cc\u06cc\u0631 \u06a9\u0631\u062f');
@@ -2492,7 +2522,7 @@ function _doDeleteCenter(rtype,id){
   _cleanCenterData(rtype,id);
   if(isExtra){
     DB.extra=(DB.extra||[]).filter(function(c){return c.id!==id;});
-    saveDB();
+    deleteCenterExtraApi(id);
   }
   if(rtype==='center'){
     for(var _ci=CENTERS.length-1;_ci>=0;_ci--){
@@ -2535,19 +2565,7 @@ function _doDeleteCenter(rtype,id){
   });
 }
 
-// پاک‌سازی weekEntries و followupDate مرکز حذف‌شده
-function _cleanCenterData(rtype,id){
-  var recKey=rtype+'_'+id;
-  // حذف از weekEntries
-  Object.keys(DB.weekEntries||{}).forEach(function(k){
-    var we=DB.weekEntries[k];
-    if(we.recKey===recKey||(we.rtype===rtype&&we.rid===id))
-      _weRemove(k);
-  });
-  // حذف followupDate از DB.edits (بقیه CRM حفظ می‌شه)
-  if(DB.edits[recKey])delete DB.edits[recKey].followupDate;
-  saveDB();
-}
+// پاک‌سازی weekEntries و followupDate مرکز حذف‌شده — canonical impl in core.js
 
 // Note pending tags: {modalId: [tagId,...]}
 var _notePendingTags = {};
@@ -2585,6 +2603,16 @@ function _noteToggleTag(modalId, tagId){
 function _noteKeydown(ev,type,id,name){
   if(ev.key==='Enter'&&!ev.shiftKey){ev.preventDefault();addNoteFromModal(type,id,name);}
 }
+
+function refreshCenterProfileNotes(rtype, id, centerKey) {
+  var k = centerKey || recK(rtype, id);
+  var notes = (DB.notes && DB.notes[k]) || [];
+  var nl = document.getElementById('mNotesList_' + id);
+  if (nl) nl.innerHTML = _renderNotesList(notes);
+  var auditNl = document.getElementById('auNotes_' + k);
+  if (auditNl) auditNl.innerHTML = _renderNotesList(notes);
+}
+window.refreshCenterProfileNotes = refreshCenterProfileNotes;
 
 function _renderNotesList(notes){
   if(!notes||!notes.length) return '<div style="text-align:center;padding:10px;font-size:11px;color:var(--text-muted)">هنوز یادداشتی ثبت نشده</div>';
@@ -2670,7 +2698,7 @@ function removeCenterTag(ev,rtype,id,tagId){
   ev.stopPropagation();
   var k=recK(rtype,id);
   DB.rTags[k]=(DB.rTags[k]||[]).filter(function(t){return t!==tagId;});
-  saveDB();
+  saveCenterTagsApi(k, DB.rTags[k]);
   // refresh tag area in modal
   var area=document.getElementById('tagArea_'+id);
   if(area){

@@ -99,10 +99,18 @@ function toggleCk(id){
   var items=DB.checklist[key].items||[];var idx=items.findIndex(function(i){return i.id===id;});
   if(idx===-1)items.push({id:id,done:true});else items[idx].done=!items[idx].done;
   DB.checklist[key].items=items;
-  var _ck={};_ck[key]=DB.checklist[key];
-  savePatchDB({checklist:_ck});renderChecklist();
+  saveChecklistApi(_ckDate,currentUser,DB.checklist[key]).catch(function(){
+    showToast('⚠ خطا در ذخیره چک‌لیست',2500);
+  });
+  renderChecklist();
 }
-function saveCkNote(v){var key=_ckDate+'_'+currentUser;if(!DB.checklist[key])DB.checklist[key]={items:[],note:''};DB.checklist[key].note=v;var _ck={};_ck[key]=DB.checklist[key];savePatchDB({checklist:_ck});}
+function saveCkNote(v){
+  var key=_ckDate+'_'+currentUser;if(!DB.checklist[key])DB.checklist[key]={items:[],note:''};
+  DB.checklist[key].note=v;
+  saveChecklistApi(_ckDate,currentUser,DB.checklist[key]).catch(function(){
+    showToast('⚠ خطا در ذخیره یادداشت',2500);
+  });
+}
 function ckNav(delta){var p=_ckDate.split('/').map(Number);var d=jAdd(p[0],p[1],p[2],delta);_ckDate=d[0]+'/'+p2(d[1])+'/'+p2(d[2]);renderChecklist();}
 function ckToday(){_ckDate=todayStr();renderChecklist();}
 

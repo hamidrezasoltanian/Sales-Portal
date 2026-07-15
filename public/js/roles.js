@@ -3,6 +3,7 @@ var ALL_ROLES = ['مدیر', 'کارشناس فروش', 'سوپر ادمین', '
 var MANAGER_ROLES = ['مدیر', 'سوپر ادمین', 'admin', 'manager'];
 var DEFAULT_COMPANY_NAME = 'آتنا زیست درمان';
 var DEPARTMENTS = ['فروش', 'بازرگانی', 'مالی', 'مدیریت', 'فنی', 'اداری', 'عمومی'];
+var CRM_SEGREGATED_MODULES = { payroll: 1, proforma: 1 };
 
 var ROLE_ALIASES = {
   'کارشناس بازرگانی': 'بازرگانی',
@@ -20,16 +21,18 @@ var CRM_ROLE_DEFAULTS = {
     modules: {
       provinces: 'edit', weekplan: 'edit', calendar: 'edit', checklist: 'edit',
       activity: 'edit', tasks: 'edit', mtr: 'edit', pricing: 'edit',
-      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'edit',
-      'trade-kpi': 'edit', kpi: 'edit', manager: 'edit', changelog: 'edit', wms: 'edit', letters: 'edit'
+      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'edit', payroll: 'manage',
+      'trade-kpi': 'edit', kpi: 'edit', manager: 'edit', changelog: 'edit', wms: 'edit', letters: 'edit',
+      workflows: 'edit'
     }
   },
   'سوپر ادمین': {
     modules: {
       provinces: 'edit', weekplan: 'edit', calendar: 'edit', checklist: 'edit',
       activity: 'edit', tasks: 'edit', mtr: 'edit', pricing: 'edit',
-      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'edit',
-      'trade-kpi': 'edit', kpi: 'edit', manager: 'edit', changelog: 'edit', wms: 'edit', letters: 'edit'
+      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'edit', payroll: 'edit',
+      'trade-kpi': 'edit', kpi: 'edit', manager: 'edit', changelog: 'edit', wms: 'edit', letters: 'edit',
+      workflows: 'edit'
     }
   },
   'IT': {
@@ -37,39 +40,44 @@ var CRM_ROLE_DEFAULTS = {
       provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
       activity: 'view', tasks: 'view', mtr: 'none', pricing: 'none',
       proforma: 'none', support: 'view', hcp: 'view', hr: 'none',
-      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'edit', wms: 'none', letters: 'none'
+      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'edit', wms: 'none', letters: 'none',
+      workflows: 'view'
     }
   },
   'بازرگانی': {
     modules: {
       provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
       activity: 'view', tasks: 'view', mtr: 'none', pricing: 'none',
-      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'none',
-      'trade-kpi': 'edit', kpi: 'none', manager: 'none', changelog: 'none', wms: 'edit', letters: 'edit'
+      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'view',
+      payroll: 'none', 'trade-kpi': 'edit', kpi: 'none', manager: 'none', changelog: 'none', wms: 'edit', letters: 'edit',
+      workflows: 'edit'
     }
   },
   'مالی': {
     modules: {
       provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
       activity: 'view', tasks: 'view', mtr: 'edit', pricing: 'edit',
-      proforma: 'edit', support: 'none', hcp: 'none', hr: 'none',
-      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'view', letters: 'edit'
+      proforma: 'edit', support: 'none', hcp: 'none', hr: 'none', payroll: 'approve',
+      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'view', letters: 'edit',
+      workflows: 'view'
     }
   },
   'کارشناس فروش': {
     modules: {
       provinces: 'view', weekplan: 'edit', calendar: 'edit', checklist: 'edit',
       activity: 'view', tasks: 'edit', mtr: 'none', pricing: 'view',
-      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'none',
-      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'none', letters: 'edit'
+      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'view',
+      payroll: 'none', 'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'none', letters: 'edit',
+      workflows: 'edit'
     }
   },
   'مهمان': {
     modules: {
-      provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
-      activity: 'view', tasks: 'view', mtr: 'none', pricing: 'none',
-      proforma: 'none', support: 'none', hcp: 'none', hr: 'none',
-      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'none', letters: 'none'
+      provinces: 'none', weekplan: 'none', calendar: 'none', checklist: 'none',
+      activity: 'none', tasks: 'none', mtr: 'none', pricing: 'none',
+      proforma: 'none', support: 'none', hcp: 'none', hr: 'none', payroll: 'none',
+      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'none', letters: 'none',
+      workflows: 'none'
     }
   }
 };
@@ -99,4 +107,22 @@ function crmResolveCurrentRole() {
 function crmCanDataAdmin() {
   var role = crmResolveCurrentRole();
   return crmIsManagerRole(role) || crmIsSuperAdminRole(role);
+}
+
+function crmNormalizePermLevel(level) {
+  if (level === 'view' || level === 'manage' || level === 'edit' || level === 'approve') return level;
+  return 'none';
+}
+
+function crmLevelSatisfies(have, need) {
+  var h = crmNormalizePermLevel(have);
+  if (need === 'view') return h === 'view' || h === 'manage' || h === 'edit' || h === 'approve';
+  if (need === 'manage') return h === 'manage' || h === 'edit';
+  if (need === 'approve') return h === 'approve' || h === 'edit';
+  if (need === 'edit') return h === 'edit';
+  return false;
+}
+
+function crmManagerBypassAllowed(module) {
+  return !CRM_SEGREGATED_MODULES[module];
 }

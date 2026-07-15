@@ -6,6 +6,17 @@ const { requireAuth } = require('../auth');
 
 const router = express.Router();
 
+let _broadcast = null;
+try { _broadcast = require('./events').broadcast; } catch (e) {}
+
+function notifyCalendarChange(req, data) {
+  try {
+    if (_broadcast) {
+      _broadcast('calendar-changed', Object.assign({ at: Date.now(), by: req.user.username }, data || {}), req.headers['x-cid'] || '');
+    }
+  } catch (e) {}
+}
+
 const _UPSERT = `INSERT INTO app_events (id, title, description, start_ms, all_day, color, owner, updated_at, updated_by)
   VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)
   ON CONFLICT (id) DO UPDATE SET
@@ -48,6 +59,7 @@ router.post('/', requireAuth, async function (req, res) {
       ev.owner || req.user.username,
       req.user.username,
     ]);
+    notifyCalendarChange(req, { action: 'upsert', id: ev.id });
     res.json({ ok: true, event: rowToEv(result.rows[0]) });
   } catch (e) {
     console.error('[calendar-events POST]', e.message);
@@ -62,6 +74,7 @@ router.delete('/:id', requireAuth, async function (req, res) {
     if (isNaN(id)) return res.status(400).json({ error: 'شناسه نامعتبر' });
     const result = await query('DELETE FROM app_events WHERE id = $1 RETURNING id', [id]);
     if (!result.rows.length) return res.status(404).json({ error: 'یافت نشد' });
+    notifyCalendarChange(req, { action: 'delete', id: id });
     res.json({ ok: true, deleted: id });
   } catch (e) {
     console.error('[calendar-events DELETE]', e.message);

@@ -4,9 +4,88 @@ const express = require('express');
 const { query } = require('../db');
 const { requireAuth, requireManager } = require('../auth');
 const { isManagerRole } = require('../lib/roles');
+const { p2 } = require('../lib/jalali-mini');
 
 const router = express.Router();
 router.use(requireAuth);
+
+function jMonthBounds(month) {
+  const pts = String(month || '').split('/');
+  const jy = parseInt(pts[0], 10);
+  const jm = parseInt(pts[1], 10);
+  if (!jy || !jm) return null;
+  const lastDay = jm <= 6 ? 31 : jm <= 11 ? 30 : 29;
+  return {
+    start: jy + '/' + p2(jm) + '/01',
+    end: jy + '/' + p2(jm) + '/' + p2(lastDay),
+  };
+}
+
+// GET /api/kpi-data/actuals?user=&month=1404/04
+router.get('/actuals', async function (req, res) {
+  try {
+    const month = req.query.month;
+    if (!month) return res.status(400).json({ error: 'month الزامی است' });
+    const bounds = jMonthBounds(month);
+    if (!bounds) return res.status(400).json({ error: 'month نامعتبر' });
+
+    const username = isManagerRole(req.user.role)
+      ? (req.query.user || req.query.username || req.user.username)
+      : req.user.username;
+
+    const [callsR, visitsR, salesR] = await Promise.all([
+      query(
+        `SELECT id, date, username, count, note FROM call_log
+         WHERE username = $1 AND date >= $2 AND date <= $3
+         ORDER BY date DESC, id DESC`,
+        [username, bounds.start, bounds.end]
+      ),
+      query(
+        `SELECT id, date, username, count, note FROM visit_log
+         WHERE username = $1 AND date >= $2 AND date <= $3
+         ORDER BY date DESC, id DESC`,
+        [username, bounds.start, bounds.end]
+      ),
+      query(
+        `SELECT id, date, username, center_name, center_key, amount, is_cash FROM sales_log
+         WHERE username = $1 AND date >= $2 AND date <= $3
+         ORDER BY date DESC, id DESC`,
+        [username, bounds.start, bounds.end]
+      ),
+    ]);
+
+    const calls = callsR.rows.map(function (r) {
+      return { id: Number(r.id), date: r.date, userId: r.username, count: r.count || 1, note: r.note || '' };
+    });
+    const visits = visitsR.rows.map(function (r) {
+      return { id: Number(r.id), date: r.date, userId: r.username, count: r.count || 1, note: r.note || '' };
+    });
+    const sales = salesR.rows.map(function (r) {
+      return {
+        id: Number(r.id), date: r.date, userId: r.username,
+        centerName: r.center_name || '', centerKey: r.center_key || null,
+        amount: Number(r.amount) || 0, isCash: !!r.is_cash,
+      };
+    });
+
+    const totalCalls = calls.reduce(function (s, l) { return s + (l.count || 1); }, 0);
+    const totalVisits = visits.reduce(function (s, l) { return s + (l.count || 1); }, 0);
+
+    res.json({
+      ok: true,
+      username,
+      month,
+      bounds,
+      calls,
+      visits,
+      sales,
+      totals: { calls: totalCalls, visits: totalVisits, salesCount: sales.length },
+    });
+  } catch (e) {
+    console.error('[kpi-data GET actuals]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // GET /api/kpi-data/targets?month=1404/04
 router.get('/targets', async function (req, res) {

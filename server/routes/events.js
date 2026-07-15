@@ -21,7 +21,6 @@ router.get('/stream', requireAuth, (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
-  res.setHeader('Content-Encoding', 'identity');
   res.flushHeaders();
 
   if (req.socket) {
@@ -32,37 +31,39 @@ router.get('/stream', requireAuth, (req, res) => {
 
   const client = { res, username: req.user.username, cid: req.query.cid || '', id: Date.now() };
   _clients.add(client);
-  sseWrite(res, `data: ${JSON.stringify({ type: 'connected', username: req.user.username })}\n\n`);
 
-  const hb = setInterval(() => {
+  let cleaned = false;
+  const cleanup = function () {
+    if (cleaned) return;
+    cleaned = true;
+    clearInterval(hb);
+    _clients.delete(client);
+    // Do not res.end() here — client disconnect mid-chunk causes ERR_INCOMPLETE_CHUNKED_ENCODING
+  };
+
+  // Comment line helps proxies/browsers open the stream cleanly
+  sseWrite(res, ': connected\n\n');
+  sseWrite(res, 'data: ' + JSON.stringify({ type: 'connected', username: req.user.username }) + '\n\n');
+
+  const hb = setInterval(function () {
     if (res.writableEnded || res.destroyed) {
-      clearInterval(hb);
-      _clients.delete(client);
+      cleanup();
       return;
     }
-    if (!sseWrite(res, `data: ${JSON.stringify({ type: 'heartbeat', at: Date.now() })}\n\n`)) {
-      clearInterval(hb);
-      _clients.delete(client);
+    if (!sseWrite(res, 'data: ' + JSON.stringify({ type: 'heartbeat', at: Date.now() }) + '\n\n')) {
+      cleanup();
     }
   }, 15000);
 
-  const cleanup = () => {
-    _clients.delete(client);
-    clearInterval(hb);
-    if (!res.writableEnded && !res.destroyed) {
-      try { res.end(); } catch (_) {}
-    }
-  };
   req.on('close', cleanup);
   req.on('aborted', cleanup);
-  req.on('error', cleanup);
   res.on('close', cleanup);
   res.on('error', cleanup);
 });
 
 function broadcast(type, data, excludeCid) {
-  const msg = `data: ${JSON.stringify({ type, ...data })}\n\n`;
-  _clients.forEach((c) => {
+  const msg = 'data: ' + JSON.stringify(Object.assign({ type: type }, data)) + '\n\n';
+  _clients.forEach(function (c) {
     if (excludeCid && c.cid === excludeCid) return;
     if (!sseWrite(c.res, msg)) _clients.delete(c);
   });

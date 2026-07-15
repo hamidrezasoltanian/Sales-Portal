@@ -5,24 +5,51 @@
  * CREATE → GET verify → UPDATE → GET verify → cleanup
  *
  * Usage: node tests/persistence.test.js
- * Requires: PostgreSQL + server on PORT (default 3000)
+ * Starts its own server on port 3097 (PostgreSQL required).
  */
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
+const jwt = require('jsonwebtoken');
+const { query, pool } = require('../server/db');
 
-const PORT = parseInt(process.env.TEST_PORT || process.env.PORT || '3000', 10);
-const BASE = `http://localhost:${PORT}`;
+const TEST_PORT = parseInt(process.env.TEST_PORT || '3097', 10);
+const JWT_SECRET = process.env.JWT_SECRET || 'change-this-to-a-random-secret-string';
+const TEST_MANAGER = '_tpersist_mgr';
 
 let passed = 0;
 let failed = 0;
-let cookie = '';
+let serverProc = null;
+let authToken = '';
 const PREFIX = '_persist_' + Date.now();
+
+function managerToken(username) {
+  return jwt.sign(
+    { username, role: 'مدیر', name: 'Persist Test Manager' },
+    JWT_SECRET,
+    { expiresIn: '1h' }
+  );
+}
 
 function assert(cond, msg) {
   if (cond) { console.log('  ✅ ' + msg); passed++; }
   else { console.log('  ❌ ' + msg); failed++; }
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function waitForServer(maxMs = 20000) {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    try {
+      const r = await req('GET', '/api/health');
+      if (r.status === 200) return;
+    } catch {}
+    await sleep(300);
+  }
+  throw new Error('سرور آماده نشد');
 }
 
 function req(method, urlPath, body, extraHeaders) {
@@ -31,7 +58,7 @@ function req(method, urlPath, body, extraHeaders) {
       ? (typeof body === 'string' ? body : JSON.stringify(body))
       : null;
     const headers = Object.assign({ 'Content-Type': 'application/json' }, extraHeaders || {});
-    if (cookie) headers.Cookie = cookie;
+    if (authToken) headers.Authorization = 'Bearer ' + authToken;
     if (bodyStr && !(body instanceof Buffer)) {
       headers['Content-Length'] = Buffer.byteLength(bodyStr);
     } else if (body instanceof Buffer) {
@@ -41,7 +68,7 @@ function req(method, urlPath, body, extraHeaders) {
       }
     }
     const r = http.request(
-      { hostname: 'localhost', port: PORT, path: urlPath, method, headers },
+      { hostname: 'localhost', port: TEST_PORT, path: urlPath, method, headers },
       res => {
         let data = '';
         res.on('data', c => (data += c));
@@ -57,6 +84,28 @@ function req(method, urlPath, body, extraHeaders) {
     else if (bodyStr) r.write(bodyStr);
     r.end();
   });
+}
+
+async function setup() {
+  await query(
+    `INSERT INTO app_users (username, display_name, role, color, active)
+     VALUES ($1, $2, 'مدیر', '#6366f1', true)
+     ON CONFLICT (username) DO UPDATE SET role = 'مدیر', active = true`,
+    [TEST_MANAGER, 'Persistence Test Manager']
+  );
+  authToken = managerToken(TEST_MANAGER);
+}
+
+async function teardown() {
+  const like = '%' + PREFIX + '%';
+  await query('DELETE FROM center_edits WHERE center_key LIKE $1', [like]).catch(() => {});
+  await query('DELETE FROM center_notes WHERE center_key LIKE $1', [like]).catch(() => {});
+  await query('DELETE FROM calendar_events WHERE title LIKE $1', [like]).catch(() => {});
+  await query('DELETE FROM daily_checklists WHERE note LIKE $1', [like]).catch(() => {});
+  await query('DELETE FROM call_log WHERE note LIKE $1', [like]).catch(() => {});
+  await query('DELETE FROM tasks WHERE id LIKE $1', ['tk_' + PREFIX + '%']).catch(() => {});
+  await query('DELETE FROM week_entries WHERE id LIKE $1', ['we_' + PREFIX + '%']).catch(() => {});
+  await query('DELETE FROM app_users WHERE username = $1', [TEST_MANAGER]).catch(() => {});
 }
 
 function multipart(fields, fileField, fileName, fileBuf, mime) {
@@ -76,14 +125,9 @@ function multipart(fields, fileField, fileName, fileBuf, mime) {
   };
 }
 
-async function login() {
-  const r = await req('POST', '/api/auth/login', {
-    username: 'Sarah.hosseini',
-    password: process.env.ADMIN_PASSWORD || 'admin123',
-  });
-  assert(r.status === 200, 'login → 200');
-  const setCookie = r.headers['set-cookie'];
-  if (setCookie) cookie = setCookie.map(c => c.split(';')[0]).join('; ');
+async function authReady() {
+  const r = await req('GET', '/api/data/db');
+  assert(r.status === 200, 'auth GET db → 200');
   return r.body;
 }
 
@@ -95,9 +139,9 @@ async function testDbBlob() {
   const db = get.body;
   const key = 'center_' + PREFIX;
   db.edits = db.edits || {};
-  db.edits[key] = { status: 'تماس گرفته شد', owner: 'Sarah.hosseini', _ts: Date.now() };
+  db.edits[key] = { status: 'تماس گرفته شد', owner: 'TEST_MANAGER', _ts: Date.now() };
   db.notes = db.notes || {};
-  db.notes[key] = [{ text: 'یادداشت تست persistence', by: 'Sarah.hosseini', date: '1404/01/01' }];
+  db.notes[key] = [{ text: 'یادداشت تست persistence', by: 'TEST_MANAGER', date: '1404/01/01' }];
   const put = await req('PUT', '/api/data/db', {
     edits: db.edits,
     notes: db.notes,
@@ -109,27 +153,199 @@ async function testDbBlob() {
   assert(get2.body.notes && get2.body.notes[key] && get2.body.notes[key].length, 'note persisted in GET');
 }
 
-// ─── 2. PATCH partial ──────────────────────────────────────────────────────
+// ─── 2. PATCH partial (centers only — weekEntries ignored) ─────────────────
 async function testDbPatch() {
-  console.log('\n📦 2. PATCH /api/data/patch — partial persistence');
+  console.log('\n📦 2. PATCH /api/data/patch — center edit persistence');
   const get = await req('GET', '/api/data/db');
   const key = 'pc_' + PREFIX + '||1';
   const patch = {
     _clientTs: get.body._serverTs,
     edits: { [key]: { status: 'پیشنهاد', followupDate: '1404/04/15' } },
-    weekEntries: {
-      ['1404w01:::' + key]: {
-        rtype: 'pc', rid: PREFIX + '||1', scheduledDate: '1404/04/10',
-        actionType: 'call', done: false, addedBy: 'Sarah.hosseini',
-      },
-    },
   };
   const r = await req('PATCH', '/api/data/patch', patch);
   assert(r.status === 200, 'PATCH → 200 (' + r.status + ')');
   const get2 = await req('GET', '/api/data/db');
-  const weKey = '1404w01:::' + key;
   assert(get2.body.edits && get2.body.edits[key], 'patch edit in db');
-  assert(get2.body.weekEntries && get2.body.weekEntries[weKey], 'patch weekEntry in db');
+  const weKey = '1404w01:::' + key;
+  assert(!get2.body.weekEntries || !get2.body.weekEntries[weKey], 'weekEntries not via patch (SQL-only)');
+}
+
+// ─── 2b. Centers PATCH API ───────────────────────────────────────────────
+async function testCentersPatch() {
+  console.log('\n🏥 2b. PATCH /api/centers/:key');
+  const key = 'center_' + PREFIX;
+  const r = await req('PATCH', '/api/centers/' + encodeURIComponent(key), {
+    field: 'status',
+    val: 'تماس گرفته شد',
+    centerName: 'تست persistence',
+  });
+  assert(r.status === 200, 'PATCH center → 200 (' + r.status + ')');
+  const get = await req('GET', '/api/centers/' + encodeURIComponent(key));
+  assert(get.status === 200, 'GET center → 200');
+  assert(get.body.data && get.body.data.status === 'تماس گرفته شد', 'center status persisted');
+}
+
+async function testCenterInteractions() {
+  console.log('\n🤝 2b2. Center interactions (idempotency + fan-out + rollback)');
+  const key = 'center_' + PREFIX;
+  const idem = 'idem_' + PREFIX;
+  const payload = {
+    mode: 'quick',
+    actionType: 'call',
+    result: 'تماس موفق',
+    note: PREFIX + ' interaction test',
+    centerName: 'تست',
+    occurredDate: '1404/04/15',
+    idempotencyKey: idem,
+  };
+  const create = await req('POST', '/api/centers/' + encodeURIComponent(key) + '/interactions', payload, { 'X-Idempotency-Key': idem });
+  assert(create.status === 201, 'POST interaction → 201 (' + create.status + ')');
+  assert(create.body.interaction && create.body.interaction.id, 'interaction id returned');
+  assert(Array.isArray(create.body.notes) && create.body.notes.length >= 1, 'interaction response includes notes');
+
+  const notesGet = await req('GET', '/api/centers/' + encodeURIComponent(key) + '/notes');
+  assert(notesGet.status === 200, 'GET center notes → 200');
+  assert(Array.isArray(notesGet.body.notes) && notesGet.body.notes.length >= 1, 'GET notes returns saved note');
+
+  const replay = await req('POST', '/api/centers/' + encodeURIComponent(key) + '/interactions', payload, { 'X-Idempotency-Key': idem });
+  assert(replay.status === 200, 'idempotent replay → 200 (' + replay.status + ')');
+  assert(replay.body.replay === true, 'replay flag true');
+
+  const cnt = await query('SELECT COUNT(*)::int AS c FROM center_interactions WHERE idempotency_key = $1', [idem]);
+  assert(cnt.rows[0].c === 1, 'single interaction row after idempotent retry');
+
+  const noKey = await req('POST', '/api/centers/' + encodeURIComponent(key) + '/interactions', { mode: 'quick', actionType: 'call' });
+  assert(noKey.status === 400, 'missing idempotency → 400');
+
+  const badIdem = 'bad_' + PREFIX;
+  const bad = await req('POST', '/api/centers/' + encodeURIComponent(key) + '/interactions', {
+    mode: 'done',
+    actionType: 'visit',
+    outcome: 'followup',
+    note: 'should rollback',
+    weekEntryId: 'nonexistent_week_id_' + PREFIX,
+    idempotencyKey: badIdem,
+  }, { 'X-Idempotency-Key': badIdem });
+  assert(bad.status === 404, 'invalid week entry → 404 (' + bad.status + ')');
+  const badCnt = await query('SELECT COUNT(*)::int AS c FROM center_interactions WHERE idempotency_key = $1', [badIdem]);
+  assert(badCnt.rows[0].c === 0, 'rollback: no interaction row on failure');
+  const notesR = await query('SELECT notes FROM center_notes WHERE center_key = $1', [key]);
+  const notes = notesR.rows.length ? (notesR.rows[0].notes || []) : [];
+  const hasRollbackNote = notes.some(function (n) { return (n.text || '').indexOf('should rollback') >= 0; });
+  assert(!hasRollbackNote, 'rollback: no orphan note on failure');
+
+  const timeline = await req('GET', '/api/center-reports/' + encodeURIComponent(key) + '/timeline');
+  assert(timeline.status === 200, 'timeline merge → 200');
+  const hasIx = (timeline.body.events || []).some(function (e) { return e.type === 'interaction'; });
+  assert(hasIx, 'timeline includes interaction event');
+}
+
+async function testCalendarEvents() {
+  console.log('\n📅 2c. Calendar events SQL API');
+  const evId = Math.floor(Date.now() / 1000) % 2000000000;
+  const create = await req('POST', '/api/calendar-events', {
+    id: evId,
+    title: 'رویداد تست ' + PREFIX,
+    desc: 'تست persistence',
+    startMs: Date.now(),
+    allDay: true,
+    color: '#0ea5e9',
+    owner: 'TEST_MANAGER',
+  });
+  assert(create.status === 200, 'POST calendar-event → 200 (' + create.status + ')');
+  const list = await req('GET', '/api/data/collections/events');
+  assert(Array.isArray(list.body) && list.body.some(function (e) { return e.id === evId; }), 'event in collections/events');
+  const del = await req('DELETE', '/api/calendar-events/' + evId);
+  assert(del.status === 200, 'DELETE calendar-event → 200');
+}
+
+// ─── 2d. Checklist SQL ───────────────────────────────────────────────────
+async function testChecklistApi() {
+  console.log('\n✅ 2d. Checklist SQL API');
+  const date = '1404/04/24';
+  const user = 'TEST_MANAGER';
+  const create = await req('POST', '/api/checklist', {
+    date: date,
+    username: user,
+    items: [{ id: 1, done: true }],
+    note: 'تست ' + PREFIX,
+  });
+  assert(create.status === 200, 'POST checklist → 200 (' + create.status + ')');
+  const get = await req('GET', '/api/data/collections/checklist/' + encodeURIComponent(date) + '/' + encodeURIComponent(user));
+  assert(get.status === 200, 'GET checklist collection → 200');
+  assert(get.body.note && get.body.note.includes(PREFIX), 'checklist note persisted');
+}
+
+// ─── 2e. Activity log idempotency ────────────────────────────────────────
+async function testActivityLog() {
+  console.log('\n📞 2e. Activity log SQL API (idempotent upsert)');
+  const logId = Date.now();
+  const entry = { id: logId, date: '1404/04/24', userId: 'TEST_MANAGER', count: 5, note: PREFIX };
+  const create = await req('POST', '/api/activity-log', { type: 'call', entry: entry });
+  assert(create.status === 201, 'POST activity-log → 201 (' + create.status + ')');
+  const retry = await req('POST', '/api/activity-log', { type: 'call', entry: Object.assign({}, entry, { count: 7 }) });
+  assert(retry.status === 201, 'POST activity-log retry → 201');
+  const list = await req('GET', '/api/activity-log?type=call&limit=20&username=TEST_MANAGER');
+  assert(list.status === 200, 'GET activity-log → 200');
+  const found = (list.body.entries || []).filter(function (e) { return e.id === logId; });
+  assert(found.length === 1, 'single row after idempotent upsert');
+  assert(found[0].count === 7, 'count updated on retry');
+  await req('DELETE', '/api/activity-log/call/' + logId);
+}
+
+// ─── 2f. KPI data API ────────────────────────────────────────────────────
+async function testKpiData() {
+  console.log('\n📊 2f. KPI data SQL API');
+  const month = '1404/04';
+  const t = await req('POST', '/api/kpi-data/user-target', {
+    username: 'TEST_MANAGER',
+    month: month,
+    callsPerDay: 12,
+    visitsPerWeek: 6,
+    salesCount: 4,
+    salesAmount: 0,
+    cashPct: 55,
+  });
+  assert(t.status === 200, 'POST kpi user-target → 200 (' + t.status + ')');
+  const hist = await req('POST', '/api/kpi-data/history', {
+    userId: 'TEST_MANAGER',
+    month: month,
+    overall: 85,
+    scores: { calls: 90 },
+    savedAt: new Date().toISOString(),
+  });
+  assert(hist.status === 200, 'POST kpi history → 200');
+  const snap = await req('GET', '/api/kpi-data/history?user=TEST_MANAGER&month=' + encodeURIComponent(month));
+  assert(snap.status === 200 && snap.body.history && snap.body.history.length, 'kpi history persisted');
+
+  const actuals = await req('GET', '/api/kpi-data/actuals?user=TEST_MANAGER&month=' + encodeURIComponent(month));
+  assert(actuals.status === 200, 'GET kpi actuals → 200');
+  assert(actuals.body.ok === true, 'kpi actuals ok:true');
+  assert(typeof actuals.body.totals === 'object', 'kpi actuals has totals');
+}
+
+// ─── 2g. Tags API ─────────────────────────────────────────────────────────
+async function testTagsApi() {
+  console.log('\n🏷 2g. Tags SQL API');
+  const centerKey = 'center_' + PREFIX;
+  const r = await req('PATCH', '/api/tags/centers/' + encodeURIComponent(centerKey), {
+    tagIds: ['tag_test_' + PREFIX],
+  });
+  assert(r.status === 200, 'PATCH center tags → 200 (' + r.status + ')');
+}
+
+// ─── 2h. Mission log ─────────────────────────────────────────────────────
+async function testMissionLog() {
+  console.log('\n✈️ 2h. Mission log SQL API');
+  const month = '1404/04';
+  const create = await req('POST', '/api/mission-log', {
+    userId: 'TEST_MANAGER',
+    month: month,
+    done: true,
+    note: 'تست ' + PREFIX,
+  });
+  assert(create.status === 200, 'POST mission-log → 200 (' + create.status + ')');
+  await req('DELETE', '/api/mission-log?userId=TEST_MANAGER&month=' + encodeURIComponent(month));
 }
 
 // ─── 3. Tasks SQL ──────────────────────────────────────────────────────────
@@ -137,8 +353,8 @@ async function testTasks() {
   console.log('\n📌 3. Tasks SQL API');
   const tid = 'tk_' + PREFIX;
   const create = await req('POST', '/api/tasks', {
-    id: tid, title: 'وظیفه تست persistence', owner: 'Sarah.hosseini',
-    dueDate: '1404/04/20', priority: 2, status: 'todo', createdBy: 'Sarah.hosseini',
+    id: tid, title: 'وظیفه تست persistence', owner: 'TEST_MANAGER',
+    dueDate: '1404/04/20', priority: 2, status: 'todo', createdBy: 'TEST_MANAGER',
   });
   assert(create.status === 201, 'POST task → 201 (' + create.status + ')');
   const list = await req('GET', '/api/tasks');
@@ -171,7 +387,7 @@ async function testWeekEntries() {
     rid,
     scheduledDate: '1404/04/12',
     actionType: 'visit',
-    addedBy: 'Sarah.hosseini',
+    addedBy: 'TEST_MANAGER',
     centerName: 'مرکز تست',
   });
   assert(create.status === 201 || create.status === 200, 'POST week-entry → ' + create.status);
@@ -191,7 +407,7 @@ async function testNotifications() {
   const nid = 'ntf_' + PREFIX;
   const create = await req('POST', '/api/notifications', {
     id: nid,
-    to: 'Sarah.hosseini',
+    to: 'TEST_MANAGER',
     msg: 'اعلان تست ' + PREFIX,
     centerKey: '',
   });
@@ -342,7 +558,7 @@ async function testChangelog() {
   console.log('\n🗃 10. Changelog POST');
   const entry = {
     at: new Date().toISOString(),
-    by: 'Sarah.hosseini',
+    by: 'TEST_MANAGER',
     rkey: 'center_' + PREFIX,
     field: 'status',
     val: 'تست changelog',
@@ -382,16 +598,35 @@ async function testCenterPricing() {
 // ─── Runner ────────────────────────────────────────────────────────────────
 async function main() {
   console.log('════════════════════════════════════════════════════════');
-  console.log('  Flow CRM — Persistence Tests (port ' + PORT + ')');
+  console.log('  Flow CRM — Persistence Tests (port ' + TEST_PORT + ')');
   console.log('════════════════════════════════════════════════════════');
 
+  serverProc = spawn('node', ['server/index.js'], {
+    env: Object.assign({}, process.env, { PORT: String(TEST_PORT) }),
+    cwd: path.resolve(__dirname, '..'),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  serverProc.stderr.on('data', d => process.stderr.write('  [srv-err] ' + d.toString().trim() + '\n'));
+
+  let exitCode = 0;
   try {
-    const health = await req('GET', '/api/health');
-    if (health.status !== 200) throw new Error('Server not healthy on port ' + PORT);
-    await login();
+    process.stdout.write('  در انتظار آماده شدن سرور');
+    await waitForServer(20000);
+    console.log('... آماده\n');
+
+    await setup();
+    await authReady();
 
     await testDbBlob();
     await testDbPatch();
+    await testCentersPatch();
+    await testCenterInteractions();
+    await testCalendarEvents();
+    await testChecklistApi();
+    await testActivityLog();
+    await testKpiData();
+    await testTagsApi();
+    await testMissionLog();
     await testTasks();
     await testTasksInDb();
     await testWeekEntries();
@@ -406,12 +641,17 @@ async function main() {
   } catch (e) {
     console.error('\n❌ Fatal:', e.message);
     failed++;
-  }
+  } finally {
+    try { await teardown(); } catch (e) { console.error('  ⚠ teardown:', e.message); }
+    if (serverProc) { try { serverProc.kill(); } catch {} }
+    await pool.end().catch(() => {});
 
-  console.log('\n' + '═'.repeat(56));
-  console.log('  ✅ Passed: ' + passed + '   ❌ Failed: ' + failed);
-  console.log('═'.repeat(56));
-  process.exit(failed > 0 ? 1 : 0);
+    console.log('\n' + '═'.repeat(56));
+    console.log('  ✅ Passed: ' + passed + '   ❌ Failed: ' + failed);
+    console.log('═'.repeat(56));
+    exitCode = failed > 0 ? 1 : 0;
+    setTimeout(() => process.exit(exitCode), 200);
+  }
 }
 
 main();

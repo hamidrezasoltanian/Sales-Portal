@@ -6,6 +6,7 @@ const { requireAuth, requireManager } = require('../auth');
 const { requirePermission } = require('../permissions');
 const { buildOwnerMaps, filterDbForUser, filterPutBodyForUser, isManagerRole } = require('../lib/center-ownership');
 const { mergeNoteArrays } = require('../lib/db-merge');
+const { applySlimCollectionUpserts } = require('../lib/blob-partial-save');
 const { filterActiveNotes } = require('../lib/soft-delete');
 let _broadcast = null;
 try { _broadcast = require('./events').broadcast; } catch(e) {}
@@ -496,6 +497,13 @@ router.put('/db', async (req, res) => {
       }
     }
 
+    // ── slim PUT: upsert activity logs / events / extras (no table wipe) ───────
+    if (!fullSync) {
+      await applySlimCollectionUpserts(client, {
+        events, callLog, visitLog, salesLog, missionLog, kpiHistory, extra,
+      }, user);
+    }
+
     // ── kpiTargets upsert (slim save — no table wipe) ─────────────────────────
     if (!fullSync && kpiTargets !== undefined && typeof kpiTargets === 'object' && kpiTargets !== null) {
       if (kpiTargets.weights) {
@@ -632,7 +640,8 @@ router.patch('/patch', async (req, res) => {
     }
 
     const { edits, notes, rTags, tags,
-            events, checklist, settings, kpiTargets, provOverrides, _deletedEventIds, extra } = patch;
+            events, checklist, settings, kpiTargets, provOverrides, _deletedEventIds, extra,
+            callLog, visitLog, salesLog, missionLog, kpiHistory } = patch;
 
     if (edits && typeof edits === 'object' && Object.keys(edits).length > 0) {
       await client.query(
@@ -788,6 +797,10 @@ router.patch('/patch', async (req, res) => {
         );
       }
     }
+
+    await applySlimCollectionUpserts(client, {
+      events, callLog, visitLog, salesLog, missionLog, kpiHistory,
+    }, user);
 
     const upserted = await client.query(
       `INSERT INTO app_data (key, value, updated_at, updated_by)

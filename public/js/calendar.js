@@ -237,13 +237,20 @@ function saveEv(evId){
   if(evId&&evId!=='null'){var ev=(DB.events||[]).find(function(e){return e.id===evId;});if(ev){ev.title=title.trim();ev.desc=desc;ev.startMs=startMs;ev.allDay=allDay;ev.color=color;}}
   else DB.events.push({id:_nextEvId++,title:title.trim(),desc:desc,startMs:startMs,allDay:allDay,color:color,owner:currentUser});
   var _savedEv=evId&&evId!=='null'?(DB.events||[]).find(function(e){return e.id===evId;}):DB.events[DB.events.length-1];
-  if(_savedEv)savePatchDB({events:[_savedEv]},{immediate:true});
+  if(_savedEv){
+    saveCalendarEventApi(_savedEv).catch(function(){
+      showToast('⚠ خطا در ذخیره رویداد — دوباره تلاش کنید',3000);
+    });
+  }
   closeModal('evModal');renderCalendar();showToast('رویداد ذخیره شد ✅');
 }
 
 function deleteEv(id){
   if(!confirm('حذف این رویداد؟'))return;
   DB.events=(DB.events||[]).filter(function(e){return e.id!==id;});
-  savePatchDB({_deletedEventIds:[id]},{immediate:true});
+  deleteCalendarEventApi(id).then(function(ok){
+    if(!ok)showToast('⚠ حذف در سرور ناموفق بود',2500);
+    closeModal('evModal');
+    renderCalendar();
+  });
 }
-

@@ -2866,7 +2866,6 @@ function _pfAddToWeekPlan(rtype, rid, cname, scheduledDate, actionType, pfNo, pf
   };
   if (typeof saveWeekEntryApi === 'function') saveWeekEntryApi(entryKey, DB.weekEntries[entryKey]);
   if (typeof _wpSaveWeek === 'function') _wpSaveWeek([entryKey]);
-  else if (typeof saveDB === 'function') saveDB();
   if (typeof setE === 'function') setE(rtype, rid, 'followupDate', scheduledDate);
   return entryKey;
 }

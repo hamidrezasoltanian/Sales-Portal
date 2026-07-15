@@ -13,7 +13,7 @@
   var _cbState = {
     view: localStorage.getItem('cb_view') || 'tree',
     treeMode: localStorage.getItem('cb_tree_mode') || 'center',
-    scope: 'mine',
+    scope: localStorage.getItem('cb_scope') || 'mine',
     owner: '',
     filter: 'all',
     search: '',
@@ -62,6 +62,13 @@
 
   function _cmpJ(a, b) { return String(a || '').localeCompare(String(b || '')); }
 
+  function _normJ(s) {
+    if (!s) return '';
+    var p = String(s).trim().split('/');
+    if (p.length < 3) return String(s || '');
+    return p[0] + '/' + p2(parseInt(p[1], 10)) + '/' + p2(parseInt(p[2], 10));
+  }
+
   function _jalaliStr(j) { return j[0] + '/' + p2(j[1]) + '/' + p2(j[2]); }
 
   function _addDays(n) {
@@ -102,16 +109,20 @@
 
   function _isThisWeek(item) {
     var today = _today();
-    if (!item.dueAt || item.urgency === 'overdue' || item.urgency === 'today') return false;
-    if (_cmpJ(item.dueAt, today) <= 0) return false;
-    return _daysUntil(item.dueAt) <= 7;
+    var due = _normJ(item.dueAt);
+    if (!due || item.urgency === 'overdue' || item.urgency === 'today') return false;
+    if (_cmpJ(due, today) <= 0) return false;
+    return _daysUntil(due) <= 7;
   }
 
   function _centerName(item) {
-    if (item.centerName) return item.centerName;
+    if (item.centerName && item.centerName !== 'سایر / بدون مرکز' && !/^c \d+$/i.test(item.centerName)) {
+      return item.centerName;
+    }
     if (item.title && item.title.indexOf(' — ') >= 0) {
       var part = item.title.split(' — ')[0].trim();
-      if (part && part.indexOf('پیگیری') !== 0 && !/^pc\s*new/i.test(part) && !/^new\s+\d+$/i.test(part) && part !== 'مرکز') {
+      if (part && part.indexOf('پیگیری') !== 0 && !/^pc\s*new/i.test(part) && !/^new\s+\d+$/i.test(part)
+          && part !== 'مرکز' && !/^c \d+$/i.test(part)) {
         return part;
       }
     }
@@ -192,6 +203,56 @@
     (items || []).forEach(function (it) { _cbState.itemById[it.id] = it; });
   }
 
+  function _itemHasReportAction(item) {
+    return item && (item.action === 'week' || item.action === 'followup' || item.type === 'followup' || (item.action === 'center' && item.centerKey));
+  }
+
+  function _cbIsFollowupItem(item) {
+    return item && (item.type === 'followup' || item.action === 'followup' || (item.action === 'center' && item.centerKey));
+  }
+
+  function _cbOpenFollowupInteraction(item) {
+    if (!item || typeof openCenterInteraction !== 'function') return;
+    var ckey = item.centerKey || (item.meta && item.meta.centerKey) || '';
+    if (!ckey) return;
+    openCenterInteraction({
+      centerKey: ckey,
+      centerName: _centerName(item),
+      actionType: 'followup',
+    });
+  }
+
+  function _centerNameLink(name, centerKey) {
+    if (!centerKey || centerKey === '_none') return esc(name);
+    return '<button type="button" class="cb-center-link" onclick="_cbOpenCenterProfile(event,\'' + esc(centerKey) + '\')" title="پروفایل مرکز">' + esc(name) + '</button>';
+  }
+
+  function _miniDetailText(item, cname) {
+    var title = item.title || '';
+    if (cname && title.indexOf(cname) === 0) {
+      var rest = title.slice(cname.length).replace(/^[\s—\-]+/, '').trim();
+      if (rest) return esc(rest);
+    }
+    if (item.subtitle) return esc(item.subtitle);
+    return '';
+  }
+
+  window._cbOpenCenterProfile = function (e, centerKey) {
+    if (e) { e.stopPropagation(); e.preventDefault(); }
+    if (!centerKey || typeof openCenterModal !== 'function') return;
+    if (typeof parseCenterRef === 'function') {
+      var ref = parseCenterRef(null, centerKey);
+      if (ref && ref.rid) { openCenterModal(ref.rtype, ref.rid, centerKey); return; }
+    }
+    var parts = String(centerKey).split('_');
+    if (parts.length >= 2) openCenterModal(parts[0], parts.slice(1).join('_'), centerKey);
+  };
+
+  window._cbForceInboxFilterAll = function () {
+    _cbState.filter = 'all';
+    _cbState.offset = 0;
+  };
+
   function _cbOpenItem(item) {
     if (!item) return;
     var meta = item.meta || {};
@@ -201,11 +262,39 @@
         else if (typeof switchTab === 'function') switchTab('tasks');
         break;
       case 'week':
-        if (meta.rtype && meta.rid && typeof quickCallLog === 'function') quickCallLog(meta.rtype, meta.rid);
-        else if (typeof switchTab === 'function') switchTab('weekplan');
+        if (typeof openCenterInteraction === 'function') {
+          var rt = meta.rtype || 'center';
+          var rd = meta.rid || '';
+          if (meta.recKey && typeof parseCenterRef === 'function') {
+            var wref = parseCenterRef(null, meta.recKey);
+            rt = wref.rtype;
+            rd = wref.rid;
+          }
+          var weekEntryKey = '';
+          if (meta.weekId && DB && DB.weekEntries) {
+            Object.keys(DB.weekEntries).some(function (k) {
+              if (DB.weekEntries[k].sqlId === meta.weekId) { weekEntryKey = k; return true; }
+              return false;
+            });
+          }
+          openCenterInteraction({
+            rtype: rt,
+            rid: rd,
+            centerName: (item && item.title) || '',
+            weekEntryKey: weekEntryKey,
+            actionType: 'call',
+          });
+        } else if (meta.rtype && meta.rid && typeof quickCallLog === 'function') {
+          quickCallLog(meta.rtype, meta.rid);
+        } else if (typeof switchTab === 'function') switchTab('weekplan');
+        break;
+      case 'followup':
+        _cbOpenFollowupInteraction(item);
         break;
       case 'center':
-        if (meta.centerKey && typeof openCenterModal === 'function') {
+        if (_cbIsFollowupItem(item)) {
+          _cbOpenFollowupInteraction(item);
+        } else if (meta.centerKey && typeof openCenterModal === 'function') {
           var parts = String(meta.centerKey).split('_');
           if (parts.length >= 2) openCenterModal(parts[0], parts.slice(1).join('_'));
         } else if (typeof switchTab === 'function') switchTab('provinces');
@@ -286,11 +375,56 @@
   window._cbQuickSnooze = function (e, itemId, days) {
     if (e) e.stopPropagation();
     fetch('/api/inbox/actions/snooze', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ itemId: itemId, days: days != null ? days : 1 }),
     }).then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error); return d; }); })
-      .then(function () { renderHomeCartable(); })
+      .then(function (d) {
+        if (typeof showToast === 'function') {
+          showToast('⏸ فقط نمایش کارتابل به‌تأخیر افتاد — تاریخ پیگیری مرکز عوض نشد' + (d.snoozedUntil ? ' (تا ' + d.snoozedUntil + ')' : ''), 4000);
+        }
+        if (typeof _cbRefreshInboxLive === 'function') _cbRefreshInboxLive();
+        else renderHomeCartable();
+      })
       .catch(function (err) { alert(err.message || 'خطا'); });
+  };
+
+  window._cbCalReschedule = function (e, dayStr) {
+    if (e) e.preventDefault();
+    var itemId = e.dataTransfer.getData('text/plain');
+    var item = _cbState.itemById[itemId];
+    if (!item || !dayStr) return;
+    var normDay = _normJ(dayStr);
+    if (_cbIsFollowupItem(item)) {
+      var ckey = item.centerKey || (item.meta && item.meta.centerKey);
+      if (!ckey || typeof patchCenterField !== 'function') return;
+      patchCenterField(ckey, 'followupDate', normDay, { centerName: _centerName(item) })
+        .then(function (res) {
+          if (res && res.inboxWarning && typeof showToast === 'function') showToast('⚠ ' + res.inboxWarning, 5000);
+          else if (typeof showToast === 'function') showToast('✓ تاریخ پیگیری به ' + normDay + ' منتقل شد');
+          if (typeof _scheduleInboxRefresh === 'function') _scheduleInboxRefresh();
+        })
+        .catch(function () { if (typeof showToast === 'function') showToast('خطا در تغییر تاریخ پیگیری'); });
+      return;
+    }
+    if (item.type === 'week' && item.meta && item.meta.weekId) {
+      fetch('/api/week-entries/' + encodeURIComponent(item.meta.weekId), {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduledDate: normDay }),
+      }).then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || 'خطا'); return d; }); })
+        .then(function () {
+          if (typeof showToast === 'function') showToast('✓ برنامه هفته به ' + normDay + ' منتقل شد');
+          if (typeof _scheduleInboxRefresh === 'function') _scheduleInboxRefresh();
+        })
+        .catch(function (err) { if (typeof showToast === 'function') showToast('⚠ ' + (err.message || 'خطا در جابجایی برنامه هفته')); });
+      return;
+    }
+    if (typeof showToast === 'function') {
+      showToast('فقط پیگیری و برنامه هفته با کشیدن روی روز قابل جابجایی هستند — برای سایر موارد از 🕐 (به‌تعویق نمایش) استفاده کنید', 4500);
+    }
   };
 
   window._cbDragStart = function (e, itemId) {
@@ -308,12 +442,8 @@
     window._cbQuickSnooze(null, itemId, days);
   };
 
-  window._cbCalDrop = function (e, dayStr) {
-    e.preventDefault();
-    var itemId = e.dataTransfer.getData('text/plain');
-    if (!itemId || !dayStr) return;
-    window._cbQuickSnooze(null, itemId, _daysUntil(dayStr));
-  };
+  // legacy alias — تقویم از reschedule واقعی استفاده می‌کند نه snooze
+  window._cbCalDrop = window._cbCalReschedule;
 
   window._cbMatrixDrill = function (username, bucket) {
     _cbState.view = 'list';
@@ -364,6 +494,15 @@
     }).join('') + '</div>';
   }
 
+  function _showOwnerTag() {
+    return _cbState.scope === 'all';
+  }
+
+  function _ownerTag(item) {
+    if (!_showOwnerTag() || !item || !item.owner) return '';
+    return '<span class="cb-owner-tag">' + esc(_userName(item.owner)) + '</span>';
+  }
+
   function _buildToolbar() {
     var mgr = _isMgr();
     var experts = _expertsList();
@@ -375,6 +514,7 @@
     if (mgr && _cbState.view !== 'matrix') {
       scopeTabs = '<div class="cb-scope-tabs">' +
         '<button type="button" class="cb-scope-btn' + (_cbState.scope === 'mine' ? ' active' : '') + '" onclick="renderHomeCartable(\'mine\')">👤 من</button>' +
+        '<button type="button" class="cb-scope-btn' + (_cbState.scope === 'all' ? ' active' : '') + '" onclick="renderHomeCartable(\'all\')" title="من + همه کارشناس‌ها">🌐 همه</button>' +
         '<button type="button" class="cb-scope-btn' + (_cbState.scope === 'team' ? ' active' : '') + '" onclick="renderHomeCartable(\'team\')">👥 کارشناس</button>' +
       '</div>';
     }
@@ -399,7 +539,8 @@
     var filterHtml = _cbState.view === 'matrix' ? '' : filters.map(function (f) {
       if (f === 'approval' && !mgr) return '';
       return '<button type="button" class="cb-filter-btn' + (_cbState.filter === f ? ' active' : '') + '" onclick="_cbSetFilter(\'' + f + '\')">' + filterLabels[f] + '</button>';
-    }).join('');
+    }).join('') +
+      '<button type="button" class="cb-filter-reset" onclick="_cbResetFilters()" title="پاک کردن فیلترها">✕</button>';
 
     var typeChips = _cbState.view === 'matrix' ? '' : TYPE_OPTS.map(function (t) {
       var on = _cbState.types.indexOf(t.id) >= 0;
@@ -415,6 +556,13 @@
 
   window._cbSetOwner = function (id) { _cbState.owner = id || ''; _cbState.offset = 0; renderHomeCartable('team'); };
   window._cbSetFilter = function (f) { _cbState.filter = f || 'all'; _cbState.offset = 0; renderHomeCartable(); };
+  window._cbResetFilters = function () {
+    _cbState.filter = 'all';
+    _cbState.search = '';
+    _cbState.types = [];
+    _cbState.offset = 0;
+    renderHomeCartable();
+  };
   window._cbSetSearch = function (v) {
     _cbState.search = v || ''; _cbState.offset = 0;
     clearTimeout(window._cbSearchT);
@@ -433,40 +581,84 @@
     _loadData();
   };
 
-  function _renderMini(item, draggable) {
-    var drag = draggable && item.canSnooze ? ' draggable="true" ondragstart="_cbDragStart(event,\'' + esc(item.id) + '\')"' : '';
+  function _renderMini(item, draggable, showDue) {
+    var canDrag = draggable && (item.canSnooze || _cbIsFollowupItem(item) || item.type === 'week');
+    var drag = canDrag ? ' draggable="true" ondragstart="_cbDragStart(event,\'' + esc(item.id) + '\')"' : '';
+    var ckey = item.centerKey;
+    var cname = _centerName(item);
+    var nameHtml;
+    if (item.type === 'notification') {
+      var noteLines = (item.title || '').split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+      var head = (noteLines[0] || '').replace(/^⚠️\s*/, '').trim();
+      var more = noteLines.length > 1
+        ? '<div class="cb-mini-note-more">' + esc(noteLines.slice(1, 4).join(' · ')) + (noteLines.length > 4 ? '…' : '') + '</div>'
+        : '';
+      nameHtml = '<span class="cb-mini-note-head">' + esc(head) + '</span>' + more;
+    } else if (ckey && ckey !== '_none') {
+      nameHtml = _centerNameLink(cname, ckey);
+    } else {
+      nameHtml = esc(item.title);
+    }
+    var detail = (ckey && ckey !== '_none' && item.type !== 'notification') ? _miniDetailText(item, cname) : '';
+    var dueTag = (showDue && item.dueAt)
+      ? '<span class="cb-mini-due">' + esc(_normJ(item.dueAt)) + '</span>' : '';
+    var typeTag = '<span class="cb-mini-type">' + esc(item.typeLabel || item.type || '') + '</span>';
+    var reportBtn = _itemHasReportAction(item)
+      ? '<button type="button" class="cb-mini-act" title="ثبت تماس / گزارش" onclick="event.stopPropagation();_cbOpenById(\'' + esc(item.id) + '\')">📞</button>'
+      : '';
     return '<div class="cb-mini ' + _severityClass(item) + '"' + drag + ' onclick="_cbOpenById(\'' + esc(item.id) + '\')" role="button">' +
-      '<span class="cb-mini-ico">' + _typeIcon(item.type) + '</span>' +
-      '<span class="cb-mini-txt">' + esc(item.title) + '</span>' +
-      _urgencyBadge(item) +
+      '<div class="cb-mini-top">' +
+        '<span class="cb-mini-ico">' + _typeIcon(item.type) + '</span>' +
+        typeTag + dueTag + _ownerTag(item) + _urgencyBadge(item) +
+      '</div>' +
+      '<div class="cb-mini-name">' + nameHtml + '</div>' +
+      (detail ? '<div class="cb-mini-detail">' + detail + '</div>' : '') +
+      (reportBtn ? '<div class="cb-mini-foot">' + reportBtn + '</div>' : '') +
     '</div>';
+  }
+
+  function _renderItemTitle(item) {
+    var ckey = item.centerKey;
+    var cname = _centerName(item);
+    if (ckey && ckey !== '_none' && item.title && item.title.indexOf(cname) >= 0) {
+      var suffix = item.title.replace(cname, '').replace(/^[\s—\-]+/, '').trim();
+      return _centerNameLink(cname, ckey) + (suffix ? '<span class="cb-item-title-sub"> — ' + esc(suffix) + '</span>' : '');
+    }
+    if (ckey && ckey !== '_none') return _centerNameLink(cname, ckey);
+    return esc(item.title);
   }
 
   function _renderItem(item, idx) {
     var actions = '';
+    if (_itemHasReportAction(item)) {
+      actions += '<button type="button" class="cb-act cb-act-report" title="ثبت تماس / گزارش" onclick="event.stopPropagation();_cbOpenById(\'' + esc(item.id) + '\')">📞</button>';
+    }
     if (item.canQuickComplete) actions += '<button type="button" class="cb-act cb-act-ok" title="تکمیل" onclick="_cbQuickComplete(event,\'' + esc(item.id) + '\')">✓</button>';
-    if (item.canSnooze) actions += '<button type="button" class="cb-act cb-act-snooze" title="فردا" onclick="_cbQuickSnooze(event,\'' + esc(item.id) + '\',1)">🕐</button>';
+    if (item.canSnooze) actions += '<button type="button" class="cb-act cb-act-snooze" title="به‌تعویق نمایش (تاریخ مرکز عوض نمی‌شود)" onclick="_cbQuickSnooze(event,\'' + esc(item.id) + '\',1)">🕐</button>';
     var valHint = (item.monetaryValue > 0 && (item.type === 'proforma' || item.type === 'mtr'))
       ? '<span class="cb-val">' + Number(item.monetaryValue).toLocaleString('fa-IR') + '</span>' : '';
     return '<div class="cb-item ' + _severityClass(item) + '" onclick="_cbOpenByIdx(' + idx + ')" role="button">' +
       '<div class="cb-item-icon">' + _typeIcon(item.type) + '</div><div class="cb-item-body">' +
-      '<div class="cb-item-top"><span class="cb-item-type">' + esc(item.typeLabel) + '</span>' + _urgencyBadge(item) + valHint +
+      '<div class="cb-item-top"><span class="cb-item-type">' + esc(item.typeLabel) + '</span>' + _ownerTag(item) + _urgencyBadge(item) + valHint +
       (item.dueAt ? '<span class="cb-item-due">' + esc(item.dueAt) + '</span>' : '') + '</div>' +
-      '<div class="cb-item-title">' + esc(item.title) + '</div>' +
+      '<div class="cb-item-title">' + _renderItemTitle(item) + '</div>' +
       (item.subtitle ? '<div class="cb-item-sub">' + esc(item.subtitle) + '</div>' : '') +
       '</div><div class="cb-item-actions">' + actions + '</div><div class="cb-item-arrow">‹</div></div>';
   }
 
   function _renderList(data) {
     if (!data || !data.items || !data.items.length) return '<div class="cb-empty">✨ کارتابل خالی است</div>';
-    var lanes = { overdue: [], today: [], other: [] };
+    var today = _today();
+    var lanes = { overdue: [], today: [], upcoming: [], other: [] };
     data.items.forEach(function (item) {
+      var due = _normJ(item.dueAt);
       if (item.urgency === 'overdue') lanes.overdue.push(item);
       else if (item.urgency === 'today') lanes.today.push(item);
+      else if (due && _cmpJ(due, today) > 0 && _daysUntil(due) <= 14) lanes.upcoming.push(item);
       else lanes.other.push(item);
     });
     var html = '';
-    [{ k: 'overdue', l: '🔴 معوق' }, { k: 'today', l: '🔵 امروز' }, { k: 'other', l: '📋 سایر' }].forEach(function (lane) {
+    [{ k: 'overdue', l: '🔴 معوق' }, { k: 'today', l: '🔵 امروز' }, { k: 'upcoming', l: '📅 پیش‌رو' }, { k: 'other', l: '📋 سایر' }].forEach(function (lane) {
       if (!lanes[lane.k].length) return;
       html += '<div class="cb-lane cb-lane-' + lane.k + '"><div class="cb-lane-hdr">' + lane.l + ' <span class="cb-lane-n">' + lanes[lane.k].length + '</span></div>';
       lanes[lane.k].forEach(function (item) { html += _renderItem(item, data.items.indexOf(item)); });
@@ -490,7 +682,7 @@
         '<div class="cb-tree-row" onclick="_cbToggleNode(\'' + esc(nkey) + '\')">' +
           '<span class="cb-tree-caret">' + (open ? '▼' : '◀') + '</span>' +
           '<span class="cb-tree-ico">📍</span>' +
-          '<span class="cb-tree-label">' + esc(c.name) + '</span>' +
+          '<span class="cb-tree-label">' + (c.key && c.key !== '_none' ? _centerNameLink(c.name, c.key) : esc(c.name)) + '</span>' +
           (c.overdueCount ? '<span class="cb-tree-badge cb-tree-badge-red">' + c.overdueCount + ' معوق</span>' : '') +
           '<span class="cb-tree-badge">' + c.items.length + '</span>' +
         '</div>';
@@ -505,6 +697,27 @@
     return html;
   }
 
+  function _applyViewFilters(items) {
+    var out = items || [];
+    var f = _cbState.filter || 'all';
+    if (f === 'overdue') out = out.filter(function (it) { return it.urgency === 'overdue'; });
+    else if (f === 'today') out = out.filter(function (it) { return it.urgency === 'today'; });
+    else if (f === 'approval') out = out.filter(function (it) { return _isApproval(it); });
+    if (_cbState.types.length) {
+      out = out.filter(function (it) { return _cbState.types.indexOf(it.type) >= 0; });
+    }
+    if (_cbState.search) {
+      var q = String(_cbState.search).trim().toLowerCase();
+      out = out.filter(function (it) {
+        return (it.title || '').toLowerCase().includes(q)
+          || (it.subtitle || '').toLowerCase().includes(q)
+          || (it.centerKey || '').toLowerCase().includes(q)
+          || (it.owner || '').toLowerCase().includes(q);
+      });
+    }
+    return out;
+  }
+
   function _renderTreeTeam(treeData) {
     if (!treeData || !treeData.experts || !treeData.experts.length) {
       return '<div class="cb-empty">داده‌ای برای نمایش تیم نیست</div>';
@@ -513,23 +726,40 @@
     treeData.experts.forEach(function (ex) {
       var ekey = 'e:' + ex.username;
       var eopen = _cbState.expanded[ekey] !== false;
-      html += '<div class="cb-tree-node' + (ex.stats.overdue ? ' cb-tree-hot' : '') + '">' +
+      var filteredCenters = (ex.centers || []).map(function (c) {
+        var items = _applyViewFilters(c.items);
+        if (!items.length) return null;
+        return {
+          centerKey: c.centerKey,
+          centerName: c.centerName,
+          items: items,
+          overdueCount: items.filter(function (it) { return it.urgency === 'overdue'; }).length,
+        };
+      }).filter(Boolean);
+      if (!filteredCenters.length) return;
+      var exOverdue = filteredCenters.reduce(function (s, c) { return s + c.overdueCount; }, 0);
+      var exTotal = filteredCenters.reduce(function (s, c) { return s + c.items.length; }, 0);
+      html += '<div class="cb-tree-node' + (exOverdue ? ' cb-tree-hot' : '') + '">' +
         '<div class="cb-tree-row cb-tree-expert" onclick="_cbToggleNode(\'' + esc(ekey) + '\')">' +
-          '<span class="cb-tree-caret">' + (eopen ? '▼' : '◀') + '</span> 👤 <span class="cb-tree-label">' + esc(_userName(ex.username)) + '</span>' +
-          (ex.stats.overdue ? '<span class="cb-tree-badge cb-tree-badge-red">' + ex.stats.overdue + ' معوق</span>' : '') +
-          '<span class="cb-tree-badge">' + ex.stats.total + '</span></div>';
+          '<span class="cb-tree-caret">' + (eopen ? '▼' : '◀') + '</span> 👤 <span class="cb-tree-label">' +
+            esc(_userName(ex.username)) + (ex.isSelf ? ' <span class="cb-owner-tag">من</span>' : '') +
+          '</span>' +
+          (exOverdue ? '<span class="cb-tree-badge cb-tree-badge-red">' + exOverdue + ' معوق</span>' : '') +
+          '<span class="cb-tree-badge">' + exTotal + '</span></div>';
       if (eopen) {
-        (ex.centers || []).forEach(function (c) {
+        filteredCenters.forEach(function (c) {
           var ckey = ekey + ':c:' + (c.centerKey || '_none');
           var copen = _cbState.expanded[ckey] !== false;
           html += '<div class="cb-tree-node cb-tree-indent' + (c.overdueCount ? ' cb-tree-hot' : '') + '">' +
             '<div class="cb-tree-row" onclick="_cbToggleNode(\'' + esc(ckey) + '\')">' +
-              '<span class="cb-tree-caret">' + (copen ? '▼' : '◀') + '</span> 📍 <span class="cb-tree-label">' + esc(c.centerName) + '</span>' +
+              '<span class="cb-tree-caret">' + (copen ? '▼' : '◀') + '</span> 📍 <span class="cb-tree-label">' +
+                (c.centerKey && c.centerKey !== '_none' ? _centerNameLink(c.centerName, c.centerKey) : esc(c.centerName)) +
+              '</span>' +
               (c.overdueCount ? '<span class="cb-tree-badge cb-tree-badge-red">' + c.overdueCount + '</span>' : '') +
               '<span class="cb-tree-badge">' + c.items.length + '</span></div>';
           if (copen) {
             html += '<div class="cb-tree-children">';
-            c.items.forEach(function (item) { html += _renderMini(item, true); });
+            c.items.forEach(function (item) { html += _renderMini(item, true, true); });
             html += '</div>';
           }
           html += '</div>';
@@ -542,10 +772,20 @@
   }
 
   function _renderTree(data) {
-    if (_isMgr() && _cbState.treeMode === 'team') {
+    if (_isMgr() && (_cbState.treeMode === 'team' || _cbState.scope === 'all') && _cbState.treeTeamData) {
       return _renderTreeTeam(_cbState.treeTeamData);
     }
     return _renderTreeCenter(data);
+  }
+
+  function _isScheduledCartableItem(item) {
+    return item && (item.type === 'followup' || item.type === 'week' || item.type === 'task');
+  }
+
+  function _calendarTypesParam() {
+    if (_cbState.types.length) return _cbState.types.join(',');
+    if (_cbState.view === 'calendar') return 'followup,week,task';
+    return '';
   }
 
   function _renderCalendar(data) {
@@ -554,23 +794,59 @@
     var today = _today();
     var byDay = {};
     days.forEach(function (d) { byDay[d] = []; });
-    var backlog = [];
+    var overdueBacklog = [];
+    var farFuture = [];
+    var alerts = [];
+
     items.forEach(function (item) {
-      if (item.urgency === 'overdue' || !item.dueAt) backlog.push(item);
-      else if (byDay[item.dueAt]) byDay[item.dueAt].push(item);
-      else if (_cmpJ(item.dueAt, days[6]) > 0) backlog.push(item);
+      if (item.type === 'notification' || item.type === 'support' || item.type === 'letter') {
+        alerts.push(item);
+        return;
+      }
+      var due = _normJ(item.dueAt);
+      if (!due) {
+        if (_isScheduledCartableItem(item)) overdueBacklog.push(item);
+        else alerts.push(item);
+        return;
+      }
+      if (_cmpJ(due, today) < 0) {
+        overdueBacklog.push(item);
+        return;
+      }
+      if (byDay[due]) {
+        byDay[due].push(item);
+      } else if (_cmpJ(due, days[6]) > 0) {
+        farFuture.push(item);
+      } else {
+        overdueBacklog.push(item);
+      }
     });
+
     var html = '<div class="cb-cal-wrap"><div class="cb-cal-backlog" ondragover="_cbDragOver(event)">' +
-      '<div class="cb-cal-backlog-hdr">🔴 انباشت معوق <span>' + backlog.length + '</span></div>' +
+      '<div class="cb-cal-backlog-hdr">🔴 معوق <span>' + overdueBacklog.length + '</span></div>' +
       '<div class="cb-cal-backlog-list">';
-    backlog.forEach(function (item) { html += _renderMini(item, true); });
-    html += '</div><p class="cb-cal-hint">بکشید روی روز مقصد</p></div><div class="cb-cal-grid">';
+    overdueBacklog.forEach(function (item) { html += _renderMini(item, true, true); });
+    html += '</div>';
+    if (farFuture.length) {
+      html += '<div class="cb-cal-future-hdr">📅 بعد از این هفته <span>' + farFuture.length + '</span></div>' +
+        '<div class="cb-cal-backlog-list">';
+      farFuture.forEach(function (item) { html += _renderMini(item, true, true); });
+      html += '</div>';
+    }
+    if (alerts.length) {
+      html += '<div class="cb-cal-alerts-hdr">🔔 اعلان <span>' + alerts.length + '</span></div>' +
+        '<div class="cb-cal-backlog-list">';
+      alerts.forEach(function (item) { html += _renderMini(item, false, false); });
+      html += '</div>';
+    }
+    html += '<p class="cb-cal-hint">کشیدن روی روز = تغییر تاریخ پیگیری / برنامه هفته · 🕐 = فقط به‌تعویق نمایش در کارتابل</p></div><div class="cb-cal-grid">';
     days.forEach(function (d, i) {
       var labels = ['امروز', 'فردا', '+۲', '+۳', '+۴', '+۵', '+۶'];
-      html += '<div class="cb-cal-col' + (d === today ? ' cb-cal-today' : '') + '" ondragover="_cbDragOver(event)" ondrop="_cbCalDrop(event,\'' + esc(d) + '\')">' +
-        '<div class="cb-cal-day-hdr"><span>' + labels[i] + '</span><code>' + esc(d) + '</code></div>' +
+      var n = (byDay[d] || []).length;
+      html += '<div class="cb-cal-col' + (d === today ? ' cb-cal-today' : '') + '" ondragover="_cbDragOver(event)" ondrop="_cbCalReschedule(event,\'' + esc(d) + '\')">' +
+        '<div class="cb-cal-day-hdr"><span>' + labels[i] + (n ? ' · ' + n : '') + '</span><code>' + esc(d) + '</code></div>' +
         '<div class="cb-cal-day-body">';
-      (byDay[d] || []).forEach(function (item) { html += _renderMini(item, true); });
+      (byDay[d] || []).forEach(function (item) { html += _renderMini(item, true, true); });
       html += '</div></div>';
     });
     html += '</div></div>';
@@ -601,8 +877,21 @@
       cols[k].items.forEach(function (item) { html += _renderMini(item, true); });
       html += '</div></div>';
     });
-    html += '</div><p class="cb-cal-hint">کارت را بین ستون‌ها بکشید = به‌تعویق (snooze)</p>';
+    html += '</div><p class="cb-cal-hint">کانبان: کشیدن بین ستون‌ها = به‌تعویق نمایش (تاریخ مرکز عوض نمی‌شود)</p>';
     return html;
+  }
+
+  function _renderWarnings(data) {
+    var list = (data && data.warnings) || [];
+    if (!list.length) return '';
+    return list.map(function (w) {
+      return '<div class="cb-warn-banner">⚠️ ' + esc(w.message || w.code || '') + '</div>';
+    }).join('');
+  }
+
+  function _updateWarnings(data) {
+    var el = document.getElementById('cbPartialBanner');
+    if (el) el.innerHTML = _renderWarnings(data);
   }
 
   function _heatClass(n) {
@@ -640,6 +929,21 @@
   function _renderStats(data) {
     if (!data || !data.counts) return '';
     var c = data.counts;
+    var items = (data.items || []);
+    if (_cbState.view === 'calendar') {
+      var today = _today();
+      var calOverdue = 0;
+      var calToday = 0;
+      var calUpcoming = 0;
+      items.forEach(function (item) {
+        if (!_isScheduledCartableItem(item)) return;
+        var due = _normJ(item.dueAt);
+        if (!due || _cmpJ(due, today) < 0) calOverdue++;
+        else if (due === today) calToday++;
+        else calUpcoming++;
+      });
+      c = { overdue: calOverdue, today: calToday, approval: c.approval || 0 };
+    }
     var total = data.total != null ? data.total : c.all;
     return '<div class="cb-stats">' +
       '<div class="cb-stat"><span class="cb-stat-n">' + total + '</span><span class="cb-stat-l">کل</span></div>' +
@@ -676,8 +980,28 @@
     if (pagerEl && _cbState.data) pagerEl.innerHTML = _renderPager(_cbState.data);
   }
 
+  window._cbRefreshInboxLive = function () {
+    if (!document.getElementById('cbListArea')) return Promise.resolve();
+    window._cbInboxDirty = false;
+    var promises = [_fetchInbox()];
+    if (_cbState.view === 'tree' && _isMgr() && (_cbState.treeMode === 'team' || _cbState.scope === 'all')) {
+      promises.push(_fetchJson('/api/inbox/tree-team'));
+    }
+    return Promise.all(promises).then(function (results) {
+      var data = results[0];
+      _cbState.data = data;
+      _indexItems(data.items || []);
+      if (results[1]) _cbState.treeTeamData = results[1];
+      var statsEl = document.getElementById('cbStatsArea');
+      if (statsEl) statsEl.innerHTML = _renderStats(data);
+      _updateWarnings(data);
+      _refreshViewOnly();
+      if (typeof updateHomeInboxBadge === 'function') updateHomeInboxBadge();
+    }).catch(function () {});
+  };
+
   function _fetchJson(url) {
-    return fetch(url).then(function (r) {
+    return fetch(url, { credentials: 'same-origin' }).then(function (r) {
       var ct = (r.headers.get('content-type') || '').toLowerCase();
       if (!ct.includes('application/json')) {
         return r.text().then(function (body) {
@@ -695,18 +1019,33 @@
     }).catch(function () { cb(); });
   }
 
+  function _inboxApiFilter() {
+    return _cbState.filter || 'all';
+  }
+
+  function _inboxApiLimit() {
+    if (_cbState.view === 'list') return _cbState.limit;
+    if (_cbState.scope === 'all') return 1500;
+    return 500;
+  }
+
   function _fetchInbox() {
-    var limit = _cbState.view === 'list' ? _cbState.limit : 500;
+    var limit = _inboxApiLimit();
     var qs = '?scope=' + encodeURIComponent(_cbState.scope) +
-      '&filter=' + encodeURIComponent(_cbState.filter) +
+      '&filter=' + encodeURIComponent(_inboxApiFilter()) +
       '&limit=' + limit + '&offset=' + (_cbState.view === 'list' ? _cbState.offset : 0);
     if (_cbState.search) qs += '&search=' + encodeURIComponent(_cbState.search);
-    if (_cbState.types.length) qs += '&types=' + encodeURIComponent(_cbState.types.join(','));
+    var calTypes = _calendarTypesParam();
+    if (calTypes) qs += '&types=' + encodeURIComponent(calTypes);
+    else if (_cbState.types.length) qs += '&types=' + encodeURIComponent(_cbState.types.join(','));
     if (_cbState.scope === 'team' && _cbState.owner) qs += '&owner=' + encodeURIComponent(_cbState.owner);
+    if (_cbState.view === 'calendar' || _cbState.view === 'list') qs += '&weekAhead=7';
+    if (_cbState.view === 'calendar') qs += '&calendar=1';
     return _fetchJson('/api/inbox' + qs);
   }
 
   function _loadData() {
+    window._cbInboxDirty = false;
     var listEl = document.getElementById('cbListArea');
     if (listEl) listEl.innerHTML = '<div class="cb-loading">در حال بارگذاری...</div>';
 
@@ -728,7 +1067,7 @@
     }
 
     var promises = [_fetchInbox()];
-    if (_cbState.view === 'tree' && _isMgr() && _cbState.treeMode === 'team') {
+    if (_cbState.view === 'tree' && _isMgr() && (_cbState.treeMode === 'team' || _cbState.scope === 'all')) {
       promises.push(_fetchJson('/api/inbox/tree-team'));
     }
 
@@ -741,13 +1080,16 @@
       var statsEl = document.getElementById('cbStatsArea');
       var pagerEl = document.getElementById('cbPagerArea');
       if (statsEl) statsEl.innerHTML = _renderStats(data);
+      _updateWarnings(data);
       _renderMain();
       if (pagerEl) pagerEl.innerHTML = _renderPager(data);
 
       var panel = document.getElementById('homePanel');
       var sub = panel && panel.querySelector('.cb-sub');
-      if (sub && data.scope === 'team' && data.targetUser) {
-        sub.textContent = 'نمایش: ' + _userName(data.targetUser) + ' · ' + _today();
+      if (sub) {
+        if (data.scope === 'all') sub.textContent = 'نمایش: من + همه کارشناس‌ها · ' + _today();
+        else if (data.scope === 'team' && data.targetUser) sub.textContent = 'نمایش: ' + _userName(data.targetUser) + ' · ' + _today();
+        else sub.textContent = _userName(currentUser) + ' · ' + _today();
       }
       if (typeof updateHomeInboxBadge === 'function') updateHomeInboxBadge();
     });
@@ -757,7 +1099,10 @@
     var panel = document.getElementById('homePanel');
     if (!panel) return;
 
-    if (scope === 'mine' || scope === 'team') _cbState.scope = scope;
+    if (scope === 'mine' || scope === 'team' || scope === 'all') {
+      _cbState.scope = scope;
+      localStorage.setItem('cb_scope', scope);
+    }
     if (!_isMgr()) { _cbState.scope = 'mine'; if (_cbState.view === 'matrix') _cbState.view = 'tree'; }
 
     _loadSubordinates(function () {
@@ -795,4 +1140,8 @@
     }).catch(function () {});
   }
   window.updateHomeInboxBadge = updateHomeInboxBadge;
+
+  if (window._cbInboxDirty && document.getElementById('cbListArea') && typeof window._scheduleInboxRefresh === 'function') {
+    window._scheduleInboxRefresh();
+  }
 })();

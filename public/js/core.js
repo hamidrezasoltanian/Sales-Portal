@@ -141,6 +141,36 @@ function initSSE() {
         if (data.msg && typeof _firePushNotif === 'function') _firePushNotif('\uD83D\uDD14 اعلان جدید', data.msg, 'notif-' + Date.now());
       } else if (data.type === 'week-entry-changed') {
         if (typeof _wpOnWeekEntryChanged === 'function') _wpOnWeekEntryChanged(data);
+      } else if (data.type === 'calendar-changed') {
+        reloadEventsFromApi().then(function () {
+          if (currentTab === 'calendar' && typeof renderCalendar === 'function') renderCalendar();
+        });
+      } else if (data.type === 'checklist-changed') {
+        if (data.date && data.username) {
+          reloadChecklistEntryFromApi(data.date, data.username).then(function () {
+            if (currentTab === 'checklist' && typeof renderChecklist === 'function') renderChecklist();
+          });
+        }
+      } else if (data.type === 'activity-log-changed') {
+        reloadActivityLogsFromApi().then(function () {
+          if (currentTab === 'kpi' && typeof renderKPIPanel === 'function') renderKPIPanel();
+          if (currentTab === 'activity' && typeof renderActivityPanel === 'function') renderActivityPanel();
+        });
+      } else if (data.type === 'center-changed') {
+        if (data.centerKey) {
+          if ((data.field === 'notes' || data.field === 'interaction') && typeof ensureCenterNotesLoaded === 'function') {
+            var ref = typeof parseCenterRef === 'function' ? parseCenterRef(null, data.centerKey) : { rtype: 'center', rid: '' };
+            ensureCenterNotesLoaded(data.centerKey, ref.rtype, ref.rid);
+          }
+          if (data.field !== 'notes' && typeof reloadCenterEditFromApi === 'function') {
+            reloadCenterEditFromApi(data.centerKey);
+          }
+          if ((data.field === 'followupDate' || data.field === 'status' || data.field === 'interaction') && typeof _scheduleInboxRefresh === 'function') {
+            _scheduleInboxRefresh();
+          }
+        }
+      } else if (data.type === 'inbox-changed') {
+        if (typeof _scheduleInboxRefresh === 'function') _scheduleInboxRefresh();
       } else if (data.type === 'letter-changed') {
         if (typeof window._lettersOnSSE === 'function') window._lettersOnSSE(data);
       } else if (data.type === 'trade-case-changed') {
@@ -269,8 +299,11 @@ function cleanupOrphanedEntries(showReport){
     removedFU++;
   });
   if(removedFU&&Object.keys(patchEdits).length){
-    if(typeof savePatchDB==='function') savePatchDB({edits:patchEdits});
-    else saveDB();
+    Object.keys(patchEdits).forEach(function(k){
+      if(typeof patchCenterField==='function'){
+        patchCenterField(k,'followupDate','',{centerName:''}).catch(function(){});
+      }
+    });
   }
   if(showReport){
     if(removedWP||removedFU){
@@ -333,6 +366,18 @@ function _invalidateEditsCache(){_editsKeysCache=null;}
 var _wpRenderTimer=null;
 function _debouncedRenderWeekPlan(){clearTimeout(_wpRenderTimer);_wpRenderTimer=setTimeout(renderWeekPlan,80);}
 var _sseClientId=Math.random().toString(36).slice(2)+Date.now().toString(36); // unique per tab, used to exclude own SSE events
+window._cbInboxDirty=false;
+var _cbInboxRefreshTimer=null;
+window._scheduleInboxRefresh=function(){
+  window._cbInboxDirty=true;
+  clearTimeout(_cbInboxRefreshTimer);
+  _cbInboxRefreshTimer=setTimeout(function(){
+    if(typeof window._cbRefreshInboxLive==='function'){
+      window._cbInboxDirty=false;
+      window._cbRefreshInboxLive();
+    }
+  },120);
+};
 
 async function loadDB(){
   var _spinner=document.getElementById('loadingSpinner');
@@ -367,7 +412,8 @@ async function loadDB(){
         
         // Trigger a save to sync these merged changes back to the server
         setTimeout(function() {
-          saveDB();
+          if(typeof saveDBFull==='function')saveDBFull();
+          else saveDBSync(true);
           showToast('🔄 تغییرات ذخیره نشده محلی بازیابی و همگام‌سازی شدند', 4000);
         }, 1000);
       } catch(err) {
@@ -389,11 +435,20 @@ async function loadDB(){
         _migrated=true;
       }
     });
-    if(_migrated){saveDB();console.log('[migration] legacy contacts migrated');}
+    if(_migrated){
+      Object.keys(DB.edits||{}).forEach(function(k){
+        var e=DB.edits[k];
+        if(e.contacts&&e.contacts.length&&typeof patchCenterField==='function'){
+          patchCenterField(k,'contacts',e.contacts,{centerName:''}).catch(function(){});
+        }
+      });
+      console.log('[migration] legacy contacts migrated');
+    }
     _serverSynced=true;_invalidateEditsCache();
     await loadWeekEntriesFromSQL();
     _lastSyncedDB = JSON.parse(JSON.stringify(DB));
-    _loadKpiFromSql();
+    await _loadKpiFromSql();
+    await reloadActivityLogsFromApi();
 
     if (isSynced !== 'false') {
       _clearLocalBackup();
@@ -551,6 +606,156 @@ function saveGlobalTagsApi(tags) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(tags),
   }).catch(function (e) { console.warn('[saveGlobalTagsApi]', e.message); });
+}
+
+function saveCenterTagsApi(centerKey, tagIds) {
+  return fetch('/api/tags/centers/' + encodeURIComponent(centerKey), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tagIds: tagIds || [] }),
+  }).catch(function (e) { console.warn('[saveCenterTagsApi]', e.message); });
+}
+
+function postActivityLog(type, entry) {
+  return fetch('/api/activity-log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type: type, entry: entry }),
+  }).then(function (r) {
+    return r.ok ? r.json() : r.json().then(function (j) { return Promise.reject(j); });
+  }).catch(function (e) {
+    console.warn('[postActivityLog]', type, e.message || e.error);
+    throw e;
+  });
+}
+
+function deleteActivityLog(type, id) {
+  return fetch('/api/activity-log/' + encodeURIComponent(type) + '/' + encodeURIComponent(id), {
+    method: 'DELETE',
+  }).then(function (r) { return r.ok; }).catch(function () { return false; });
+}
+
+function postMissionLog(entry) {
+  return fetch('/api/mission-log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(entry),
+  }).catch(function (e) { console.warn('[postMissionLog]', e.message); });
+}
+
+function deleteMissionLog(userId, month) {
+  return fetch('/api/mission-log?userId=' + encodeURIComponent(userId) + '&month=' + encodeURIComponent(month), {
+    method: 'DELETE',
+  }).catch(function (e) { console.warn('[deleteMissionLog]', e.message); });
+}
+
+function postKpiSnapshot(snap) {
+  return fetch('/api/kpi-data/history', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(snap),
+  }).catch(function (e) { console.warn('[postKpiSnapshot]', e.message); });
+}
+
+function postProvHistory(h) {
+  return fetch('/api/prov-history', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(h),
+  }).catch(function (e) { console.warn('[postProvHistory]', e.message); });
+}
+
+function saveCalendarEventApi(ev) {
+  return fetch('/api/calendar-events', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(ev),
+  }).then(function (r) {
+    return r.ok ? r.json() : r.json().then(function (j) { return Promise.reject(j); });
+  }).catch(function (e) {
+    console.warn('[saveCalendarEventApi]', e.message || e.error);
+    throw e;
+  });
+}
+
+function deleteCalendarEventApi(id) {
+  return fetch('/api/calendar-events/' + encodeURIComponent(id), { method: 'DELETE' })
+    .then(function (r) { return r.ok || r.status === 404; })
+    .catch(function () { return false; });
+}
+
+function saveChecklistApi(date, username, data) {
+  return fetch('/api/checklist', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      date: date,
+      username: username,
+      items: (data && data.items) || [],
+      note: (data && data.note) || '',
+    }),
+  }).then(function (r) {
+    return r.ok ? r.json() : r.json().then(function (j) { return Promise.reject(j); });
+  }).catch(function (e) {
+    console.warn('[saveChecklistApi]', e.message || e.error);
+    throw e;
+  });
+}
+
+function reloadEventsFromApi() {
+  return fetch('/api/data/collections/events')
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (rows) {
+      if (Array.isArray(rows)) DB.events = rows;
+    })
+    .catch(function () {});
+}
+
+function reloadChecklistEntryFromApi(date, username) {
+  return fetch('/api/data/collections/checklist/' + encodeURIComponent(date) + '/' + encodeURIComponent(username))
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (row) {
+      if (!row) return;
+      if (!DB.checklist) DB.checklist = {};
+      DB.checklist[date + '_' + username] = { items: row.items || [], note: row.note || '' };
+    })
+    .catch(function () {});
+}
+
+function postKpiUserTargetApi(username, month, targets) {
+  targets = targets || {};
+  return fetch('/api/kpi-data/user-target', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: username,
+      month: month,
+      callsPerDay: targets.callsPerDay || 10,
+      visitsPerWeek: targets.visitsPerWeek || 5,
+      salesCount: targets.salesCount || 5,
+      salesAmount: targets.salesAmount || 0,
+      cashPct: targets.cashPct || 50,
+    }),
+  }).catch(function (e) { console.warn('[postKpiUserTargetApi]', e.message); });
+}
+
+function postKpiProvinceTargetApi(provinceId, targets) {
+  targets = targets || {};
+  return fetch('/api/kpi-data/province-target', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      provinceId: provinceId,
+      calls: targets.calls || 0,
+      visits: targets.visits || 0,
+      sales: targets.contracts || targets.sales || 0,
+      extra: targets.extra || 0,
+    }),
+  }).catch(function (e) { console.warn('[postKpiProvinceTargetApi]', e.message); });
+}
+
+function postKpiWeightsApi(weights) {
+  return patchCrmSetting('kpi_weights', weights);
 }
 
 function saveCenterExtraApi(c) {
@@ -838,29 +1043,125 @@ window.wpBulkDeleteEntries = wpBulkDeleteEntries;
 window.wpTransferWeekEntry = wpTransferWeekEntry;
 window.wpMatchRecKey = wpMatchRecKey;
 window.wpFindActiveEntryKey = wpFindActiveEntryKey;
+window.saveGlobalTagsApi = saveGlobalTagsApi;
+window.saveCenterTagsApi = saveCenterTagsApi;
+window.postActivityLog = postActivityLog;
+window._postActivityLog = postActivityLog;
+window.deleteActivityLog = deleteActivityLog;
+window.postMissionLog = postMissionLog;
+window.deleteMissionLog = deleteMissionLog;
+window.postKpiSnapshot = postKpiSnapshot;
+window.postProvHistory = postProvHistory;
+window.saveCalendarEventApi = saveCalendarEventApi;
+window.deleteCalendarEventApi = deleteCalendarEventApi;
+window.saveChecklistApi = saveChecklistApi;
+window.reloadEventsFromApi = reloadEventsFromApi;
+window.reloadChecklistEntryFromApi = reloadChecklistEntryFromApi;
+window.reloadActivityLogsFromApi = reloadActivityLogsFromApi;
+window.reloadCenterEditFromApi = reloadCenterEditFromApi;
+window.reloadCenterNotesFromApi = reloadCenterNotesFromApi;
+window.ensureCenterNotesLoaded = ensureCenterNotesLoaded;
+window.postKpiUserTargetApi = postKpiUserTargetApi;
+window.postKpiProvinceTargetApi = postKpiProvinceTargetApi;
+window.postKpiWeightsApi = postKpiWeightsApi;
+window.saveDBFull = saveDBFull;
+window._cleanCenterData = _cleanCenterData;
 
 function _cleanCenterData(rtype, id) {
   var recKey = rtype + '_' + id;
+  var dels = [];
   Object.keys(DB.weekEntries || {}).forEach(function (k) {
     var we = DB.weekEntries[k];
-    if (we.recKey === recKey || (we.rtype === rtype && we.rid === id)) _weRemove(k);
+    if (!we) return;
+    if (we.recKey !== recKey && !(we.rtype === rtype && String(we.rid) === String(id))) return;
+    dels.push(deleteWeekEntryApi(we, k).finally(function () { _weRemove(k); }));
   });
-  if (DB.edits[recKey]) delete DB.edits[recKey].followupDate;
-  saveDB();
+  Promise.all(dels).finally(function () {
+    setE(rtype, id, 'followupDate', '');
+  });
+}
+
+function reloadActivityLogsFromApi() {
+  var types = ['call', 'visit', 'sales'];
+  return Promise.all(types.map(function (t) {
+    return fetch('/api/activity-log?type=' + t + '&limit=500')
+      .then(function (r) { return r.ok ? r.json() : { entries: [] }; })
+      .then(function (body) {
+        var key = t === 'call' ? 'callLog' : t === 'visit' ? 'visitLog' : 'salesLog';
+        DB[key] = (body.entries || []).filter(function (e) { return e._type === t || !e._type; });
+      });
+  })).catch(function () {});
+}
+
+function reloadCenterEditFromApi(centerKey) {
+  return fetch('/api/centers/' + encodeURIComponent(centerKey))
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (body) {
+      if (!body || !body.data) return;
+      if (!DB.edits) DB.edits = {};
+      DB.edits[centerKey] = Object.assign({}, DB.edits[centerKey] || {}, body.data);
+      if (currentTab === 'provinces' && typeof renderTable === 'function') renderTable();
+      if (currentTab === 'weekplan' && typeof renderWeekPlan === 'function') renderWeekPlan();
+    }).catch(function () {});
+}
+
+function reloadCenterNotesFromApi(centerKey) {
+  return fetch('/api/centers/' + encodeURIComponent(centerKey) + '/notes', {
+    credentials: 'same-origin',
+  })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (body) {
+      if (!body || !Array.isArray(body.notes)) return;
+      if (!DB.notes) DB.notes = {};
+      DB.notes[centerKey] = body.notes;
+      return body.notes;
+    }).catch(function () {});
+}
+
+/** یادداشت‌های مرکز را از SQL می‌خواند و در صورت باز بودن پروفایل، لیست را رفرش می‌کند */
+function ensureCenterNotesLoaded(centerKey, rtype, id) {
+  var ck = centerKey || (typeof recK === 'function' ? recK(rtype, id) : (rtype + '_' + id));
+  var domId = id != null ? String(id) : (typeof parseCenterRef === 'function' ? parseCenterRef(null, ck).rid : '');
+  var rt = rtype || (typeof parseCenterRef === 'function' ? parseCenterRef(null, ck).rtype : 'center');
+  var refresh = function () {
+    if (typeof refreshCenterProfileNotes === 'function') {
+      refreshCenterProfileNotes(rt, domId, ck);
+    }
+  };
+  return reloadCenterNotesFromApi(ck).then(refresh).catch(refresh);
 }
 
 function patchCenterField(centerKey, field, val, opts) {
   opts = opts || {};
   return fetch('/api/centers/' + encodeURIComponent(centerKey), {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-Cid': _sseClientId },
     body: JSON.stringify({
       field: field,
       val: val,
       centerName: opts.centerName || '',
       oldValue: opts.oldValue,
+      expectedTs: opts.expectedTs != null ? opts.expectedTs : undefined,
     }),
-  }).then(function (r) { return r.ok ? r.json() : r.json().then(function (j) { return Promise.reject(j); }); })
+  }).then(function (r) {
+    if (r.status === 409) {
+      return r.json().then(function (j) {
+        showToast('⚠ ' + (j.error || 'تداخل ویرایش مرکز — لطفاً رفرش کنید'));
+        return reloadCenterEditFromApi(centerKey);
+      });
+    }
+    return r.ok ? r.json() : r.json().then(function (j) { return Promise.reject(j); });
+  })
+    .then(function (j) {
+      if (j && j.inboxWarning && typeof showToast === 'function') {
+        showToast('⚠ ' + j.inboxWarning, 5000);
+      }
+      if ((field === 'followupDate' || field === 'status') && typeof _scheduleInboxRefresh === 'function') {
+        _scheduleInboxRefresh();
+      }
+      return j;
+    })
     .catch(function (e) {
       console.warn('[patchCenterField]', centerKey, field, e.message || e.error);
       throw e;
@@ -870,6 +1171,7 @@ function patchCenterField(centerKey, field, val, opts) {
 function postCenterNote(centerKey, text, extra) {
   return fetch('/api/centers/' + encodeURIComponent(centerKey) + '/notes', {
     method: 'POST',
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(Object.assign({ text: text, date: todayStr() }, extra || {})),
   }).then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('note save failed')); });
@@ -892,15 +1194,13 @@ function _buildSavePayload(fullSync){
   if(DB.settings&&Object.keys(DB.settings).length)slim.settings=DB.settings;
   if(DB.kpiTargets)slim.kpiTargets=DB.kpiTargets;
   if(DB.provOverrides)slim.provOverrides=DB.provOverrides;
-  if(DB.events&&DB.events.length)slim.events=DB.events;
-  if(DB.checklist&&Object.keys(DB.checklist).length)slim.checklist=DB.checklist;
+  // events + checklist: SQL-only via /api/calendar-events and /api/checklist
   if(DB.salesLog&&DB.salesLog.length)slim.salesLog=DB.salesLog;
   if(DB.callLog&&DB.callLog.length)slim.callLog=DB.callLog;
   if(DB.visitLog&&DB.visitLog.length)slim.visitLog=DB.visitLog;
   if(DB.missionLog&&DB.missionLog.length)slim.missionLog=DB.missionLog;
   if(DB.provHistory&&DB.provHistory.length)slim.provHistory=DB.provHistory;
-  if(DB.kpiHistory&&Object.keys(DB.kpiHistory).length)slim.kpiHistory=DB.kpiHistory;
-  if(DB.extra&&DB.extra.length)slim.extra=DB.extra;
+  if(DB.kpiHistory&&DB.kpiHistory.length)slim.kpiHistory=DB.kpiHistory;
   if(DB._mtr)slim._mtr=DB._mtr;
   return slim;
 }
@@ -1014,6 +1314,9 @@ function saveDBSync(fullSync){
   _backupLocalDB();
   clearTimeout(_saveDebounceTimer);
   return _saveDBNow(!!fullSync);
+}
+function saveDBFull(){
+  return saveDBSync(true);
 }
 
 function mergeDatabaseDiff(local, server, lastSynced) {

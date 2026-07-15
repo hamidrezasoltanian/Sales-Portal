@@ -17,7 +17,7 @@ router.get('/:centerKey/timeline', requirePermission('provinces', 'view'), requi
     const to = req.query.to || '1410/12/29';
     const events = [];
 
-    const [notesR, clR, weR, pfR, salesR] = await Promise.all([
+    const [notesR, clR, weR, pfR, salesR, intR] = await Promise.all([
       query('SELECT notes, updated_at FROM center_notes WHERE center_key = $1', [ck]).catch(function () { return { rows: [] }; }),
       query(
         `SELECT at, "by", field, val, rkey FROM change_log
@@ -42,13 +42,44 @@ router.get('/:centerKey/timeline', requirePermission('provinces', 'view'), requi
          WHERE center_key = $1 AND date >= $2 AND date <= $3 ORDER BY date DESC`,
         [ck, from, to]
       ).catch(function () { return { rows: [] }; }),
+      query(
+        `SELECT id, username, occurred_date, action_type, mode, outcome, note, result_text,
+                followup_date, projections, created_at, corrects_interaction_id
+         FROM center_interactions
+         WHERE center_key = $1 AND occurred_date >= $2 AND occurred_date <= $3
+         ORDER BY created_at DESC LIMIT 100`,
+        [ck, from, to]
+      ).catch(function () { return { rows: [] }; }),
     ]);
+
+    var interactionNoteIds = {};
+
+    intR.rows.forEach(function (ix) {
+      var proj = ix.projections || {};
+      if (proj.noteIndex != null) interactionNoteIds[String(proj.noteIndex)] = true;
+      events.push({
+        type: 'interaction',
+        source: 'canonical',
+        at: ix.occurred_date,
+        by: ix.username,
+        actionType: ix.action_type,
+        mode: ix.mode,
+        outcome: ix.outcome,
+        note: ix.note || ix.result_text || '',
+        interactionId: ix.id,
+        correctsInteractionId: ix.corrects_interaction_id,
+        sortKey: ix.occurred_date + 'T' + (ix.created_at ? new Date(ix.created_at).getTime() : 0),
+      });
+    });
 
     if (notesR.rows.length && notesR.rows[0].notes) {
       const notes = notesR.rows[0].notes;
       (Array.isArray(notes) ? notes : []).forEach(function (n, i) {
+        if (n.interactionId) return;
+        if (interactionNoteIds[String(i)]) return;
         events.push({
           type: 'note',
+          source: 'legacy',
           at: n.at || n.date || '',
           by: n.by || n.user || '',
           text: n.text || '',
@@ -72,6 +103,7 @@ router.get('/:centerKey/timeline', requirePermission('provinces', 'view'), requi
       var v = we.value || {};
       events.push({
         type: 'week_entry',
+        source: 'legacy',
         at: we.done_date || we.scheduled_date,
         by: we.added_by,
         scheduledDate: we.scheduled_date,

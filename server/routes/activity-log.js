@@ -87,6 +87,10 @@ router.post('/', requireAuth, async function (req, res) {
     }
 
     res.status(201).json({ ok: true, type, entry: rowToEntry(type, result.rows[0]) });
+    try {
+      const { broadcast } = require('./events');
+      if (broadcast) broadcast('activity-log-changed', { type, id: entry.id, by: user }, req.headers['x-cid'] || '');
+    } catch (_) {}
   } catch (e) {
     console.error('[activity-log POST]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
@@ -150,6 +154,10 @@ router.delete('/:type/:id', requireAuth, async function (req, res) {
     const result = await query('DELETE FROM ' + table + ' WHERE id = $1 RETURNING id', [id]);
     if (!result.rows.length) return res.status(404).json({ error: 'یافت نشد' });
     res.json({ ok: true, deleted: id });
+    try {
+      const { broadcast } = require('./events');
+      if (broadcast) broadcast('activity-log-changed', { type, id, by: req.user.username }, req.headers['x-cid'] || '');
+    } catch (_) {}
   } catch (e) {
     console.error('[activity-log DELETE]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });

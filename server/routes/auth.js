@@ -12,8 +12,10 @@ const behindHttpsProxy = process.env.BEHIND_HTTPS_PROXY === '1';
 
 const COOKIE_OPTIONS = {
   httpOnly: true,
-  sameSite: 'lax',
+  sameSite: behindHttpsProxy ? 'strict' : 'lax',
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
+  // CSRF: httpOnly prevents XSS token theft; SameSite blocks cross-site cookie on mutations.
+  // Prefer Authorization: Bearer for API clients that cannot use SameSite cookies.
 };
 if (behindHttpsProxy) {
   COOKIE_OPTIONS.secure = true;

@@ -3,6 +3,27 @@
 const { MANAGER_ROLES: MANAGER_ROLE_LIST, isManagerRole } = require('./roles');
 const MANAGER_ROLES = new Set(MANAGER_ROLE_LIST);
 
+/** Default-deny: only these top-level DB keys may be exposed to non-managers (then row-filtered). */
+const EXPERT_DB_GET_ALLOWLIST = new Set([
+  'edits', 'notes', 'rTags', 'tags', 'weekTags', 'weekEntries', 'events', 'checklist',
+  'extra', 'settings', 'callLog', 'visitLog', 'salesLog', 'changeLog', 'tasks', 'notifications',
+  '_serverTs',
+]);
+
+/** Default-deny: only these keys may be written by non-managers via PUT /api/data/db. */
+const EXPERT_DB_PUT_ALLOWLIST = new Set([
+  'edits', 'notes', 'rTags', 'weekEntries', 'events', 'checklist', 'callLog', 'visitLog', 'kpiTargets',
+]);
+
+function pickAllowlistedKeys(obj, allowSet) {
+  if (!obj || typeof obj !== 'object') return {};
+  const out = {};
+  allowSet.forEach(function (key) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) out[key] = obj[key];
+  });
+  return out;
+}
+
 function isExpertRole(role) {
   return role === 'کارشناس فروش';
 }
@@ -134,7 +155,8 @@ function filterArrayByCenterKey(arr, allowedKeys, keyField) {
 function filterDbForUser(db, user, ownerMaps) {
   if (!db || isManagerRole(user.role)) return db;
 
-  const edits = db.edits || {};
+  const base = pickAllowlistedKeys(db, EXPERT_DB_GET_ALLOWLIST);
+  const edits = base.edits || {};
   let allowed = new Set();
   Object.keys(edits).forEach(function (key) {
     if (userOwnsCenter(user.username, key, edits, ownerMaps)) allowed.add(key);
@@ -153,15 +175,15 @@ function filterDbForUser(db, user, ownerMaps) {
     allowed = applyProvinceRestriction(allowed, provAllow);
   }
 
-  const filtered = Object.assign({}, db);
+  const filtered = Object.assign({}, base);
   filtered.edits = filterObjectByCenterKeys(edits, allowed);
-  filtered.notes = filterObjectByCenterKeys(db.notes, allowed);
-  filtered.rTags = filterObjectByCenterKeys(db.rTags || db.tags, allowed);
+  filtered.notes = filterObjectByCenterKeys(base.notes, allowed);
+  filtered.rTags = filterObjectByCenterKeys(base.rTags || base.tags, allowed);
 
-  if (db.weekEntries) {
+  if (base.weekEntries) {
     const we = {};
-    Object.keys(db.weekEntries).forEach(function (k) {
-      const entry = db.weekEntries[k];
+    Object.keys(base.weekEntries).forEach(function (k) {
+      const entry = base.weekEntries[k];
       if (!entry) return;
       const recKey = entry.rtype && entry.rid != null
         ? entry.rtype + '_' + entry.rid
@@ -172,34 +194,57 @@ function filterDbForUser(db, user, ownerMaps) {
     filtered.weekEntries = we;
   }
 
-  if (db.changeLog) {
-    filtered.changeLog = db.changeLog.filter(function (cl) {
+  if (base.changeLog) {
+    filtered.changeLog = base.changeLog.filter(function (cl) {
       return !cl.rkey || allowed.has(cl.rkey);
     });
   }
 
-  if (db.salesLog) {
-    filtered.salesLog = db.salesLog.filter(function (s) {
+  if (base.salesLog) {
+    filtered.salesLog = base.salesLog.filter(function (s) {
       return !s.centerKey || allowed.has(s.centerKey);
     });
   }
 
-  if (db.tasks) {
-    filtered.tasks = (db.tasks || []).filter(function (t) {
+  if (base.tasks) {
+    filtered.tasks = (base.tasks || []).filter(function (t) {
       if (t.owner === user.username) return true;
       if (t.centerKey && allowed.has(t.centerKey)) return true;
       return false;
     });
   }
 
-  if (db.events) {
-    filtered.events = (db.events || []).filter(function (ev) {
+  if (base.events) {
+    filtered.events = (base.events || []).filter(function (ev) {
       return !ev.owner || ev.owner === user.username;
     });
   }
 
-  if (db.settings) {
-    filtered.settings = Object.assign({}, db.settings);
+  if (base.callLog) {
+    filtered.callLog = (base.callLog || []).filter(function (l) {
+      return !l.userId || l.userId === user.username;
+    });
+  }
+  if (base.visitLog) {
+    filtered.visitLog = (base.visitLog || []).filter(function (l) {
+      return !l.userId || l.userId === user.username;
+    });
+  }
+  if (base.checklist) {
+    const ck = {};
+    Object.keys(base.checklist || {}).forEach(function (k) {
+      if (k.endsWith('_' + user.username)) ck[k] = base.checklist[k];
+    });
+    filtered.checklist = ck;
+  }
+  if (base.notifications) {
+    filtered.notifications = (base.notifications || []).filter(function (n) {
+      return n.to === user.username;
+    });
+  }
+
+  if (base.settings) {
+    filtered.settings = Object.assign({}, base.settings);
     delete filtered.settings.anthropicKey;
     if (filtered.settings.members) {
       filtered.settings.members = filtered.settings.members.map(function (m) {
@@ -220,7 +265,12 @@ function filterPutBodyForUser(body, user, serverEdits, ownerMaps) {
   if (!body || isManagerRole(user.role)) return { body: body, rejected: [] };
 
   const rejected = [];
-  const out = Object.assign({}, body);
+  const picked = pickAllowlistedKeys(body, EXPERT_DB_PUT_ALLOWLIST);
+  const out = Object.assign({}, picked);
+
+  Object.keys(body).forEach(function (key) {
+    if (!EXPERT_DB_PUT_ALLOWLIST.has(key)) rejected.push('deny:' + key);
+  });
 
   function checkKeys(collection, label) {
     if (!collection || typeof collection !== 'object') return collection;

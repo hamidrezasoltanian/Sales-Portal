@@ -26,7 +26,7 @@ const ROLE_DEFAULTS = {
     modules: {
       provinces: 'edit', weekplan: 'edit', calendar: 'edit', checklist: 'edit',
       activity: 'edit', tasks: 'edit', mtr: 'edit', pricing: 'edit',
-      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'edit',
+      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'edit', payroll: 'manage',
       'trade-kpi': 'edit', kpi: 'edit', manager: 'edit', changelog: 'edit', wms: 'edit', letters: 'edit',
       workflows: 'edit'
     }
@@ -35,7 +35,7 @@ const ROLE_DEFAULTS = {
     modules: {
       provinces: 'edit', weekplan: 'edit', calendar: 'edit', checklist: 'edit',
       activity: 'edit', tasks: 'edit', mtr: 'edit', pricing: 'edit',
-      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'edit',
+      proforma: 'edit', support: 'edit', hcp: 'edit', hr: 'edit', payroll: 'edit',
       'trade-kpi': 'edit', kpi: 'edit', manager: 'edit', changelog: 'edit', wms: 'edit', letters: 'edit',
       workflows: 'edit'
     }
@@ -62,7 +62,7 @@ const ROLE_DEFAULTS = {
     modules: {
       provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
       activity: 'view', tasks: 'view', mtr: 'edit', pricing: 'edit',
-      proforma: 'edit', support: 'none', hcp: 'none', hr: 'none',
+      proforma: 'edit', support: 'none', hcp: 'none', hr: 'none', payroll: 'approve',
       'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'view', letters: 'edit',
       workflows: 'view'
     }
@@ -78,11 +78,11 @@ const ROLE_DEFAULTS = {
   },
   'مهمان': {
     modules: {
-      provinces: 'view', weekplan: 'view', calendar: 'view', checklist: 'view',
-      activity: 'view', tasks: 'view', mtr: 'none', pricing: 'none',
+      provinces: 'none', weekplan: 'none', calendar: 'none', checklist: 'none',
+      activity: 'none', tasks: 'none', mtr: 'none', pricing: 'none',
       proforma: 'none', support: 'none', hcp: 'none', hr: 'none',
-      'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none', wms: 'none', letters: 'none',
-      workflows: 'none'
+      payroll: 'none', 'trade-kpi': 'none', kpi: 'none', manager: 'none', changelog: 'none',
+      wms: 'none', letters: 'none', workflows: 'none'
     }
   }
 };

@@ -56,12 +56,15 @@ if (helmet) {
   }));
 }
 if (compression) {
+  function isSseRequest(req) {
+    const url = req.originalUrl || req.url || '';
+    if (url.indexOf('/api/events/stream') !== -1) return true;
+    const accept = req.headers.accept || '';
+    return accept.indexOf('text/event-stream') !== -1;
+  }
   app.use(compression({
     filter: function (req, res) {
-      if (req.path === '/api/events/stream' || (req.originalUrl || '').indexOf('/api/events/stream') === 0
-        || (req.headers.accept || '').indexOf('text/event-stream') !== -1) {
-        return false;
-      }
+      if (isSseRequest(req)) return false;
       return compression.filter(req, res);
     },
   }));

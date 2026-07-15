@@ -37,7 +37,7 @@ npm test
 
 echo "[deploy] pm2 reload..."
 if command -v pm2 >/dev/null 2>&1; then
-  pm2 reload sales-portal || pm2 restart sales-portal
+  pm2 reload click-crm 2>/dev/null || pm2 reload sales-portal 2>/dev/null || pm2 restart click-crm || pm2 restart sales-portal
 else
   echo "[deploy] pm2 not found — start manually: node server/index.js"
 fi

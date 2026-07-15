@@ -6,36 +6,21 @@ const crypto = require('crypto');
 const { query } = require('../db');
 const { requireAuth, requireManager, invalidateAuthCache } = require('../auth');
 const { isManagerRole, isValidRole, normalizeRole } = require('../lib/roles');
+const { serializeUser } = require('../lib/user-serializer');
+const { validatePermissions } = require('../lib/permissions-schema');
+const { detectDirectManagerCycle } = require('../lib/direct-manager');
 
 const router = express.Router();
 
-function mapUserRow(row, isAdmin) {
-  const base = {
-    username: row.username,
-    display_name: row.display_name,
-    role: normalizeRole(row.role),
-    color: row.color,
-    phone: row.phone || '',
-    active: row.active,
-  };
-  if (!isAdmin) return base;
-  return Object.assign(base, {
-    department: row.department || '',
-    direct_manager: row.direct_manager || '',
-    permissions: row.permissions || {},
-    commission_pct: row.commission_pct,
-    salary_amount: row.salary_amount,
-  });
-}
-
-// GET /api/users — managers: full list; others: public fields only (no salary/permissions)
+// GET /api/users — field-level serializer; sensitive columns only for authorized requesters
 router.get('/', requireAuth, async (req, res) => {
   try {
-    const isAdmin = isManagerRole(req.user.role);
     const result = await query(
       'SELECT username, display_name, role, color, phone, active, department, direct_manager, permissions, commission_pct, salary_amount FROM app_users ORDER BY created_at'
     );
-    return res.json(result.rows.map(function (row) { return mapUserRow(row, isAdmin); }));
+    return res.json(result.rows.map(function (row) {
+      return serializeUser(row, req.user);
+    }));
   } catch (e) {
     console.error('[users GET /]', e.message);
     return res.status(500).json({ error: 'خطای سرور' });
@@ -108,6 +93,16 @@ router.put('/:username', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'نقش نامعتبر است' });
   }
 
+  if (permissions !== undefined && isAdmin) {
+    const pv = validatePermissions(permissions);
+    if (!pv.ok) return res.status(400).json({ error: pv.error });
+  }
+
+  if (direct_manager !== undefined && isAdmin) {
+    const cycleErr = await detectDirectManagerCycle(username, direct_manager, query);
+    if (cycleErr) return res.status(400).json({ error: cycleErr });
+  }
+
   try {
     const existing = await query('SELECT username, role FROM app_users WHERE username = $1', [username]);
     if (existing.rows.length === 0) {
@@ -133,8 +128,12 @@ router.put('/:username', requireAuth, async (req, res) => {
       }
       if (active !== undefined) { updates.push(`active = $${idx++}`); params.push(active); }
       if (department !== undefined) { updates.push(`department = $${idx++}`); params.push(department); }
-      if (direct_manager !== undefined) { updates.push(`direct_manager = $${idx++}`); params.push(direct_manager); }
-      if (permissions !== undefined) { updates.push(`permissions = $${idx++}`); params.push(JSON.stringify(permissions)); }
+      if (direct_manager !== undefined) { updates.push(`direct_manager = $${idx++}`); params.push(direct_manager || ''); }
+      if (permissions !== undefined) {
+        const pv = validatePermissions(permissions);
+        updates.push(`permissions = $${idx++}`);
+        params.push(JSON.stringify(pv.value));
+      }
       if (commission_pct !== undefined) { updates.push(`commission_pct = $${idx++}`); params.push(commission_pct); }
     }
 
@@ -152,6 +151,8 @@ router.put('/:username', requireAuth, async (req, res) => {
       if (dup.rows.length > 0) {
         return res.status(409).json({ error: 'این نام کاربری قبلاً استفاده شده' });
       }
+      const cycleErr = await detectDirectManagerCycle(new_username, direct_manager, query);
+      if (cycleErr) return res.status(400).json({ error: cycleErr });
       updates.push(`username = $${idx++}`);
       params.push(new_username);
       renamedUsername = new_username;
