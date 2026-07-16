@@ -5,6 +5,7 @@ const { query } = require('../db');
 const { requireAuth, requireManager } = require('../auth');
 const { resolveCenterOwner } = require('../lib/center-ownership');
 const { loadCenterAccessContext } = require('../lib/center-access');
+const { todayJalaliStr } = require('../lib/jalali-mini');
 
 const router = express.Router();
 router.use(requireAuth, requireManager);
@@ -193,13 +194,80 @@ router.get('/daily', async function (req, res) {
   }
 });
 
-// GET /api/manager-reports/team-summary?from=&to=
+// GET /api/manager-reports/team-summary?from=&to=&today=
 router.get('/team-summary', async function (req, res) {
   try {
     const from = req.query.from || '1400/01/01';
     const to = req.query.to || '1410/12/29';
+    const today = req.query.today || todayJalaliStr();
 
-    const [weR, salesR, pfR] = await Promise.all([
+    const [usersRes, totalCentersRes, crmStatsRes, weR, salesR, pfR] = await Promise.all([
+      query("SELECT username, display_name as name, role, color FROM app_users WHERE active = true AND username <> 'guest'"),
+      query(`
+        SELECT 
+          COALESCE((SELECT jsonb_array_length(data) FROM centers_master WHERE key = 'CENTERS'), 0) + 
+          COALESCE((SELECT SUM(jsonb_array_length(val)) FROM centers_master, jsonb_each(data) AS t(k, val) WHERE key = 'PC_RAW'), 0) + 
+          COALESCE((SELECT jsonb_array_length(value) FROM app_data WHERE key = 'extra'), 0) AS total_centers
+      `),
+      query(`
+        WITH all_centers AS (
+          SELECT 
+            val->>'id' AS id,
+            'center' AS rtype,
+            val->>'owner' AS owner
+          FROM centers_master, jsonb_array_elements(data) AS val
+          WHERE key = 'CENTERS'
+          
+          UNION ALL
+          
+          SELECT 
+            val->>'id' AS id,
+            'pc' AS rtype,
+            val->>'owner' AS owner
+          FROM centers_master, jsonb_each(data) AS t(k, arr), jsonb_array_elements(arr) AS val
+          WHERE key = 'PC_RAW'
+          
+          UNION ALL
+          
+          SELECT 
+            id,
+            'extra' AS rtype,
+            owner
+          FROM center_extras
+        ),
+        resolved_centers AS (
+          SELECT 
+            c.id,
+            c.rtype,
+            COALESCE(e.data->>'owner', c.owner, '') AS resolved_owner,
+            COALESCE(e.data->>'status', 'بدون تماس') AS resolved_status,
+            COALESCE(e.data->>'followupDate', '') AS followup_date,
+            COALESCE((e.data->>'_lastActivity')::numeric, (e.data->>'_ts')::numeric, 0) AS last_activity
+          FROM all_centers c
+          LEFT JOIN center_edits e ON e.center_key = (c.rtype || '_' || c.id)
+        )
+        SELECT 
+          resolved_owner,
+          COUNT(*)::int AS total_assigned,
+          COUNT(*) FILTER (WHERE resolved_status = 'قرارداد بسته شد')::int AS contracted,
+          COUNT(*) FILTER (WHERE resolved_status = 'ملاقات انجام شد')::int AS meetings,
+          COUNT(*) FILTER (WHERE resolved_status = 'پیشنهاد ارسال شد')::int AS proposals,
+          COUNT(*) FILTER (WHERE resolved_status = 'تماس اولیه')::int AS first_contact,
+          COUNT(*) FILTER (
+            WHERE followup_date <> '' 
+              AND followup_date < $1 
+              AND resolved_status NOT IN ('قرارداد بسته شد', 'غیرفعال')
+          )::int AS overdue,
+          COUNT(*) FILTER (WHERE followup_date = $1)::int AS followup_today,
+          COUNT(*) FILTER (
+            WHERE resolved_status NOT IN ('قرارداد بسته شد', 'غیرفعال')
+              AND last_activity > 0 
+              AND ((EXTRACT(EPOCH FROM NOW()) * 1000) - last_activity) > (30::numeric * 24 * 3600 * 1000)
+          )::int AS stalled
+        FROM resolved_centers
+        WHERE resolved_owner <> ''
+        GROUP BY resolved_owner
+      `, [today]),
       query(
         `SELECT added_by,
                 COUNT(*)::int AS planned,
@@ -222,22 +290,65 @@ router.get('/team-summary', async function (req, res) {
       ).catch(function () { return { rows: [] }; }),
     ]);
 
+    const totalCenters = totalCentersRes.rows[0] ? totalCentersRes.rows[0].total_centers : 0;
+
     const experts = {};
-    weR.rows.forEach(function (r) {
-      experts[r.added_by] = { planned: r.planned, done: r.done_cnt, salesCount: 0, salesTotal: 0, proformas: 0, proformaApproved: 0 };
-    });
-    salesR.rows.forEach(function (r) {
-      if (!experts[r.username]) experts[r.username] = { planned: 0, done: 0, salesCount: 0, salesTotal: 0, proformas: 0, proformaApproved: 0 };
-      experts[r.username].salesCount = r.cnt;
-      experts[r.username].salesTotal = Number(r.total);
-    });
-    pfR.rows.forEach(function (r) {
-      if (!experts[r.created_by]) experts[r.created_by] = { planned: 0, done: 0, salesCount: 0, salesTotal: 0, proformas: 0, proformaApproved: 0 };
-      experts[r.created_by].proformas = r.cnt;
-      experts[r.created_by].proformaApproved = r.approved;
+    usersRes.rows.forEach(function (u) {
+      experts[u.username] = {
+        name: u.name,
+        role: u.role,
+        color: u.color,
+        planned: 0,
+        done: 0,
+        salesCount: 0,
+        salesTotal: 0,
+        proformas: 0,
+        proformaApproved: 0,
+        totalAssigned: 0,
+        contracted: 0,
+        meetings: 0,
+        proposals: 0,
+        firstContact: 0,
+        overdue: 0,
+        followupToday: 0,
+        stalled: 0
+      };
     });
 
-    res.json({ ok: true, from, to, experts });
+    crmStatsRes.rows.forEach(function (r) {
+      const u = r.resolved_owner;
+      if (experts[u]) {
+        experts[u].totalAssigned = r.total_assigned;
+        experts[u].contracted = r.contracted;
+        experts[u].meetings = r.meetings;
+        experts[u].proposals = r.proposals;
+        experts[u].firstContact = r.first_contact;
+        experts[u].overdue = r.overdue;
+        experts[u].followupToday = r.followup_today;
+        experts[u].stalled = r.stalled;
+      }
+    });
+
+    weR.rows.forEach(function (r) {
+      if (experts[r.added_by]) {
+        experts[r.added_by].planned = r.planned;
+        experts[r.added_by].done = r.done_cnt;
+      }
+    });
+    salesR.rows.forEach(function (r) {
+      if (experts[r.username]) {
+        experts[r.username].salesCount = r.cnt;
+        experts[r.username].salesTotal = Number(r.total);
+      }
+    });
+    pfR.rows.forEach(function (r) {
+      if (experts[r.created_by]) {
+        experts[r.created_by].proformas = r.cnt;
+        experts[r.created_by].proformaApproved = r.approved;
+      }
+    });
+
+    res.json({ ok: true, from, to, today, totalCenters, experts });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

@@ -5,10 +5,14 @@
   var _rTab = 'sales'; // sales | pipeline | activity | competitor | coverage | targets | payroll | invoices | expert | support | mission | faradis
 
   var STATUS_LABELS = {
-    draft: 'پیش‌نویس', sent: 'ارسال‌شده', approved: 'تأیید', rejected: 'رد', cancelled: 'لغو'
+    draft: 'پیش‌نویس', sent: 'ارسال‌شده', negotiating: 'در حال مذاکره',
+    approved: 'تأیید شده', invoiced: 'فاکتور شده',
+    rejected: 'رد', cancelled: 'لغو', expired: 'منقضی', pending_disc: 'تأیید تخفیف'
   };
   var STATUS_COLORS = {
-    draft: '#94a3b8', sent: '#60a5fa', approved: '#34d399', rejected: '#f87171', cancelled: '#d1d5db'
+    draft: '#94a3b8', sent: '#60a5fa', negotiating: '#f59e0b',
+    approved: '#34d399', invoiced: '#0ea5e9',
+    rejected: '#f87171', cancelled: '#d1d5db', expired: '#c084fc', pending_disc: '#fb923c'
   };
   var CAT_LABELS = {
     complaint: 'شکایت', service: 'خدمات پس از فروش', training: 'آموزش', other: 'سایر'
@@ -182,9 +186,10 @@
         var convRate = totalPFs > 0 ? Math.round((totalApproved / totalPFs) * 100) : 0;
 
         var html = '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">' +
-          _card('مجموع فروش تأیید‌شده', _fmtMoney(grandTotal), months.length + ' ماه گذشته', '#10b981') +
-          _card('نرخ تبدیل', convRate + '٪', totalApproved + ' از ' + totalPFs + ' پیش‌فاکتور', '#6366f1') +
-          _card('تعداد پیش‌فاکتور', _fmtNum(totalPFs), 'کل در بازه', '#f59e0b') +
+          _card('مجموع فروش نهایی', _fmtMoney(grandTotal), months.length + ' ماه گذشته', '#10b981') +
+          _card('نرخ تبدیل', convRate + '٪', totalApproved + ' فروش از ' + totalPFs + ' پیش‌فاکتور', '#6366f1') +
+          _card('تعداد پیش‌فاکتور (کل)', _fmtNum(totalPFs), 'شامل همه وضعیت‌ها', '#f59e0b') +
+          _card('فروش نهایی', _fmtNum(totalApproved), 'تأیید + فاکتور شده', '#8b5cf6') +
           '</div>';
 
         // Table: employees × months
@@ -196,7 +201,7 @@
             if (!row) return '<td style="padding:6px 10px;text-align:center;color:#9ca3af">—</td>';
             return '<td style="padding:6px 10px;text-align:center;font-size:.82rem">' +
               '<div style="font-weight:600;color:#10b981">' + _fmtMoney(row.approved_total) + '</div>' +
-              '<div style="color:#9ca3af;font-size:.75rem">' + row.approved_count + '/' + row.count + ' تأیید</div>' +
+              '<div style="color:#9ca3af;font-size:.75rem">' + row.approved_count + '/' + row.count + ' فروش</div>' +
               '</td>';
           }).join('');
           return '<tr style="border-bottom:1px solid #f1f5f9">' +
@@ -248,13 +253,13 @@
 
         var totalCount = byStatus.reduce(function (s, r) { return s + r.count; }, 0);
         var totalValue = byStatus.reduce(function (s, r) { return s + r.total_value; }, 0);
-        var approved   = byStatus.find(function (r) { return r.status === 'approved'; }) || {};
-        var convRate   = totalCount > 0 ? Math.round(((approved.count || 0) / totalCount) * 100) : 0;
+        var approvedCount = byStatus.reduce(function (s, r) { return s + (['approved', 'invoiced'].includes(r.status) ? r.count : 0); }, 0);
+        var convRate   = totalCount > 0 ? Math.round((approvedCount / totalCount) * 100) : 0;
 
         var html = '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">' +
           _card('کل پیش‌فاکتور', _fmtNum(totalCount), 'همه وضعیت‌ها', '#6366f1') +
           _card('ارزش کل', _fmtMoney(totalValue), 'ریال', '#f59e0b') +
-          _card('نرخ تبدیل', convRate + '٪', (approved.count||0) + ' تأیید از ' + totalCount, '#10b981') +
+          _card('نرخ تبدیل', convRate + '٪', approvedCount + ' تأیید از ' + totalCount, '#10b981') +
           _card('میانگین چرخه', (data.avgCycleDays||0).toFixed(0) + ' روز', 'از ایجاد تا تأیید', '#8b5cf6') +
           '</div>';
 
@@ -273,8 +278,8 @@
           '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.85rem">' +
           '<thead><tr style="background:#f8fafc">' +
           '<th style="padding:8px 12px;text-align:right">کارشناس</th>' +
-          '<th style="padding:8px 12px">کل</th><th style="padding:8px 12px">تأیید</th>' +
-          '<th style="padding:8px 12px">نرخ تبدیل</th><th style="padding:8px 12px">ارزش تأیید</th>' +
+          '<th style="padding:8px 12px">کل پیش‌فاکتور</th><th style="padding:8px 12px">فروش نهایی</th>' +
+          '<th style="padding:8px 12px">نرخ تبدیل</th><th style="padding:8px 12px">ارزش فروش</th>' +
           '</tr></thead><tbody>' +
           byEmp.map(function (e) {
             var rate = e.total > 0 ? Math.round((e.approved / e.total) * 100) : 0;
@@ -291,7 +296,7 @@
         // Trend
         if (trend.length) {
           var maxTrend = Math.max.apply(null, trend.map(function(r){return r.approved_total;}).concat([1]));
-          html += _section('روند ماهانه فروش تأیید‌شده',
+          html += _section('روند ماهانه فروش نهایی (تأیید + فاکتور)',
             trend.slice().reverse().map(function (r) {
               var pct = Math.round((r.approved_total / maxTrend) * 100);
               return _barRow(r.month, pct, '#10b981', _fmtMoney(r.approved_total) + ' (' + r.count + ')');
@@ -411,7 +416,8 @@
               var parts = (c.centerKey || '').split('_');
               var rt = parts[0] || 'pc';
               var rid = parts.slice(1).join('_');
-              return '<a href="#" onclick="openCenterModal(\'' + rt + '\',\'' + rid + '\');return false;" style="display:inline-block;margin:2px 4px 2px 0;padding:2px 8px;background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;border-radius:6px;font-size:10px;text-decoration:none">' + esc(c.centerName || c.centerKey) + '</a>';
+              var displayName = (typeof getCenterNameFromKey === 'function' ? getCenterNameFromKey(c.centerKey) : '') || c.centerName || c.centerKey;
+              return '<a href="#" onclick="openCenterModal(\'' + rt + '\',\'' + rid + '\');return false;" style="display:inline-block;margin:2px 4px 2px 0;padding:2px 8px;background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;border-radius:6px;font-size:10px;text-decoration:none">' + esc(displayName) + '</a>';
             }).join('') + (centers.length > 8 ? '<span style="font-size:10px;color:#94a3b8"> +' + (centers.length - 8) + ' مرکز دیگر</span>' : '');
             return '<div style="margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #f1f5f9">'
               + _barRow(row.competitor || '—', pct, colors[i % colors.length], cnt + ' مرکز')
@@ -854,13 +860,37 @@
 
   // ── اهداف فروش ماهانه ──────────────────────────────────────────────────────
 
-  var _tgtMonth = (function(){
+  function currentJMonth() {
+    if (typeof todayJ === 'function') {
+      var t = todayJ();
+      return t[0] + '/' + (t[1] < 10 ? '0' + t[1] : String(t[1]));
+    }
     var d = new Date();
-    // Approximate current Jalali month
     var y = d.getFullYear() - 621;
     var m = d.getMonth() + 1;
     return y + '/' + String(m).padStart(2,'0');
-  })();
+  }
+
+  function buildJalaliMonthSelect(id, currentValue, onchangeAttr) {
+    var parts = (currentValue || currentJMonth()).split('/');
+    var curYear = parseInt(parts[0]);
+    var jMonths = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
+    var options = '<option value=""' + (!currentValue ? ' selected' : '') + '>-- انتخاب ماه --</option>';
+    
+    // Generate dropdown options for curYear - 2 to curYear + 1
+    var startYear = curYear - 2;
+    var endYear = curYear + 1;
+    for (var y = startYear; y <= endYear; y++) {
+      for (var m = 1; m <= 12; m++) {
+        var val = y + '/' + (m < 10 ? '0' + m : String(m));
+        var selected = val === currentValue ? ' selected' : '';
+        options += '<option value="' + val + '"' + selected + '>' + y + ' - ' + jMonths[m-1] + '</option>';
+      }
+    }
+    return '<select id="' + id + '" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:7px;font-family:inherit;font-size:.85rem;background:#fff;color:var(--text-primary)" onchange="' + onchangeAttr + '">' + options + '</select>';
+  }
+
+  var _tgtMonth = currentJMonth();
 
   function _rTargets(cont) {
     cont.innerHTML = '<div style="text-align:center;padding:30px;color:#9ca3af">در حال بارگذاری...</div>';
@@ -868,8 +898,7 @@
     var html = '<div style="background:#fff;border-radius:12px;padding:20px;border:1px solid #e2e8f0;margin-bottom:16px">' +
       '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px">' +
         '<h3 style="margin:0;font-size:1rem;font-weight:600;color:#1e293b">🎯 اهداف فروش ماهانه</h3>' +
-        '<input type="month" id="tgtMonthInput" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:7px;font-family:inherit;font-size:.85rem" ' +
-          'value="' + _tgtMonthToNative(_tgtMonth) + '" onchange="window._rTargetsMonthChange(this.value)">' +
+        buildJalaliMonthSelect('tgtMonthInput', _tgtMonth, 'window._rTargetsMonthChange(this.value)') +
         '<button onclick="window._rTargetsLoad()" style="padding:6px 14px;background:#6366f1;color:white;border:none;border-radius:7px;font-family:inherit;font-size:.85rem;cursor:pointer">🔄 بارگذاری</button>' +
       '</div>' +
       '<div id="tgtTable">در حال بارگذاری...</div>' +
@@ -879,7 +908,6 @@
   }
 
   function _tgtMonthToNative(jalali) {
-    // Approximate: Jalali 1404/03 → 2025-06
     var parts = (jalali||'').split('/');
     if (parts.length < 2) return '';
     var jy = parseInt(parts[0]);
@@ -891,7 +919,6 @@
   }
 
   function _tgtMonthFromNative(native) {
-    // Approximate: 2025-06 → 1404/03
     if (!native) return _tgtMonth;
     var parts = native.split('-');
     var gy = parseInt(parts[0]);
@@ -902,8 +929,9 @@
     return jy + '/' + String(jm).padStart(2,'0');
   }
 
-  window._rTargetsMonthChange = function(native) {
-    _tgtMonth = _tgtMonthFromNative(native);
+  window._rTargetsMonthChange = function(val) {
+    _tgtMonth = val;
+    window._rTargetsLoad();
   };
 
   window._rTargetsLoad = function() {
@@ -918,7 +946,7 @@
     ]).then(function(results) {
       var targets = results[0].reduce ? results[0] : (results[0].rows||[]);
       var actuals = results[1].reduce ? results[1] : (results[1].rows||[]);
-      var users = (results[2].users || results[2] || []).filter(function(u){ return u.role === 'کارشناس فروش' && u.active !== false; });
+      var users = (results[2].users || results[2] || []).filter(function(u){ return u.role !== 'مهمان' && u.username !== 'guest' && u.active !== false; });
 
       var tgtMap = {};
       targets.forEach(function(t){ tgtMap[t.employee] = t.target_amount; });
@@ -1008,25 +1036,20 @@
       '<div style="background:#fff;border-radius:12px;padding:20px;border:1px solid #e2e8f0;margin-bottom:16px">' +
         '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px">' +
           '<h3 style="margin:0;font-size:1rem;font-weight:600;color:#1e293b">💵 محاسبه حقوق و پورسانت</h3>' +
-          '<input type="month" id="payMonthInput" value="' + _tgtMonthToNative(_payMonth) + '" ' +
-            'onchange="window._payMonthChange(this.value)" ' +
-            'style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:7px;font-family:inherit;font-size:.85rem">' +
+          buildJalaliMonthSelect('payMonthInput', _payMonth, 'window._payMonthChange(this.value)') +
           '<button onclick="window._rPayCalc()" style="padding:6px 14px;background:#6366f1;color:white;border:none;border-radius:7px;font-family:inherit;font-size:.85rem;cursor:pointer">🔄 محاسبه</button>' +
           (isSuperAdmin ? '<button onclick="window._rPayFinalizeAll()" style="padding:6px 14px;background:#10b981;color:white;border:none;border-radius:7px;font-family:inherit;font-size:.85rem;cursor:pointer">✅ نهایی کردن همه</button>' : '') +
         '</div>' +
         '<div id="payCalcResult">برای محاسبه دکمه «محاسبه» را بزنید.</div>' +
       '</div>' +
-      '<div id="payHistorySection"><div style="text-align:center;padding:20px;color:#9ca3af">در حال بارگذاری تاریخچه...</div></div>' +
-      (isSuperAdmin
-        ? '<div id="paySettingsWrap"><div style="text-align:center;padding:20px;color:#9ca3af">در حال بارگذاری تنظیمات...</div></div>'
-        : '');
+      '<div id="payHistorySection"><div style="text-align:center;padding:20px;color:#9ca3af">در حال بارگذاری تاریخچه...</div></div>';
 
     _rPayHistory();
-    if (isSuperAdmin) _rPayrollSettings(cont);
   }
 
-  window._payMonthChange = function(native) {
-    _payMonth = _tgtMonthFromNative(native);
+  window._payMonthChange = function(val) {
+    _payMonth = val;
+    window._rPayCalc();
   };
 
   window._rPayCalc = function() {
@@ -1145,31 +1168,65 @@
 
   var _invStatus = 'all';
   var _invMonth = _tgtMonth;
+  var _invFromDate = '';
+  var _invToDate = '';
 
   function _rInvoices(cont) {
     cont.innerHTML =
       '<div style="background:#fff;border-radius:12px;padding:20px;border:1px solid #e2e8f0;margin-bottom:16px">' +
-        '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px">' +
-          '<h3 style="margin:0;font-size:1rem;font-weight:600;color:#1e293b">🧾 فاکتورهای رسمی</h3>' +
-          '<input type="month" id="invMonthFilter" value="' + _tgtMonthToNative(_invMonth) + '" ' +
-            'onchange="window._invMonthChange(this.value)" ' +
-            'style="padding:5px 10px;border:1px solid #e2e8f0;border-radius:7px;font-family:inherit;font-size:.83rem">' +
-          ['all','issued','partial','paid','cancelled'].map(function(s){
-            var lbl = {all:'همه',issued:'صادر',partial:'جزئی',paid:'پرداخت کامل',cancelled:'لغو'}[s];
-            return '<button onclick="window._invSetStatus(\'' + s + '\')" ' +
-              'style="padding:4px 10px;border-radius:20px;border:1px solid #e2e8f0;font-family:inherit;font-size:.8rem;cursor:pointer;' +
-              'background:' + (_invStatus===s ? '#6366f1' : '#f1f5f9') + ';color:' + (_invStatus===s ? '#fff' : '#374151') + '">' +
-              lbl + '</button>';
-          }).join('') +
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:15px;flex-wrap:wrap;margin-bottom:16px;border-bottom:1px solid #f1f5f9;padding-bottom:14px">' +
+          '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">' +
+            '<h3 style="margin:0;font-size:1rem;font-weight:600;color:#1e293b">🧾 فاکتورهای رسمی</h3>' +
+            '<div style="display:flex;background:#f1f5f9;border-radius:20px;padding:2px">' +
+              ['all','issued','partial','paid','cancelled'].map(function(s){
+                var lbl = {all:'همه',issued:'صادر',partial:'جزئی',paid:'پرداخت کامل',cancelled:'لغو'}[s];
+                return '<button onclick="window._invSetStatus(\'' + s + '\')" ' +
+                  'style="padding:4px 12px;border-radius:20px;border:none;font-family:inherit;font-size:.78rem;cursor:pointer;font-weight:600;transition:all 0.2s;' +
+                  'background:' + (_invStatus===s ? '#6366f1' : 'transparent') + ';color:' + (_invStatus===s ? '#fff' : '#475569') + '">' +
+                  lbl + '</button>';
+              }).join('') +
+            '</div>' +
+          '</div>' +
+          
+          '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:.8rem">' +
+            '<div style="display:flex;align-items:center;gap:5px">' +
+              '<span style="color:#64748b">ماه شمسی:</span>' +
+              buildJalaliMonthSelect('invMonthFilter', _invMonth, 'window._invMonthChange(this.value)') +
+            '</div>' +
+            '<span style="color:#cbd5e1">|</span>' +
+            '<div style="display:flex;align-items:center;gap:6px">' +
+              '<span style="color:#64748b">یا بازه دلخواه:</span>' +
+              '<input type="text" id="invFromFilter" value="' + _invFromDate + '" placeholder="از تاریخ" readonly class="fd-inp" onclick="openJDP(this, function(v){ window._invDateRangeChange(\'from\', v); })" style="width:90px;padding:5px 8px;border:1px solid #e2e8f0;border-radius:7px;font-family:inherit;font-size:.78rem;cursor:pointer;text-align:center;background:#fff">' +
+              '<span style="color:#94a3b8">تا</span>' +
+              '<input type="text" id="invToFilter" value="' + _invToDate + '" placeholder="تا تاریخ" readonly class="fd-inp" onclick="openJDP(this, function(v){ window._invDateRangeChange(\'to\', v); })" style="width:90px;padding:5px 8px;border:1px solid #e2e8f0;border-radius:7px;font-family:inherit;font-size:.78rem;cursor:pointer;text-align:center;background:#fff">' +
+              (_invFromDate || _invToDate ? '<button onclick="window._invClearDateRange()" style="border:none;background:none;color:#ef4444;cursor:pointer;font-size:12px;font-weight:700;padding:0;margin-right:4px" title="پاک کردن بازه">✕ حذف بازه</button>' : '') +
+            '</div>' +
+          '</div>' +
         '</div>' +
         '<div id="invList">در حال بارگذاری...</div>' +
       '</div>';
     _rInvoicesLoad();
   }
 
-  window._invMonthChange = function(native) {
-    _invMonth = _tgtMonthFromNative(native);
-    _rInvoicesLoad();
+  window._invMonthChange = function(val) {
+    _invMonth = val;
+    _invFromDate = '';
+    _invToDate = '';
+    _rInvoices(document.getElementById('rContent'));
+  };
+
+  window._invDateRangeChange = function(type, val) {
+    if (type === 'from') _invFromDate = val;
+    if (type === 'to') _invToDate = val;
+    _invMonth = '';
+    _rInvoices(document.getElementById('rContent'));
+  };
+
+  window._invClearDateRange = function() {
+    _invFromDate = '';
+    _invToDate = '';
+    _invMonth = _tgtMonth;
+    _rInvoices(document.getElementById('rContent'));
   };
 
   window._invSetStatus = function(s) {
@@ -1181,91 +1238,147 @@
     var el = document.getElementById('invList');
     if (!el) return;
     el.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af">در حال بارگذاری...</div>';
-    var url = '/api/invoices?month=' + encodeURIComponent(_invMonth) + (_invStatus !== 'all' ? '&status=' + _invStatus : '');
-    fetch(url)
-      .then(function(r){ return r.json().then(function(d){ if (!r.ok) throw new Error(d.error||r.status); return d; }); })
-      .then(function(invs) {
-        if (!invs.length) {
-          el.innerHTML = '<p style="text-align:center;color:#9ca3af;padding:30px">فاکتوری یافت نشد</p>';
-          return;
-        }
-        var totalInv = invs.reduce(function(s,i){ return s + parseFloat(i.total||0); }, 0);
-        var totalPaid = invs.reduce(function(s,i){ return s + parseFloat(i.paid_amount||0); }, 0);
-        var stColors = { issued:'#60a5fa', partial:'#f59e0b', paid:'#10b981', cancelled:'#d1d5db' };
-        var stLabels = { issued:'صادر', partial:'جزئی وصول', paid:'پرداخت کامل', cancelled:'لغو' };
-        var tbody = invs.map(function(inv){
-          var paid = parseFloat(inv.paid_amount||0);
-          var total = parseFloat(inv.total||0);
-          var pct = total > 0 ? Math.round(paid/total*100) : 0;
-          return '<tr style="border-bottom:1px solid #f1f5f9">' +
-            '<td style="padding:8px 12px;font-weight:600;white-space:nowrap">' + esc(inv.invoice_no||'—') + '</td>' +
-            '<td style="padding:8px 12px">' + esc(inv.jalali_date||'—') + '</td>' +
-            '<td style="padding:8px 12px">' + esc(inv.center_name||'—') + '</td>' +
-            '<td style="padding:8px 12px;text-align:left;direction:ltr;font-weight:600">' + _fmtMoney(total) + '</td>' +
-            '<td style="padding:8px 12px;text-align:left;direction:ltr;color:#10b981">' + _fmtMoney(paid) + '</td>' +
+
+    var isManager = (typeof _isManager === 'function' ? _isManager() : false) ||
+      (typeof window._authUserRole !== 'undefined' && ['سوپر ادمین','مدیر'].includes(window._authUserRole));
+
+    var url = '/api/invoices?status=' + _invStatus;
+    if (_invFromDate || _invToDate) {
+      if (_invFromDate) url += '&from=' + encodeURIComponent(_invFromDate);
+      if (_invToDate) url += '&to=' + encodeURIComponent(_invToDate);
+    } else if (_invMonth) {
+      url += '&month=' + encodeURIComponent(_invMonth);
+    }
+
+    Promise.all([
+      fetch(url).then(function(r){ return r.json().then(function(d){ if (!r.ok) throw new Error(d.error||r.status); return d; }); }),
+      isManager ? fetch('/api/proforma?status=approved').then(function(r){ return r.json(); }).catch(function(){ return []; }) : Promise.resolve([])
+    ]).then(function(results) {
+      var invs = results[0] || [];
+      var approvedPfs = results[1] || [];
+
+      var pfHtml = '';
+      if (isManager && approvedPfs.length > 0) {
+        var pfRows = approvedPfs.map(function(pf) {
+          var totalVal = parseFloat(pf.total) || 0;
+          return '<tr style="border-bottom:1px solid #fed7aa;background:#fffaf5">' +
+            '<td style="padding:8px 12px;font-weight:600;color:#c2410c">' + esc(pf.no||'—') + '</td>' +
+            '<td style="padding:8px 12px">' + esc(pf.jalaliDate||'—') + '</td>' +
+            '<td style="padding:8px 12px">' + esc(pf.centerName||'—') + '</td>' +
+            '<td style="padding:8px 12px;text-align:left;direction:ltr;font-weight:600">' + _fmtMoney(totalVal) + '</td>' +
+            '<td style="padding:8px 12px">' + esc(pf.creatorName || pf.createdBy || '—') + '</td>' +
             '<td style="padding:8px 12px">' +
-              '<span style="padding:3px 8px;border-radius:12px;font-size:.75rem;background:' + (stColors[inv.status]||'#e2e8f0') + '20;color:' + (stColors[inv.status]||'#6b7280') + ';border:1px solid ' + (stColors[inv.status]||'#e2e8f0') + '40">' +
-                (stLabels[inv.status]||inv.status) + '</span>' +
-            '</td>' +
-            '<td style="padding:8px 12px">' +
-              (total > 0 ? '<div style="display:flex;align-items:center;gap:5px">' +
-                '<div style="flex:1;height:6px;background:#f1f5f9;border-radius:3px;overflow:hidden;min-width:60px">' +
-                  '<div style="width:' + pct + '%;height:100%;background:' + (stColors[inv.status]||'#6366f1') + ';border-radius:3px"></div>' +
-                '</div>' +
-                '<span style="font-size:.75rem;color:#6b7280">' + pct + '٪</span>' +
-              '</div>' : '—') +
-            '</td>' +
-            '<td style="padding:8px 12px">' +
-              '<button onclick="window._invRegPayment(\'' + inv.id + '\',' + total + ',' + paid + ')" ' +
-                'style="padding:3px 8px;border:1px solid #10b981;border-radius:5px;background:#f0fdf4;color:#15803d;font-size:.78rem;cursor:pointer;font-family:inherit"' +
-                (inv.status === 'paid' || inv.status === 'cancelled' ? ' disabled' : '') +
-                '>💰 ثبت وصول</button>' +
+              '<button onclick="window._invIssueFromPF(\'' + pf.id + '\')" ' +
+                'style="padding:4px 10px;background:#ea580c;color:white;border:none;border-radius:6px;font-size:.78rem;cursor:pointer;font-family:inherit;font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,0.05)"' +
+                '>🧾 صدور فاکتور</button>' +
             '</td>' +
           '</tr>';
         }).join('');
 
-        el.innerHTML =
-          '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px">' +
-            _card('تعداد فاکتور', _fmtNum(invs.length), 'این ماه', '#6366f1') +
-            _card('جمع مبلغ', _fmtMoney(totalInv), 'ریال', '#1e293b') +
-            _card('وصول شده', _fmtMoney(totalPaid), _fmtNum(Math.round(totalInv>0?totalPaid/totalInv*100:0)) + '٪', '#10b981') +
-          '</div>' +
-          '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">' +
-            '<thead><tr style="background:#f8fafc">' +
-              '<th style="padding:8px 12px;text-align:right;font-size:.8rem">شماره فاکتور</th>' +
-              '<th style="padding:8px 12px;text-align:right;font-size:.8rem">تاریخ</th>' +
-              '<th style="padding:8px 12px;text-align:right;font-size:.8rem">مشتری</th>' +
-              '<th style="padding:8px 12px;text-align:left;font-size:.8rem">مبلغ کل</th>' +
-              '<th style="padding:8px 12px;text-align:left;font-size:.8rem">وصول شده</th>' +
-              '<th style="padding:8px 12px;text-align:right;font-size:.8rem">وضعیت</th>' +
-              '<th style="padding:8px 12px;text-align:right;font-size:.8rem">پیشرفت</th>' +
-              '<th style="padding:8px 12px;text-align:right;font-size:.8rem">عملیات</th>' +
+        pfHtml = '<div style="background:#fff7ed;border:1px solid #ffedd5;border-radius:12px;padding:16px;margin-bottom:16px">' +
+          '<h4 style="margin:0 0 10px 0;font-size:.9rem;font-weight:700;color:#c2410c;display:flex;align-items:center;gap:6px">🔸 پیش‌فاکتورهای تأیید شده (منتظر صدور فاکتور)</h4>' +
+          '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.82rem">' +
+            '<thead><tr style="background:#ffedd5;color:#9a3412">' +
+              '<th style="padding:8px 12px;text-align:right">شماره پیش‌فاکتور</th>' +
+              '<th style="padding:8px 12px;text-align:right">تاریخ</th>' +
+              '<th style="padding:8px 12px;text-align:right">مشتری</th>' +
+              '<th style="padding:8px 12px;text-align:left">مبلغ کل</th>' +
+              '<th style="padding:8px 12px;text-align:right">کارشناس</th>' +
+              '<th style="padding:8px 12px;text-align:right">عملیات</th>' +
             '</tr></thead>' +
-            '<tbody>' + tbody + '</tbody>' +
-          '</table></div>';
-      })
-      .catch(function(e){ el.innerHTML = '<div style="color:#ef4444;font-size:.85rem;padding:20px">خطا: ' + esc(e.message) + '</div>'; });
+            '<tbody>' + pfRows + '</tbody>' +
+          '</table></div>' +
+        '</div>';
+      }
+
+      if (!invs.length) {
+        el.innerHTML = pfHtml + '<p style="text-align:center;color:#9ca3af;padding:30px">فاکتوری یافت نشد</p>';
+        return;
+      }
+      var totalInv = invs.reduce(function(s,i){ return s + parseFloat(i.total||0); }, 0);
+      var totalPaid = invs.reduce(function(s,i){ return s + parseFloat(i.paid_amount||0); }, 0);
+      var stColors = { issued:'#60a5fa', partial:'#f59e0b', paid:'#10b981', cancelled:'#d1d5db' };
+      var stLabels = { issued:'صادر', partial:'جزئی وصول', paid:'پرداخت کامل', cancelled:'لغو' };
+      var tbody = invs.map(function(inv){
+        var paid = parseFloat(inv.paid_amount||0);
+        var total = parseFloat(inv.total||0);
+        var pct = total > 0 ? Math.round(paid/total*100) : 0;
+        return '<tr style="border-bottom:1px solid #f1f5f9">' +
+          '<td style="padding:8px 12px;font-weight:600;white-space:nowrap">' + esc(inv.invoice_no||'—') + '</td>' +
+          '<td style="padding:8px 12px">' + esc(inv.jalali_date||'—') + '</td>' +
+          '<td style="padding:8px 12px">' + esc(inv.center_name||'—') + '</td>' +
+          '<td style="padding:8px 12px;text-align:left;direction:ltr;font-weight:600">' + _fmtMoney(total) + '</td>' +
+          '<td style="padding:8px 12px;text-align:left;direction:ltr;color:#10b981">' + _fmtMoney(paid) + '</td>' +
+          '<td style="padding:8px 12px">' +
+            '<span style="padding:3px 8px;border-radius:12px;font-size:.75rem;background:' + (stColors[inv.status]||'#e2e8f0') + '20;color:' + (stColors[inv.status]||'#6b7280') + ';border:1px solid ' + (stColors[inv.status]||'#e2e8f0') + '40">' +
+              (stLabels[inv.status]||inv.status) + '</span>' +
+          '</td>' +
+          '<td style="padding:8px 12px">' +
+            (total > 0 ? '<div style="display:flex;align-items:center;gap:5px">' +
+              '<div style="flex:1;height:6px;background:#f1f5f9;border-radius:3px;overflow:hidden;min-width:60px">' +
+                '<div style="width:' + pct + '%;height:100%;background:' + (stColors[inv.status]||'#6366f1') + ';border-radius:3px"></div>' +
+              '</div>' +
+              '<span style="font-size:.75rem;color:#6b7280">' + pct + '٪</span>' +
+            '</div>' : '—') +
+          '</td>' +
+          '<td style="padding:8px 12px">' +
+            '<button onclick="window._invRegPayment(\'' + inv.id + '\',' + total + ',' + paid + ')" ' +
+              'style="padding:3px 8px;border:1px solid #10b981;border-radius:5px;background:#f0fdf4;color:#15803d;font-size:.78rem;cursor:pointer;font-family:inherit"' +
+              (inv.status === 'paid' || inv.status === 'cancelled' ? ' disabled' : '') +
+              '>💰 ثبت وصول</button>' +
+          '</td>' +
+        '</tr>';
+      }).join('');
+
+      el.innerHTML = pfHtml +
+        '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px">' +
+          _card('تعداد فاکتور', _fmtNum(invs.length), 'این ماه', '#6366f1') +
+          _card('جمع مبلغ', _fmtMoney(totalInv), 'ریال', '#1e293b') +
+          _card('وصول شده', _fmtMoney(totalPaid), _fmtNum(Math.round(totalInv>0?totalPaid/totalInv*100:0)) + '٪', '#10b981') +
+        '</div>' +
+        '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">' +
+          '<thead><tr style="background:#f8fafc">' +
+            '<th style="padding:8px 12px;text-align:right;font-size:.8rem">شماره فاکتور</th>' +
+            '<th style="padding:8px 12px;text-align:right;font-size:.8rem">تاریخ</th>' +
+            '<th style="padding:8px 12px;text-align:right;font-size:.8rem">مشتری</th>' +
+            '<th style="padding:8px 12px;text-align:left;font-size:.8rem">مبلغ کل</th>' +
+            '<th style="padding:8px 12px;text-align:left;font-size:.8rem">وصول شده</th>' +
+            '<th style="padding:8px 12px;text-align:right;font-size:.8rem">وضعیت</th>' +
+            '<th style="padding:8px 12px;text-align:right;font-size:.8rem">پیشرفت</th>' +
+            '<th style="padding:8px 12px;text-align:right;font-size:.8rem">عملیات</th>' +
+          '</tr></thead>' +
+          '<tbody>' + tbody + '</tbody>' +
+        '</table></div>';
+    }).catch(function(e){ el.innerHTML = '<div style="color:#ef4444;font-size:.85rem;padding:20px">خطا: ' + esc(e.message) + '</div>'; });
   }
 
   var _invPayModal = null;
   window._invRegPayment = function(invoiceId, total, paid) {
     var remaining = Math.max(0, total - paid);
+    var today = typeof todayStr === 'function' ? todayStr() : '';
+    
     var body =
-      '<div style="display:flex;flex-direction:column;gap:12px">' +
-        '<div><label style="font-size:.83rem;font-weight:600;display:block;margin-bottom:4px">مبلغ وصول (ریال)</label>' +
-          '<input type="number" id="invPayAmt" value="' + remaining + '" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-family:inherit;font-size:.9rem;box-sizing:border-box"></div>' +
-        '<div><label style="font-size:.83rem;font-weight:600;display:block;margin-bottom:4px">روش پرداخت</label>' +
+      '<div style="display:flex;flex-direction:column;gap:12px;font-family:inherit">' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;background:#f8fafc;padding:10px;border-radius:8px;border:1px solid #e2e8f0">' +
+          '<div style="text-align:center"><div style="font-size:10px;color:#64748b">کل فاکتور</div><div style="font-size:11px;font-weight:700;color:#1e293b">' + _fmtMoney(total) + '</div></div>' +
+          '<div style="text-align:center"><div style="font-size:10px;color:#64748b">وصول شده قبلی</div><div style="font-size:11px;font-weight:700;color:#10b981">' + _fmtMoney(paid) + '</div></div>' +
+          '<div style="text-align:center"><div style="font-size:10px;color:#64748b">باقیمانده</div><div style="font-size:11px;font-weight:700;color:#f59e0b">' + _fmtMoney(remaining) + '</div></div>' +
+        '</div>' +
+        '<div><label style="font-size:.83rem;font-weight:600;display:block;margin-bottom:4px;color:#374151">مبلغ وصول جدید (ریال)</label>' +
+          '<input type="number" id="invPayAmt" value="' + remaining + '" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-family:inherit;font-size:.9rem;box-sizing:border-box" placeholder="مبلغ به ریال">' +
+          '<div style="font-size:10px;color:#94a3b8;margin-top:2px">💡 می‌توانید کل یا بخشی از مبلغ باقیمانده را به عنوان وصول جدید وارد کنید.</div></div>' +
+        '<div><label style="font-size:.83rem;font-weight:600;display:block;margin-bottom:4px;color:#374151">روش پرداخت</label>' +
           '<select id="invPayMethod" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-family:inherit;font-size:.9rem">' +
-            '<option value="transfer">انتقال بانکی</option>' +
-            '<option value="cheque">چک</option>' +
-            '<option value="cash">نقد</option>' +
+            '<option value="transfer">انتقال بانکی / فیش واریزی</option>' +
+            '<option value="cheque">چک بانکی</option>' +
+            '<option value="cash">نقد / واریز مستقیم</option>' +
           '</select></div>' +
-        '<div><label style="font-size:.83rem;font-weight:600;display:block;margin-bottom:4px">شماره مرجع / چک</label>' +
-          '<input type="text" id="invPayRef" placeholder="اختیاری" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-family:inherit;font-size:.9rem;box-sizing:border-box"></div>' +
-        '<div><label style="font-size:.83rem;font-weight:600;display:block;margin-bottom:4px">تاریخ (شمسی)</label>' +
-          '<input type="text" id="invPayDate" placeholder="مثال: 1404/03/15" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-family:inherit;font-size:.9rem;box-sizing:border-box"></div>' +
-        '<div><label style="font-size:.83rem;font-weight:600;display:block;margin-bottom:4px">توضیحات</label>' +
-          '<input type="text" id="invPayNote" placeholder="اختیاری" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-family:inherit;font-size:.9rem;box-sizing:border-box"></div>' +
+        '<div><label style="font-size:.83rem;font-weight:600;display:block;margin-bottom:4px;color:#374151">شماره مرجع / فیش / چک</label>' +
+          '<input type="text" id="invPayRef" placeholder="شماره پیگیری فیش، شماره چک و غیره (اختیاری)" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-family:inherit;font-size:.9rem;box-sizing:border-box"></div>' +
+        '<div><label style="font-size:.83rem;font-weight:600;display:block;margin-bottom:4px;color:#374151">تاریخ وصول (شمسی)</label>' +
+          '<input type="text" id="invPayDate" value="' + today + '" readonly class="fd-inp" onclick="openJDP(this, function(v){ document.getElementById(\'invPayDate\').value=v; })" placeholder="انتخاب تاریخ..." style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-family:inherit;font-size:.9rem;box-sizing:border-box;cursor:pointer;background:#fff"></div>' +
+        '<div><label style="font-size:.83rem;font-weight:600;display:block;margin-bottom:4px;color:#374151">توضیحات</label>' +
+          '<input type="text" id="invPayNote" placeholder="توضیحات تکمیلی (اختیاری)" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:7px;font-family:inherit;font-size:.9rem;box-sizing:border-box"></div>' +
       '</div>';
     var footer =
       '<button onclick="document.getElementById(\'invPayModalWrap\').style.display=\'none\'" style="padding:8px 16px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:.9rem;cursor:pointer">انصراف</button>' +
@@ -1309,59 +1422,24 @@
       .catch(function(e){ if(typeof showToast==='function') showToast('❌ ' + e.message); });
   };
 
-  // ── تنظیمات پورسانت (سوپر ادمین) ──────────────────────────────────────────
-
-  function _rPayrollSettings(cont) {
-    fetch('/api/payroll/settings')
-      .then(function(r){ return r.json(); })
-      .then(function(s) {
-        var html = _section('⚙️ تنظیمات پورسانت',
-          '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin-bottom:14px">' +
-            _settingField('commBasePct',    'نرخ پایه (٪)',                s.base_pct,      'number', '0.1') +
-            _settingField('commThreshold',  'آستانه پلکان (ریال)',         s.tier_threshold,'number', '100000000') +
-            _settingField('commStepAmt',    'هر پله (ریال)',               s.tier_step_amount,'number','100000000') +
-            _settingField('commStepPct',    'افزایش هر پله (٪)',           s.tier_step_pct, 'number', '0.05') +
-            _settingField('commKpiThr',     'آستانه KPI برای multiplier',  s.kpi_threshold, 'number', '1') +
-            _settingField('commKpiMul',     'ضریب KPI (x)',                s.kpi_multiplier,'number', '0.1') +
-          '</div>' +
-          '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:#f8fafc;border-radius:8px;font-size:.8rem;color:#6b7280;margin-bottom:14px">' +
-            '💡 فرمول: اگر فروش > آستانه، به ازای هر پله نرخ + افزایش. اگر KPI > آستانه، افزایش × ضریب.' +
-          '</div>' +
-          '<button onclick="window._rSavePayrollSettings()" style="padding:8px 20px;background:#6366f1;color:white;border:none;border-radius:8px;font-family:inherit;font-size:.9rem;cursor:pointer;font-weight:600">💾 ذخیره تنظیمات</button>');
-        var wrap = document.getElementById('paySettingsWrap');
-        if (wrap) wrap.innerHTML = html;
-      })
-      .catch(function(e){ var w = document.getElementById('paySettingsWrap'); if(w) w.innerHTML = '<div style="color:#ef4444;padding:12px">خطا: ' + esc(e.message) + '</div>'; });
-  }
-
-  function _settingField(id, label, value, type, step) {
-    return '<div>' +
-      '<label style="display:block;font-size:.78rem;font-weight:600;color:#374151;margin-bottom:4px">' + label + '</label>' +
-      '<input type="' + type + '" id="' + id + '" value="' + (value||'') + '" step="' + (step||'1') + '" ' +
-        'style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:7px;font-family:inherit;font-size:.9rem;box-sizing:border-box" dir="ltr">' +
-    '</div>';
-  }
-
-  window._rSavePayrollSettings = function() {
-    var g = function(id){ return parseFloat((document.getElementById(id)||{}).value); };
-    var body = {
-      base_pct:         g('commBasePct'),
-      tier_threshold:   g('commThreshold'),
-      tier_step_amount: g('commStepAmt'),
-      tier_step_pct:    g('commStepPct'),
-      kpi_threshold:    g('commKpiThr'),
-      kpi_multiplier:   g('commKpiMul'),
-    };
-    for (var k in body) { if (isNaN(body[k])) { if(typeof showToast==='function') showToast('مقادیر را بررسی کنید'); return; } }
-    fetch('/api/payroll/settings', {
-      method: 'PUT',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(body)
+  window._invIssueFromPF = function(pfId) {
+    if (!confirm('آیا می‌خواهید برای این پیش‌فاکتور فاکتور رسمی صادر کنید؟')) return;
+    fetch('/api/invoices/from-proforma/' + pfId, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tax_pct: 9 })
     })
       .then(function(r){ return r.json().then(function(d){ if (!r.ok) throw new Error(d.error); return d; }); })
-      .then(function(){ if(typeof showToast==='function') showToast('✅ تنظیمات پورسانت ذخیره شد'); })
+      .then(function(d){
+        if (typeof showToast==='function') showToast('✅ فاکتور با شماره ' + d.invoice_no + ' صادر شد');
+        _rInvoicesLoad();
+      })
       .catch(function(e){ if(typeof showToast==='function') showToast('❌ ' + e.message); });
   };
+
+  // ── تنظیمات پورسانت (سوپر ادمین) ──────────────────────────────────────────
+
+
 
   // ── گزارش عمیق کارشناس ────────────────────────────────────────────────────
 
@@ -1386,9 +1464,7 @@
                 'style="padding:7px 12px;border:1px solid #e2e8f0;border-radius:7px;font-family:inherit;font-size:.85rem;min-width:180px">' +
                 '<option value="">— کارشناس را انتخاب کنید —</option>' + opts +
               '</select>' +
-              '<input type="month" id="expertMonthInput" value="' + _tgtMonthToNative(_expertMonth) + '" ' +
-                'onchange="window._expertMonth=window._tgtMonthFromNative(this.value)" ' +
-                'style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:7px;font-family:inherit;font-size:.85rem">' +
+              buildJalaliMonthSelect('expertMonthInput', _expertMonth, 'window._expertMonth=this.value') +
               '<button onclick="window._rExpertLoad()" style="padding:7px 16px;background:#6366f1;color:white;border:none;border-radius:7px;font-family:inherit;font-size:.85rem;cursor:pointer;font-weight:600">📊 بارگذاری</button>' +
             '</div>' +
             '<div id="expertReport"><p style="text-align:center;color:#9ca3af;padding:30px">کارشناس و ماه را انتخاب کنید</p></div>' +
@@ -1397,7 +1473,6 @@
         // expose for onchange callbacks
         window._expertId = _expertId;
         window._expertMonth = _expertMonth;
-        window._tgtMonthFromNative = _tgtMonthFromNative;
       })
       .catch(function(e){ cont.innerHTML = '<div style="color:#ef4444;padding:30px">خطا: ' + esc(e.message) + '</div>'; });
   }

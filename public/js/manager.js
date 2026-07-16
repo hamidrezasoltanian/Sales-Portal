@@ -410,48 +410,58 @@ function _mgrLoadPendingProformas() {
     .catch(function() { box.innerHTML = ''; });
 }
 
+var _teamSummaryFetching = false;
 function renderManagerPanel(){
   var el=document.getElementById('managerPanel');if(!el)return;
   var today=todayStr();
-  var members=(DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS;
-  // compute stats per member (active only — inactive owner centers won't be counted)
-  var stats={};
-  members.filter(function(m){return m.active!==false;}).forEach(function(m){
-    stats[m.id]={name:m.name,role:m.role||'',contracted:0,meetings:0,proposals:0,firstContact:0,overdue:0,followupToday:0,totalAssigned:0,stalled:0};
+
+  if (!window._teamSummaryCache) {
+    if (!_teamSummaryFetching) {
+      _teamSummaryFetching = true;
+      el.innerHTML = '<div style="padding:48px;text-align:center;font-size:14px;color:var(--text-muted)">⏳ در حال بارگذاری اطلاعات عملیاتی تیم...</div>';
+      fetch('/api/manager-reports/team-summary?today=' + encodeURIComponent(today))
+        .then(function(r) { return r.ok ? r.json() : Promise.reject(new Error('خطا در دریافت اطلاعات')); })
+        .then(function(data) {
+          window._teamSummaryCache = data;
+          _teamSummaryFetching = false;
+          renderManagerPanel();
+        })
+        .catch(function(err) {
+          _teamSummaryFetching = false;
+          el.innerHTML = '<div style="padding:32px;text-align:center;color:#ef4444;font-size:14px">⚠ خطا در بارگذاری داشبورد: ' + esc(err.message || String(err)) + '</div>';
+        });
+    }
+    return;
+  }
+
+  var stats = window._teamSummaryCache.experts || {};
+  var totalCenters = window._teamSummaryCache.totalCenters || 0;
+  var allProvs = getAllProvinces();
+
+  var members = Object.keys(stats).map(function(k) {
+    return {
+      id: k,
+      name: stats[k].name,
+      role: stats[k].role,
+      color: stats[k].color,
+      active: true
+    };
   });
-  // scan all edits
-  _buildPCCache();
-  var allProvs=getAllProvinces();
-  allProvs.forEach(function(p){
-    var rtype=getProvType(p.id);
-    var centers=getProvCenters(p.id);
-    centers.forEach(function(c){
-      var e=getE(rtype,c.id);
-      var owner=e.owner||c.owner||'';
-      if(!stats[owner])return;
-      stats[owner].totalAssigned++;
-      var st=e.status||'بدون تماس';
-      if(st==='قرارداد بسته شد')stats[owner].contracted++;
-      else if(st==='ملاقات انجام شد')stats[owner].meetings++;
-      else if(st==='پیشنهاد ارسال شد')stats[owner].proposals++;
-      else if(st==='تماس اولیه')stats[owner].firstContact++;
-      var fd=e.followupDate||'';
-      if(fd&&fd<today&&st!=='قرارداد بسته شد'&&st!=='غیرفعال')stats[owner].overdue++;
-      if(fd&&fd===today)stats[owner].followupToday++;
-      if(isStalled(rtype,c.id))stats[owner].stalled++;
+
+  // Calculate totals
+  var total = {contracted:0,meetings:0,proposals:0,firstContact:0,overdue:0,followupToday:0,totalAssigned:0,stalled:0};
+  Object.values(stats).forEach(function(s) {
+    Object.keys(total).forEach(function(k) {
+      total[k] += s[k] || 0;
     });
   });
-  // totals
-  var total={contracted:0,meetings:0,proposals:0,firstContact:0,overdue:0,followupToday:0,totalAssigned:0,stalled:0};
-  Object.values(stats).forEach(function(s){Object.keys(total).forEach(function(k){total[k]+=s[k]||0;});});
-
-  var totalCenters=CENTERS.length+Object.values(PC_RAW).reduce(function(s,a){return s+a.length;},0)+(DB.extra||[]).length;
 
   var html='<div style="padding:14px">';
   // quick-action bar for manager
   html+='<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">'
     +'<button onclick="openDailyMonitor()" style="flex:1;min-width:200px;background:#1d4ed8;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">📋 گزارش فعالیت امروز</button>'
     +'<button onclick="openOverdueList()" style="flex:1;min-width:160px;background:#dc2626;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">🔴 پیگیری‌های معوق</button>'
+    +'<button onclick="window._teamSummaryCache=null;renderManagerPanel()" style="flex:1;min-width:140px;background:var(--bg-raised);color:var(--text-secondary);border:1px solid var(--border);border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">🔄 بروزرسانی</button>'
     +'</div>';
   html+='<div id="mgrPendingPf"></div>';
   // summary cards
@@ -1616,99 +1626,144 @@ function getWeekForDate(dateStr) {
   }
   return null;
 }
+function jDIM(jy,jm){
+  if(jm<=6)return 31;
+  if(jm<=11)return 30;
+  var isLeap = [1399, 1403, 1408, 1412, 1420].indexOf(jy) !== -1;
+  return isLeap ? 30 : 29;
+}
+function _getCenterNameFromKey(recKey) {
+  if (typeof getRecLabel === 'function') {
+    return getRecLabel(recKey);
+  }
+  if (!recKey) return '';
+  var pts = recKey.split('_');
+  var tp = pts[0];
+  var id = pts.slice(1).join('_');
+  
+  var e = (DB.edits && DB.edits[recKey]) || {};
+  if (e.nameOverride) return e.nameOverride;
+  
+  if (tp === 'center') {
+    var c = CENTERS.find(function(x) { return String(x.id) === String(id); });
+    if (c) return c.name;
+  }
+  
+  var ex = (DB.extra || []).find(function(x) { return String(x.id) === String(id); });
+  if (ex) return ex.name;
+  
+  if (typeof _buildPCCache === 'function') _buildPCCache();
+  if (window._PC_CACHE) {
+    for (var pv in window._PC_CACHE) {
+      var found = window._PC_CACHE[pv].find(function(x) { return String(x.id) === String(id); });
+      if (found) return found.name;
+    }
+  }
+  return id;
+}
 // ════════════════════════ EXPERT REPORT ════════════════════
 function openExpertReport(memberId){
-  _buildPCCache();
-  var allMem=typeof umGetActive==='function'?umGetActive():((DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS);
-  var m=allMem.find(function(x){return x.id===memberId;});
-  if(!m)return;
   var mon=currentJMonth();
-  // Compute default date range: first and last day of current month
   var monParts=mon.split('/');
   var fromDefault=monParts[0]+'/'+monParts[1]+'/01';
   var lastDay=jDIM(parseInt(monParts[0]),parseInt(monParts[1]));
   var toDefault=monParts[0]+'/'+monParts[1]+'/'+p2(lastDay);
-  function buildReport(fromDate,toDate,apiData){
-    window._rptApiCache=apiData||null;
-    var allPlanned=Object.keys(DB.weekEntries||{}).map(function(k){
-      var we = DB.weekEntries[k];
-      we._key = k;
-      return we;
-    }).filter(function(we){
-      var entryDate = we.scheduledDate || we._key.split(':::')[0] || '';
-      return we.addedBy === memberId && entryDate >= fromDate && entryDate <= toDate;
-    });
+  openExpertReportWithDates(memberId, fromDefault, toDefault);
+}
 
-    var totalPlanned = apiData&&apiData.summary?apiData.summary.planned:allPlanned.length;
-    var totalDone = apiData&&apiData.summary?apiData.summary.done:allPlanned.filter(function(we){ return we.done; }).length;
-    var totalNotDone = totalPlanned - totalDone;
-    var donePct = totalPlanned > 0 ? Math.round(totalDone / totalPlanned * 100) : 0;
-
-    var _rptAllMem=typeof umGetActive==='function'?umGetActive():(((DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS).filter(function(x){return x.active!==false;}));
-    var _rptMemOpts=_rptAllMem.map(function(x){return'<option value="'+esc(x.id)+'"'+(x.id===memberId?' selected':'')+'>'+esc(x.name||x.id)+'</option>';}).join('');
-    var body='<div style="font-size:12px">';
-    body+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;background:var(--bg-raised);border-radius:8px;padding:8px 12px">';
-    body+='<span style="font-size:11px;font-weight:700;color:var(--text-secondary)">👤 کارشناس:</span>';
-    body+='<select id="rptMember" onchange="openExpertReport(this.value)" style="padding:4px 8px;border:1px solid var(--border-input);border-radius:5px;font-family:inherit;font-size:12px;background:var(--bg-input);color:var(--text-primary)">'+_rptMemOpts+'</select>';
-    body+='</div>';
-    body+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">';
-    body+='<label style="font-size:11px">از: <input type="text" id="rptFrom" value="'+fromDate+'" readonly class="fd-inp" style="cursor:pointer;padding:4px 8px;border:1px solid var(--border-input);border-radius:5px;font-family:inherit;font-size:11px"></label>';
-    body+='<label style="font-size:11px">تا: <input type="text" id="rptTo" value="'+toDate+'" readonly class="fd-inp" style="cursor:pointer;padding:4px 8px;border:1px solid var(--border-input);border-radius:5px;font-family:inherit;font-size:11px"></label>';
-    body+='<button onclick="var f=document.getElementById(\'rptFrom\').value,t=document.getElementById(\'rptTo\').value;document.getElementById(\'rptBody\').innerHTML=buildExpertReportHtml(\''+memberId+'\',f,t);if(typeof refreshDoneLogsFromReport===\'function\')refreshDoneLogsFromReport(\''+memberId+'\')" style="padding:4px 12px;background:var(--brand,#6366f1);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-family:inherit">🔍 فیلتر</button>';
-    body+='</div>';
-    body+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">';
-    body+='<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#1d4ed8">'+totalPlanned+'</div><div style="font-size:11px;color:#1d4ed8">کل برنامه‌ها</div></div>';
-    body+='<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#16a34a">'+totalDone+'</div><div style="font-size:11px;color:#16a34a">انجام شده ✓</div></div>';
-    body+='<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#dc2626">'+totalNotDone+'</div><div style="font-size:11px;color:#dc2626">باقی‌مانده (اختلاف)</div></div>';
-    body+='<div style="background:#faf5ff;border:1px solid #d8b4fe;border-radius:8px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#7c3aed">'+donePct+'٪</div><div style="font-size:11px;color:#7c3aed">نرخ تحقق</div></div>';
-    body+='</div>';
-    // قیف فروش برای این کارشناس
-    body+='<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:12px">';
-    body+='<div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:6px">📊 قیف فروش (وضعیت فعلی مراکز)</div>';
-    var _fStages=['لید','سرنخ','فرصت','مشتری'];
-    var _fColors={'لید':'#f59e0b','سرنخ':'#0ea5e9','فرصت':'#8b5cf6','مشتری':'#22c55e'};
-    var _fCnts={};_fStages.forEach(function(s){_fCnts[s]=0;});
-    _buildPCCache();
-    getAllProvinces().forEach(function(p){
-      var rt=getProvType(p.id);
-      getProvCenters(p.id).forEach(function(c){
-        var e=getE(rt,c.id);
-        if((e.owner||c.owner||'')!==memberId)return;
-        var lead=e.lead||c.lead||'سرنخ';
-        if(_fCnts[lead]!==undefined)_fCnts[lead]++;
-      });
-    });
-    var _fTotal=Object.values(_fCnts).reduce(function(a,b){return a+b;},0)||1;
-    body+='<div style="display:flex;gap:2px;align-items:stretch">';
-    _fStages.forEach(function(s){
-      var cnt=_fCnts[s]||0;var pct=Math.round(cnt/_fTotal*100);var clr=_fColors[s];
-      body+='<div style="flex:1;text-align:center;padding:5px 3px;border:1px solid '+clr+'33;border-radius:5px;background:'+clr+'11">';
-      body+='<div style="font-size:15px;font-weight:700;color:'+clr+'">'+cnt+'</div>';
-      body+='<div style="font-size:10px;font-weight:600;color:'+clr+'">'+esc(s)+'</div>';
-      body+='<div style="font-size:10px;color:var(--text-muted)">'+pct+'٪</div>';
-      body+='</div>';
-      if(s!=='مشتری')body+='<div style="display:flex;align-items:center;color:var(--text-muted);font-size:14px;padding:0 1px">›</div>';
-    });
-    body+='</div>';
-    body+='</div>';
-    body+=renderLeadTimingHtml(memberId);
-    body+='<div id="rptBody">'+buildExpertReportHtml(memberId,fromDate,toDate)+'</div>';
-    body+='</div>';
-    var notifFoot='<button class="btn-secondary" onclick="closeModal(\'expertReport\')">بستن</button>';
-    if(typeof _isManager==='function'&&_isManager()){
-      notifFoot='<button style="background:#faf5ff;color:#7c3aed;border:1px solid #d8b4fe;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="_sendReportNotif(\''+memberId+'\',\''+esc(m.name)+'\')">📨 ارسال اعلان</button>'+notifFoot;
-    }
-    openModal('expertReport','📊 گزارش '+esc(m.name)+' — '+fromDate+' تا '+toDate,body,notifFoot,{lg:true});
-    // init date pickers after modal is open
-    setTimeout(function(){
-      var fi=document.getElementById('rptFrom');if(fi)openJDP(fi,function(v){fi.value=v;});
-      var ti=document.getElementById('rptTo');if(ti)openJDP(ti,function(v){ti.value=v;});
-    },100);
+function openExpertReportWithDates(memberId, fromDate, toDate) {
+  var rptBody = document.getElementById('rptBody');
+  if (rptBody) {
+    rptBody.innerHTML = '<div style="padding:48px;text-align:center;font-size:14px;color:var(--text-muted)">⏳ در حال به‌روزرسانی گزارش...</div>';
   }
-  fetch('/api/manager-reports/expert/'+encodeURIComponent(memberId)+'?from='+encodeURIComponent(fromDefault)+'&to='+encodeURIComponent(toDefault))
+  
+  fetch('/api/manager-reports/expert/'+encodeURIComponent(memberId)+'?from='+encodeURIComponent(fromDate)+'&to='+encodeURIComponent(toDate))
     .then(function(r){return r.ok?r.json():null;})
-    .then(function(apiData){buildReport(fromDefault,toDefault,apiData);})
-    .catch(function(){buildReport(fromDefault,toDefault,null);});
+    .then(function(apiData){
+      renderExpertReportModal(memberId, fromDate, toDate, apiData);
+    })
+    .catch(function(){
+      renderExpertReportModal(memberId, fromDate, toDate, null);
+    });
+}
+
+function renderExpertReportModal(memberId, fromDate, toDate, apiData) {
+  _buildPCCache();
+  var allMem=typeof umGetActive==='function'?umGetActive():((DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS);
+  var m=allMem.find(function(x){return x.id===memberId;});
+  if(!m)return;
+
+  window._rptApiCache=apiData||null;
+  var allPlanned=Object.keys(DB.weekEntries||{}).map(function(k){
+    var we = DB.weekEntries[k];
+    we._key = k;
+    return we;
+  }).filter(function(we){
+    var entryDate = we.scheduledDate || we._key.split(':::')[0] || '';
+    return we.addedBy === memberId && entryDate >= fromDate && entryDate <= toDate;
+  });
+
+  var totalPlanned = apiData&&apiData.summary?apiData.summary.planned:allPlanned.length;
+  var totalDone = apiData&&apiData.summary?apiData.summary.done:allPlanned.filter(function(we){ return we.done; }).length;
+  var totalNotDone = totalPlanned - totalDone;
+  var donePct = totalPlanned > 0 ? Math.round(totalDone / totalPlanned * 100) : 0;
+
+  var _rptAllMem=typeof umGetActive==='function'?umGetActive():(((DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS).filter(function(x){return x.active!==false;}));
+  var _rptMemOpts=_rptAllMem.map(function(x){return'<option value="'+esc(x.id)+'"'+(x.id===memberId?' selected':'')+'>'+esc(x.name||x.id)+'</option>';}).join('');
+  
+  var body='<div style="font-size:12px">';
+  body+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;background:var(--bg-raised);border-radius:8px;padding:8px 12px">';
+  body+='<span style="font-size:11px;font-weight:700;color:var(--text-secondary)">👤 کارشناس:</span>';
+  body+='<select id="rptMember" onchange="openExpertReportWithDates(this.value, \''+fromDate+'\', \''+toDate+'\')" style="padding:4px 8px;border:1px solid var(--border-input);border-radius:5px;font-family:inherit;font-size:12px;background:var(--bg-input);color:var(--text-primary)">'+_rptMemOpts+'</select>';
+  body+='</div>';
+  body+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">';
+  body+='<label style="font-size:11px">از: <input type="text" id="rptFrom" value="'+fromDate+'" readonly class="fd-inp" onclick="openJDP(this, function(v){ document.getElementById(\'rptFrom\').value=v; })" style="cursor:pointer;padding:4px 8px;border:1px solid var(--border-input);border-radius:5px;font-family:inherit;font-size:11px"></label>';
+  body+='<label style="font-size:11px">تا: <input type="text" id="rptTo" value="'+toDate+'" readonly class="fd-inp" onclick="openJDP(this, function(v){ document.getElementById(\'rptTo\').value=v; })" style="cursor:pointer;padding:4px 8px;border:1px solid var(--border-input);border-radius:5px;font-family:inherit;font-size:11px"></label>';
+  body+='<button onclick="openExpertReportWithDates(\''+memberId+'\', document.getElementById(\'rptFrom\').value, document.getElementById(\'rptTo\').value)" style="padding:4px 12px;background:var(--brand,#6366f1);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-family:inherit">🔍 فیلتر</button>';
+  body+='</div>';
+  body+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">';
+  body+='<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#1d4ed8">'+totalPlanned+'</div><div style="font-size:11px;color:#1d4ed8">کل برنامه‌ها</div></div>';
+  body+='<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#16a34a">'+totalDone+'</div><div style="font-size:11px;color:#16a34a">انجام شده ✓</div></div>';
+  body+='<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#dc2626">'+totalNotDone+'</div><div style="font-size:11px;color:#dc2626">باقی‌مانده (اختلاف)</div></div>';
+  body+='<div style="background:#faf5ff;border:1px solid #d8b4fe;border-radius:8px;padding:8px;text-align:center"><div style="font-size:20px;font-weight:700;color:#7c3aed">'+donePct+'٪</div><div style="font-size:11px;color:#7c3aed">نرخ تحقق</div></div>';
+  body+='</div>';
+  
+  body+='<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:12px">';
+  body+='<div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:6px">📊 قیف فروش (وضعیت فعلی مراکز)</div>';
+  var _fStages=['لید','سرنخ','فرصت','مشتری'];
+  var _fColors={'لید':'#f59e0b','سرنخ':'#0ea5e9','فرصت':'#8b5cf6','مشتری':'#22c55e'};
+  var _fCnts={};_fStages.forEach(function(s){_fCnts[s]=0;});
+  getAllProvinces().forEach(function(p){
+    var rt=getProvType(p.id);
+    getProvCenters(p.id).forEach(function(c){
+      var e=getE(rt,c.id);
+      if((e.owner||c.owner||'')!==memberId)return;
+      var lead=e.lead||c.lead||'سرنخ';
+      if(_fCnts[lead]!==undefined)_fCnts[lead]++;
+    });
+  });
+  var _fTotal=Object.values(_fCnts).reduce(function(a,b){return a+b;},0)||1;
+  body+='<div style="display:flex;gap:2px;align-items:stretch">';
+  _fStages.forEach(function(s){
+    var cnt=_fCnts[s]||0;var pct=Math.round(cnt/_fTotal*100);var clr=_fColors[s];
+    body+='<div style="flex:1;text-align:center;padding:5px 3px;border:1px solid '+clr+'33;border-radius:5px;background:'+clr+'11">';
+    body+='<div style="font-size:15px;font-weight:700;color:'+clr+'">'+cnt+'</div>';
+    body+='<div style="font-size:10px;font-weight:600;color:'+clr+'">'+esc(s)+'</div>';
+    body+='<div style="font-size:10px;color:var(--text-muted)">'+pct+'٪</div>';
+    body+='</div>';
+    if(s!=='مشتری')body+='<div style="display:flex;align-items:center;color:var(--text-muted);font-size:14px;padding:0 1px">›</div>';
+  });
+  body+='</div>';
+  body+='</div>';
+  body+=renderLeadTimingHtml(memberId);
+  body+='<div id="rptBody">'+buildExpertReportHtml(memberId,fromDate,toDate)+'</div>';
+  body+='</div>';
+  
+  var notifFoot='<button class="btn-secondary" onclick="closeModal(\'expertReport\')">بستن</button>';
+  if(typeof _isManager==='function'&&_isManager()){
+    notifFoot='<button style="background:#faf5ff;color:#7c3aed;border:1px solid #d8b4fe;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit" onclick="_sendReportNotif(\''+memberId+'\',\''+esc(m.name)+'\')">📨 ارسال اعلان</button>'+notifFoot;
+  }
+  openModal('expertReport','📊 گزارش '+esc(m.name)+' — '+fromDate+' تا '+toDate,body,notifFoot,{lg:true});
 }
 function _sendReportNotif(memberId,memberName){
   var body='<div style="font-size:12px">'
@@ -1734,7 +1789,7 @@ function buildExpertReportHtml(memberId,fromDate,toDate){
     + '<button class="report-tab-btn active" onclick="switchReportTab(0)" style="' + btnStyle + 'background:var(--brand,#6366f1);color:#fff">📋 تماس‌ها و ملاقات‌ها</button>'
     + '<button class="report-tab-btn" onclick="switchReportTab(1)" style="' + btnStyle + 'background:transparent;color:var(--text-secondary)">🔄 لاگ تغییرات کارشناس</button>'
     + '<button class="report-tab-btn" onclick="switchReportTab(2)" style="' + btnStyle + 'background:transparent;color:var(--text-secondary)">🏢 عملیات دیگران روی مراکز</button>'
-    + '<button class="report-tab-btn" onclick="switchReportTab(3)" style="' + btnStyle + 'background:transparent;color:var(--text-secondary)">📞 فعالیت SQL</button>'
+    + '<button class="report-tab-btn" onclick="switchReportTab(3)" style="' + btnStyle + 'background:transparent;color:var(--text-secondary)">📞 ثبت تماس و ویزیت</button>'
     + '<button class="report-tab-btn" onclick="switchReportTab(4)" style="' + btnStyle + 'background:transparent;color:var(--text-secondary)">💰 فروش / پیشفاکتور</button>'
     + '</div>';
     

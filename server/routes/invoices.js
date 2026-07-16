@@ -30,11 +30,13 @@ async function nextInvoiceNo(jalaliDate) {
 // GET /api/invoices
 router.get('/', requireAuth, async (req, res) => {
   try {
-    const { status, month, employee } = req.query;
+    const { status, month, from, to, employee } = req.query;
     const conds = [], params = [];
 
     if (status) { conds.push(`i.status = $${params.length + 1}`); params.push(status); }
-    if (month)  { conds.push(`i.jalali_date LIKE $${params.length + 1}`); params.push(month + '%'); }
+    if (month && !from && !to)  { conds.push(`i.jalali_date LIKE $${params.length + 1}`); params.push(month + '%'); }
+    if (from)   { conds.push(`i.jalali_date >= $${params.length + 1}`); params.push(from); }
+    if (to)     { conds.push(`i.jalali_date <= $${params.length + 1}`); params.push(to); }
     if (employee && isManager(req.user.role)) {
       conds.push(`i.created_by = $${params.length + 1}`); params.push(employee);
     } else if (!isManager(req.user.role)) {

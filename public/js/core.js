@@ -221,6 +221,9 @@ function _sseReloadDB(byUser) {
       delete merged._serverTs; delete merged._clientTs;
       Object.keys(merged).forEach(function(k) { DB[k] = merged[k]; });
       _lastSyncedDB = JSON.parse(JSON.stringify(DB));
+      if (merged.edits || merged.weekEntries || merged.salesLog) {
+        window._teamSummaryCache = null;
+      }
       if (!_saveDebounceTimer) {
         if (currentTab === 'weekplan' && typeof renderWeekPlan === 'function') renderWeekPlan();
         else if (currentTab === 'provinces' && typeof renderDashboard === 'function') { renderDashboard(); if(typeof renderTable==='function')renderTable(); }

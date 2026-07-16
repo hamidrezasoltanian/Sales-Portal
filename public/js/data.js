@@ -161,6 +161,38 @@ function getCenterOwnerFromKey(centerKey) {
   return getCenterOwner(centerKey.slice(0, us), centerKey.slice(us + 1));
 }
 
+/** Resolve center name from centerKey e.g. center_42 or pc_p3||5 */
+function getCenterNameFromKey(centerKey) {
+  if (typeof getRecLabel === 'function') {
+    var lbl = getRecLabel(centerKey);
+    if (lbl && lbl !== '?') return lbl;
+  }
+  if (!centerKey) return '';
+  var pts = centerKey.split('_');
+  var tp = pts[0];
+  var id = pts.slice(1).join('_');
+  
+  var e = (DB.edits && DB.edits[centerKey]) || {};
+  if (e.nameOverride) return e.nameOverride;
+  
+  if (tp === 'center') {
+    var c = CENTERS.find(function(x) { return String(x.id) === String(id); });
+    if (c) return c.name;
+  }
+  
+  var ex = (DB.extra || []).find(function(x) { return String(x.id) === String(id); });
+  if (ex) return ex.name;
+  
+  if (typeof _buildPCCache === 'function') _buildPCCache();
+  if (window._PC_CACHE) {
+    for (var pv in window._PC_CACHE) {
+      var found = window._PC_CACHE[pv].find(function(x) { return String(x.id) === String(id); });
+      if (found) return found.name;
+    }
+  }
+  return id;
+}
+
 /** Week-entry owner: canonical getCenterOwner + addedBy fallback */
 function _wpGetOwner(we) {
   if (!we) return '';

@@ -21,8 +21,8 @@ router.get('/sales-trend', requireAuth, requireManager, async (req, res) => {
         created_by AS employee,
         LEFT(jalali_date, 7) AS month,
         COUNT(*) AS count,
-        SUM(CASE WHEN status='approved' THEN total ELSE 0 END) AS approved_total,
-        COUNT(CASE WHEN status='approved' THEN 1 END) AS approved_count,
+        SUM(CASE WHEN status IN ('approved','invoiced') THEN total ELSE 0 END) AS approved_total,
+        COUNT(CASE WHEN status IN ('approved','invoiced') THEN 1 END) AS approved_count,
         COUNT(CASE WHEN status='rejected' THEN 1 END) AS rejected_count
       FROM proformas
       WHERE jalali_date IS NOT NULL AND jalali_date != ''
@@ -67,8 +67,8 @@ router.get('/pipeline', requireAuth, requireManager, async (req, res) => {
       SELECT
         created_by AS employee,
         COUNT(*) AS total,
-        COUNT(CASE WHEN status='approved' THEN 1 END) AS approved,
-        COALESCE(SUM(CASE WHEN status='approved' THEN total ELSE 0 END),0) AS approved_value
+        COUNT(CASE WHEN status IN ('approved','invoiced') THEN 1 END) AS approved,
+        COALESCE(SUM(CASE WHEN status IN ('approved','invoiced') THEN total ELSE 0 END),0) AS approved_value
       FROM proformas
       GROUP BY created_by ORDER BY approved_value DESC
     `);
@@ -76,7 +76,7 @@ router.get('/pipeline', requireAuth, requireManager, async (req, res) => {
     const trend = await query(`
       SELECT LEFT(jalali_date,7) AS month,
              COUNT(*) AS count,
-             COALESCE(SUM(CASE WHEN status='approved' THEN total ELSE 0 END),0) AS approved_total,
+             COALESCE(SUM(CASE WHEN status IN ('approved','invoiced') THEN total ELSE 0 END),0) AS approved_total,
              COALESCE(SUM(total),0) AS all_total
       FROM proformas
       WHERE jalali_date IS NOT NULL AND jalali_date != ''
@@ -86,7 +86,7 @@ router.get('/pipeline', requireAuth, requireManager, async (req, res) => {
 
     const cycleR = await query(`
       SELECT ROUND(AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) / 86400)::numeric, 1) AS avg_days
-      FROM proformas WHERE status='approved'
+      FROM proformas WHERE status IN ('approved','invoiced')
     `);
 
     const users = await query(`SELECT username, display_name FROM app_users`);
