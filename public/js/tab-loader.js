@@ -17,7 +17,7 @@
     hr: ['hr.js', 'payroll.js'],
     'trade-kpi': ['trade-kpi.js', 'trade-cases-ui.js', 'tasks.js'],
     reports: ['reports.js'],
-    'week-planner': ['week-planner.js'],
+    'week-planner': ['expert-targets.js', 'week-planner.js'],
     'faradis-match': ['faradis-match.js', 'faradis-data.js'],
     home: ['home-cartable.js'],
     pricing: [],

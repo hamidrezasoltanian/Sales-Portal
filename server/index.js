@@ -115,7 +115,8 @@ app.use('/api/proforma', require('./routes/proforma'));
 app.use('/api/webhooks', require('./routes/webhooks'));
 app.use('/api/tasks', require('./routes/tasks'));
 app.use('/api/week-entries', require('./routes/week-entries'));
-app.use('/api/crm-settings', require('./routes/crm-settings'));
+  app.use('/api/expert-targets', require('./routes/expert-targets'));
+  app.use('/api/crm-settings', require('./routes/crm-settings'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/settings', require('./routes/settings'));
 app.use('/api/changelog', require('./routes/changelog'));
@@ -294,6 +295,11 @@ async function start() {
       require('./lib/proforma-scheduler').startProformaScheduler();
     } catch (e) {
       console.warn('[proforma-scheduler] not started:', e.message);
+    }
+    try {
+      require('./lib/notification-scheduler').startNotificationScheduler();
+    } catch (e) {
+      console.warn('[notif-scheduler] not started:', e.message);
     }
     if (process.env.TELEGRAM_BOT_TOKEN) {
       const bot = require('./bot/telegram');

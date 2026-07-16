@@ -278,6 +278,8 @@ The receivables AI tab calls `https://api.anthropic.com/v1/messages` directly fr
 |---|---|---|
 | Province → center pipeline w/ status, lead, potential, owner | provinces tab | ✅ |
 | Week plan: drag-drop scheduling, expert filter (unified across grid + center list), bulk move, progress bar | weekplan tab | ✅ |
+| **Expert targets (Quota)**: جدا از week_entries؛ شمارش فقط done؛ min پرریسک؛ ماه→هفته؛ progress board | `/api/expert-targets` + تب تخصیص → اهداف | ✅ |
+| assignment_source on week_entries (manager_fixed / expert_self) + free_slots/WIP enforce | week-entries POST | ✅ |
 | Done modal: structured logging (نتیجه / یادداشت / اقدام بعدی) on completion | weekplan | ✅ |
 | Followup → next-date auto suggestion, overdue marking | center modal, banner | ✅ |
 | Convert followup to task («📌 وظیفه» button) | center modal | ✅ |
@@ -285,7 +287,10 @@ The receivables AI tab calls `https://api.anthropic.com/v1/messages` directly fr
 | Per-user custom kanban columns | tasks ⚙️ ستون‌ها | ✅ |
 | 3-level subtasks, inline add/edit (no prompt()) | task modal | ✅ |
 | In-app notifications + manager all-view toggle | bell icon | ✅ |
-| Auto-reminders at startup (no-date / overdue centers) | init | ✅ |
+| **Notification engine**: severity, atomic dedup, per-user prefs, no cartable mirror | `notification-engine.js` + `/api/notifications` | ✅ |
+| **Server digests**: morning 08:00 / afternoon 15:00 / weekly Sat 09:00 Tehran | `notification-scheduler.js` | ✅ |
+| Bell = events only; cartable = scheduled work (no dual spam) | inbox-index + weekplan UI | ✅ |
+| Auto-reminders at startup (no-date / overdue centers) | init | ⛔ replaced by server digests + cartable |
 | Manager overview: summary cards, expert table, pipeline matrix, today summary | manager tab | ✅ |
 | Manager drill-down: expert → centers → notes/changeLog | click expert row | ✅ |
 | Overdue list modal (per-expert or global) | click معوق numbers | ✅ |

@@ -386,6 +386,23 @@ function _renderWeekPlanBody(){
     days.push({str:d[0]+'/'+p2(d[1])+'/'+p2(d[2]), name:J_DAYS[i], isToday:d[0]+'/'+p2(d[1])+'/'+p2(d[2])===today});
   }
 
+  // راهنمای کوتاه یک‌بار (قابل بستن)
+  try {
+    var tipId = 'wpHowTip';
+    var tipEl = document.getElementById(tipId);
+    if (!tipEl && daysEl.parentNode && !localStorage.getItem('wp_how_dismissed')) {
+      tipEl = document.createElement('div');
+      tipEl.id = tipId;
+      tipEl.style.cssText = 'background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:10px 14px;margin:0 0 10px;font-size:12px;color:#1e40af;line-height:1.7;display:flex;gap:10px;align-items:flex-start';
+      tipEl.innerHTML = '<div style="flex:1">' +
+        (_isManager()
+          ? '<b>اینجا اجرای برنامه است.</b> تخصیص مراکز و هدف عددی را از تب «تخصیص برنامه» بگذارید. کارشناس کارت‌ها را Done می‌کند تا پیشرفت ثبت شود.'
+          : '<b>برنامه هفته شما:</b> کارت‌های هر روز را انجام دهید و Done بزنید. فقط Done شمرده می‌شود. کارهای معوق را در تب «خانه» هم می‌بینید.') +
+        '</div><button type="button" onclick="localStorage.setItem(\'wp_how_dismissed\',\'1\');this.parentNode.remove()" style="border:none;background:transparent;cursor:pointer;color:#64748b;font-size:16px;padding:0 4px" title="بستن">✕</button>';
+      daysEl.parentNode.insertBefore(tipEl, daysEl);
+    }
+  } catch (eTip) {}
+
   var getCenterOwner = function(rtype, rid) { return _wpGetOwner({rtype:rtype, rid:rid}); };
 
   // جمع‌آوری تمامی مراکزِ تخصیص یافته به این هفته
@@ -1960,15 +1977,19 @@ document.addEventListener('visibilitychange', function() {
   }
 });
 
-// Polling fallback: refresh badge every 60s
-setInterval(function() { if (currentUser) _refreshNotifs(); }, 60000);
+// Polling fallback ONLY when SSE is down (avoids duplicate load on healthy streams)
+setInterval(function() {
+  if (!currentUser) return;
+  var sseDown = (typeof _sse === 'undefined' || !_sse || _sse.readyState !== 1);
+  if (sseDown) _refreshNotifs();
+}, 60000);
 
-// ── Helper: check if same-type unread notification exists in cache today ──
+// Server-side atomic dedup is authoritative; this is a soft UI hint only
 function _hasRecentNotif(toUser, notifType) {
-  var today = (typeof todayStr === 'function') ? todayStr() : new Date().toISOString().slice(0,10);
+  var cutoff = Date.now() - 86400000;
   return (_notifCache||[]).some(function(n) {
     return n.to === toUser && !n.read && n.type === notifType
-      && n.at && n.at.slice(0,10) >= new Date(Date.now()-86400000).toISOString().slice(0,10);
+      && n.at && new Date(n.at).getTime() >= cutoff;
   });
 }
 
@@ -1982,17 +2003,26 @@ function _sendPendingNotifs() {
     }).catch(function() { showToast('❌ خطا در ارسال', 2000); });
 }
 
+var _NOTIF_SEVERITY_RANK = { critical: 4, high: 3, medium: 2, low: 1 };
+var _ROUTINE_NOTIF_TYPES = { morning_brief: 1, followup: 1, digest: 1 };
+
 function sendNotif(toUser, message, centerKey, centerKeys, type, meta) {
-  // Check global notification preferences
   var _np = (DB && DB.settings && DB.settings.notifPrefs) || {};
-  if (_np.enabled === false) return; // notifications disabled
+  if (_np.enabled === false) return;
   var _ntType = type || 'general';
-  if (_np.types && _np.types[_ntType] === false) return; // this type is disabled
+  if (_np.types && _np.types[_ntType] === false) return;
 
   var id = Date.now() + '_' + Math.random().toString(36).slice(2);
-  var payload = { id: id, to: toUser, msg: message, centerKey: centerKey || null,
-                  type: _ntType, meta: meta || null,
-                  autoSend: _np.autoSend !== false }; // false = queued, not auto-pushed
+  var forceBell = !_ROUTINE_NOTIF_TYPES[_ntType] || !!(meta && meta.forceBell);
+  var payload = {
+    id: id, to: toUser, msg: message, centerKey: centerKey || null,
+    type: _ntType, meta: meta || null,
+    autoSend: _np.autoSend !== false,
+    forceBell: forceBell,
+    severity: (meta && meta.severity) || undefined,
+    bucket: (meta && meta.bucket) || undefined,
+    actionUrl: (meta && meta.actionUrl) || undefined
+  };
   if (centerKeys && centerKeys.length) payload.centerKeys = centerKeys;
   fetch('/api/notifications', {
     method: 'POST',
@@ -2001,18 +2031,23 @@ function sendNotif(toUser, message, centerKey, centerKeys, type, meta) {
   }).then(function(r) {
     return r.ok ? r.json() : null;
   }).then(function(notif) {
-    if (!notif) return;
+    if (!notif || notif.skipped) return;
     _notifCache.unshift({
       id: notif.id, to: notif.to, msg: notif.msg,
       centerKey: notif.centerKey || centerKey || '',
       centerKeys: centerKeys || null,
       at: notif.at || new Date().toISOString(),
-      read: false, from: currentUser
+      read: false, from: currentUser,
+      type: notif.type || _ntType,
+      severity: notif.severity || 'medium',
+      meta: notif.meta || meta || null,
+      actionUrl: notif.actionUrl || null
     });
+    updateNotifBadge();
   }).catch(function() {
     console.warn('[sendNotif] API failed for', toUser);
   });
-  showToast('\U0001f4e9 اعلان برای ' + (USERS[toUser] || toUser) + ' ارسال شد', 2000);
+  if (forceBell) showToast('\U0001f4e9 اعلان برای ' + (USERS[toUser] || toUser) + ' ارسال شد', 2000);
 }
 
 function updateNotifBadge() {
@@ -2030,10 +2065,22 @@ function setNotifView(all) {
   toggleNotifPanel();
 }
 
+function _notifSeverityLabel(s) {
+  if (s === 'critical') return 'بحرانی';
+  if (s === 'high') return 'مهم';
+  if (s === 'low') return 'کم';
+  return 'عادی';
+}
+
 function _renderNotifPanel(arr) {
   var viewAll = _notifViewAll && _isManager();
   var myNotifs = (viewAll ? arr.slice() : arr.filter(function(n) { return n.to === currentUser; }))
-    .sort(function(a, b) { return new Date(b.at) - new Date(a.at); })
+    .sort(function(a, b) {
+      var sa = _NOTIF_SEVERITY_RANK[a.severity] || 2;
+      var sb = _NOTIF_SEVERITY_RANK[b.severity] || 2;
+      if (sa !== sb) return sb - sa;
+      return new Date(b.at) - new Date(a.at);
+    })
     .slice(0, 100);
   var panel = document.createElement('div');
   panel.id = 'notifPanel'; panel.className = 'notif-panel';
@@ -2045,7 +2092,7 @@ function _renderNotifPanel(arr) {
       + '<button onclick="setNotifView(true)" style="font-size:10px;border:none;border-radius:4px;padding:2px 8px;cursor:pointer;background:' + (viewAll ? 'var(--brand,#6366f1)' : 'transparent') + ';color:' + (viewAll ? '#fff' : 'var(--text-secondary)') + '">همه</button>'
       + '</span>';
   }
-  var head = '<div class="notif-panel-head"><span>\U0001f514 ' + (viewAll ? 'همه اعلان‌ها' : 'اعلان‌های من') + '</span>'
+  var head = '<div class="notif-panel-head"><span>\U0001f514 اخبار جدید</span>'
     + '<span style="display:inline-flex;gap:6px;align-items:center">'
     + _tglBtn
     + (unreadIds.length ? '<button onclick="markAllNotifsRead()" style="font-size:10px;background:var(--bg-raised);border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer">همه خوانده شد</button>' : '')
@@ -2053,37 +2100,43 @@ function _renderNotifPanel(arr) {
        ? '<button onclick="_sendPendingNotifs()" style="font-size:10px;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:4px;padding:2px 8px;cursor:pointer">📤 ارسال دستی</button>'
        : '')
     + '</span>'
-    + '</div>';
+    + '</div>'
+    + '<div class="notif-panel-hint">کارهای زمان‌بندی‌شده در «خانه / کارتابل» هستند — اینجا فقط رویدادهای جدید.</div>';
   var body = '';
   if (!myNotifs.length) {
-    body = '<div class="notif-empty">اعلانی وجود ندارد</div>';
+    body = '<div class="notif-empty">خبر جدیدی نیست<br><span style="font-size:11px;color:var(--text-muted)">کارهای امروز را از تب خانه ببینید</span></div>';
   } else {
     body = myNotifs.map(function(n) {
       var timeAgo = _timeAgo(n.at);
       var nid = n.id;
       var nmsg = n.msg || n.message || '';
       var nfrom = n.from || '';
+      var sev = n.severity || 'medium';
       var hasCk = n.centerKey && n.centerKey.indexOf('_') > 0;
       var hasMultiCk = n.centerKeys && n.centerKeys.length > 1;
       var cName = hasCk ? _clGetName(n.centerKey) : '';
-      return '<div class="notif-item' + (n.read ? '' : ' unread') + (n.ack ? ' notif-acked' : '') + '" data-nid="' + nid + '">'
+      var isDigest = (n.type === 'digest' || n.type === 'morning_brief' || n.type === 'followup');
+      return '<div class="notif-item sev-' + sev + (n.read ? '' : ' unread') + (n.ack ? ' notif-acked' : '') + '" data-nid="' + nid + '">'
+        + '<div class="notif-sev-row"><span class="notif-sev-badge sev-' + sev + '">' + _notifSeverityLabel(sev) + '</span></div>'
         + '<div class="notif-item-msg">' + esc(nmsg) + '</div>'
         + ((hasCk || hasMultiCk) ? '<div class="notif-item-center">\U0001f4cd <span class="notif-center-link" onclick="goToNotifCenter(\'' + nid + '\')">' + (hasMultiCk ? (n.centerKeys.length + ' مرکز') : esc(cName)) + '</span></div>' : '')
         + '<div class="notif-item-actions">'
-        + ((hasCk || hasMultiCk) ? '<button class="notif-act-btn" onclick="goToNotifCenter(\'' + nid + '\')">\U0001f50d ' + (hasMultiCk ? 'مشاهده مراکز' : 'مشاهده مرکز') + '</button>' : '')
+        + (isDigest || hasMultiCk
+          ? '<button class="notif-act-btn notif-primary" onclick="goToNotifCenter(\'' + nid + '\')">📥 باز کردن کارتابل</button>'
+          : (hasCk ? '<button class="notif-act-btn" onclick="goToNotifCenter(\'' + nid + '\')">\U0001f50d مشاهده مرکز</button>' : ''))
         + (viewAll
           ? (n.ack ? '<span class="notif-ack-badge">✓ تأیید شده</span>' : '')
           : (n.ack ? '<span class="notif-ack-badge">✓ تأیید شده</span>' : (function(){
               var ntype = n.type || 'general';
-              if (ntype === 'followup' || ntype === 'manager_request') {
+              if (ntype === 'followup' || ntype === 'digest' || ntype === 'morning_brief') {
+                return '';
+              } else if (ntype === 'manager_request') {
                 return (n.centerKey && n.centerKey.indexOf('_') > 0
                   ? '<button class="notif-act-btn" onclick="_notifAction(\'' + nid + '\',\'call\')">📞 ثبت تماس</button>'
                     + '<button class="notif-act-btn" onclick="_notifAction(\'' + nid + '\',\'brief\')">📋 خلاصه</button>'
                   : '<button class="notif-act-btn notif-ack-btn" onclick="ackNotif(\'' + nid + '\')">✓ انجام دادم</button>');
               } else if (ntype === 'task') {
                 return '<button class="notif-act-btn" onclick="_notifAction(\'' + nid + '\',\'task\')">📋 باز کردن تکلیف</button>';
-              } else if (ntype === 'morning_brief') {
-                return '<button class="notif-act-btn" onclick="_notifAction(\'' + nid + '\',\'weekplan\')">📅 برنامه هفته</button>';
               } else if (ntype === 'owner_change') {
                 return '<button class="notif-act-btn" onclick="_notifAction(\'' + nid + '\',\'center\')">🔍 مشاهده مرکز</button>';
               } else if (ntype === 'ack') {
@@ -2093,33 +2146,18 @@ function _renderNotifPanel(arr) {
               }
             })()))
         + '</div>'
-        + '<div class="notif-item-time">' + (viewAll ? 'به: <b>' + esc(USERS[n.to] || n.to) + '</b> · ' : '') + 'از: ' + (USERS[nfrom] || nfrom) + ' · ' + timeAgo + (viewAll && !n.read ? ' · <span style="color:#f59e0b">خوانده نشده</span>' : '') + '</div>'
+        + '<div class="notif-item-time">' + (viewAll ? 'به: <b>' + esc(USERS[n.to] || n.to) + '</b> · ' : '') + (nfrom ? ('از: ' + (USERS[nfrom] || nfrom) + ' · ') : '') + timeAgo + (viewAll && !n.read ? ' · <span style="color:#f59e0b">خوانده نشده</span>' : '') + '</div>'
         + '</div>';
     }).join('');
   }
   panel.innerHTML = head + '<div class="notif-body-scroll">' + body + '</div>';
   document.body.appendChild(panel);
-  // Auto mark-as-read after 2s
-  setTimeout(function() {
-    if (viewAll || !unreadIds.length) return;
-    unreadIds.forEach(function(id) {
-      var nx = _notifCache.find(function(x) { return x.id === id; });
-      if (nx) nx.read = true;
-    });
-    updateNotifBadge();
-    fetch('/api/notifications/read-all', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to: currentUser })
-    }).catch(function() {});
-    var p = document.getElementById('notifPanel');
-    if (p) p.querySelectorAll('.notif-item.unread').forEach(function(el) { el.classList.remove('unread'); });
-  }, 2000);
+  // Do NOT auto-mark-all-read — that caused alert blindness. User marks via actions / read-all.
   setTimeout(function() {
     document.addEventListener('click', function _nClose(ev) {
       var p = document.getElementById('notifPanel');
       var bell = document.getElementById('notifBell');
-      if (p && !p.contains(ev.target) && ev.target !== bell && !bell.contains(ev.target)) { p.remove(); _notifPanelOpen = false; }
+      if (p && !p.contains(ev.target) && ev.target !== bell && !(bell && bell.contains(ev.target))) { p.remove(); _notifPanelOpen = false; }
       document.removeEventListener('click', _nClose);
     });
   }, 100);
@@ -2129,7 +2167,6 @@ function toggleNotifPanel() {
   var existing = document.getElementById('notifPanel');
   if (existing) { existing.remove(); _notifPanelOpen = false; return; }
   _notifPanelOpen = true;
-  // Fetch fresh notifications from API then render
   var url = '/api/notifications' + (_notifViewAll && _isManager() ? '' : '?to=' + encodeURIComponent(currentUser));
   fetch(url)
     .then(function(r) { return r.ok ? r.json() : _notifCache; })
@@ -2137,26 +2174,58 @@ function toggleNotifPanel() {
     .catch(function() { _renderNotifPanel(_notifCache); });
 }
 
+/** Open home cartable with filter, or single center modal */
 function goToNotifCenter(nid) {
   var n = _notifCache.find(function(x) { return x.id === nid; });
-  if (!n || (!(n.centerKey && n.centerKey.indexOf('_') > 0) && !(n.centerKeys && n.centerKeys.length))) return;
+  if (!n) return;
   markNotifRead(nid);
   var p = document.getElementById('notifPanel'); if (p) p.remove(); _notifPanelOpen = false;
-  var keys = n.centerKeys && n.centerKeys.length ? n.centerKeys : [n.centerKey];
-  if (keys.length === 1) {
-    var parts = keys[0].split('_'); var rtype = parts[0]; var rid = parts.slice(1).join('_');
-    setTimeout(function() { openCenterModal(rtype, rid); }, 100);
+
+  var meta = n.meta || {};
+  var filter = meta.filter || '';
+  if (!filter && (n.type === 'digest' || n.type === 'morning_brief' || n.type === 'followup')) {
+    filter = 'overdue';
+  }
+  var keys = (n.centerKeys && n.centerKeys.length) ? n.centerKeys
+    : (n.centerKey && n.centerKey.indexOf('_') > 0 ? [n.centerKey] : []);
+
+  // Multi-center or digest → cartable
+  if (filter || keys.length > 1 || n.type === 'digest' || n.type === 'morning_brief' || n.type === 'followup') {
+    if (typeof switchTab === 'function') switchTab('home');
+    setTimeout(function() {
+      if (typeof window._cbSetFilter === 'function') {
+        window._cbSetFilter(filter || 'overdue');
+      } else if (typeof renderHomeCartable === 'function') {
+        renderHomeCartable();
+      }
+    }, 250);
     return;
   }
-  var listHtml = '<div style="display:flex;flex-direction:column;gap:6px;padding:4px 0">';
-  keys.forEach(function(ck) {
-    var cname = _clGetName(ck);
-    var cparts = ck.split('_'); var crt = cparts[0]; var crid = cparts.slice(1).join('_');
-    listHtml += '<button onclick="closeModal(\'notifCkList\');if(currentTab!==\'provinces\'&&currentTab!==\'weekplan\')switchTab(\'provinces\');setTimeout(function(){openCenterModal(\'' + crt + '\',\'' + crid + '\');},150)" style="text-align:right;padding:8px 12px;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px;cursor:pointer">' + esc(cname) + '</button>';
-  });
-  listHtml += '</div>';
-  openModal('notifCkList', '\U0001f4cd مراکز مرتبط با این اعلان', listHtml, '<button class="btn-secondary" onclick="closeModal(\'notifCkList\')">بستن</button>');
+
+  if (keys.length === 1) {
+    var parts = keys[0].split('_');
+    var rtype = parts[0];
+    var rid = parts.slice(1).join('_');
+    setTimeout(function() { openCenterModal(rtype, rid, keys[0]); }, 100);
+    return;
+  }
+
+  if (n.type === 'task' && meta.taskId && typeof openTaskModal === 'function') {
+    setTimeout(function() { openTaskModal(meta.taskId); }, 100);
+  }
 }
+
+/** Mark related unread notifs as read when cartable work is done for a center */
+function markNotifsForCenterRead(centerKey) {
+  if (!centerKey || !currentUser) return;
+  (_notifCache || []).forEach(function(n) {
+    if (n.to !== currentUser || n.read) return;
+    var hit = n.centerKey === centerKey
+      || (n.centerKeys && n.centerKeys.indexOf(centerKey) >= 0);
+    if (hit) markNotifRead(n.id);
+  });
+}
+window.markNotifsForCenterRead = markNotifsForCenterRead;
 
 function ackNotif(nid) {
   var n = _notifCache.find(function(x) { return x.id === nid; });
@@ -2455,7 +2524,7 @@ function sendReminderToAll(){
       +names.slice(0,5).join('\n• ')
       +(names.length>5?'\nو '+(names.length-5)+' مورد دیگر':'')
       +'\nوارد برنامه هفته شوید.';
-    sendNotif(exp,msg,'',[],'followup',null);
+    sendNotif(exp,msg,'',[],'followup',{forceBell:true,filter:'today',actionUrl:'/?tab=home&filter=today',bucket:'manual_today:'+today+':'+exp});
   });
   if(cnt>0)showToast('🔔 یادآوری برای '+cnt+' کارشناس ارسال شد',3000);
   else showToast('✅ همه کارشناسان گزارش داده‌اند');
@@ -2495,7 +2564,7 @@ function sendReminderToExpert(expertUser){
   });
   if(!noActEntries.length){showToast('✅ این کارشناس برای همه مراکز گزارش داده است');return;}
   var msg='لطفاً برای مراکز زیر که امروز برنامه دارید گزارش وارد کنید: '+noActEntries.slice(0,5).join('، ')+(noActEntries.length>5?' و '+(noActEntries.length-5)+' مرکز دیگر':'');
-  sendNotif(expertUser,msg,'',[],'followup',null);
+  sendNotif(expertUser,msg,'',[],'followup',{forceBell:true,filter:'today',bucket:'manual_expert:'+today+':'+expertUser});
 }
 
 

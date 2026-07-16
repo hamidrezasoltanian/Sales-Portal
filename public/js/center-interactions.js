@@ -387,6 +387,9 @@ function _ciSubmit() {
     _ciApplyInteractionResult(centerKey, ctx.rtype, ctx.rid, res);
     closeModal(CI_MODAL_ID);
     showToast(res.replay ? '✓ قبلاً ثبت شده بود' : '✓ تعامل ثبت شد');
+    if (typeof window.markNotifsForCenterRead === 'function') {
+      window.markNotifsForCenterRead(centerKey);
+    }
     if (typeof renderExpertDashboard === 'function') renderExpertDashboard();
     if (typeof renderDashboard === 'function') renderDashboard();
   }).catch(function (err) {

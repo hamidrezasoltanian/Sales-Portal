@@ -9,9 +9,10 @@
     customStart: '',
     customEnd: '',
     mode: 'week',
-    actionType: 'call',
+    actionType: 'all',
     centers: [],
     selected: {},
+    rowTypes: {},
     // filters
     search: '',
     filterStatus: '',
@@ -23,6 +24,47 @@
     sortBy: 'priority',
     visibleCount: 80,
   };
+  // HTML onchange handlers need global access (IIFE scope otherwise throws)
+  window._wpState = _wpState;
+
+  var _WP_ACT_FALLBACK = {
+    call: '📞 تماس',
+    visit: '🤝 ملاقات',
+    price_send: '📄 ارسال قیمت',
+    sample_send: '🧪 ارسال نمونه',
+    committee: '🏛 پیگیری کمیته',
+    meeting: '👥 جلسه',
+    followup: '🔄 پیگیری',
+  };
+
+  function _wpActLabels() {
+    return (typeof ACTION_TYPE_LABELS !== 'undefined' && ACTION_TYPE_LABELS) ? ACTION_TYPE_LABELS : _WP_ACT_FALLBACK;
+  }
+
+  function _wpActOptionsHtml(selected, withAll) {
+    var labels = _wpActLabels();
+    var html = '';
+    if (withAll) {
+      html += '<option value="all"' + (selected === 'all' || !selected ? ' selected' : '') + '>✨ همه — انتخاب برای هر مرکز</option>';
+    }
+    Object.keys(labels).forEach(function (k) {
+      html += '<option value="' + k + '"' + (selected === k ? ' selected' : '') + '>' + labels[k] + '</option>';
+    });
+    return html;
+  }
+
+  function _wpResolveActionType(rkey) {
+    if (_wpState.actionType && _wpState.actionType !== 'all') return _wpState.actionType;
+    return (_wpState.rowTypes && _wpState.rowTypes[rkey]) || 'call';
+  }
+
+  function _wpActHint() {
+    if (_wpState.actionType === 'all') {
+      return 'برای هر مرکز در جدول، نوع اقدام جداگانه انتخاب کنید (پیش‌فرض: تماس).';
+    }
+    var labels = _wpActLabels();
+    return 'همه مراکز انتخاب‌شده با نوع «' + (labels[_wpState.actionType] || _wpState.actionType) + '» ثبت می‌شوند.';
+  }
 
   // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -240,96 +282,184 @@
 
   // ── render panel ─────────────────────────────────────────────────────────
 
+  // fallback if expert-targets.js not yet loaded
+  if (typeof window._etSetView !== 'function') {
+    window._etSetView = function (v) {
+      window._wpPlannerView = v;
+      try { if (v !== 'guide') localStorage.setItem('wp_planner_seen', '1'); } catch (e) {}
+      if (typeof renderWeekPlannerPanel === 'function') renderWeekPlannerPanel();
+    };
+  }
+
   window.renderWeekPlannerPanel = function () {
     var el = document.getElementById('weekPlannerPanel');
     if (!el) return;
 
-    var users = typeof _DEFAULT_MEMBERS !== 'undefined' ? _DEFAULT_MEMBERS : [];
-    var experts = users.filter(function(u) {
-      return u.active !== false;
-    });
+    // اولین بازدید مدیر → تب راهنما تا سه لایه سیستم روشن شود
+    if (!window._wpPlannerView) {
+      try {
+        window._wpPlannerView = localStorage.getItem('wp_planner_seen') ? 'assign' : 'guide';
+      } catch (e) { window._wpPlannerView = 'assign'; }
+    }
+    var view = window._wpPlannerView;
+    if (view !== 'guide') {
+      try { localStorage.setItem('wp_planner_seen', '1'); } catch (e2) {}
+    }
+    var tab = function (id, label) {
+      var on = view === id;
+      return '<button onclick="window._etSetView(\'' + id + '\')" style="padding:8px 16px;border:none;border-bottom:2px solid ' + (on ? '#6366f1' : 'transparent') + ';background:transparent;font-family:inherit;font-size:.88rem;font-weight:' + (on ? '700' : '500') + ';color:' + (on ? '#6366f1' : '#64748b') + ';cursor:pointer">' + label + '</button>';
+    };
 
+    var chrome =
+      '<div style="max-width:1100px;margin:0 auto">' +
+      '<h2 style="margin:0 0 4px;font-size:1.2rem;font-weight:700;color:#1e293b">📋 برنامه تیم — تخصیص و هدف</h2>' +
+      '<div style="font-size:.8rem;color:#64748b;margin-bottom:10px">مدیر اینجا کار را برنامه‌ریزی می‌کند؛ کارشناس در تب «برنامه هفته» و «خانه» انجام می‌دهد.</div>' +
+      '<div style="display:flex;gap:4px;border-bottom:1px solid #e2e8f0;margin-bottom:14px">' +
+        tab('assign', '۱. تخصیص مراکز') +
+        tab('quota', '۲. اهداف عددی (Quota)') +
+        tab('guide', '❓ راهنما') +
+      '</div>' +
+      '<div id="wpPlannerBody"></div></div>';
+
+    el.innerHTML = chrome;
+    var body = document.getElementById('wpPlannerBody');
+    if (!body) return;
+
+    if (view === 'guide') {
+      _renderGuidePanel(body);
+      return;
+    }
+    if (view === 'quota') {
+      if (typeof window.renderExpertTargetsPanel === 'function') {
+        window.renderExpertTargetsPanel(body);
+      } else {
+        body.innerHTML = '<div style="padding:20px;color:#94a3b8">ماژول اهداف بارگذاری نشده — صفحه را رفرش کنید</div>';
+      }
+      return;
+    }
+
+    _renderAssignPanel(body);
+  };
+
+  function _renderGuidePanel(el) {
+    el.innerHTML =
+      '<div style="max-width:720px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px 22px;line-height:1.9;color:#334155;font-size:.9rem">' +
+        '<h3 style="margin:0 0 12px;color:#1e293b;font-size:1.05rem">سیستم برنامه هفته در یک نگاه</h3>' +
+        '<p style="margin:0 0 14px">این سیستم سه لایه دارد. اگر این‌ها را قاطی کنید گیج می‌شوید:</p>' +
+        '<table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:.85rem">' +
+          '<tr style="background:#f8fafc"><th style="text-align:right;padding:8px;border:1px solid #e2e8f0">لایه</th><th style="text-align:right;padding:8px;border:1px solid #e2e8f0">سؤال</th><th style="text-align:right;padding:8px;border:1px solid #e2e8f0">کجا</th></tr>' +
+          '<tr><td style="padding:8px;border:1px solid #e2e8f0"><b>تخصیص مراکز</b></td><td style="padding:8px;border:1px solid #e2e8f0">این مرکز کِی؟</td><td style="padding:8px;border:1px solid #e2e8f0">همین تب → تخصیص</td></tr>' +
+          '<tr><td style="padding:8px;border:1px solid #e2e8f0"><b>هدف (Quota)</b></td><td style="padding:8px;border:1px solid #e2e8f0">این هفته چند تا Done؟</td><td style="padding:8px;border:1px solid #e2e8f0">همین تب → اهداف</td></tr>' +
+          '<tr><td style="padding:8px;border:1px solid #e2e8f0"><b>اجرا</b></td><td style="padding:8px;border:1px solid #e2e8f0">الان چه کار کنم؟</td><td style="padding:8px;border:1px solid #e2e8f0">تب برنامه هفته / خانه</td></tr>' +
+        '</table>' +
+        '<h4 style="margin:0 0 8px;color:#1e293b">مثال واقعی</h4>' +
+        '<ol style="margin:0 0 14px 18px;padding:0">' +
+          '<li>مدیر برای «رامبد» هدف می‌گذارد: <b>۲۰ Done این هفته</b>، حداقل ۶ پرریسک.</li>' +
+          '<li>مدیر ۳ مرکز مهم را هم دستی تخصیص می‌دهد (تعهد ثابت — از ۲۰ کم می‌شود).</li>' +
+          '<li>رامبد در «برنامه هفته» بقیه را می‌چیند و کار می‌کند.</li>' +
+          '<li>هر Done → نوار پیشرفت Quota جلو می‌رود. فقط برنامه‌چیدن بدون Done = صفر.</li>' +
+        '</ol>' +
+        '<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 12px;font-size:.82rem;color:#92400e">' +
+          '<b>نکته:</b> خانه (کارتابل) لیست کارهای معوق/امروز است. زنگ 🔔 فقط خبرهای جدید است — نه لیست کار روزانه.' +
+        '</div>' +
+        '<div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">' +
+          '<button onclick="window._etSetView(\'assign\')" style="padding:8px 14px;background:#6366f1;color:#fff;border:none;border-radius:8px;font-family:inherit;cursor:pointer;font-weight:600">رفتن به تخصیص</button>' +
+          '<button onclick="window._etSetView(\'quota\')" style="padding:8px 14px;background:#fff;color:#6366f1;border:1px solid #6366f1;border-radius:8px;font-family:inherit;cursor:pointer;font-weight:600">رفتن به اهداف</button>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function _renderAssignPanel(el) {
     var weeks = typeof wpGetWeeks === 'function' ? wpGetWeeks() : [];
     var currentWeekId = typeof wpCurrentWeekId === 'function' ? wpCurrentWeekId() : '';
     if (!_wpState.weekId && currentWeekId) {
-      var cw = weeks.find(function(w) { return w.id === currentWeekId; });
+      var cw = weeks.find(function (w) { return w.id === currentWeekId; });
       if (cw) { _wpState.weekId = cw.wsStr; _wpState.weekEnd = cw.weStr; }
     }
 
-    var expertOpts = '<option value="">— انتخاب کنید —</option>' +
-      experts.map(function(u) {
-        return '<option value="'+esc(u.id)+'"'+((_wpState.expertId===u.id)?' selected':'')+'>'+esc(u.name)+'</option>';
-      }).join('');
-
     var activeWeeksMap = {};
-    Object.keys(DB.weekEntries || {}).forEach(function(k) {
+    Object.keys(DB.weekEntries || {}).forEach(function (k) {
       var we = DB.weekEntries[k];
       if (we && !we.done) {
         activeWeeksMap[k.split(':::')[0]] = true;
       }
     });
 
-    var weekOpts = weeks.map(function(w) {
+    var weekOpts = weeks.map(function (w) {
       var suffix = '';
       if (w.isCurrent) suffix = ' ◀ این هفته';
       else if (activeWeeksMap[w.id]) suffix = ' 🔴 (کار مانده)';
       else if (w.isPast) suffix = ' ✓';
-      return '<option value="'+w.wsStr+'|'+w.weStr+'"'+((_wpState.weekId===w.wsStr)?' selected':'')+'>'+esc(w.label)+suffix+' </option>';
+      return '<option value="' + w.wsStr + '|' + w.weStr + '"' + ((_wpState.weekId === w.wsStr) ? ' selected' : '') + '>' + esc(w.label) + suffix + ' </option>';
     }).join('');
 
-    var inp = function(style, extra) {
-      return 'padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:.85rem;' + (style||'') + '" ' + (extra||'');
+    var inp = function (style, extra) {
+      return 'padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:.85rem;' + (style || '') + '" ' + (extra || '');
     };
 
-    var modeBtn = function(m, lbl) {
+    var modeBtn = function (m, lbl) {
       var active = _wpState.mode === m;
-      return '<button onclick="window._wpSetMode(\''+m+'\')" style="flex:1;padding:7px 4px;border:1px solid '+(active?'#6366f1':'#e2e8f0')+';border-radius:7px;font-family:inherit;font-size:.82rem;cursor:pointer;background:'+(active?'#6366f1':'#fff')+';color:'+(active?'#fff':'#374151')+'">'+lbl+'</button>';
+      return '<button onclick="window._wpSetMode(\'' + m + '\')" style="flex:1;padding:7px 4px;border:1px solid ' + (active ? '#6366f1' : '#e2e8f0') + ';border-radius:7px;font-family:inherit;font-size:.82rem;cursor:pointer;background:' + (active ? '#6366f1' : '#fff') + ';color:' + (active ? '#fff' : '#374151') + '">' + lbl + '</button>';
     };
 
     var dateRangeHtml =
       _wpState.mode === 'week'
         ? '<div style="flex:2;min-width:200px"><label style="display:block;font-size:.78rem;font-weight:600;color:#374151;margin-bottom:5px">هفته</label>' +
-          '<select id="wpWeekSel" onchange="window._wpOnWeekChange(this.value)" style="width:100%;'+inp()+'></select></div>'.replace('></select>', '>'+weekOpts+'</select>')
+          '<select id="wpWeekSel" onchange="window._wpOnWeekChange(this.value)" style="width:100%;' + inp() + '></select></div>'.replace('></select>', '>' + weekOpts + '</select>')
         : _wpState.mode === 'custom'
           ? '<div style="flex:1;min-width:110px"><label style="display:block;font-size:.78rem;font-weight:600;color:#374151;margin-bottom:5px">از</label>' +
-            '<input type="text" id="wpCustomStart" placeholder="۱۴۰۴/۰۳/۱۵" value="'+(_wpState.customStart||'')+'" onchange="_wpState.customStart=this.value" style="width:100%;box-sizing:border-box;'+inp()+'></div>' +
+            '<input type="text" id="wpCustomStart" placeholder="۱۴۰۴/۰۳/۱۵" value="' + (_wpState.customStart || '') + '" onchange="window._wpState.customStart=this.value" style="width:100%;box-sizing:border-box;' + inp() + '></div>' +
             '<div style="flex:1;min-width:110px"><label style="display:block;font-size:.78rem;font-weight:600;color:#374151;margin-bottom:5px">تا</label>' +
-            '<input type="text" id="wpCustomEnd" placeholder="۱۴۰۴/۰۳/۱۸" value="'+(_wpState.customEnd||'')+'" onchange="_wpState.customEnd=this.value" style="width:100%;box-sizing:border-box;'+inp()+'></div>'
+            '<input type="text" id="wpCustomEnd" placeholder="۱۴۰۴/۰۳/۱۸" value="' + (_wpState.customEnd || '') + '" onchange="window._wpState.customEnd=this.value" style="width:100%;box-sizing:border-box;' + inp() + '></div>'
           : '<div style="flex:1;min-width:180px;padding:9px 12px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;font-size:.83rem;color:#15803d;display:flex;align-items:center">📅 ۳ روز کاری از فردا</div>';
 
     el.innerHTML =
-      '<div style="max-width:1100px;margin:0 auto">' +
-      '<h2 style="margin:0 0 16px;font-size:1.2rem;font-weight:700;color:#1e293b">📋 تخصیص برنامه هفتگی</h2>' +
-
-      // ── Config card ───────────────────────────────────────────────────────
+      '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:.8rem;color:#1e40af;line-height:1.6">' +
+        '<b>تخصیص مراکز چیست؟</b> انتخاب مرکزهای مشخص برای یک کارشناس در یک بازه. این کارها «تعهد ثابت» می‌شوند و در برنامه هفته او ظاهر می‌شوند. برای عدد کلی هدف → زیرتب «اهداف».' +
+      '</div>' +
       '<div style="background:#fff;border-radius:12px;padding:18px 20px;border:1px solid #e2e8f0;margin-bottom:14px">' +
         '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">' +
-
-          '<div style="flex:1;min-width:150px"><label style="display:block;font-size:.78rem;font-weight:600;color:#374151;margin-bottom:5px">کارشناس</label>' +
-          '<select id="wpExpertSel" onchange="window._wpOnExpertChange(this.value)" style="width:100%;'+inp()+'></select>'.replace('></select>', '>'+expertOpts+'</select>')+'</div>'+
-
-          '<div style="flex:1;min-width:150px"><label style="display:block;font-size:.78rem;font-weight:600;color:#374151;margin-bottom:5px">بازه</label>' +
-          '<div style="display:flex;gap:4px">'+modeBtn('week','هفتگی')+modeBtn('3day','۳ روز')+modeBtn('custom','دلخواه')+'</div></div>'+
-
+          '<div style="flex:1.2;min-width:200px"><label style="display:block;font-size:.78rem;font-weight:600;color:#374151;margin-bottom:5px">کاربر <span id="wpExpertHint" style="color:#94a3b8;font-weight:500"></span></label>' +
+          '<select id="wpExpertSel" onchange="window._wpOnExpertChange(this.value)" style="width:100%;' + inp() + '"><option value="">در حال بارگذاری…</option></select></div>' +
+          '<div style="flex:1;min-width:160px"><label style="display:block;font-size:.78rem;font-weight:600;color:#374151;margin-bottom:5px">بازه زمانی</label>' +
+          '<div style="display:flex;gap:4px">' + modeBtn('week', 'هفتگی') + modeBtn('3day', '۳ روز') + modeBtn('custom', 'دلخواه') + '</div></div>' +
           dateRangeHtml +
-
-          '<div style="min-width:110px"><label style="display:block;font-size:.78rem;font-weight:600;color:#374151;margin-bottom:5px">نوع</label>' +
-          '<select id="wpActionType" onchange="_wpState.actionType=this.value" style="width:100%;'+inp()+'">' +
-            (typeof wpActOptionsHtml==='function'?wpActOptionsHtml(_wpState.actionType):
-              '<option value="call"'+(_wpState.actionType==='call'?' selected':'')+'>📞 تماس</option>' +
-              '<option value="visit"'+(_wpState.actionType==='visit'?' selected':'')+'>🤝 ملاقات</option>') +
-          '</select></div>' +
-
+          '<div style="flex:1.1;min-width:200px">' +
+            '<label style="display:block;font-size:.78rem;font-weight:600;color:#374151;margin-bottom:5px">نوع اقدام</label>' +
+            '<select id="wpActionType" onchange="window._wpOnActionTypeChange(this.value)" style="width:100%;' + inp('font-weight:600') + '">' +
+              _wpActOptionsHtml(_wpState.actionType || 'all', true) +
+            '</select>' +
+            '<div id="wpActHint" style="font-size:.72rem;color:#64748b;margin-top:5px;line-height:1.45">' + _wpActHint() + '</div>' +
+          '</div>' +
           '<button onclick="window._wpLoadCenters()" style="padding:9px 22px;background:#6366f1;color:white;border:none;border-radius:8px;font-family:inherit;font-size:.9rem;cursor:pointer;font-weight:600;white-space:nowrap">بارگذاری مراکز ▼</button>' +
-
         '</div>' +
       '</div>' +
+      '<div id="wpCenterList"></div>';
 
-      // Center list placeholder
-      '<div id="wpCenterList"></div>' +
-
-      '</div>';
-  };
+    // Fill expert dropdown from /api/users (all active)
+    function fillExperts(users) {
+      var sel = document.getElementById('wpExpertSel');
+      if (!sel) return;
+      var hint = document.getElementById('wpExpertHint');
+      if (hint) hint.textContent = '(' + users.length + ' نفر)';
+      sel.innerHTML = '<option value="">— انتخاب کنید —</option>' +
+        users.map(function (u) {
+          var label = esc(u.name) + (u.role ? ' — ' + esc(u.role) : '');
+          return '<option value="' + esc(u.id) + '"' + ((_wpState.expertId === u.id) ? ' selected' : '') + '>' + label + '</option>';
+        }).join('');
+    }
+    if (typeof window._etLoadUsersForPlanner === 'function') {
+      window._etLoadUsersForPlanner(fillExperts);
+    } else {
+      fetch('/api/users').then(function (r) { return r.json(); }).then(function (list) {
+        fillExperts((list || []).filter(function (m) {
+          return m.active !== false && m.username !== 'guest' && m.role !== 'مهمان';
+        }).map(function (m) {
+          return { id: m.username, name: m.display_name, role: m.role };
+        }));
+      }).catch(function () {});
+    }
+  }
 
   // ── render list with filters ──────────────────────────────────────────────
 
@@ -338,9 +468,9 @@
     if (!el) return;
 
     var workDays = _workDays(range.start, range.end);
-    var members = typeof _DEFAULT_MEMBERS !== 'undefined' ? _DEFAULT_MEMBERS : [];
-    var expertMember = members.find(function(u){ return u.id === _wpState.expertId; });
-    var expertName = expertMember ? expertMember.name : _wpState.expertId;
+    var expertName = (typeof USERS !== 'undefined' && USERS[_wpState.expertId])
+      ? USERS[_wpState.expertId]
+      : _wpState.expertId;
 
     // Unique statuses and provinces from loaded centers
     var statusSet = {}, provSet = {};
@@ -434,6 +564,17 @@
       var schedTag   = c.alreadyScheduled ? '<span style="font-size:.68rem;padding:2px 6px;background:#f0fdf4;color:#16a34a;border-radius:10px;display:inline-block">✓ برنامه دارد</span>' : '';
       var provTag    = '<span style="font-size:.68rem;padding:2px 6px;background:#f1f5f9;color:#64748b;border-radius:10px;display:inline-block">'+esc(c.provName||c.provId)+'</span>';
 
+      var typeCell = '';
+      if (_wpState.actionType === 'all') {
+        var rowType = (_wpState.rowTypes && _wpState.rowTypes[c.rkey]) || 'call';
+        typeCell = '<td style="padding:8px 10px;width:150px">' +
+          '<select onchange="window._wpSetRowType(\''+esc(c.rkey)+'\',this.value)" ' +
+            (checked ? '' : 'disabled ') +
+            'style="width:100%;padding:5px 8px;border:1px solid #e2e8f0;border-radius:6px;font-family:inherit;font-size:.75rem;opacity:'+(checked?'1':'.55')+'">' +
+            _wpActOptionsHtml(rowType, false) +
+          '</select></td>';
+      }
+
       return '<tr style="border-bottom:1px solid #f1f5f9'+(c.isOverdue?';background:#fff8f8':'')+(c.alreadyScheduled?';opacity:.5':'') + '">' +
         '<td style="padding:8px 10px;width:34px">' +
           '<input type="checkbox"'+(checked?' checked':'')+(c.alreadyScheduled?' disabled title="این بازه برنامه دارد"':'')+
@@ -450,11 +591,20 @@
           (c.followupDate ? '<div style="color:'+(c.isOverdue?'#dc2626':'#374151')+';font-weight:'+(c.isOverdue?'700':'400')+'">'+c.followupDate+'</div>' : '') +
           '<div style="color:#94a3b8;font-size:.75rem">'+lastStr+'</div>' +
         '</td>' +
+        typeCell +
         '<td style="padding:8px 10px;width:155px">' +
           '<select onchange="window._wpSetDay(\''+esc(c.rkey)+'\',this.value)" style="width:100%;padding:5px 8px;border:1px solid #e2e8f0;border-radius:6px;font-family:inherit;font-size:.78rem">'+dayOpts+'</select>' +
         '</td>' +
       '</tr>';
     }).join('');
+
+    var actLabel = _wpState.actionType === 'all'
+      ? 'نوع per مرکز'
+      : (_wpActLabels()[_wpState.actionType] || _wpState.actionType);
+    var colSpan = _wpState.actionType === 'all' ? 6 : 5;
+    var typeHead = _wpState.actionType === 'all'
+      ? '<th style="padding:8px 10px;font-size:.75rem;font-weight:600;color:#6b7280;text-align:right">نوع اقدام</th>'
+      : '';
 
     // ── preview ───────────────────────────────────────────────────────────────
     var previewHtml = '';
@@ -467,8 +617,24 @@
       withDay.forEach(function(k){ var d=_wpState.selected[k]; if(!dayBuckets[d])dayBuckets[d]=[]; dayBuckets[d].push(k); });
       withoutDay.forEach(function(k){ var d=autoSpread[k]; if(!dayBuckets[d])dayBuckets[d]=[]; dayBuckets[d].push(k); });
 
+      var typeSummary = '';
+      if (_wpState.actionType === 'all') {
+        var typeCounts = {};
+        selectedKeys.forEach(function(k) {
+          var t = _wpResolveActionType(k);
+          typeCounts[t] = (typeCounts[t] || 0) + 1;
+        });
+        typeSummary = '<div style="font-size:.75rem;color:#64748b;margin-bottom:8px">ترکیب نوع: ' +
+          Object.keys(typeCounts).map(function(t) {
+            return (_wpActLabels()[t] || t) + ' <b>' + typeCounts[t] + '</b>';
+          }).join(' · ') + '</div>';
+      } else {
+        typeSummary = '<div style="font-size:.75rem;color:#64748b;margin-bottom:8px">نوع یکسان: <b>' + esc(actLabel) + '</b></div>';
+      }
+
       previewHtml =
         '<div style="font-size:.83rem;font-weight:600;color:#374151;margin-bottom:8px">پیش‌نمایش توزیع:</div>' +
+        typeSummary +
         '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">' +
           workDays.map(function(d) {
             var n = (dayBuckets[d]||[]).length;
@@ -495,7 +661,7 @@
 
         // top bar
         '<div style="padding:12px 18px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">' +
-          '<span style="font-size:.88rem;font-weight:600;color:#374151">'+esc(expertName)+' — '+range.start+' تا '+range.end+' ('+workDays.length+' روز کاری)</span>' +
+          '<span style="font-size:.88rem;font-weight:600;color:#374151">'+esc(expertName)+' — '+range.start+' تا '+range.end+' ('+workDays.length+' روز کاری) · '+esc(actLabel)+'</span>' +
           '<span style="font-size:.82rem;color:#6366f1;font-weight:600">'+filtered.length+' مرکز</span>' +
         '</div>' +
 
@@ -510,22 +676,21 @@
           '<button id="wpClearBtn" onclick="window._wpClearAll()" style="padding:3px 10px;border:1px solid #e2e8f0;border-radius:6px;font-family:inherit;font-size:.78rem;cursor:pointer;background:#fff;display:'+(selectedCount>0?'inline':'none')+'">پاک‌کردن</button>' +
         '</div>' +
 
-        // table
-        '<div style="max-height:460px;overflow-y:auto">' +
+        '<div style="overflow-x:auto">' +
           '<table style="width:100%;border-collapse:collapse">' +
-            '<thead style="position:sticky;top:0;z-index:1"><tr style="background:#f8fafc">' +
+            '<thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0">' +
               '<th style="padding:8px 10px;width:34px"></th>' +
-              '<th style="padding:8px 10px;text-align:right;font-size:.78rem;font-weight:600">مرکز</th>' +
-              '<th style="padding:8px 10px;text-align:center;font-size:.78rem;font-weight:600">P</th>' +
-              '<th style="padding:8px 10px;text-align:right;font-size:.78rem;font-weight:600">پیگیری / آخرین تماس</th>' +
-              '<th style="padding:8px 10px;text-align:right;font-size:.78rem;font-weight:600">روز (اختیاری)</th>' +
+              '<th style="padding:8px 10px;font-size:.75rem;font-weight:600;color:#6b7280;text-align:right">مرکز</th>' +
+              '<th style="padding:8px 10px;font-size:.75rem;font-weight:600;color:#6b7280;text-align:center">پتانسیل</th>' +
+              '<th style="padding:8px 10px;font-size:.75rem;font-weight:600;color:#6b7280;text-align:right">پیگیری / آخرین</th>' +
+              typeHead +
+              '<th style="padding:8px 10px;font-size:.75rem;font-weight:600;color:#6b7280;text-align:right">روز</th>' +
             '</tr></thead>' +
-            '<tbody>'+(tableRows||'<tr><td colspan="5" style="padding:32px;text-align:center;color:#9ca3af">مرکزی با این فیلترها پیدا نشد</td></tr>')+(hasMore ? '<tr><td colspan="5" style="padding:12px;text-align:center"><button onclick="window._wpShowMore()" style="padding:7px 22px;border:1px solid #6366f1;border-radius:7px;font-family:inherit;font-size:.83rem;cursor:pointer;background:#fff;color:#6366f1">نمایش '+(filtered.length-_wpState.visibleCount)+' مرکز دیگر از '+(filtered.length)+' مرکز</button></td></tr>' : '')+'</tbody>' +
+            '<tbody>'+(tableRows||'<tr><td colspan="'+colSpan+'" style="padding:32px;text-align:center;color:#9ca3af">مرکزی با این فیلترها پیدا نشد</td></tr>')+(hasMore ? '<tr><td colspan="'+colSpan+'" style="padding:12px;text-align:center"><button onclick="window._wpShowMore()" style="padding:7px 22px;border:1px solid #6366f1;border-radius:7px;font-family:inherit;font-size:.83rem;cursor:pointer;background:#fff;color:#6366f1">نمایش '+(filtered.length-_wpState.visibleCount)+' مرکز دیگر از '+(filtered.length)+' مرکز</button></td></tr>' : '')+'</tbody>' +
           '</table>' +
         '</div>' +
 
-        '<div id="wpPreviewArea" style="padding:16px 18px;border-top:1px solid #f1f5f9;background:#f0fdf4;display:'+(selectedCount>0?'':'none')+'">'+previewHtml+'</div>' +
-
+        (previewHtml ? '<div id="wpPreviewArea" style="padding:16px 18px;border-top:1px solid #f1f5f9;background:#fafafa">'+previewHtml+'</div>' : '<div id="wpPreviewArea" style="display:none"></div>') +
       '</div>';
   }
 
@@ -559,13 +724,29 @@
     withDay.forEach(function(k){ var d=_wpState.selected[k]; if(!dayBuckets[d])dayBuckets[d]=[]; dayBuckets[d].push(k); });
     withoutDay.forEach(function(k){ var d=autoSpread[k]; if(!dayBuckets[d])dayBuckets[d]=[]; dayBuckets[d].push(k); });
 
-    var members = typeof _DEFAULT_MEMBERS !== 'undefined' ? _DEFAULT_MEMBERS : [];
-    var expertMember = members.find(function(u){ return u.id === _wpState.expertId; });
-    var expertName = expertMember ? expertMember.name : _wpState.expertId;
+    var expertName = (typeof USERS !== 'undefined' && USERS[_wpState.expertId])
+      ? USERS[_wpState.expertId]
+      : _wpState.expertId;
 
     previewEl.style.display = '';
+    var typeSummary = '';
+    if (_wpState.actionType === 'all') {
+      var typeCounts = {};
+      selectedKeys.forEach(function(k) {
+        var t = _wpResolveActionType(k);
+        typeCounts[t] = (typeCounts[t] || 0) + 1;
+      });
+      typeSummary = '<div style="font-size:.75rem;color:#64748b;margin-bottom:8px">ترکیب نوع: ' +
+        Object.keys(typeCounts).map(function(t) {
+          return (_wpActLabels()[t] || t) + ' <b>' + typeCounts[t] + '</b>';
+        }).join(' · ') + '</div>';
+    } else {
+      typeSummary = '<div style="font-size:.75rem;color:#64748b;margin-bottom:8px">نوع یکسان: <b>' +
+        esc(_wpActLabels()[_wpState.actionType] || _wpState.actionType) + '</b></div>';
+    }
     previewEl.innerHTML =
       '<div style="font-size:.83rem;font-weight:600;color:#374151;margin-bottom:8px">پیش‌نمایش توزیع:</div>' +
+      typeSummary +
       '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">' +
         workDays.map(function(d) {
           var n = (dayBuckets[d]||[]).length;
@@ -601,6 +782,26 @@
   window._wpOnExpertChange = function(v) {
     _wpState.expertId = v;
     _wpState.selected = {};
+    _wpState.rowTypes = {};
+  };
+
+  window._wpOnActionTypeChange = function(v) {
+    _wpState.actionType = v || 'all';
+    var hint = document.getElementById('wpActHint');
+    if (hint) hint.textContent = _wpActHint();
+    if (_wpState.actionType !== 'all') {
+      _wpState.rowTypes = {};
+    }
+    var list = document.getElementById('wpCenterList');
+    if (list && list.innerHTML) {
+      _wpRenderList(_computeRange());
+    }
+  };
+
+  window._wpSetRowType = function(rkey, val) {
+    if (!_wpState.rowTypes) _wpState.rowTypes = {};
+    _wpState.rowTypes[rkey] = val || 'call';
+    _wpUpdateSummaryArea();
   };
 
   window._wpOnWeekChange = function(v) {
@@ -624,7 +825,8 @@
   window._wpLoadCenters = function() {
     var expertId = (document.getElementById('wpExpertSel')||{}).value || _wpState.expertId;
     _wpState.expertId = expertId;
-    _wpState.actionType = (document.getElementById('wpActionType')||{}).value || _wpState.actionType;
+    _wpState.actionType = (document.getElementById('wpActionType')||{}).value || _wpState.actionType || 'all';
+    if (_wpState.actionType !== 'all') _wpState.rowTypes = {};
     if (_wpState.mode === 'custom') {
       _wpState.customStart = ((document.getElementById('wpCustomStart')||{}).value||'').trim();
       _wpState.customEnd   = ((document.getElementById('wpCustomEnd')||{}).value||'').trim();
@@ -640,9 +842,21 @@
   };
 
   window._wpToggle = function(rkey, checked) {
-    if (checked) { _wpState.selected[rkey] = _wpState.selected[rkey] || ''; }
-    else { delete _wpState.selected[rkey]; }
-    requestAnimationFrame(_wpUpdateSummaryArea);
+    if (checked) {
+      _wpState.selected[rkey] = _wpState.selected[rkey] || '';
+      if (_wpState.actionType === 'all' && !_wpState.rowTypes[rkey]) {
+        _wpState.rowTypes[rkey] = 'call';
+      }
+    } else {
+      delete _wpState.selected[rkey];
+    }
+    requestAnimationFrame(function () {
+      if (_wpState.actionType === 'all') {
+        _wpRenderList(_computeRange());
+      } else {
+        _wpUpdateSummaryArea();
+      }
+    });
   };
 
   window._wpSetDay = function(rkey, day) {
@@ -679,7 +893,6 @@
     var withoutDay = selectedKeys.filter(function(k){ return !_wpState.selected[k]; });
     var autoSpread = _autoSpread(withoutDay, workDays);
     var weekId = _wpState.weekId || range.start;
-    var actionType = _wpState.actionType || 'call';
     var expertId = _wpState.expertId;
 
     var entries = [];
@@ -687,12 +900,14 @@
       var c = _wpState.centers.find(function(x){ return x.rkey === rkey; });
       if (!c) return;
       var scheduledDate = _wpState.selected[rkey] || autoSpread[rkey] || workDays[0] || '';
+      var actionType = _wpResolveActionType(rkey);
       entries.push({
         id: 'we_'+Date.now()+'_'+Math.random().toString(36).slice(2,5)+'_'+c.id.slice(-4),
         weekId: weekId, recKey: c.rtype+'_'+c.id,
         rtype: c.rtype, rid: c.id,
         scheduledDate: scheduledDate, actionType: actionType,
         addedBy: expertId, centerName: c.name,
+        assignmentSource: 'manager_fixed',
       });
     });
 
@@ -759,13 +974,13 @@
     var selectedKeys = Object.keys(_wpState.selected);
     if (!selectedKeys.length) return;
     
-    var actionType = _wpState.actionType || 'call';
     var expertId = _wpState.expertId;
 
     var entries = [];
     selectedKeys.forEach(function(rkey) {
       var c = _wpState.centers.find(function(x){ return x.rkey === rkey; });
       if (!c) return;
+      var actionType = _wpResolveActionType(rkey);
       
       if (typeof wpRemoveFromOtherWeeks === 'function') {
         wpRemoveFromOtherWeeks(c.rtype + '_' + c.id, targetWeekId);
@@ -777,6 +992,7 @@
         rtype: c.rtype, rid: c.id,
         scheduledDate: null, actionType: actionType,
         addedBy: expertId, centerName: c.name,
+        assignmentSource: 'manager_fixed',
       });
     });
 

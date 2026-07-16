@@ -364,11 +364,17 @@
 
   window._cbQuickComplete = function (e, itemId) {
     if (e) e.stopPropagation();
+    var _doneItem = _cbState.itemById && _cbState.itemById[itemId];
     fetch('/api/inbox/actions/complete', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ itemId: itemId }),
     }).then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error); return d; }); })
-      .then(function () { renderHomeCartable(); })
+      .then(function () {
+        if (_doneItem && _doneItem.centerKey && typeof window.markNotifsForCenterRead === 'function') {
+          window.markNotifsForCenterRead(_doneItem.centerKey);
+        }
+        renderHomeCartable();
+      })
       .catch(function (err) { alert(err.message || 'خطا'); });
   };
 

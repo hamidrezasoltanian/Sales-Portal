@@ -71,12 +71,14 @@ function rowToObj(r) {
     rtype:         r.rtype,
     rid:           r.rid,
     scheduledDate: r.scheduled_date,
+    scheduledTime: r.scheduled_time || null,
     actionType:    r.action_type,
     done:          r.done,
     doneDate:      r.done_date,
     addedBy:       r.added_by,
     centerName:    r.center_name,
     weekTagId:     r.week_tag_id,
+    assignmentSource: r.assignment_source || (v.assignmentSource) || 'manual',
     createdAt:     r.created_at,
     updatedAt:     r.updated_at,
     doneResult:    v.doneResult || null,
@@ -131,17 +133,39 @@ router.get('/', requireAuth, async function (req, res) {
 // ── POST /api/week-entries ─────────────────────────────────────────────────
 router.post('/', requireAuth, requirePermission('weekplan', 'edit'), async function (req, res) {
   try {
-    const { id, weekId, recKey, rtype, rid, scheduledDate, actionType, addedBy, centerName, weekTagId } = req.body;
+    const { id, weekId, recKey, rtype, rid, scheduledDate, scheduledTime, actionType, addedBy, centerName, weekTagId, assignmentSource } = req.body;
     if (!id || !weekId || !recKey || !rtype || !rid) {
       return res.status(400).json({ error: 'فیلدهای id، weekId، recKey، rtype و rid الزامی هستند' });
     }
     const cleanRecKey = (recKey && recKey !== rtype && recKey.includes('_')) ? recKey : `${rtype}_${rid}`;
-    if (!isManagerRole(req.user.role)) {
+    const isMgr = isManagerRole(req.user.role);
+    if (!isMgr) {
       const context = await loadCenterAccessContext();
       if (!canAccessCenter(req.user, cleanRecKey, context)) {
         return res.status(403).json({ error: 'دسترسی به این مرکز مجاز نیست' });
       }
     }
+
+    // Precedence: manager from تخصیص → manager_fixed; expert self-fill → expert_self
+    let source = assignmentSource || null;
+    if (!source) {
+      source = isMgr ? 'manager_fixed' : 'expert_self';
+    }
+    if (!isMgr && source === 'manager_fixed') source = 'expert_self';
+
+    const ownerForQuota = addedBy || req.user.username;
+    if (source === 'expert_self') {
+      try {
+        const et = require('../lib/expert-targets');
+        const guard = await et.assertExpertSelfAllowed(ownerForQuota, weekId, scheduledDate || null);
+        if (!guard.ok) {
+          return res.status(403).json({ error: guard.error, progress: guard.progress });
+        }
+      } catch (ge) {
+        console.warn('[week-entries] quota guard:', ge.message);
+      }
+    }
+
     const dbKey = `${weekId}:::${rtype}:::${rid}`;
     const dbValue = {
       id,
@@ -150,25 +174,31 @@ router.post('/', requireAuth, requirePermission('weekplan', 'edit'), async funct
       rtype,
       rid,
       scheduledDate: scheduledDate || null,
+      scheduledTime: scheduledTime || null,
       actionType: actionType || 'call',
-      addedBy: addedBy || req.user.username,
+      addedBy: ownerForQuota,
       centerName: centerName || null,
       weekTagId: weekTagId || null,
+      assignmentSource: source,
       done: false,
       doneDate: null
     };
+    // Ensure columns exist (idempotent alter is in migration; fallback if missing)
     const result = await query(
-      `INSERT INTO week_entries (key, value, id, week_id, rec_key, rtype, rid, scheduled_date, action_type, added_by, center_name, week_tag_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      `INSERT INTO week_entries (key, value, id, week_id, rec_key, rtype, rid, scheduled_date, action_type, added_by, center_name, week_tag_id, assignment_source, scheduled_time)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        ON CONFLICT (key) DO UPDATE SET
          value          = week_entries.value || jsonb_build_object(
                             'scheduledDate', EXCLUDED.scheduled_date,
                             'actionType',    EXCLUDED.action_type,
-                            'centerName',    COALESCE(EXCLUDED.center_name, week_entries.center_name)
+                            'centerName',    COALESCE(EXCLUDED.center_name, week_entries.center_name),
+                            'assignmentSource', EXCLUDED.assignment_source
                           ),
          scheduled_date = EXCLUDED.scheduled_date,
          action_type    = EXCLUDED.action_type,
          center_name    = COALESCE(EXCLUDED.center_name, week_entries.center_name),
+         assignment_source = COALESCE(EXCLUDED.assignment_source, week_entries.assignment_source),
+         scheduled_time = COALESCE(EXCLUDED.scheduled_time, week_entries.scheduled_time),
          updated_at     = now()
        RETURNING *`,
       [
@@ -181,14 +211,16 @@ router.post('/', requireAuth, requirePermission('weekplan', 'edit'), async funct
         rid,
         scheduledDate || null,
         actionType || 'call',
-        addedBy || req.user.username,
+        ownerForQuota,
         centerName || null,
         weekTagId || null,
+        source,
+        scheduledTime || null,
       ]
     );
     const saved = result.rows[0];
     const purged = await purgeOtherActiveForRecKey(cleanRecKey, saved.id);
-    notifyWeekChange(req, { action: 'create', id: saved.id, weekId, purged });
+    notifyWeekChange(req, { action: 'create', id: saved.id, weekId, purged, assignmentSource: source });
     res.status(201).json(rowToObj(saved));
     try { require('../lib/inbox-hooks').onWeekChange(saved.id); } catch (_) {}
   } catch (e) {

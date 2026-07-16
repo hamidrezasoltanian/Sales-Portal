@@ -746,137 +746,27 @@ function _clValDisplay(field, val){
 var _autoReminderChecked = false;
 
 function _setupAutoReminder(){
-  // یادآوری صبحگاهی (ساعت ۹): برنامه امروز برای هر کارشناس
-  setInterval(function(){
-    if(!_isManager()) return;
-    var now = new Date();
-    if(now.getHours() < 9) return;
-    var today = todayStr();
-    if(!DB.settings) DB.settings = {};
-    if((DB.settings.lastMorningReminder||'') === today) return;
-    DB.settings.lastMorningReminder = today;
-    if(typeof patchCrmSetting==='function')patchCrmSetting('lastMorningReminder',today);
-    _runMorningBriefing(today);
-  }, 60000);
-
-  // یادآوری بعدازظهر (ساعت ۱۵): مراکز امروز بدون گزارش
-  setInterval(function(){
-    if(!_isManager()) return;
-    var now = new Date();
-    if(now.getHours() < 15) return;
-    var today = todayStr();
-    if(!DB.settings) DB.settings = {};
-    if((DB.settings.lastAfternoonReminder||'') === today) return;
-    DB.settings.lastAfternoonReminder = today;
-    if(typeof patchCrmSetting==='function')patchCrmSetting('lastAfternoonReminder',today);
-    _runTodayReminders(today);
-  }, 60000);
-
-  // یادآوری startup برای مراکز بدون تاریخ + سررسیدگذشته: یک بار در روز
+  // یادآورهای روتین (صبح/بعدازظهر/معوق) به سرور منتقل شدند:
+  // server/lib/notification-scheduler.js — یک digest ترکیبی، بدون اسپم زنگ.
+  // اینجا فقط browser push معوق برای کاربر فعلی (اختیاری) می‌ماند.
   setTimeout(function(){
-    if(!_isManager()) return;
-    var today = todayStr();
-    if(!DB.settings) DB.settings = {};
-    if((DB.settings.lastStartupReminder||'') === today) return;
-    DB.settings.lastStartupReminder = today;
-    if(typeof patchCrmSetting==='function')patchCrmSetting('lastStartupReminder',today);
-    _runOverdueAndUndatedReminders(today);
+    if(typeof _sendOverduePushNotifs==='function') _sendOverduePushNotifs();
   }, 8000);
 }
 
-// بریفینگ صبحگاهی: برنامه امروز هر کارشناس
+// بریفینگ صبحگاهی — deprecated: سرور digest می‌فرستد
 function _runMorningBriefing(today){
-  var byExpert = {};
-  _buildPCCache();
-  Object.keys(DB.weekEntries||{}).forEach(function(k){
-    var we = DB.weekEntries[k];
-    if(we.done || we.scheduledDate !== today || we.rtype === 'mtr') return;
-    var owner = _wpGetOwner(we);
-    if(!owner) return;
-    if(!byExpert[owner]) byExpert[owner] = [];
-    byExpert[owner].push(we.centerName||getRecLabel((we.rtype||'center')+'_'+(we.rid||'')));
-  });
-  var cnt = 0;
-  Object.keys(byExpert).forEach(function(exp){
-    var items = byExpert[exp]; if(!items.length) return; cnt++;
-    var msg = '🌅 برنامه امروز شما: '+items.length+' مرکز برای بازدید:\n• '
-      + items.slice(0,5).join('\n• ')
-      + (items.length>5?'\nو '+(items.length-5)+' مورد دیگر':'')
-      + '\nروز خوبی داشته باشید! 💪';
-    if(!_hasRecentNotif(exp,'morning_brief')){sendNotif(exp, msg, '', [], 'morning_brief', null);}
-  });
-  if(cnt>0) showToast('🌅 بریفینگ صبحگاهی برای '+cnt+' کارشناس ارسال شد', 3000);
+  if(typeof console!=='undefined') console.info('[notif] morning brief moved to server scheduler');
 }
 
-// ── یادآوری ساعت ۳: مراکز امروز بدون گزارش ──
+// یادآوری ساعت ۳ — deprecated
 function _runTodayReminders(today){
-  var byExpert = {};
-  _buildPCCache();
-  Object.keys(DB.weekEntries||{}).forEach(function(k){
-    var we = DB.weekEntries[k];
-    if(we.done || we.scheduledDate !== today || we.rtype === 'mtr') return;
-    var owner = _wpGetOwner(we);
-    if(!owner) return;
-    var acts = _getTodayActivities(we.rtype||'center', we.rid||'', today);
-    if(acts.length > 0) return;
-    if(!byExpert[owner]) byExpert[owner] = [];
-    byExpert[owner].push({name: we.centerName||getRecLabel((we.rtype||'center')+'_'+(we.rid||'')), key: (we.rtype||'center')+'_'+(we.rid||'')});
-  });
-  var cnt = 0;
-  Object.keys(byExpert).forEach(function(exp){
-    var items = byExpert[exp]; if(!items.length) return; cnt++;
-    var msg = '📋 برنامه امروز: '+items.length+' مرکز برای بازدید دارید:\n• '
-      + items.slice(0,5).map(function(x){return x.name;}).join('\n• ')
-      + (items.length>5?'\nو '+(items.length-5)+' مورد دیگر':'')
-      + '\nوارد برنامه هفته شوید.';
-    if(!_hasRecentNotif(exp,'followup')){sendNotif(exp, msg, items[0].key, items.map(function(x){return x.key;}), 'followup', null);}
-  });
-  if(cnt>0) showToast('🔔 یادآوری ساعت ۱۵ برای '+cnt+' کارشناس ارسال شد', 3000);
+  if(typeof console!=='undefined') console.info('[notif] afternoon reminder moved to server scheduler');
 }
 
-// ── یادآوری روزانه: مراکز بدون تاریخ + سررسیدگذشته ──
+// یادآوری معوق/بدون‌تاریخ — deprecated (کارتابل منبع حقیقت است)
 function _runOverdueAndUndatedReminders(today){
-  setTimeout(_sendOverduePushNotifs,1000);
-  var byExpert = {};
-  _buildPCCache();
-  Object.keys(DB.weekEntries||{}).forEach(function(k){
-    var we = DB.weekEntries[k];
-    if(we.done || we.rtype === 'mtr') return;
-    var owner = _wpGetOwner(we);
-    if(!owner) return;
-    if(!byExpert[owner]) byExpert[owner] = {noDate:[], overdue:[]};
-    var name = we.centerName||getRecLabel((we.rtype||'center')+'_'+(we.rid||''))||'?';
-    var ck = (we.rtype||'center')+'_'+(we.rid||'');
-    if(!we.scheduledDate){
-      byExpert[owner].noDate.push({name:name, key:ck});
-    } else if(we.scheduledDate < today){
-      var actOnDay = _getActivitiesOnDate(we.rtype||'center', we.rid||'', we.scheduledDate);
-      if(actOnDay.length === 0){
-        byExpert[owner].overdue.push({name:name, key:ck, date:we.scheduledDate});
-      }
-    }
-  });
-  var cnt = 0;
-  Object.keys(byExpert).forEach(function(exp){
-    var d = byExpert[exp];
-    if(d.overdue.length){
-      var msg = '⚠️ '+d.overdue.length+' مرکز سررسید گذشته بدون گزارش:\n• '
-        + d.overdue.slice(0,5).map(function(x){return x.name+' (تاریخ: '+x.date+')';}).join('\n• ')
-        + (d.overdue.length>5?'\nو '+(d.overdue.length-5)+' مورد دیگر':'')
-        + '\nلطفاً گزارش ثبت کنید.';
-      if(!_hasRecentNotif(exp,'followup')){sendNotif(exp, msg, d.overdue[0].key, d.overdue.map(function(x){return x.key;}), 'followup', null);}
-      cnt++;
-    }
-    if(d.noDate.length){
-      var msg2 = '📅 '+d.noDate.length+' مرکز بدون تاریخ پیگیری:\n• '
-        + d.noDate.slice(0,5).map(function(x){return x.name;}).join('\n• ')
-        + (d.noDate.length>5?'\nو '+(d.noDate.length-5)+' مورد دیگر':'')
-        + '\nبرای هر مرکز تاریخ تنظیم کنید.';
-      if(!_hasRecentNotif(exp,'followup')){sendNotif(exp, msg2, d.noDate[0].key, d.noDate.map(function(x){return x.key;}), 'followup', null);}
-      if(!d.overdue.length) cnt++;
-    }
-  });
-  if(cnt>0) showToast('🔔 یادآوری مراکز معوق برای '+cnt+' کارشناس ارسال شد', 3000);
+  if(typeof _sendOverduePushNotifs==='function') setTimeout(_sendOverduePushNotifs, 500);
 }
 
 function tkQuickAssign(tid){

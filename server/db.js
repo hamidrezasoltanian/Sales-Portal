@@ -755,9 +755,46 @@ async function initSchema() {
   await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS done BOOLEAN DEFAULT false`).catch(()=>{});
   await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS done_date VARCHAR(12)`).catch(()=>{});
   await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`).catch(()=>{});
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS assignment_source VARCHAR(20) DEFAULT 'manual'`).catch(()=>{});
+  await query(`ALTER TABLE week_entries ADD COLUMN IF NOT EXISTS scheduled_time VARCHAR(5)`).catch(()=>{});
   await query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_we_id ON week_entries(id) WHERE id IS NOT NULL`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_we_week_id ON week_entries(week_id)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_we_added_by ON week_entries(added_by)`).catch(()=>{});
+
+  // Expert targets (quota) — independent of week_entries
+  await query(`
+    CREATE TABLE IF NOT EXISTS expert_targets (
+      id                 TEXT PRIMARY KEY,
+      expert_id          TEXT NOT NULL,
+      period_type        TEXT NOT NULL,
+      period_key         TEXT NOT NULL,
+      week_ids           JSONB NOT NULL DEFAULT '[]'::jsonb,
+      parent_id          TEXT,
+      target_count       INT NOT NULL,
+      min_priority_count INT NOT NULL DEFAULT 0,
+      filters            JSONB NOT NULL DEFAULT '{}'::jsonb,
+      count_mode         TEXT NOT NULL DEFAULT 'done',
+      daily_wip_cap      INT DEFAULT 5,
+      status             TEXT NOT NULL DEFAULT 'active',
+      note               TEXT,
+      created_by         TEXT NOT NULL,
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_by         TEXT
+    )
+  `).catch(()=>{});
+  await query(`CREATE UNIQUE INDEX IF NOT EXISTS expert_targets_one_active ON expert_targets (expert_id, period_type, period_key) WHERE status = 'active'`).catch(()=>{});
+  await query(`
+    CREATE TABLE IF NOT EXISTS expert_target_audit (
+      id BIGSERIAL PRIMARY KEY,
+      target_id TEXT NOT NULL,
+      at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      by_user TEXT NOT NULL,
+      action TEXT NOT NULL,
+      before_val JSONB,
+      after_val JSONB
+    )
+  `).catch(()=>{});
 
   // Idempotent trigger to keep table columns synchronized with the JSONB value blob
   await query(`
@@ -843,9 +880,37 @@ async function initSchema() {
   await query(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS meta JSONB`);
   await query(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS center_keys JSONB`);
   await query(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ`);
+  await query(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS severity TEXT DEFAULT 'medium'`);
+  await query(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS action_url TEXT`);
+  await query(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS bucket TEXT`);
   await query(`CREATE INDEX IF NOT EXISTS idx_notif_to ON notifications(to_user)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_notif_read ON notifications(read)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_notif_at ON notifications(at DESC)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_notif_severity ON notifications(severity)`).catch(()=>{});
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS notification_fired (
+      user_id  TEXT NOT NULL,
+      bucket   TEXT NOT NULL,
+      fired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, bucket)
+    )
+  `).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_notif_fired_at ON notification_fired(fired_at DESC)`).catch(()=>{});
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS user_notification_settings (
+      user_id          TEXT PRIMARY KEY,
+      enabled          BOOLEAN NOT NULL DEFAULT TRUE,
+      bell             BOOLEAN NOT NULL DEFAULT TRUE,
+      telegram         BOOLEAN NOT NULL DEFAULT TRUE,
+      digest_telegram  BOOLEAN NOT NULL DEFAULT TRUE,
+      digest_bell      BOOLEAN NOT NULL DEFAULT FALSE,
+      min_severity     TEXT NOT NULL DEFAULT 'low',
+      types            JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(()=>{});
 
   // ════════════════════════════════════════
   // CHANGE LOG — extracted from DB.changeLog blob

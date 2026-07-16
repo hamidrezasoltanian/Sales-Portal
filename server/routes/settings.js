@@ -75,6 +75,9 @@ router.put('/', requireAuth, async function (req, res) {
         [key, JSON.stringify(body[key]), user]
       );
     }
+    if (keys.indexOf('notifPrefs') >= 0) {
+      try { require('./notifications').invalidatePrefsCaches(); } catch (_) {}
+    }
     res.json({ ok: true, updated: keys });
   } catch (e) {
     console.error('[settings PUT]', e.message);

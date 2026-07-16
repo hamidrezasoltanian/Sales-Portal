@@ -436,27 +436,12 @@ async function syncLeave(leaveId) {
   });
 }
 
+/**
+ * Notifications are events (bell), not work items (cartable).
+ * Keep this as a deactivate-only hook so read/delete clears any legacy rows.
+ */
 async function syncNotification(notifId) {
-  const r = await query('SELECT * FROM notifications WHERE id = $1', [notifId]);
-  if (!r.rows.length || r.rows[0].read) {
-    await deactivateBySource('notification', notifId);
-    return;
-  }
-  const row = r.rows[0];
-  await upsertInboxItem({
-    id: 'notification:' + row.id,
-    sourceType: 'notification',
-    sourceId: row.id,
-    owner: row.to_user,
-    title: (row.msg || '').slice(0, 120),
-    subtitle: row.at ? new Date(row.at).toLocaleString('fa-IR') : '',
-    priority: 3,
-    centerKey: row.center_key || null,
-    action: 'notification',
-    meta: { notifId: row.id },
-    automationEligible: true,
-    deploymentMode: 'full',
-  });
+  await deactivateBySource('notification', notifId);
 }
 
 async function syncProforma(pfId) {
@@ -612,11 +597,12 @@ async function rebuildAll() {
     activeIds.add('followup:' + key);
   }
 
-  const notifs = await query('SELECT id FROM notifications WHERE read = false');
-  for (const row of notifs.rows) {
-    await syncNotification(row.id);
-    activeIds.add('notification:' + row.id);
-  }
+  // Notifications no longer mirror into inbox_items (bell ≠ cartable).
+  // Deactivate any legacy notification:* rows so they leave the cartable.
+  await query(
+    `UPDATE inbox_items SET active = FALSE, updated_at = NOW()
+     WHERE source_type = 'notification' AND active = TRUE`
+  ).catch(function () {});
 
   const pfs = await query(`SELECT id FROM proformas WHERE status IN ('draft','rejected','sent','negotiating','pending_disc')`);
   for (const row of pfs.rows) {

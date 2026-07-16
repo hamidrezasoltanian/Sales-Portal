@@ -139,42 +139,44 @@ function openSettings(){
     +'</div>';
   // ── Notification settings section ──────────────────────────────────────────
   var _np = (DB.settings&&DB.settings.notifPrefs)||{};
-  var _npEnabled  = _np.enabled  !== false;   // default true
-  var _npAuto     = _np.autoSend !== false;   // default true
+  var _npEnabled  = _np.enabled  !== false;
+  var _npAuto     = _np.autoSend !== false;
   var _npTypes    = _np.types || {};
   function _npChk(k){ return (_npTypes[k] !== false) ? 'checked' : ''; }
   body += '<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">'
     + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'
     + '<div><div style="font-size:12px;font-weight:700;color:var(--text-primary)">🔔 تنظیمات اعلان‌ها</div>'
-    + '<div style="font-size:11px;color:var(--text-muted)">کنترل ارسال و نوع اعلان‌های خودکار سیستم</div></div>'
-    + '</div>'
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
-    // enable/disable toggle
-    + '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:10px 12px">'
-    + '<input type="checkbox" id="stgNotifEnabled" style="width:16px;height:16px;cursor:pointer;accent-color:var(--brand)"'
-    + (_npEnabled ? ' checked' : '') + '>'
-    + '<div><div style="font-size:12px;font-weight:600">اعلان‌ها فعال</div>'
-    + '<div style="font-size:10px;color:var(--text-muted)">ارسال و نمایش اعلان‌های خودکار</div></div></label>'
-    // auto/manual toggle
-    + '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:10px 12px">'
-    + '<input type="checkbox" id="stgNotifAuto" style="width:16px;height:16px;cursor:pointer;accent-color:var(--brand)"'
-    + (_npAuto ? ' checked' : '') + '>'
-    + '<div><div style="font-size:12px;font-weight:600">ارسال خودکار</div>'
-    + '<div style="font-size:10px;color:var(--text-muted)">غیرفعال = اعلان‌ها در صف انتظار باقی می‌مانند</div></div></label>'
-    + '</div>'
-    + '<div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">نوع اعلان‌های فعال:</div>'
-    + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px">'
-    + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
-    + '<input type="checkbox" id="stgNtMorning" style="accent-color:var(--brand)" ' + _npChk('morning_brief') + '>🌅 بریفینگ صبحگاهی</label>'
-    + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
-    + '<input type="checkbox" id="stgNtFollowup" style="accent-color:var(--brand)" ' + _npChk('followup') + '>⚠️ مراکز معوق و بدون تاریخ</label>'
-    + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
-    + '<input type="checkbox" id="stgNtTask" style="accent-color:var(--brand)" ' + _npChk('task') + '>📌 وظایف جدید</label>'
-    + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
-    + '<input type="checkbox" id="stgNtOwner" style="accent-color:var(--brand)" ' + _npChk('owner_change') + '>🔄 تغییر مالکیت مرکز</label>'
-    + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
-    + '<input type="checkbox" id="stgNtGeneral" style="accent-color:var(--brand)" ' + _npChk('general') + '>📩 پیام‌های مستقیم مدیر</label>'
-    + '</div></div>';
+    + '<div style="font-size:11px;color:var(--text-muted)">زنگ = رویداد جدید · کارتابل خانه = کارهای زمان‌بندی‌شده</div></div>'
+    + '</div>';
+  if(_isManager()){
+    body += '<div style="font-size:11px;font-weight:600;margin-bottom:6px;color:var(--text-secondary)">تنظیمات سراسری (مدیر)</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
+      + '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:10px 12px">'
+      + '<input type="checkbox" id="stgNotifEnabled" style="width:16px;height:16px;cursor:pointer;accent-color:var(--brand)"'
+      + (_npEnabled ? ' checked' : '') + '>'
+      + '<div><div style="font-size:12px;font-weight:600">اعلان‌ها فعال</div>'
+      + '<div style="font-size:10px;color:var(--text-muted)">کل سیستم</div></div></label>'
+      + '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:10px 12px">'
+      + '<input type="checkbox" id="stgNotifAuto" style="width:16px;height:16px;cursor:pointer;accent-color:var(--brand)"'
+      + (_npAuto ? ' checked' : '') + '>'
+      + '<div><div style="font-size:12px;font-weight:600">ارسال خودکار تلگرام</div>'
+      + '<div style="font-size:10px;color:var(--text-muted)">غیرفعال = صف دستی</div></div></label>'
+      + '</div>'
+      + '<div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">انواع سراسری:</div>'
+      + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px;margin-bottom:12px">'
+      + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
+      + '<input type="checkbox" id="stgNtTask" style="accent-color:var(--brand)" ' + _npChk('task') + '>📌 وظایف جدید</label>'
+      + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
+      + '<input type="checkbox" id="stgNtOwner" style="accent-color:var(--brand)" ' + _npChk('owner_change') + '>🔄 تغییر مالکیت</label>'
+      + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
+      + '<input type="checkbox" id="stgNtGeneral" style="accent-color:var(--brand)" ' + _npChk('general') + '>📩 پیام مدیر</label>'
+      + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
+      + '<input type="checkbox" id="stgNtDigest" style="accent-color:var(--brand)" ' + _npChk('digest') + '>🌅 خلاصه روزانه (تلگرام)</label>'
+      + '</div>';
+  }
+  body += '<div style="font-size:11px;font-weight:600;margin-bottom:6px;color:var(--text-secondary)">تنظیمات شخصی من</div>'
+    + '<div id="stgMyNotifPrefs" style="background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:12px">'
+    + '<div style="font-size:11px;color:var(--text-muted)">در حال بارگذاری…</div></div></div>';
   // ── MTR accounting sync (manager) ─────────────────────────────────────────
   if(_isManager()){
     var _mtrSync=!!(DB.settings&&DB.settings.mtrSyncEnabled);
@@ -187,6 +189,25 @@ function openSettings(){
       +'</div>';
   }
   openModal('settingsModal','⚙ تنظیمات نرم‌افزار',body,foot,{lg:true});
+  // Load per-user prefs async
+  fetch('/api/notifications/my-prefs').then(function(r){return r.ok?r.json():null;}).then(function(p){
+    var el=document.getElementById('stgMyNotifPrefs'); if(!el||!p)return;
+    function chk(v){return v!==false?' checked':'';}
+    el.innerHTML=
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'
+      +'<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer"><input type="checkbox" id="stgMyBell"'+chk(p.bell)+'> زنگ داخل اپ</label>'
+      +'<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer"><input type="checkbox" id="stgMyTg"'+chk(p.telegram)+'> تلگرام</label>'
+      +'<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer"><input type="checkbox" id="stgMyDigTg"'+chk(p.digestTelegram)+'> خلاصه روزانه تلگرام</label>'
+      +'<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer"><input type="checkbox" id="stgMyDigBell"'+chk(p.digestBell)+'> خلاصه در زنگ</label>'
+      +'</div>'
+      +'<label style="font-size:11px;display:flex;align-items:center;gap:8px">حداقل شدت نمایش '
+      +'<select id="stgMyMinSev" style="padding:4px 8px;border-radius:6px;border:1px solid var(--border);font-family:inherit;font-size:11px">'
+      +'<option value="low"'+(p.minSeverity==='low'?' selected':'')+'>همه</option>'
+      +'<option value="medium"'+(p.minSeverity==='medium'?' selected':'')+'>عادی و بالاتر</option>'
+      +'<option value="high"'+(p.minSeverity==='high'?' selected':'')+'>فقط مهم و بحرانی</option>'
+      +'<option value="critical"'+(p.minSeverity==='critical'?' selected':'')+'>فقط بحرانی</option>'
+      +'</select></label>';
+  }).catch(function(){});
 }
 
 function addCKRow(){
@@ -229,12 +250,28 @@ function saveSettings(){
     if(_npE)DB.settings.notifPrefs.enabled=_npE.checked;
     if(_npA)DB.settings.notifPrefs.autoSend=_npA.checked;
     DB.settings.notifPrefs.types={
-      morning_brief:!!(document.getElementById('stgNtMorning')||{checked:true}).checked,
-      followup:!!(document.getElementById('stgNtFollowup')||{checked:true}).checked,
       task:!!(document.getElementById('stgNtTask')||{checked:true}).checked,
       owner_change:!!(document.getElementById('stgNtOwner')||{checked:true}).checked,
-      general:!!(document.getElementById('stgNtGeneral')||{checked:true}).checked
+      general:!!(document.getElementById('stgNtGeneral')||{checked:true}).checked,
+      digest:!!(document.getElementById('stgNtDigest')||{checked:true}).checked,
+      manager_request:true,
+      ack:true
     };
+  }
+  // Per-user prefs
+  var _myBell=document.getElementById('stgMyBell');
+  if(_myBell){
+    var myPrefs={
+      bell:!!_myBell.checked,
+      telegram:!!(document.getElementById('stgMyTg')||{checked:true}).checked,
+      digestTelegram:!!(document.getElementById('stgMyDigTg')||{checked:true}).checked,
+      digestBell:!!(document.getElementById('stgMyDigBell')||{checked:false}).checked,
+      minSeverity:(document.getElementById('stgMyMinSev')||{value:'low'}).value||'low'
+    };
+    fetch('/api/notifications/my-prefs',{
+      method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(myPrefs)
+    }).catch(function(){});
   }
   // ذخیره برچسب‌های ویرایش‌شده
   if(!DB.tags)DB.tags=[];
@@ -2251,43 +2288,7 @@ function applyStoredTheme(){
 }
 
 function _sendWeeklyDigest(){
-  if(!_isManager())return;
-  var lastSent=DB.settings&&DB.settings.lastWeeklyDigest||'';
-  var today=todayStr();
-  if(lastSent){
-    var lp=lastSent.split('/').map(Number),tp=today.split('/').map(Number);
-    var daysDiff=Math.round((jMs(tp[0],tp[1],tp[2])-jMs(lp[0],lp[1],lp[2]))/86400000);
-    if(daysDiff<7)return;
-  }
-  var members=(DB.settings&&DB.settings.members)||_DEFAULT_MEMBERS;
-  var mon=currentJMonth();
-  var lines=[];
-  var overdueByExpert={};
-  _buildPCCache();
-  getAllProvinces().forEach(function(p){
-    var rt=getProvType(p.id);
-    getProvCenters(p.id).forEach(function(c){
-      var e=getE(rt,c.id);
-      var fd=e.followupDate||'';
-      if(!fd||fd>=today||e.status==='قرارداد بسته شد'||e.status==='غیرفعال')return;
-      var ow=e.owner||c.owner||'';
-      if(!overdueByExpert[ow])overdueByExpert[ow]=0;
-      overdueByExpert[ow]++;
-    });
-  });
-  members.filter(function(m){return m.active!==false&&m.role!=='مهمان'&&m.role!=='سوپر ادمین'&&m.role!=='مدیر';}).forEach(function(m){
-    try{
-      var calls=getCallsMonth(m.id,mon).reduce(function(s,l){return s+(l.count||0);},0);
-      var visits=(getVisitsMonth(m.id,mon).total||0);
-      lines.push(m.name+': '+calls+' تماس، '+visits+' ملاقات'+(overdueByExpert[m.id]?'، 🔴 '+overdueByExpert[m.id]+' معوق':''));
-    }catch(e){}
-  });
-  if(!lines.length)return;
-  var msg='📊 خلاصه هفتگی '+mon+':\n'+lines.join(' | ');
-  sendNotif(currentUser,msg,'');
-  if(!DB.settings)DB.settings={};
-  DB.settings.lastWeeklyDigest=today;
-  patchCrmSetting('lastWeeklyDigest',today);
+  // Weekly digest moved to server/lib/notification-scheduler.js (Sat 09:00 Tehran)
 }
 
 async function init(){
