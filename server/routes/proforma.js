@@ -682,23 +682,60 @@ router.post('/:id/action', requireAuth, async (req, res) => {
 
     res.json(Object.assign({}, updated, { wmsDispatch: wmsDispatch }));
 
-    // Push Telegram notifications (non-blocking, only if enabled in settings)
+    // In-app + Telegram notifications
     try {
+      const hub = require('../lib/notification-hub');
       const settingsRow = await query("SELECT value FROM app_settings WHERE key = 'telegramNotify'");
       const notifyEnabled = !settingsRow.rows.length || settingsRow.rows[0].value !== false;
-      if (!notifyEnabled) throw new Error('telegram notify disabled');
-      const bot = require('../bot/telegram');
+
       if (d.action === 'send') {
         const msg = '📄 پیشفاکتور ' + updated.no + ' از ' + req.user.username +
-          ' در انتظار تأیید است.\n💰 مبلغ: ' + Number(updated.total).toLocaleString('fa-IR') + ' ﷼\n👤 مشتری: ' + (updated.centerName || '—');
-        bot.notifyManagers(msg).catch(function(){});
+          ' در انتظار تأیید است — مبلغ: ' + Number(updated.total).toLocaleString('fa-IR') + ' ﷼';
+        const mgrs = await query(
+          `SELECT username FROM app_users WHERE active = true AND role IN ('مدیر', 'سوپر ادمین')`
+        );
+        for (const m of mgrs.rows) {
+          await hub.createNotification({
+            id: 'pf_sent_' + updated.id + '_' + m.username,
+            to: m.username,
+            from: req.user.username,
+            msg,
+            centerKey: updated.centerKey || null,
+            type: 'proforma',
+            meta: { proformaId: updated.id, proformaNo: updated.no, action: 'pending' },
+            priority: 1,
+            skipDedup: true,
+          });
+        }
+        if (notifyEnabled) {
+          const bot = require('../bot/telegram');
+          const tgMsg = '📄 پیشفاکتور ' + updated.no + ' از ' + req.user.username +
+            ' در انتظار تأیید است.\n💰 مبلغ: ' + Number(updated.total).toLocaleString('fa-IR') + ' ﷼\n👤 مشتری: ' + (updated.centerName || '—');
+          bot.notifyManagers(tgMsg).catch(function () {});
+        }
       } else if (d.action === 'approve' || d.action === 'reject') {
         const label = d.action === 'approve' ? '✅ تأیید شد' : '❌ رد شد';
-        const msg   = '📄 پیشفاکتور ' + updated.no + ' ' + label + ' توسط ' + req.user.username +
-          (d.note ? '\n📝 ' + d.note : '');
-        bot.notifyAll(msg).catch(function(){});
+        const msg = '📄 پیشفاکتور ' + updated.no + ' ' + label + ' توسط ' + req.user.username +
+          (d.note ? ' — ' + d.note : '');
+        if (updated.created_by) {
+          await hub.createNotification({
+            id: 'pf_' + d.action + '_' + updated.id + '_' + updated.created_by,
+            to: updated.created_by,
+            from: req.user.username,
+            msg,
+            type: 'proforma',
+            meta: { proformaId: updated.id, proformaNo: updated.no, action: d.action },
+            skipDedup: true,
+          });
+        }
+        if (notifyEnabled) {
+          const bot = require('../bot/telegram');
+          bot.notifyAll(msg).catch(function () {});
+        }
       }
-    } catch(e) {}
+    } catch (e) {
+      console.error('[proforma notify]', e.message);
+    }
   } catch(e) {
     console.error('[proforma action]', e.message);
     res.status(500).json({ error: 'خطای سرور' });

@@ -106,7 +106,11 @@ function initSSE() {
         setTimeout(function(){ location.reload(); }, 2500);
       } else if (data.type === 'notif_new' && data.to === currentUser) {
         if (typeof _refreshNotifs === 'function') _refreshNotifs();
+        if (typeof window._notifVueLoad === 'function') window._notifVueLoad();
         if (data.msg && typeof _firePushNotif === 'function') _firePushNotif('\uD83D\uDD14 اعلان جدید', data.msg, 'notif-' + Date.now());
+      } else if (data.type === 'notif_updated' && data.to === currentUser) {
+        if (typeof window._notifVueLoad === 'function') window._notifVueLoad();
+        if (typeof _refreshNotifs === 'function') _refreshNotifs();
       }
     } catch(err) {}
   };

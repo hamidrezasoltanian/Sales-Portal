@@ -4,75 +4,90 @@ const express = require('express');
 const { query, pool } = require('../db');
 const { requireAuth } = require('../auth');
 const { isManagerRole } = require('../lib/roles');
-
-// Lazy-load bot to avoid circular deps
-let _tgNotify = null;
-function getTgNotify() {
-  if (!_tgNotify) { try { _tgNotify = require('../bot/telegram').notifyUser; } catch(e) {} }
-  return _tgNotify;
-}
-
-// Lazy-load SSE broadcast to avoid circular deps at module load
-let _broadcast = null;
-function getBroadcast() {
-  if (!_broadcast) { try { _broadcast = require('./events').broadcast; } catch(e) {} }
-  return _broadcast;
-}
+const hub = require('../lib/notification-hub');
 
 const router = express.Router();
 
-let _notifPrefsCache = null;
-let _notifPrefsCacheTs = 0;
-
-async function getNotifPrefs() {
-  if (_notifPrefsCache && (Date.now() - _notifPrefsCacheTs) < 60000) {
-    return _notifPrefsCache;
-  }
-  try {
-    const r = await query("SELECT value FROM app_settings WHERE key = 'notifPrefs'");
-    _notifPrefsCache = (r.rows[0] && r.rows[0].value) || {};
-  } catch (e) {
-    _notifPrefsCache = {};
-  }
-  _notifPrefsCacheTs = Date.now();
-  return _notifPrefsCache;
-}
-
-function isNotifAllowed(prefs, type) {
-  if (!prefs || prefs.enabled === false) return false;
-  const t = type || 'general';
-  if (prefs.types && prefs.types[t] === false) return false;
-  return true;
-}
-
-function invalidateNotifPrefsCache() {
-  _notifPrefsCache = null;
-  _notifPrefsCacheTs = 0;
-}
-
-// ── Helper: map DB row → camelCase object ──────────────────────────────────
 function rowToObj(r) {
-  return {
-    id:        r.id,
-    to:        r.to_user,
-    msg:       r.msg,
-    centerKey: r.center_key,
-    centerKeys: r.center_keys || null,
-    at:        r.at,
-    read:      r.read,
-    type:      r.type || 'general',
-    meta:      r.meta || null,
-    sentAt:    r.sent_at || null,   // null = pending (not yet pushed to Telegram)
-  };
+  return hub.rowToObj(r);
 }
+
+// ── GET /api/notifications/inbox ───────────────────────────────────────────
+router.get('/inbox', requireAuth, async function (req, res) {
+  try {
+    const isManager = isManagerRole(req.user.role);
+    const viewAll = isManager && req.query.all === 'true';
+    const targetUser = viewAll ? null : (req.query.to || req.user.username);
+    const conditions = [];
+    const params = [];
+
+    if (targetUser) {
+      params.push(targetUser);
+      conditions.push(`to_user = $${params.length}`);
+    }
+    if (req.query.unread === 'true') conditions.push('read = false');
+    if (req.query.type) {
+      params.push(req.query.type);
+      conditions.push(`type = $${params.length}`);
+    }
+
+    const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+    const sqlResult = await query(
+      `SELECT * FROM notifications ${where} ORDER BY at DESC LIMIT 200`,
+      params
+    );
+    res.json(sqlResult.rows.map(rowToObj));
+  } catch (e) {
+    console.error('[notifications GET /inbox]', e.message);
+    res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
+
+// ── GET /api/notifications/prefs ───────────────────────────────────────────
+router.get('/prefs', requireAuth, async function (req, res) {
+  try {
+    const username = req.query.user && isManagerRole(req.user.role)
+      ? req.query.user
+      : req.user.username;
+    const prefs = await hub.getUserPrefs(username);
+    res.json({ username, prefs });
+  } catch (e) {
+    res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
+
+// ── PUT /api/notifications/prefs ───────────────────────────────────────────
+router.put('/prefs', requireAuth, async function (req, res) {
+  try {
+    const username = req.body.username && isManagerRole(req.user.role)
+      ? req.body.username
+      : req.user.username;
+    const saved = await hub.saveUserPrefs(username, req.body.prefs || req.body);
+    res.json({ username, prefs: saved });
+  } catch (e) {
+    res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
+
+// ── POST /api/notifications/telegram-link ──────────────────────────────────
+router.post('/telegram-link', requireAuth, async function (req, res) {
+  try {
+    const data = await hub.createTelegramLinkToken(req.user.username);
+    res.json({
+      token: data.token,
+      expiresAt: data.expiresAt,
+      hint: 'در تلگرام دستور /link ' + data.token + ' را بفرستید',
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
 
 // ── GET /api/notifications ─────────────────────────────────────────────────
-// Query params: ?to=username, ?unread=true
 router.get('/', requireAuth, async function (req, res) {
   try {
     const conditions = [];
     const params = [];
-
     const isManager = isManagerRole(req.user.role);
     const targetUser = req.query.to || (!isManager ? req.user.username : null);
 
@@ -80,8 +95,10 @@ router.get('/', requireAuth, async function (req, res) {
       params.push(targetUser);
       conditions.push(`to_user = $${params.length}`);
     }
-    if (req.query.unread === 'true') {
-      conditions.push(`read = false`);
+    if (req.query.unread === 'true') conditions.push('read = false');
+    if (req.query.type) {
+      params.push(req.query.type);
+      conditions.push(`type = $${params.length}`);
     }
 
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
@@ -99,38 +116,32 @@ router.get('/', requireAuth, async function (req, res) {
 // ── POST /api/notifications ────────────────────────────────────────────────
 router.post('/', requireAuth, async function (req, res) {
   try {
-    const { id, to, msg, centerKey, centerKeys, at, type, meta, autoSend } = req.body;
+    const { id, to, msg, centerKey, centerKeys, at, type, meta, autoSend, priority } = req.body;
     if (!id || !to || !msg) {
       return res.status(400).json({ error: 'فیلدهای id، to و msg الزامی هستند' });
     }
 
-    const prefs = await getNotifPrefs();
-    const notifType = type || 'general';
-    if (!isNotifAllowed(prefs, notifType)) {
-      return res.status(201).json({ ok: true, skipped: true, reason: 'disabled' });
-    }
+    const result = await hub.createNotification({
+      id,
+      to,
+      from: req.body.from || req.user.username,
+      msg,
+      centerKey,
+      centerKeys,
+      at,
+      type,
+      meta,
+      autoSend,
+      priority,
+    });
 
-    const shouldPush = autoSend !== false && prefs.autoSend !== false;
-    const result = await query(
-      `INSERT INTO notifications (id, to_user, msg, center_key, center_keys, at, type, meta, sent_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING *`,
-      [id, to, msg, centerKey || null,
-       (centerKeys && centerKeys.length) ? JSON.stringify(centerKeys) : null,
-       at ? new Date(at) : new Date(),
-       type || 'general', meta ? JSON.stringify(meta) : null,
-       shouldPush ? new Date() : null]   // sent_at tracks delivery time
-    );
-    const notif = rowToObj(result.rows[0]);
-    // Push to Telegram only if autoSend is enabled
-    if (shouldPush) {
-      const tgNotify = getTgNotify();
-      if (tgNotify) tgNotify(to, '🔔 ' + msg).catch(function(){});
+    if (result.skipped) {
+      return res.status(201).json({ ok: true, skipped: true, reason: result.reason });
     }
-    // Broadcast SSE so the recipient's open browser tab sees the badge update immediately
-    const broadcast = getBroadcast();
-    if (broadcast) broadcast('notif_new', { to, msg, id: notif.id });
-    res.status(201).json(notif);
+    if (!result.ok) {
+      return res.status(400).json({ error: result.error || 'خطا' });
+    }
+    res.status(201).json(result.notif);
   } catch (e) {
     if (e.code === '23505') {
       return res.status(409).json({ error: 'اعلان با این شناسه قبلاً ثبت شده' });
@@ -140,139 +151,135 @@ router.post('/', requireAuth, async function (req, res) {
   }
 });
 
-async function _markBlobNotifRead() { return 0; }
-
-// ── GET /api/notifications/count ──────────────────────────────────────────
-// Lightweight endpoint: returns just the unread count for the current user.
 router.get('/count', requireAuth, async function (req, res) {
   try {
     const isManager = isManagerRole(req.user.role);
     const targetUser = req.query.to || (!isManager ? req.user.username : null);
-
-    // Count from SQL
     let sqlCount = 0;
     if (targetUser) {
-      const r = await query(`SELECT COUNT(*) AS c FROM notifications WHERE to_user = $1 AND read = false`, [targetUser]);
+      const r = await query(
+        `SELECT COUNT(*) AS c FROM notifications WHERE to_user = $1 AND read = false`,
+        [targetUser]
+      );
       sqlCount = parseInt(r.rows[0].c, 10) || 0;
     } else {
       const r = await query(`SELECT COUNT(*) AS c FROM notifications WHERE read = false`);
       sqlCount = parseInt(r.rows[0].c, 10) || 0;
     }
-
     res.json({ count: sqlCount });
   } catch (e) {
-    console.error('[notifications GET /count]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
   }
 });
 
-// ── PUT /api/notifications/:id/read ───────────────────────────────────────
 router.put('/:id/read', requireAuth, async function (req, res) {
   try {
-    const result = await query(
-      `UPDATE notifications SET read = true WHERE id = $1 RETURNING *`,
-      [req.params.id]
-    );
-    if (!result.rows.length) {
-      // Not in SQL → it's a blob notification; persist read state into the blob
-      await _markBlobNotifRead(req.params.id, null);
-      return res.json({ ok: true, blob: true });
-    }
-    res.json(rowToObj(result.rows[0]));
+    const notif = await hub.markNotifRead(req.params.id, req.user.username);
+    if (!notif) return res.json({ ok: true });
+    res.json(notif);
   } catch (e) {
-    console.error('[notifications PUT /:id/read]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
   }
 });
 
-// ── POST /api/notifications/read-all ──────────────────────────────────────
-// Mark all notifications as read for the current user (or ?to= if manager).
-// A manager with no ?to= sees everyone's notifications, so mark them all.
+// ── POST /api/notifications/:id/action ─────────────────────────────────────
+router.post('/:id/action', requireAuth, async function (req, res) {
+  try {
+    const action = (req.body.action || '').trim();
+    if (!action) return res.status(400).json({ error: 'action الزامی است' });
+
+    const r = await query('SELECT * FROM notifications WHERE id = $1', [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'اعلان یافت نشد' });
+    const row = r.rows[0];
+    const isManager = isManagerRole(req.user.role);
+    if (row.to_user !== req.user.username && !isManager) {
+      return res.status(403).json({ error: 'دسترسی غیرمجاز' });
+    }
+
+    const notif = await hub.recordAction(req.params.id, row.to_user, action);
+    const response = { ok: true, action, notif };
+
+    if (action === 'ack') {
+      await hub.createAckReply(rowToObj(row), req.user.username, req.user.display_name || req.user.username);
+    }
+
+    if (action === 'task' && row.meta && row.meta.taskId) {
+      response.taskId = row.meta.taskId;
+    }
+    if ((action === 'call' || action === 'brief' || action === 'center') && row.center_key) {
+      const parts = row.center_key.split('_');
+      response.center = { rtype: parts[0], rid: parts.slice(1).join('_'), centerKey: row.center_key };
+    }
+    if (action === 'proforma' && row.meta && row.meta.proformaId) {
+      response.proformaId = row.meta.proformaId;
+    }
+
+    res.json(response);
+  } catch (e) {
+    console.error('[notifications POST /:id/action]', e.message);
+    res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
+
 router.post('/read-all', requireAuth, async function (req, res) {
   try {
     const isManager = isManagerRole(req.user.role);
     const markEveryone = isManager && !req.body.to;
     const targetUser = req.body.to || req.user.username;
-
-    // SQL table
     const sqlResult = markEveryone
       ? await query(`UPDATE notifications SET read = true WHERE read = false RETURNING id`)
-      : await query(`UPDATE notifications SET read = true WHERE to_user = $1 AND read = false RETURNING id`, [targetUser]);
-
-    // Blob notifications
-    const blobCount = await _markBlobReadAll(markEveryone ? null : targetUser);
-
-    res.json({ updated: sqlResult.rows.length + blobCount });
+      : await query(
+        `UPDATE notifications SET read = true WHERE to_user = $1 AND read = false RETURNING id`,
+        [targetUser]
+      );
+    res.json({ updated: sqlResult.rows.length });
   } catch (e) {
-    console.error('[notifications POST /read-all]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
   }
 });
 
-async function _markBlobReadAll() { return 0; }
-
-// ── POST /api/notifications/send-pending ─────────────────────────────────
-// Manager manually triggers delivery of pending (autoSend=false) notifications.
 router.post('/send-pending', requireAuth, async function (req, res) {
   try {
-    const isManager = isManagerRole(req.user.role);
-    if (!isManager) return res.status(403).json({ error: 'فقط مدیر مجاز است' });
-
-    // Find all unsent notifications (sent_at IS NULL)
+    if (!isManagerRole(req.user.role)) return res.status(403).json({ error: 'فقط مدیر مجاز است' });
     const pending = await query(
       `SELECT * FROM notifications WHERE sent_at IS NULL ORDER BY at ASC LIMIT 100`
     );
     if (!pending.rows.length) return res.json({ sent: 0 });
 
-    const tgNotify = getTgNotify();
-    const broadcast = getBroadcast();
     let sent = 0;
     for (const row of pending.rows) {
       const notif = rowToObj(row);
-      if (tgNotify) {
-        try { await tgNotify(notif.to, '🔔 ' + notif.msg); } catch(_) {}
-      }
+      const prefs = await hub.getUserPrefs(notif.to);
+      await hub.pushTelegram(notif, prefs);
       await query(`UPDATE notifications SET sent_at = NOW() WHERE id = $1`, [notif.id]);
+      const broadcast = require('./events').broadcast;
       if (broadcast) broadcast('notif_new', { to: notif.to, msg: notif.msg, id: notif.id });
       sent++;
     }
     res.json({ sent });
   } catch (e) {
-    console.error('[notifications POST /send-pending]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
   }
 });
 
-// ── DELETE /api/notifications/:id ─────────────────────────────────────────
 router.delete('/:id', requireAuth, async function (req, res) {
   try {
-    const nid = req.params.id;
-    const sqlResult = await query('DELETE FROM notifications WHERE id = $1 RETURNING id', [nid]);
-    if (!sqlResult.rows.length) {
-      return res.status(404).json({ error: 'اعلان یافت نشد' });
-    }
+    const sqlResult = await query('DELETE FROM notifications WHERE id = $1 RETURNING id', [req.params.id]);
+    if (!sqlResult.rows.length) return res.status(404).json({ error: 'اعلان یافت نشد' });
     res.json({ ok: true });
   } catch (e) {
-    console.error('[notifications DELETE /:id]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
   }
 });
 
-
-// ── POST /api/notifications/telegram-push ─────────────────────────────────
-// Called by the browser (sendNotif in app.js) to push a Telegram message
-// to the target user without storing a DB notification record.
 router.post('/telegram-push', requireAuth, async function (req, res) {
   try {
     const { to, msg } = req.body;
     if (!to || !msg) return res.status(400).json({ error: 'to and msg required' });
-    const tgNotify = getTgNotify();
-    if (tgNotify) {
-      tgNotify(to, '🔔 ' + msg).catch(function(){});
-    }
+    const tg = require('../bot/telegram').notifyUser;
+    if (tg) tg(to, '🔔 ' + msg).catch(function () {});
     res.json({ ok: true });
   } catch (e) {
-    console.error('[notifications POST /telegram-push]', e.message);
     res.status(500).json({ error: 'internal error' });
   }
 });

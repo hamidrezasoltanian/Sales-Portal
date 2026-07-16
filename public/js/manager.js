@@ -165,7 +165,19 @@ function openSettings(){
     + '<input type="checkbox" id="stgNtOwner" style="accent-color:var(--brand)" ' + _npChk('owner_change') + '>🔄 تغییر مالکیت مرکز</label>'
     + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
     + '<input type="checkbox" id="stgNtGeneral" style="accent-color:var(--brand)" ' + _npChk('general') + '>📩 پیام‌های مستقیم مدیر</label>'
+    + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
+    + '<input type="checkbox" id="stgNtProforma" style="accent-color:var(--brand)" ' + _npChk('proforma') + '>📄 پیش‌فاکتور</label>'
     + '</div></div>';
+  var _tgNotify = (DB.settings&&DB.settings.telegramNotify)!==false;
+  body += '<div style="margin-top:12px;background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:12px 16px">'
+    + '<div style="font-size:12px;font-weight:700;margin-bottom:8px">🔗 اتصال تلگرام</div>'
+    + '<div id="tgLinkHint" style="font-size:11px;color:var(--text-muted);margin-bottom:8px">کد یکبارمصرف بگیرید و در ربات بفرستید: <code>/link کد</code></div>'
+    + '<button type="button" onclick="_requestTelegramLink()" style="background:#6366f1;color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:11px;font-family:inherit">دریافت کد اتصال</button>'
+    + '<div id="tgLinkCode" style="margin-top:8px;font-size:13px;font-weight:700;color:#4338ca;display:none"></div>'
+    + (_isManager()?'<label style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer;font-size:11px">'
+    + '<input type="checkbox" id="stgTelegramNotify" style="accent-color:var(--brand)"'+(_tgNotify?' checked':'')+'>'
+    + 'اعلان پیش‌فاکتور در تلگرام (مدیران)</label>':'')
+    + '</div>';
   // ── MTR accounting sync (manager) ─────────────────────────────────────────
   if(_isManager()){
     var _mtrSync=!!(DB.settings&&DB.settings.mtrSyncEnabled);
@@ -224,9 +236,12 @@ function saveSettings(){
       followup:!!(document.getElementById('stgNtFollowup')||{checked:true}).checked,
       task:!!(document.getElementById('stgNtTask')||{checked:true}).checked,
       owner_change:!!(document.getElementById('stgNtOwner')||{checked:true}).checked,
-      general:!!(document.getElementById('stgNtGeneral')||{checked:true}).checked
+      general:!!(document.getElementById('stgNtGeneral')||{checked:true}).checked,
+      proforma:!!(document.getElementById('stgNtProforma')||{checked:true}).checked
     };
   }
+  var _tgN=document.getElementById('stgTelegramNotify');
+  if(_tgN)DB.settings.telegramNotify=_tgN.checked;
   // ذخیره برچسب‌های ویرایش‌شده
   if(!DB.tags)DB.tags=[];
   DB.tags.forEach(function(t){
@@ -254,6 +269,7 @@ function saveSettings(){
     ckItems:DB.settings.ckItems,
     notifPrefs:DB.settings.notifPrefs
   };
+  if(_tgN)settingsPatch.telegramNotify=DB.settings.telegramNotify;
   if(_anthKey.trim())settingsPatch.anthropicKey=_anthKey.trim();
   if(_isManager()){
     if(DB.settings.statusList)settingsPatch.statusList=DB.settings.statusList;
@@ -281,6 +297,22 @@ function saveSettings(){
       console.warn('[saveSettings] /api/settings failed, falling back to blob save:',e.message);
       _finishSave();
     });
+}
+
+function _requestTelegramLink(){
+  fetch('/api/notifications/telegram-link',{method:'POST',headers:{'Content-Type':'application/json'}})
+    .then(function(r){return r.ok?r.json():r.json().then(function(d){throw new Error(d.error||'خطا');});})
+    .then(function(d){
+      var el=document.getElementById('tgLinkCode');
+      var hint=document.getElementById('tgLinkHint');
+      if(el){
+        el.style.display='block';
+        el.textContent='کد: '+d.token+' — در تلگرام: /link '+d.token;
+      }
+      if(hint)hint.textContent='کد ۱۵ دقیقه اعتبار دارد. در ربات تلگرام بفرستید:';
+      if(typeof showToast==='function')showToast('✅ کد اتصال تولید شد',2500);
+    })
+    .catch(function(e){if(typeof showToast==='function')showToast('❌ '+e.message,3000);});
 }
 
 function addTagRow(){

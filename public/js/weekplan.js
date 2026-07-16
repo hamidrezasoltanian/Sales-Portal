@@ -1833,7 +1833,7 @@ function sendNotif(toUser, message, centerKey, centerKeys, type, meta) {
   if (_np.types && _np.types[_ntType] === false) return; // this type is disabled
 
   var id = Date.now() + '_' + Math.random().toString(36).slice(2);
-  var payload = { id: id, to: toUser, msg: message, centerKey: centerKey || null,
+  var payload = { id: id, to: toUser, from: currentUser, msg: message, centerKey: centerKey || null,
                   type: _ntType, meta: meta || null,
                   autoSend: _np.autoSend !== false }; // false = queued, not auto-pushed
   if (centerKeys && centerKeys.length) payload.centerKeys = centerKeys;
@@ -1850,7 +1850,8 @@ function sendNotif(toUser, message, centerKey, centerKeys, type, meta) {
       centerKey: notif.centerKey || centerKey || '',
       centerKeys: centerKeys || null,
       at: notif.at || new Date().toISOString(),
-      read: false, from: currentUser
+      read: false, from: notif.from || currentUser,
+      type: notif.type || _ntType, meta: notif.meta || meta
     });
   }).catch(function() {
     // Fallback: add to blob so at least something is stored

@@ -19,6 +19,7 @@ fetch('/api/auth/me')
     if (notifEl) {
       const ni = createApp(NotificationsPanel, {
         username,
+        isManager,
         onOpenCenter: (key: string) => {
           // key is a centerKey like "pc_p4||88" or "center_123" — parse to (rtype, id)
           // and open the center modal. Do NOT call openProvince (it expects a province id).

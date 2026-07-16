@@ -255,6 +255,11 @@ async function start() {
     } catch (e) {
       console.warn('[faradis-auto-sync] scheduler not started:', e.message);
     }
+    try {
+      require('./lib/notification-scheduler').startNotificationScheduler();
+    } catch (e) {
+      console.warn('[notif-scheduler] not started:', e.message);
+    }
     if (process.env.TELEGRAM_BOT_TOKEN) {
       const bot = require('./bot/telegram');
       bot.poll().catch(function(e){ console.error('[bot] fatal:', e.message); });

@@ -701,42 +701,7 @@ function _clValDisplay(field, val){
 var _autoReminderChecked = false;
 
 function _setupAutoReminder(){
-  // یادآوری صبحگاهی (ساعت ۹): برنامه امروز برای هر کارشناس
-  setInterval(function(){
-    if(!_isManager()) return;
-    var now = new Date();
-    if(now.getHours() < 9) return;
-    var today = todayStr();
-    if(!DB.settings) DB.settings = {};
-    if((DB.settings.lastMorningReminder||'') === today) return;
-    DB.settings.lastMorningReminder = today;
-    if(typeof patchCrmSetting==='function')patchCrmSetting('lastMorningReminder',today);else saveDB();
-    _runMorningBriefing(today);
-  }, 60000);
-
-  // یادآوری بعدازظهر (ساعت ۱۵): مراکز امروز بدون گزارش
-  setInterval(function(){
-    if(!_isManager()) return;
-    var now = new Date();
-    if(now.getHours() < 15) return;
-    var today = todayStr();
-    if(!DB.settings) DB.settings = {};
-    if((DB.settings.lastAfternoonReminder||'') === today) return;
-    DB.settings.lastAfternoonReminder = today;
-    if(typeof patchCrmSetting==='function')patchCrmSetting('lastAfternoonReminder',today);else saveDB();
-    _runTodayReminders(today);
-  }, 60000);
-
-  // یادآوری startup برای مراکز بدون تاریخ + سررسیدگذشته: یک بار در روز
-  setTimeout(function(){
-    if(!_isManager()) return;
-    var today = todayStr();
-    if(!DB.settings) DB.settings = {};
-    if((DB.settings.lastStartupReminder||'') === today) return;
-    DB.settings.lastStartupReminder = today;
-    if(typeof patchCrmSetting==='function')patchCrmSetting('lastStartupReminder',today);else saveDB();
-    _runOverdueAndUndatedReminders(today);
-  }, 8000);
+  // یادآورها توسط server/lib/notification-scheduler.js اجرا می‌شوند
 }
 
 // بریفینگ صبحگاهی: برنامه امروز هر کارشناس
