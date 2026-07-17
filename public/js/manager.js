@@ -166,8 +166,28 @@ function openSettings(){
     + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
     + '<input type="checkbox" id="stgNtGeneral" style="accent-color:var(--brand)" ' + _npChk('general') + '>📩 پیام‌های مستقیم مدیر</label>'
     + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
+    + '<input type="checkbox" id="stgNtMgrReq" style="accent-color:var(--brand)" ' + _npChk('manager_request') + '>📨 درخواست مدیر</label>'
+    + '<label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 8px">'
     + '<input type="checkbox" id="stgNtProforma" style="accent-color:var(--brand)" ' + _npChk('proforma') + '>📄 پیش‌فاکتور</label>'
     + '</div></div>';
+  body += '<div style="margin-top:12px;background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:12px 16px">'
+    + '<div style="font-size:12px;font-weight:700;margin-bottom:8px">👤 تنظیمات اعلان شخصی من</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;font-size:11px">'
+    + '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="stgUpWeb" checked>وب</label>'
+    + '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="stgUpTg" checked>تلگرام</label>'
+    + '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="stgUpBrowser" checked>مرورگر</label>'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'
+    + '<div><label style="font-size:10px;color:var(--text-muted)">سکوت از</label>'
+    + '<input id="stgUpQuietStart" class="ed-inp" style="width:100%;font-size:11px" placeholder="22:00"></div>'
+    + '<div><label style="font-size:10px;color:var(--text-muted)">تا</label>'
+    + '<input id="stgUpQuietEnd" class="ed-inp" style="width:100%;font-size:11px" placeholder="07:00"></div>'
+    + '</div>'
+    + '<div><label style="font-size:10px;color:var(--text-muted)">حالت دریافت</label>'
+    + '<select id="stgUpDigest" class="ed-inp" style="width:100%;font-size:11px">'
+    + '<option value="instant">فوری</option><option value="hourly">ساعتی</option><option value="daily">روزانه</option>'
+    + '</select></div>'
+    + '</div>';
   var _tgNotify = (DB.settings&&DB.settings.telegramNotify)!==false;
   body += '<div style="margin-top:12px;background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:12px 16px">'
     + '<div style="font-size:12px;font-weight:700;margin-bottom:8px">🔗 اتصال تلگرام</div>'
@@ -190,6 +210,7 @@ function openSettings(){
       +'</div>';
   }
   openModal('settingsModal','⚙ تنظیمات نرم‌افزار',body,foot,{lg:true});
+  setTimeout(_loadUserNotifPrefs, 200);
 }
 
 function addCKRow(){
@@ -237,6 +258,7 @@ function saveSettings(){
       task:!!(document.getElementById('stgNtTask')||{checked:true}).checked,
       owner_change:!!(document.getElementById('stgNtOwner')||{checked:true}).checked,
       general:!!(document.getElementById('stgNtGeneral')||{checked:true}).checked,
+      manager_request:!!(document.getElementById('stgNtMgrReq')||{checked:true}).checked,
       proforma:!!(document.getElementById('stgNtProforma')||{checked:true}).checked
     };
   }
@@ -279,6 +301,7 @@ function saveSettings(){
   }
 
   function _finishSave(){
+    _saveUserNotifPrefs();
     saveDB();
     if(typeof _mtrStartSyncPoll==='function')_mtrStartSyncPoll();
     buildUSERS();
@@ -313,6 +336,42 @@ function _requestTelegramLink(){
       if(typeof showToast==='function')showToast('✅ کد اتصال تولید شد',2500);
     })
     .catch(function(e){if(typeof showToast==='function')showToast('❌ '+e.message,3000);});
+}
+
+function _loadUserNotifPrefs(){
+  fetch('/api/notifications/prefs')
+    .then(function(r){return r.ok?r.json():null;})
+    .then(function(d){
+      if(!d||!d.prefs)return;
+      var p=d.prefs, ch=p.channels||{};
+      var w=document.getElementById('stgUpWeb'); if(w)w.checked=ch.web!==false;
+      var t=document.getElementById('stgUpTg'); if(t)t.checked=ch.telegram!==false;
+      var b=document.getElementById('stgUpBrowser'); if(b)b.checked=ch.browser!==false;
+      var qs=document.getElementById('stgUpQuietStart');
+      var qe=document.getElementById('stgUpQuietEnd');
+      if(p.quiet_hours){ if(qs)qs.value=p.quiet_hours.start||''; if(qe)qe.value=p.quiet_hours.end||''; }
+      var dg=document.getElementById('stgUpDigest'); if(dg)dg.value=p.digest_mode||'instant';
+    }).catch(function(){});
+}
+
+function _saveUserNotifPrefs(){
+  var qs=(document.getElementById('stgUpQuietStart')||{}).value||'';
+  var qe=(document.getElementById('stgUpQuietEnd')||{}).value||'';
+  var prefs={
+    enabled:true,
+    channels:{
+      web:!!(document.getElementById('stgUpWeb')||{checked:true}).checked,
+      telegram:!!(document.getElementById('stgUpTg')||{checked:true}).checked,
+      browser:!!(document.getElementById('stgUpBrowser')||{checked:true}).checked
+    },
+    digest_mode:(document.getElementById('stgUpDigest')||{value:'instant'}).value||'instant',
+    quiet_hours:(qs&&qe)?{start:qs.trim(),end:qe.trim()}:null
+  };
+  fetch('/api/notifications/prefs',{
+    method:'PUT',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({prefs:prefs})
+  }).catch(function(){});
 }
 
 function addTagRow(){

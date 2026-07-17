@@ -5,6 +5,18 @@ const multer  = require('multer');
 const { query } = require('../db');
 const { requirePermission } = require('../permissions');
 const { requireAuth } = require('../auth');
+const hub = require('../lib/notification-hub');
+
+async function sendLetterNotif(toUser, fromUser, msg, notifId, meta) {
+  await hub.notifySimple({
+    id: notifId,
+    to: String(toUser),
+    from: fromUser,
+    msg,
+    type: 'letters',
+    meta: Object.assign({ module: 'letters' }, meta || {}),
+  }).catch(function () {});
+}
 
 const router = express.Router();
 const DEFAULT_LETTERS_PIN = process.env.LETTERS_DEFAULT_PIN || '1234';
@@ -390,10 +402,9 @@ router.post('/', requireAuth, async (req, res) => {
         // ایجاد نوتیفیکیشن
         const notifId = `referral_${Date.now()}_${letterId}_${rec}`;
         const senderName = req.user.display_name || req.user.username;
-        await query(`
-          INSERT INTO notifications (id, to_user, msg, at, read)
-          VALUES ($1, $2, $3, NOW(), FALSE)
-        `, [notifId, String(rec), `📨 نامه‌ای با موضوع «${subject}» و شماره اندیکاتور ${indicator} از طرف ${senderName} به کارتابل شما ارجاع شد.`]).catch(()=>{});
+        await sendLetterNotif(String(rec), req.user.username,
+          `📨 نامه‌ای با موضوع «${subject}» و شماره اندیکاتور ${indicator} از طرف ${senderName} به کارتابل شما ارجاع شد.`,
+          notifId, { letterId, action: 'referral' });
       }
     }
 
@@ -495,10 +506,9 @@ router.put('/:id', requireAuth, async (req, res) => {
         // ایجاد نوتیفیکیشن
         const notifId = `referral_${Date.now()}_${letterId}_${rec}`;
         const senderName = req.user.display_name || req.user.username;
-        await query(`
-          INSERT INTO notifications (id, to_user, msg, at, read)
-          VALUES ($1, $2, $3, NOW(), FALSE)
-        `, [notifId, String(rec), `📨 نامه‌ای با موضوع «${subject || letter.subject}» و شماره اندیکاتور ${indicator} از طرف ${senderName} به کارتابل شما ارجاع شد.`]).catch(()=>{});
+        await sendLetterNotif(String(rec), req.user.username,
+          `📨 نامه‌ای با موضوع «${subject || letter.subject}» و شماره اندیکاتور ${indicator} از طرف ${senderName} به کارتابل شما ارجاع شد.`,
+          notifId, { letterId, action: 'referral' });
       }
     }
 
@@ -547,10 +557,9 @@ router.post('/:id/approve-internal', requireAuth, async (req, res) => {
         // ایجاد نوتیفیکیشن
         const notifId = `referral_${Date.now()}_${letterId}_${r.receiver_id}`;
         const senderName = req.user.display_name || req.user.username;
-        await query(`
-          INSERT INTO notifications (id, to_user, msg, at, read)
-          VALUES ($1, $2, $3, NOW(), FALSE)
-        `, [notifId, r.receiver_id, `📥 نامه‌ای با موضوع «${letter.subject}» و شماره اندیکاتور ${indicator} به کارتابل شما ارجاع شد.`]).catch(()=>{});
+        await sendLetterNotif(r.receiver_id, req.user.username,
+          `📥 نامه‌ای با موضوع «${letter.subject}» و شماره اندیکاتور ${indicator} به کارتابل شما ارجاع شد.`,
+          notifId, { letterId, action: 'referral' });
       }
     }
 
@@ -588,10 +597,9 @@ router.post('/:id/approve-outgoing', requireAuth, async (req, res) => {
         // ایجاد نوتیفیکیشن
         const notifId = `sig_req_${Date.now()}_${letterId}_${s.user_id}`;
         const senderName = req.user.display_name || req.user.username;
-        await query(`
-          INSERT INTO notifications (id, to_user, msg, at, read)
-          VALUES ($1, $2, $3, NOW(), FALSE)
-        `, [notifId, s.user_id, `✍️ درخواست امضای نامه «${letter.subject}» از طرف ${senderName} ارجاع شد.`]).catch(()=>{});
+        await sendLetterNotif(s.user_id, req.user.username,
+          `✍️ درخواست امضای نامه «${letter.subject}» از طرف ${senderName} ارجاع شد.`,
+          notifId, { letterId, action: 'signature' });
       }
     }
 
@@ -681,10 +689,9 @@ router.post('/:id/sign', requireAuth, async (req, res) => {
           // ایجاد نوتیفیکیشن
           const notifId = `referral_${Date.now()}_${letterId}_${r.receiver_id}`;
           const senderName = req.user.display_name || username;
-          await query(`
-            INSERT INTO notifications (id, to_user, msg, at, read)
-            VALUES ($1, $2, $3, NOW(), FALSE)
-          `, [notifId, r.receiver_id, `📥 نامه‌ای با موضوع «${letter.subject}» و شماره اندیکاتور ${indicator} به کارتابل شما ارجاع شد.`]).catch(()=>{});
+          await sendLetterNotif(r.receiver_id, username,
+            `📥 نامه‌ای با موضوع «${letter.subject}» و شماره اندیکاتور ${indicator} به کارتابل شما ارجاع شد.`,
+            notifId, { letterId, action: 'referral' });
         }
       }
 
@@ -807,12 +814,9 @@ router.post('/:id/refer', requireAuth, async (req, res) => {
     const notifId = `referral_${Date.now()}_${letterId}_${receiverId}`;
     const senderName = req.user.display_name || req.user.username;
     const subject = check.rows[0].subject;
-    await query(`
-      INSERT INTO notifications (id, to_user, msg, at, read)
-      VALUES ($1, $2, $3, NOW(), FALSE)
-    `, [notifId, receiverId, `📨 نامه‌ای با موضوع «${subject}» از طرف ${senderName} به کارتابل شما ارجاع شد.`]).catch(e => {
-      console.warn('[letters referral notif]', e.message);
-    });
+    await sendLetterNotif(receiverId, req.user.username,
+      `📨 نامه‌ای با موضوع «${subject}» از طرف ${senderName} به کارتابل شما ارجاع شد.`,
+      notifId, { letterId, action: 'referral' });
 
     res.json({ ok: true, referral: referralResult.rows[0] });
   } catch (e) {

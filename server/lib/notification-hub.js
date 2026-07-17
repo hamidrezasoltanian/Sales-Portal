@@ -15,9 +15,12 @@ const DEFAULT_GLOBAL_PREFS = {
     task: true,
     owner_change: true,
     general: true,
-    manager_request: true,
+  manager_request: true,
     ack: true,
     proforma: true,
+    support: true,
+    hr: true,
+    letters: true,
   },
 };
 
@@ -344,6 +347,22 @@ async function consumeTelegramLinkToken(token, chatId) {
   return r.rows[0].username;
 }
 
+async function notifySimple(opts) {
+  return createNotification({
+    id: opts.id || ('ntf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)),
+    to: opts.to,
+    from: opts.from || null,
+    msg: opts.msg,
+    type: opts.type || 'general',
+    centerKey: opts.centerKey || null,
+    centerKeys: opts.centerKeys || null,
+    meta: opts.meta || null,
+    priority: opts.priority,
+    autoSend: opts.autoSend,
+    skipDedup: true,
+  });
+}
+
 module.exports = {
   rowToObj,
   getGlobalPrefs,
@@ -361,4 +380,5 @@ module.exports = {
   createTelegramLinkToken,
   consumeTelegramLinkToken,
   calcTodayJ,
+  notifySimple,
 };

@@ -4,6 +4,7 @@ const express = require('express');
 const { query } = require('../db');
 const { requirePermission } = require('../permissions');
 const { requireAuth } = require('../auth');
+const hub = require('../lib/notification-hub');
 
 const router  = express.Router();
 router.use(requireAuth);
@@ -172,12 +173,14 @@ router.post('/leave', requireAuth, async function(req, res) {
     try {
       const managers = await query(`SELECT username FROM app_users WHERE role IN ('مدیر','سوپر ادمین') AND active = true`);
       for (const mgr of managers.rows) {
-        await query(
-          `INSERT INTO notifications (id, to_user, msg, at) VALUES ($1, $2, $3, NOW())`,
-          ['ntf_' + Date.now() + '_' + mgr.username,
-           mgr.username,
-           '📋 درخواست مرخصی از ' + user.username + ': ' + from_date + ' تا ' + to_date]
-        );
+        await hub.notifySimple({
+          id: 'ntf_lv_' + Date.now() + '_' + mgr.username,
+          to: mgr.username,
+          from: user.username,
+          msg: '📋 درخواست مرخصی از ' + user.username + ': ' + from_date + ' تا ' + to_date,
+          type: 'hr',
+          meta: { module: 'hr', leaveId: id },
+        });
       }
     } catch(_) {}
 
@@ -214,11 +217,13 @@ router.put('/leave/:id', requireAuth, async function(req, res) {
 
     // Notify employee
     try {
-      await query(
-        `INSERT INTO notifications (id, to_user, msg, at) VALUES ($1, $2, $3, NOW())`,
-        ['ntf_' + Date.now(), leave.employee,
-         (status === 'approved' ? '✅ مرخصی تأیید شد: ' : '❌ مرخصی رد شد: ') + leave.from_date + ' تا ' + leave.to_date]
-      );
+      await hub.notifySimple({
+        to: leave.employee,
+        from: req.user.username,
+        msg: (status === 'approved' ? '✅ مرخصی تأیید شد: ' : '❌ مرخصی رد شد: ') + leave.from_date + ' تا ' + leave.to_date,
+        type: 'hr',
+        meta: { module: 'hr', leaveId: leave.id, status },
+      });
     } catch(_) {}
 
     res.json(leave);

@@ -14,6 +14,7 @@
             <button :class="{ on: viewAll }" @click.stop="setViewAll(true)">همه</button>
           </span>
           <button v-if="unreadCount > 0 && !viewAll" class="nb-read-all" @click="readAll">همه خوانده شد</button>
+          <button v-if="showManualSend && isManager" class="nb-read-all" @click="sendPending">📤 ارسال دستی</button>
           <button class="nb-close" @click="close">✕</button>
         </div>
       </div>
@@ -72,7 +73,7 @@ interface Notif {
   at: string;
   read: boolean;
   type?: string;
-  meta?: { taskId?: string; taskTitle?: string; proformaId?: string; proformaNo?: string } | null;
+  meta?: { taskId?: string; taskTitle?: string; proformaId?: string; proformaNo?: string; action?: string } | null;
 }
 
 const props = defineProps<{
@@ -102,6 +103,12 @@ const filters = [
 const unreadCount = computed(() =>
   items.value.filter(n => n.to === props.username && !n.read).length
 );
+
+const showManualSend = computed(() => {
+  const w = window as any;
+  const np = w.DB && w.DB.settings && w.DB.settings.notifPrefs;
+  return np && np.autoSend === false;
+});
 
 const displayItems = computed(() => {
   let list = viewAll.value
@@ -154,7 +161,13 @@ function actionsFor(n: Notif) {
     acts.push({ id: 'weekplan', label: '📅 برنامه هفته' });
   } else if (t === 'owner_change' && hasCenter) {
     acts.push({ id: 'center', label: '🔍 مشاهده مرکز' });
-  } else if (t === 'proforma' && props.isManager) {
+  } else if (t === 'proforma' && props.isManager && n.meta?.proformaId) {
+    if (n.meta.action === 'pending' || !n.meta.action) {
+      acts.push({ id: 'pf_approve', label: '✅ تأیید' });
+      acts.push({ id: 'pf_reject', label: '❌ رد' });
+    }
+    acts.push({ id: 'proforma', label: '👁 مشاهده' });
+  } else if (t === 'proforma') {
     acts.push({ id: 'proforma', label: '👁 پیش‌فاکتور' });
   } else if (t !== 'ack') {
     acts.push({ id: 'ack', label: '✓ انجام دادم' });
@@ -211,8 +224,36 @@ function openCenter(centerKey: string) {
   close();
 }
 
+async function sendPending() {
+  const r = await fetch('/api/notifications/send-pending', { method: 'POST' });
+  if (r.ok) {
+    const w = window as any;
+    w.showToast?.('📤 اعلان‌های در صف ارسال شدند', 2500);
+    await load();
+  }
+}
+
 async function runAction(n: Notif, action: string) {
   const w = window as any;
+  if (action === 'pf_approve' || action === 'pf_reject') {
+    const pid = n.meta?.proformaId;
+    if (!pid) return;
+    const note = action === 'pf_reject' ? (prompt('دلیل رد (اختیاری):') || '') : '';
+    const r = await fetch('/api/proforma/' + encodeURIComponent(pid) + '/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: action === 'pf_approve' ? 'approve' : 'reject', note }),
+    });
+    if (r.ok) {
+      n.read = true;
+      await fetch(`/api/notifications/${n.id}/read`, { method: 'PUT' });
+      w.showToast?.(action === 'pf_approve' ? '✅ تأیید شد' : '❌ رد شد', 2500);
+      await load();
+    } else {
+      w.showToast?.('❌ خطا در عملیات پیش‌فاکتور', 3000);
+    }
+    return;
+  }
   try {
     const r = await fetch(`/api/notifications/${n.id}/action`, {
       method: 'POST',

@@ -209,6 +209,18 @@ async function testNotifications() {
   await req('PUT', '/api/notifications/' + returnedId + '/read');
 }
 
+async function testNotifPrefsAndInbox() {
+  console.log('\n🔔 5b. Notification prefs + inbox');
+  const prefs = await req('GET', '/api/notifications/prefs');
+  assert(prefs.status === 200, 'GET prefs → 200');
+  const put = await req('PUT', '/api/notifications/prefs', {
+    prefs: { channels: { web: true, telegram: true, browser: true }, digest_mode: 'instant' },
+  });
+  assert(put.status === 200, 'PUT prefs → 200');
+  const inbox = await req('GET', '/api/notifications/inbox');
+  assert(inbox.status === 200, 'GET inbox → 200');
+}
+
 // ─── 6. Proforma ───────────────────────────────────────────────────────────
 async function testProforma() {
   console.log('\n📄 6. Proforma CRUD + file');
@@ -396,6 +408,7 @@ async function main() {
     await testTasksInDb();
     await testWeekEntries();
     await testNotifications();
+    await testNotifPrefsAndInbox();
     await testProforma();
     await testWms();
     await testLetters();

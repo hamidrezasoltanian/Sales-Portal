@@ -178,11 +178,101 @@ async function runNoFollowupDateReminders(today) {
   return sent;
 }
 
+async function expertWeeklyStats(username) {
+  const weekStart = calcTodayJ(); // simplified — use 7-day window from SQL
+  const today = calcTodayJ();
+  const [calls, visits, done, overdue] = await Promise.all([
+    query(
+      `SELECT COALESCE(SUM(count),0)::int AS c FROM call_log
+       WHERE username = $1 AND updated_at >= NOW() - INTERVAL '7 days'`,
+      [username]
+    ).catch(function () { return { rows: [{ c: 0 }] }; }),
+    query(
+      `SELECT COALESCE(SUM(count),0)::int AS c FROM visit_log
+       WHERE username = $1 AND updated_at >= NOW() - INTERVAL '7 days'`,
+      [username]
+    ).catch(function () { return { rows: [{ c: 0 }] }; }),
+    query(
+      `SELECT COUNT(*)::int AS c FROM week_entries
+       WHERE COALESCE(added_by, value->>'addedBy') = $1
+         AND (done = true OR (value->>'done')::boolean = true)
+         AND COALESCE(done_date, value->>'doneDate') >= $2`,
+      [username, weekStart]
+    ).catch(function () { return { rows: [{ c: 0 }] }; }),
+    query(
+      `SELECT COUNT(*)::int AS c FROM center_edits
+       WHERE data->>'owner' = $1 AND (data->>'followupDate') < $2
+         AND COALESCE(data->>'status','') NOT IN ('lost','inactive','غیرفعال','قرارداد بسته شد')`,
+      [username, today]
+    ).catch(function () { return { rows: [{ c: 0 }] }; }),
+  ]);
+  return {
+    calls: calls.rows[0].c || 0,
+    visits: visits.rows[0].c || 0,
+    done: done.rows[0].c || 0,
+    overdue: overdue.rows[0].c || 0,
+  };
+}
+
+async function runWeeklyKpiDigest(today) {
+  today = today || calcTodayJ();
+  const experts = await getExpertsWithSessions();
+  let sent = 0;
+  for (const exp of experts) {
+    const s = await expertWeeklyStats(exp);
+    const msg = '📈 خلاصه هفتگی شما: 📞' + s.calls + ' تماس | 🤝' + s.visits + ' ملاقات | ✅' + s.done + ' انجام'
+      + (s.overdue ? ' | ⚠️' + s.overdue + ' معوق' : '');
+    const res = await hub.createNotification({
+      id: 'wk_' + today.replace(/\//g, '') + '_' + exp,
+      to: exp,
+      msg,
+      type: 'general',
+      meta: { digest: 'weekly_kpi' },
+    });
+    if (res.ok && !res.skipped) sent++;
+  }
+  return sent;
+}
+
+async function runMonthlySummary(today) {
+  today = today || calcTodayJ();
+  const experts = await getExpertsWithSessions();
+  let sent = 0;
+  for (const exp of experts) {
+    const [sales, tasks] = await Promise.all([
+      query(
+        `SELECT COALESCE(SUM(count),0)::int AS c FROM sales_log
+         WHERE username = $1 AND updated_at >= NOW() - INTERVAL '30 days'`,
+        [exp]
+      ).catch(function () { return { rows: [{ c: 0 }] }; }),
+      query(
+        `SELECT COUNT(*)::int AS c FROM tasks
+         WHERE owner = $1 AND (done = true OR status = 'done')
+           AND updated_at >= NOW() - INTERVAL '30 days'`,
+        [exp]
+      ).catch(function () { return { rows: [{ c: 0 }] }; }),
+    ]);
+    const msg = '📊 خلاصه ماهانه: 💰' + (sales.rows[0].c || 0) + ' فروش ثبت‌شده | 📌' + (tasks.rows[0].c || 0) + ' وظیفه انجام‌شده';
+    const res = await hub.createNotification({
+      id: 'mo_' + today.replace(/\//g, '') + '_' + exp,
+      to: exp,
+      msg,
+      type: 'general',
+      meta: { digest: 'monthly' },
+    });
+    if (res.ok && !res.skipped) sent++;
+  }
+  return sent;
+}
+
 module.exports = {
   runMorningBriefing,
   runAfternoonReminders,
   runOverdueFollowupReminders,
   runNoFollowupDateReminders,
+  runWeeklyKpiDigest,
+  runMonthlySummary,
   morningBriefingForExpert,
   getExpertsWithSessions,
+  expertWeeklyStats,
 };

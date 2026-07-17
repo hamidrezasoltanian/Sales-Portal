@@ -7,7 +7,8 @@ const digest = require('./digest-builder');
 let _timer = null;
 let _lastMorning = '';
 let _lastAfternoon = '';
-let _lastStartup = '';
+let _lastWeeklyKpi = '';
+let _lastMonthly = '';
 let _startupDone = false;
 
 async function getCrmSetting(key) {
@@ -66,6 +67,29 @@ async function tick() {
         const n = await digest.runAfternoonReminders(today);
         await setCrmSetting('lastAfternoonReminder', today);
         console.log('[notif-scheduler] afternoon reminders sent:', n);
+      }
+    }
+
+    // دوشنبه ۹:۰۵ — KPI هفتگی in-app
+    if (now.getDay() === 1 && h === 9 && m === 5 && _lastWeeklyKpi !== dateKey) {
+      _lastWeeklyKpi = dateKey;
+      const last = await getCrmSetting('lastWeeklyKpiDigest');
+      if (last !== today) {
+        const n = await digest.runWeeklyKpiDigest(today);
+        await setCrmSetting('lastWeeklyKpiDigest', today);
+        console.log('[notif-scheduler] weekly KPI digest:', n);
+      }
+    }
+
+    // روز اول هر ماه شمسی — خلاصه ماهانه
+    const jParts = today.split('/').map(Number);
+    if (jParts[2] === 1 && h === 9 && m === 10 && _lastMonthly !== dateKey) {
+      _lastMonthly = dateKey;
+      const last = await getCrmSetting('lastMonthlyDigest');
+      if (last !== today) {
+        const n = await digest.runMonthlySummary(today);
+        await setCrmSetting('lastMonthlyDigest', today);
+        console.log('[notif-scheduler] monthly digest:', n);
       }
     }
   } catch (e) {

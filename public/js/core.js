@@ -108,6 +108,14 @@ function initSSE() {
         if (typeof _refreshNotifs === 'function') _refreshNotifs();
         if (typeof window._notifVueLoad === 'function') window._notifVueLoad();
         if (data.msg && typeof _firePushNotif === 'function') _firePushNotif('\uD83D\uDD14 اعلان جدید', data.msg, 'notif-' + Date.now());
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage({
+            type: 'crm-notif',
+            title: '\uD83D\uDD14 اعلان جدید',
+            body: data.msg,
+            tag: 'notif-' + (data.id || Date.now()),
+          });
+        }
       } else if (data.type === 'notif_updated' && data.to === currentUser) {
         if (typeof window._notifVueLoad === 'function') window._notifVueLoad();
         if (typeof _refreshNotifs === 'function') _refreshNotifs();

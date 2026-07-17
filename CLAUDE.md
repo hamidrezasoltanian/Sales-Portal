@@ -341,6 +341,7 @@ The receivables AI tab calls `https://api.anthropic.com/v1/messages` directly fr
 | Proforma SQL: zod validation, rowToObj mapper, manager-only approve/reject | server/routes/proforma.js | ✅ |
 | Proforma auto-migration: blob migrated to SQL on first startup | server/db.js _migrateProformasFromBlob() | ✅ |
 | Telegram bot: long-polling, CRM auth, proforma approve/reject inline keyboard, inventory check, QR scan | server/bot/telegram.js | ✅ |
+| NotificationHub + server scheduler + per-user prefs + Vue inbox with actions | server/lib/notification-hub.js, notification-scheduler.js, NotificationsPanel.vue | ✅ |
 | Security middleware: Helmet CSP + compression (graceful fallback) | server/index.js | ✅ |
 | Vite + TypeScript + Vue 3 scaffold for incremental frontend migration | src/ + vite.config.ts + tsconfig.json | ✅ (placeholder) |
 | Slim PUT save: routine saves omit destructive collections; `_fullSync` for import | public/js/core.js + server/routes/data.js | ✅ |

@@ -21,3 +21,16 @@ self.addEventListener('fetch',function(e){
     }));
   }
 });
+self.addEventListener('message', function(e) {
+  if (!e.data || e.data.type !== 'crm-notif') return;
+  self.registration.showNotification(e.data.title || 'اعلان CRM', {
+    body: e.data.body || '',
+    icon: '/favicon.ico',
+    tag: e.data.tag || 'crm-notif',
+    data: { url: e.data.url || '/' },
+  });
+});
+self.addEventListener('notificationclick', function(e) {
+  e.notification.close();
+  e.waitUntil(clients.openWindow((e.notification.data && e.notification.data.url) || '/'));
+});
