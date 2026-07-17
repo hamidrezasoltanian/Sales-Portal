@@ -21,6 +21,18 @@ self.addEventListener('fetch',function(e){
     }));
   }
 });
+self.addEventListener('push', function(e) {
+  var data = {};
+  try { data = e.data ? e.data.json() : {}; } catch(err) {}
+  var title = data.title || 'اعلان CRM';
+  var opts = {
+    body: data.body || '',
+    icon: '/favicon.ico',
+    tag: data.tag || 'crm-push',
+    data: { url: data.url || '/' },
+  };
+  e.waitUntil(self.registration.showNotification(title, opts));
+});
 self.addEventListener('message', function(e) {
   if (!e.data || e.data.type !== 'crm-notif') return;
   self.registration.showNotification(e.data.title || 'اعلان CRM', {

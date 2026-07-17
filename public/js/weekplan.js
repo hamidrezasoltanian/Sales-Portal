@@ -1760,22 +1760,62 @@ function _refreshNotifs() {
   if (!currentUser) return;
   fetch('/api/notifications?to=' + encodeURIComponent(currentUser))
     .then(function(r) { return r.ok ? r.json() : _notifCache; })
-    .then(function(arr) { _notifCache = arr; _notifLoaded = true; updateNotifBadge(); })
+    .then(function(arr) {
+      _notifCache = arr;
+      _notifLoaded = true;
+      if (typeof window._notifVueLoad === 'function') window._notifVueLoad();
+    })
     .catch(function() {});
 }
 
 // ── Browser Push Notifications ──────────────────────────────────────────────
 function _initBrowserNotif() {
   if (!('Notification' in window)) return;
-  if (Notification.permission === 'granted') { _pushGranted = true; return; }
+  if (Notification.permission === 'granted') {
+    _pushGranted = true;
+    _initWebPush();
+    return;
+  }
   if (Notification.permission === 'denied') return;
   setTimeout(function() {
     Notification.requestPermission().then(function(p) {
       _pushGranted = (p === 'granted');
-      if (_pushGranted) _firePushNotif('Flow CRM', 'اعلان‌های مرورگر فعال شد ✅');
+      if (_pushGranted) {
+        _firePushNotif('Flow CRM', 'اعلان‌های مرورگر فعال شد ✅');
+        _initWebPush();
+      }
     });
   }, 3000);
 }
+
+function _initWebPush() {
+  if (!('serviceWorker' in navigator) || !window.PushManager) return;
+  navigator.serviceWorker.register('/sw.js').catch(function() {});
+  fetch('/api/notifications/push-vapid')
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(d) {
+      if (!d || !d.publicKey) return;
+      return navigator.serviceWorker.ready.then(function(reg) {
+        return reg.pushManager.getSubscription().then(function(sub) {
+          if (sub) return sub;
+          var key = d.publicKey.replace(/-/g, '+').replace(/_/g, '/');
+          var raw = atob(key);
+          var arr = new Uint8Array(raw.length);
+          for (var i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+          return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: arr });
+        }).then(function(sub) {
+          if (!sub) return;
+          return fetch('/api/notifications/push-subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subscription: sub.toJSON() }),
+          });
+        });
+      });
+    })
+    .catch(function() {});
+}
+window._initWebPush = _initWebPush;
 
 function _firePushNotif(title, body, tag) {
   if (!_pushGranted || !('Notification' in window)) return;
@@ -1821,7 +1861,7 @@ function _sendPendingNotifs() {
     .then(function(d) {
       if (!d) return;
       showToast(d.sent > 0 ? ('📤 ' + d.sent + ' اعلان ارسال شد') : 'هیچ اعلان pending وجود ندارد', 3000);
-      if (d.sent > 0) { _refreshNotifs(); toggleNotifPanel(); setTimeout(toggleNotifPanel, 50); }
+      if (d.sent > 0) { _refreshNotifs(); }
     }).catch(function() { showToast('❌ خطا در ارسال', 2000); });
 }
 
@@ -1867,266 +1907,21 @@ function sendNotif(toUser, message, centerKey, centerKeys, type, meta) {
   showToast('\U0001f4e9 اعلان برای ' + (USERS[toUser] || toUser) + ' ارسال شد', 2000);
 }
 
-function updateNotifBadge() {
-  var unread = _notifCache.filter(function(n) { return n.to === currentUser && !n.read; }).length;
-  var badge = document.getElementById('notifBadge');
-  if (badge) { badge.textContent = unread; badge.style.display = unread > 0 ? 'flex' : 'none'; }
-}
-
-var _notifPanelOpen = false;
-var _notifViewAll = false;
-function setNotifView(all) {
-  _notifViewAll = !!all;
-  var p = document.getElementById('notifPanel');
-  if (p) { p.remove(); _notifPanelOpen = false; }
-  toggleNotifPanel();
-}
-
-function _renderNotifPanel(arr) {
-  var viewAll = _notifViewAll && _isManager();
-  var myNotifs = (viewAll ? arr.slice() : arr.filter(function(n) { return n.to === currentUser; }))
-    .sort(function(a, b) { return new Date(b.at) - new Date(a.at); })
-    .slice(0, 100);
-  var panel = document.createElement('div');
-  panel.id = 'notifPanel'; panel.className = 'notif-panel';
-  var unreadIds = viewAll ? [] : myNotifs.filter(function(n) { return !n.read; }).map(function(n) { return n.id; });
-  var _tglBtn = '';
-  if (_isManager()) {
-    _tglBtn = '<span style="display:inline-flex;gap:2px;background:var(--bg-raised);border-radius:6px;padding:2px;border:1px solid var(--border)">'
-      + '<button onclick="setNotifView(false)" style="font-size:10px;border:none;border-radius:4px;padding:2px 8px;cursor:pointer;background:' + (viewAll ? 'transparent' : 'var(--brand,#6366f1)') + ';color:' + (viewAll ? 'var(--text-secondary)' : '#fff') + '">من</button>'
-      + '<button onclick="setNotifView(true)" style="font-size:10px;border:none;border-radius:4px;padding:2px 8px;cursor:pointer;background:' + (viewAll ? 'var(--brand,#6366f1)' : 'transparent') + ';color:' + (viewAll ? '#fff' : 'var(--text-secondary)') + '">همه</button>'
-      + '</span>';
-  }
-  var head = '<div class="notif-panel-head"><span>\U0001f514 ' + (viewAll ? 'همه اعلان‌ها' : 'اعلان‌های من') + '</span>'
-    + '<span style="display:inline-flex;gap:6px;align-items:center">'
-    + _tglBtn
-    + (unreadIds.length ? '<button onclick="markAllNotifsRead()" style="font-size:10px;background:var(--bg-raised);border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer">همه خوانده شد</button>' : '')
-    + (_isManager() && (DB.settings&&DB.settings.notifPrefs&&DB.settings.notifPrefs.autoSend===false)
-       ? '<button onclick="_sendPendingNotifs()" style="font-size:10px;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:4px;padding:2px 8px;cursor:pointer">📤 ارسال دستی</button>'
-       : '')
-    + '</span>'
-    + '</div>';
-  var body = '';
-  if (!myNotifs.length) {
-    body = '<div class="notif-empty">اعلانی وجود ندارد</div>';
-  } else {
-    body = myNotifs.map(function(n) {
-      var timeAgo = _timeAgo(n.at);
-      var nid = n.id;
-      var nmsg = n.msg || n.message || '';
-      var nfrom = n.from || '';
-      var hasCk = n.centerKey && n.centerKey.indexOf('_') > 0;
-      var hasMultiCk = n.centerKeys && n.centerKeys.length > 1;
-      var cName = hasCk ? _clGetName(n.centerKey) : '';
-      return '<div class="notif-item' + (n.read ? '' : ' unread') + (n.ack ? ' notif-acked' : '') + '" data-nid="' + nid + '">'
-        + '<div class="notif-item-msg">' + esc(nmsg) + '</div>'
-        + ((hasCk || hasMultiCk) ? '<div class="notif-item-center">\U0001f4cd <span class="notif-center-link" onclick="goToNotifCenter(\'' + nid + '\')">' + (hasMultiCk ? (n.centerKeys.length + ' مرکز') : esc(cName)) + '</span></div>' : '')
-        + '<div class="notif-item-actions">'
-        + ((hasCk || hasMultiCk) ? '<button class="notif-act-btn" onclick="goToNotifCenter(\'' + nid + '\')">\U0001f50d ' + (hasMultiCk ? 'مشاهده مراکز' : 'مشاهده مرکز') + '</button>' : '')
-        + (viewAll
-          ? (n.ack ? '<span class="notif-ack-badge">✓ تأیید شده</span>' : '')
-          : (n.ack ? '<span class="notif-ack-badge">✓ تأیید شده</span>' : (function(){
-              var ntype = n.type || 'general';
-              if (ntype === 'followup' || ntype === 'manager_request') {
-                return (n.centerKey && n.centerKey.indexOf('_') > 0
-                  ? '<button class="notif-act-btn" onclick="_notifAction(\'' + nid + '\',\'call\')">📞 ثبت تماس</button>'
-                    + '<button class="notif-act-btn" onclick="_notifAction(\'' + nid + '\',\'brief\')">📋 خلاصه</button>'
-                  : '<button class="notif-act-btn notif-ack-btn" onclick="ackNotif(\'' + nid + '\')">✓ انجام دادم</button>');
-              } else if (ntype === 'task') {
-                return '<button class="notif-act-btn" onclick="_notifAction(\'' + nid + '\',\'task\')">📋 باز کردن تکلیف</button>';
-              } else if (ntype === 'morning_brief') {
-                return '<button class="notif-act-btn" onclick="_notifAction(\'' + nid + '\',\'weekplan\')">📅 برنامه هفته</button>';
-              } else if (ntype === 'owner_change') {
-                return '<button class="notif-act-btn" onclick="_notifAction(\'' + nid + '\',\'center\')">🔍 مشاهده مرکز</button>';
-              } else if (ntype === 'ack') {
-                return '';
-              } else {
-                return '<button class="notif-act-btn notif-ack-btn" onclick="ackNotif(\'' + nid + '\')">✓ انجام دادم</button>';
-              }
-            })()))
-        + '</div>'
-        + '<div class="notif-item-time">' + (viewAll ? 'به: <b>' + esc(USERS[n.to] || n.to) + '</b> · ' : '') + 'از: ' + (USERS[nfrom] || nfrom) + ' · ' + timeAgo + (viewAll && !n.read ? ' · <span style="color:#f59e0b">خوانده نشده</span>' : '') + '</div>'
-        + '</div>';
-    }).join('');
-  }
-  panel.innerHTML = head + '<div class="notif-body-scroll">' + body + '</div>';
-  document.body.appendChild(panel);
-  // Auto mark-as-read after 2s
-  setTimeout(function() {
-    if (viewAll || !unreadIds.length) return;
-    unreadIds.forEach(function(id) {
-      var nx = _notifCache.find(function(x) { return x.id === id; });
-      if (nx) nx.read = true;
-    });
-    updateNotifBadge();
-    fetch('/api/notifications/read-all', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to: currentUser })
-    }).catch(function() {});
-    var p = document.getElementById('notifPanel');
-    if (p) p.querySelectorAll('.notif-item.unread').forEach(function(el) { el.classList.remove('unread'); });
-  }, 2000);
-  setTimeout(function() {
-    document.addEventListener('click', function _nClose(ev) {
-      var p = document.getElementById('notifPanel');
-      var bell = document.getElementById('notifBell');
-      if (p && !p.contains(ev.target) && ev.target !== bell && !bell.contains(ev.target)) { p.remove(); _notifPanelOpen = false; }
-      document.removeEventListener('click', _nClose);
-    });
-  }, 100);
-}
-
-function toggleNotifPanel() {
-  var existing = document.getElementById('notifPanel');
-  if (existing) { existing.remove(); _notifPanelOpen = false; return; }
-  _notifPanelOpen = true;
-  // Fetch fresh notifications from API then render
-  var url = '/api/notifications' + (_notifViewAll && _isManager() ? '' : '?to=' + encodeURIComponent(currentUser));
-  fetch(url)
-    .then(function(r) { return r.ok ? r.json() : _notifCache; })
-    .then(function(arr) { _notifCache = arr; updateNotifBadge(); _renderNotifPanel(arr); })
-    .catch(function() { _renderNotifPanel(_notifCache); });
-}
-
-function goToNotifCenter(nid) {
-  var n = _notifCache.find(function(x) { return x.id === nid; });
-  if (!n || (!(n.centerKey && n.centerKey.indexOf('_') > 0) && !(n.centerKeys && n.centerKeys.length))) return;
-  markNotifRead(nid);
-  var p = document.getElementById('notifPanel'); if (p) p.remove(); _notifPanelOpen = false;
-  var keys = n.centerKeys && n.centerKeys.length ? n.centerKeys : [n.centerKey];
-  if (keys.length === 1) {
-    var parts = keys[0].split('_'); var rtype = parts[0]; var rid = parts.slice(1).join('_');
-    setTimeout(function() { openCenterModal(rtype, rid); }, 100);
-    return;
-  }
-  var listHtml = '<div style="display:flex;flex-direction:column;gap:6px;padding:4px 0">';
-  keys.forEach(function(ck) {
-    var cname = _clGetName(ck);
-    var cparts = ck.split('_'); var crt = cparts[0]; var crid = cparts.slice(1).join('_');
-    listHtml += '<button onclick="closeModal(\'notifCkList\');if(currentTab!==\'provinces\'&&currentTab!==\'weekplan\')switchTab(\'provinces\');setTimeout(function(){openCenterModal(\'' + crt + '\',\'' + crid + '\');},150)" style="text-align:right;padding:8px 12px;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px;cursor:pointer">' + esc(cname) + '</button>';
-  });
-  listHtml += '</div>';
-  openModal('notifCkList', '\U0001f4cd مراکز مرتبط با این اعلان', listHtml, '<button class="btn-secondary" onclick="closeModal(\'notifCkList\')">بستن</button>');
-}
-
-function ackNotif(nid) {
-  var n = _notifCache.find(function(x) { return x.id === nid; });
-  if (!n || n.ack) return;
-  n.read = true; n.ack = true; n.ackAt = new Date().toISOString();
-  fetch('/api/notifications/' + encodeURIComponent(nid) + '/read', { method: 'PUT' }).catch(function() {});
-  if (n.from && n.from !== currentUser) {
-    var nmsg = n.msg || n.message || '';
-    var cName = n.centerKey ? _clGetName(n.centerKey) : '';
-    var replyMsg = (USERS[currentUser] || currentUser) + ' تأیید کرد: ' + (cName ? '"' + cName + '" ' : '') + 'انجام شد ✓';
-    sendNotif(n.from, replyMsg, n.centerKey || '', [], 'ack', null);
-  }
-  updateNotifBadge();
-  var p = document.getElementById('notifPanel');
-  if (p) {
-    var el = p.querySelector('[data-nid="' + nid + '"]');
-    if (el) {
-      el.classList.remove('unread'); el.classList.add('notif-acked');
-      var btn = el.querySelector('.notif-ack-btn');
-      if (btn) btn.outerHTML = '<span class="notif-ack-badge">✓ تأیید شده</span>';
-    }
-  }
-  showToast('✅ تأیید ثبت و به مدیر اطلاع داده شد', 2000);
-}
-
-function markNotifRead(nid) {
-  var nx = _notifCache.find(function(x) { return x.id === nid; });
-  if (nx && !nx.read) {
-    nx.read = true;
-    updateNotifBadge();
-    fetch('/api/notifications/' + encodeURIComponent(nid) + '/read', { method: 'PUT' }).catch(function() {});
-  }
-}
-
-function markAllNotifsRead() {
-  _notifCache.forEach(function(n) { if (n.to === currentUser) n.read = true; });
-  updateNotifBadge();
-  fetch('/api/notifications/read-all', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ to: currentUser })
-  }).catch(function() {});
-  var p = document.getElementById('notifPanel');
-  if (p) {
-    var btn = p.querySelector('.notif-panel-head button');
-    if (btn) btn.remove();
-    p.querySelectorAll('.notif-item.unread').forEach(function(el) { el.classList.remove('unread'); });
-  }
-}
-
-function _timeAgo(isoStr) {
-  var diff = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
-  if (diff < 60) return 'لحظاتی پیش';
-  if (diff < 3600) return Math.floor(diff / 60) + ' دقیقه پیش';
-  if (diff < 86400) return Math.floor(diff / 3600) + ' ساعت پیش';
-  return Math.floor(diff / 86400) + ' روز پیش';
-}
-
-var _npickData = null;
-function _npickSelect(i) {
-  if (!_npickData || i >= _npickData.keys.length) return;
-  closeModal('_npick');
-  var ck = _npickData.keys[i];
-  var cp = ck.split('_'); var crt = cp[0]; var crid = cp.slice(1).join('_');
-  var cn = _clGetName(ck) || ck;
-  var act = _npickData.action;
-  setTimeout(function() {
-    if (act === 'call') quickCallLog(crt, crid, cn);
-    else if (act === 'brief') openPreCallBrief(crt, crid);
-    else openCenterModal(crt, crid);
-  }, 80);
-}
-function _notifAction(nid, action) {
-  var n = _notifCache.find(function(x) { return x.id === nid; });
-  if (!n) return;
-  markNotifRead(nid);
-  var p = document.getElementById('notifPanel'); if (p) { p.remove(); _notifPanelOpen = false; }
-  var multiKeys = n.centerKeys && n.centerKeys.length > 1 ? n.centerKeys : null;
-  if (multiKeys && (action === 'call' || action === 'brief' || action === 'center')) {
-    _npickData = { keys: multiKeys, action: action };
-    var _title = action === 'call' ? '\U0001f4de کدام مرکز را تماس می‌گیرید؟'
-               : action === 'brief' ? '\U0001f4cb خلاصه کدام مرکز؟'
-               : '\U0001f50d کدام مرکز؟';
-    var _html = '<div style="display:flex;flex-direction:column;gap:5px;max-height:360px;overflow-y:auto;padding:2px 0">';
-    multiKeys.forEach(function(ck, i) {
-      var cn = _clGetName(ck) || ck;
-      _html += '<button onclick="_npickSelect(' + i + ')" style="text-align:right;padding:8px 12px;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px;cursor:pointer">' + esc(cn) + '</button>';
-    });
-    _html += '</div>';
-    openModal('_npick', _title, _html, '<button class="btn-secondary" onclick="closeModal(\'_npick\')">لغو</button>');
-    return;
-  }
-  var ck = n.centerKey || '';
-  var parts = ck.indexOf('_') > 0 ? ck.split('_') : [];
-  var rtype = parts[0] || 'center';
-  var rid = parts.slice(1).join('_');
-  var centerName = ck ? (_clGetName(ck) || ck) : '';
-  if (action === 'call') {
-    if (rid) setTimeout(function() { quickCallLog(rtype, rid, centerName); }, 100);
-    else showToast('مرکز مشخص نیست');
-  } else if (action === 'brief') {
-    if (rid) setTimeout(function() { openPreCallBrief(rtype, rid); }, 100);
-    else showToast('مرکز مشخص نیست');
-  } else if (action === 'task') {
-    var tid = n.meta && n.meta.taskId;
-    if (tid) setTimeout(function() { openTaskModal(tid); }, 100);
-    else { switchTab('tasks'); }
-  } else if (action === 'weekplan') {
-    switchTab('weekplan');
-  } else if (action === 'center') {
-    if (rid) setTimeout(function() { openCenterModal(rtype, rid); }, 100);
-  }
-}
-
 function openDailyMonitor(){
   if(!_isManager()){showToast('⚠ این بخش فقط برای مدیران است');return;}
+  var tab=window._dmTab||'today';
+  if(tab==='team'){_renderTeamSummaryModal();return;}
+  if(tab==='weekly'){_renderWeeklySnapshotsModal();return;}
   _buildPCCache();
   var today=todayStr();
+  fetch('/api/manager-reports/daily?date='+encodeURIComponent(today))
+    .then(function(r){return r.ok?r.json():{experts:{}};})
+    .catch(function(){return {experts:{}};})
+    .then(function(sqlData){_renderDailyMonitorModal(today,sqlData.experts||{});});
+}
+
+function _renderDailyMonitorModal(today,sqlExperts){
+  _buildPCCache();
   var todayEntries=[];
   Object.keys(DB.weekEntries||{}).forEach(function(k){
     var we=DB.weekEntries[k];
@@ -2140,8 +1935,6 @@ function openDailyMonitor(){
     var isDone=we.done||acts.length>0;
     todayEntries.push({key:k,rtype:rtype,rid:rid,name:name,owner:owner,actType:we.actionType||'call',status:e.status||'بدون تماس',activities:acts,done:isDone});
   });
-
-  // Collect overdue entries (past date, no activity)
   var overdueByOwner={};
   Object.keys(DB.weekEntries||{}).forEach(function(k){
     var we=DB.weekEntries[k];
@@ -2154,53 +1947,50 @@ function openDailyMonitor(){
     if(!overdueByOwner[owner])overdueByOwner[owner]=[];
     overdueByOwner[owner].push({name:we.centerName||getRecLabel((we.rtype||'center')+'_'+(we.rid||'')),date:we.scheduledDate});
   });
-
   var byOwner={};
   todayEntries.forEach(function(en){
     var o=en.owner||'__none__';
     if(!byOwner[o])byOwner[o]=[];
     byOwner[o].push(en);
   });
-  // Add all active non-manager experts so they appear even with 0 schedule
   (typeof umGetActive==='function'?umGetActive():[]).forEach(function(m){
     if(m.id==='guest')return;
     if(m.role==='مدیر'||m.role==='سوپر ادمین')return;
     if(!byOwner[m.id])byOwner[m.id]=[];
   });
-
   var totalScheduled=todayEntries.length;
   var totalDone=todayEntries.filter(function(en){return en.done;}).length;
   var totalNotDone=totalScheduled-totalDone;
   var pct=totalScheduled>0?Math.round((totalDone/totalScheduled)*100):0;
-
-  var body='<div style="background:var(--bg-raised);border-radius:10px;padding:14px;margin-bottom:16px">'
-    +'<div style="font-weight:700;font-size:13px;margin-bottom:10px">📊 خلاصه امروز — '+today+'</div>'
+  var sqlPlanned=0,sqlDone=0,sqlCalls=0,sqlVisits=0;
+  Object.keys(sqlExperts).forEach(function(uid){
+    var s=sqlExperts[uid]||{};
+    sqlPlanned+=(s.planned||0);sqlDone+=(s.done||0);sqlCalls+=(s.calls||0);sqlVisits+=(s.visits||0);
+  });
+  var body=_dmTabBar('today')
+    +'<div style="background:var(--bg-raised);border-radius:10px;padding:14px;margin-bottom:16px">'
+    +'<div style="font-weight:700;font-size:13px;margin-bottom:10px">📊 خلاصه امروز — '+today+' <span style="font-size:10px;color:var(--text-muted);font-weight:400">(SQL + برنامه)</span></div>'
     +'<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">'
-    +'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px 16px;text-align:center"><div style="font-size:20px;font-weight:800;color:#16a34a">'+totalScheduled+'</div><div style="font-size:11px;color:#166534">برنامه‌ریزی امروز</div></div>'
-    +'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px 16px;text-align:center"><div style="font-size:20px;font-weight:800;color:#16a34a">'+totalDone+'</div><div style="font-size:11px;color:#166534">انجام شده ✔</div></div>'
+    +'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px 16px;text-align:center"><div style="font-size:20px;font-weight:800;color:#16a34a">'+(sqlPlanned||totalScheduled)+'</div><div style="font-size:11px;color:#166534">برنامه‌ریزی</div></div>'
+    +'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px 16px;text-align:center"><div style="font-size:20px;font-weight:800;color:#16a34a">'+(sqlDone||totalDone)+'</div><div style="font-size:11px;color:#166534">انجام شده ✔</div></div>'
     +'<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:8px 16px;text-align:center"><div style="font-size:20px;font-weight:800;color:#dc2626">'+totalNotDone+'</div><div style="font-size:11px;color:#991b1b">انجام نشده ✖</div></div>'
+    +'<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 16px;text-align:center"><div style="font-size:20px;font-weight:800;color:#1d4ed8">'+sqlCalls+'</div><div style="font-size:11px;color:#1e40af">تماس ثبت‌شده</div></div>'
+    +'<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 16px;text-align:center"><div style="font-size:20px;font-weight:800;color:#1d4ed8">'+sqlVisits+'</div><div style="font-size:11px;color:#1e40af">ویزیت ثبت‌شده</div></div>'
     +'<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 16px;text-align:center"><div style="font-size:20px;font-weight:800;color:#1d4ed8">'+pct+'%</div><div style="font-size:11px;color:#1e40af">درصد انجام</div></div>'
     +'</div>'
     +'<div style="background:#e2e8f0;border-radius:6px;height:10px;overflow:hidden">'
     +'<div style="background:linear-gradient(90deg,#22c55e,#16a34a);height:100%;width:'+pct+'%;transition:width .4s"></div>'
-    +'</div>'
-    +'</div>';
-
+    +'</div></div>';
   if(Object.keys(byOwner).length>0){
-    // Per-expert breakdown table
     body+='<div style="background:var(--bg-card);border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden;margin-bottom:16px">'
       +'<div style="padding:10px 14px;font-weight:700;font-size:13px;border-bottom:1px solid var(--border)">👥 عملکرد کارشناسان</div>'
       +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
       +'<thead><tr style="background:var(--bg-raised)">'
-      +'<th style="padding:8px 10px;text-align:right">کارشناس</th>'
-      +'<th style="padding:8px 10px;text-align:center">گزارش</th>'
-      +'<th style="padding:8px 10px;text-align:center">برنامه امروز</th>'
-      +'<th style="padding:8px 10px;text-align:center;color:#16a34a">انجام شده</th>'
-      +'<th style="padding:8px 10px;text-align:center;color:#dc2626">انجام نشده</th>'
-      +'<th style="padding:8px 10px;text-align:center;color:#f59e0b">سررسید گذشته</th>'
-      +'<th style="padding:8px 10px;text-align:center">اقدام</th>'
-      +'</tr></thead><tbody>';
-    // Sort: experts with entries first, then by name
+      +'<th style="padding:8px 10px;text-align:right">کارشناس</th><th style="padding:8px 10px;text-align:center">گزارش</th>'
+      +'<th style="padding:8px 10px;text-align:center">برنامه</th><th style="padding:8px 10px;text-align:center;color:#16a34a">انجام</th>'
+      +'<th style="padding:8px 10px;text-align:center;color:#dc2626">نشده</th><th style="padding:8px 10px;text-align:center;color:#1d4ed8">تماس</th>'
+      +'<th style="padding:8px 10px;text-align:center;color:#1d4ed8">ویزیت</th><th style="padding:8px 10px;text-align:center;color:#f59e0b">معوق</th>'
+      +'<th style="padding:8px 10px;text-align:center">اقدام</th></tr></thead><tbody>';
     var _dmOwnerList=Object.keys(byOwner).filter(function(ow){return ow!=='__none__';}).sort(function(a,b){
       var aHas=byOwner[a].length>0?1:0,bHas=byOwner[b].length>0?1:0;
       if(aHas!==bHas)return bHas-aHas;
@@ -2209,30 +1999,29 @@ function openDailyMonitor(){
     if(byOwner['__none__']&&byOwner['__none__'].length>0)_dmOwnerList.push('__none__');
     _dmOwnerList.forEach(function(ow,idx){
       var entries=byOwner[ow];
+      var sq=sqlExperts[ow]||{};
       var owName=ow==='__none__'?'بدون مسئول':(USERS[ow]||ow);
-      var owDone=entries.filter(function(en){return en.done;}).length;
-      var owNotDone=entries.length-owDone;
+      var owDone=sq.done!=null?sq.done:entries.filter(function(en){return en.done;}).length;
+      var owPlanned=sq.planned!=null?sq.planned:entries.length;
+      var owNotDone=Math.max(0,owPlanned-owDone);
       var owOverdue=(overdueByOwner[ow]||[]).length;
       var owColor=(window.umGetColor?umGetColor(ow):'#94a3b8');
       var bg=idx%2===0?'var(--bg-card)':'var(--bg-raised)';
-      var noSchedule=entries.length===0&&!owOverdue;
+      var noSchedule=owPlanned===0&&!owOverdue;
       body+='<tr style="background:'+bg+';border-bottom:1px solid #f1f5f9;'+(noSchedule?'opacity:.65':'')+'">'
         +'<td style="padding:8px 10px;font-weight:600"><span style="display:inline-flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:'+owColor+'"></span>'+esc(owName)+'</span></td>'
-        +'<td style="padding:8px 10px;text-align:center">'
-      +'<button onclick="event.stopPropagation();openExpertReport(\''+ow+'\')" style="font-size:10px;padding:2px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:5px;cursor:pointer;font-family:inherit">📊 گزارش</button>'
-      +'</td>'
-      +'<td style="text-align:center;padding:8px">'+(noSchedule?'<span style="color:var(--text-muted);font-size:11px">💤 بدون برنامه</span>':entries.length)+'</td>'
+        +'<td style="padding:8px 10px;text-align:center"><button onclick="event.stopPropagation();openExpertReport(\''+ow+'\')" style="font-size:10px;padding:2px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:5px;cursor:pointer;font-family:inherit">📊</button></td>'
+        +'<td style="text-align:center;padding:8px">'+(noSchedule?'<span style="color:var(--text-muted);font-size:11px">—</span>':owPlanned)+'</td>'
         +'<td style="text-align:center;padding:8px"><span style="background:#dcfce7;color:#166534;border-radius:10px;padding:2px 8px;font-weight:700">'+owDone+'</span></td>'
         +'<td style="text-align:center;padding:8px"><span style="background:#fee2e2;color:#991b1b;border-radius:10px;padding:2px 8px;font-weight:700">'+owNotDone+'</span></td>'
+        +'<td style="text-align:center;padding:8px">'+(sq.calls||0)+'</td>'
+        +'<td style="text-align:center;padding:8px">'+(sq.visits||0)+'</td>'
         +'<td style="text-align:center;padding:8px"><span style="background:#fef3c7;color:#92400e;border-radius:10px;padding:2px 8px;font-weight:700">'+owOverdue+'</span></td>'
         +'<td style="text-align:center;padding:8px">'
-        +(ow!=='__none__'&&owNotDone>0?'<button onclick="sendReminderToExpert(\''+ow+'\')" style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:5px;padding:3px 10px;cursor:pointer;font-size:10px;font-family:inherit">📩 یادآوری</button>':'<span style="color:var(--text-muted);font-size:11px">'+(noSchedule?'—':'✔ کامل')+'</span>')
-        +'</td>'
-        +'</tr>';
+        +(ow!=='__none__'&&owNotDone>0?'<button onclick="sendReminderToExpert(\''+ow+'\')" style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:5px;padding:3px 10px;cursor:pointer;font-size:10px;font-family:inherit">📩</button>':'<span style="color:var(--text-muted);font-size:11px">'+(noSchedule?'—':'✔')+'</span>')
+        +'</td></tr>';
     });
     body+='</tbody></table></div></div>';
-
-    // Collapsible per-expert detail sections (ALL experts shown for consistency)
     body+='<div style="font-weight:700;font-size:13px;margin-bottom:8px">📍 جزئیات مراکز</div>';
     _dmOwnerList.forEach(function(ow){
       var entries=byOwner[ow];
@@ -2241,16 +2030,14 @@ function openDailyMonitor(){
       var sectionId='dm_sec2_'+ow.replace(/[^a-z0-9]/gi,'_');
       var hasEntries=entries&&entries.length>0;
       var overdueCount=(overdueByOwner[ow]||[]).length;
-      var subtitle=hasEntries?(entries.length+' مرکز برنامه‌ریزی شده'):'بدون برنامه امروز';
       body+='<div style="background:var(--bg-card);border-radius:8px;box-shadow:0 1px 2px rgba(0,0,0,.05);margin-bottom:8px;overflow:hidden;'+(hasEntries?'':'opacity:.6')+'">'
         +'<div onclick="var el=document.getElementById(\''+sectionId+'\');el.style.display=el.style.display===\'none\'?\'block\':\'none\'" '
         +'style="padding:10px 14px;cursor:pointer;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)">'
         +'<span style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:'+owColor+'"></span>'
         +'<span style="font-weight:700;font-size:13px">'+esc(owName)+'</span>'
-        +'<span style="font-size:11px;color:var(--text-muted);margin-right:auto">'+subtitle+' — کلیک برای باز/بسته</span>'
-        +(overdueCount>0?'<span style="font-size:10px;background:#fef3c7;color:#92400e;border-radius:10px;padding:2px 7px;font-weight:700">⚠ '+overdueCount+' معوق</span>':'')
-        +'</div>'
-        +'<div id="'+sectionId+'" style="display:none;padding:8px">';
+        +'<span style="font-size:11px;color:var(--text-muted);margin-right:auto">'+(hasEntries?entries.length+' مرکز':'بدون برنامه')+'</span>'
+        +(overdueCount>0?'<span style="font-size:10px;background:#fef3c7;color:#92400e;border-radius:10px;padding:2px 7px;font-weight:700">⚠ '+overdueCount+'</span>':'')
+        +'</div><div id="'+sectionId+'" style="display:none;padding:8px">';
       if(hasEntries){
         entries.forEach(function(en){
           var icon=en.done?'✅':'🔴';
@@ -2259,29 +2046,95 @@ function openDailyMonitor(){
             +'<span style="font-size:16px">'+icon+'</span>'
             +'<span style="flex:1"><a href="#" onclick="closeModal(\'dmModal\');openCenterModal(\''+en.rtype+'\',\''+en.rid+'\');return false;" style="color:#2563eb;text-decoration:none;font-weight:600">'+esc(en.name)+'</a></span>'
             +'<span style="font-size:10px;background:#e0f2fe;color:#0369a1;padding:2px 7px;border-radius:8px;border:1px solid #7dd3fc">'+actTypeLabel+'</span>'
-            +'<span style="font-size:10px;color:var(--text-muted)">'+esc(en.status)+'</span>'
-            +'</div>';
+            +'<span style="font-size:10px;color:var(--text-muted)">'+esc(en.status)+'</span></div>';
         });
-        if((overdueByOwner[ow]||[]).length>0){
+        if(overdueCount>0){
           body+='<div style="padding:6px 8px;font-size:11px;color:#92400e;background:#fef3c7;border-radius:4px;margin-top:4px">⚠ معوق: '
-            +(overdueByOwner[ow]||[]).map(function(x){return esc(x.name)+' ('+x.date+')';}).join('، ')
-            +'</div>';
+            +(overdueByOwner[ow]||[]).map(function(x){return esc(x.name)+' ('+x.date+')';}).join('، ')+'</div>';
         }
-      } else {
+      }else{
         body+='<div style="text-align:center;padding:12px;color:var(--text-muted);font-size:12px">💤 برنامه‌ای برای امروز تعریف نشده</div>';
       }
       body+='</div></div>';
     });
-
-  } else {
+  }else{
     body+='<div style="text-align:center;padding:40px;color:var(--text-muted)"><div style="font-size:32px;margin-bottom:10px">📋</div><div>هیچ کارشناس فعالی یافت نشد</div></div>';
   }
-
   var foot='<button class="btn-secondary" onclick="closeModal(\'dmModal\')">بستن</button>'
     +'<button class="btn-secondary" onclick="sendReminderToAll()" style="background:#fef3c7;color:#92400e;border-color:#fcd34d">📩 یادآوری به همه</button>'
     +'<button class="btn-primary" onclick="openDailyMonitor()">🔄 بروزرسانی</button>';
   openModal('dmModal','📊 گزارش فعالیت روزانه — '+today,body,foot,{xl:true});
 }
+
+function _dmTabBar(active){
+  var tabs=[{id:'today',label:'امروز'},{id:'team',label:'خلاصه تیم'},{id:'weekly',label:'اسنپ‌شات هفتگی'}];
+  return '<div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">'
+    +tabs.map(function(t){
+      var on=t.id===active;
+      return '<button onclick="window._dmTab=\''+t.id+'\';openDailyMonitor()" style="padding:6px 14px;border-radius:8px;border:1px solid '+(on?'var(--brand,#6366f1)':'var(--border)')+';background:'+(on?'var(--brand,#6366f1)':'var(--bg-raised)')+';color:'+(on?'#fff':'var(--text-secondary)')+';cursor:pointer;font-size:12px;font-family:inherit;font-weight:'+(on?'700':'500')+'">'+t.label+'</button>';
+    }).join('')+'</div>';
+}
+
+function _renderTeamSummaryModal(){
+  var today=typeof todayStr==='function'?todayStr():'';
+  var from=today?today.substring(0,8)+'01':'1400/01/01';
+  var to=today||'1410/12/29';
+  fetch('/api/manager-reports/team-summary?from='+encodeURIComponent(from)+'&to='+encodeURIComponent(to))
+    .then(function(r){return r.ok?r.json():Promise.reject();})
+    .then(function(d){
+      var experts=d.experts||{};
+      var body=_dmTabBar('team')
+        +'<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">بازه: '+esc(from)+' تا '+esc(to)+'</div>'
+        +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+        +'<thead><tr style="background:var(--bg-raised)"><th style="padding:8px;text-align:right">کارشناس</th>'
+        +'<th style="padding:8px;text-align:center">برنامه</th><th style="padding:8px;text-align:center">انجام</th>'
+        +'<th style="padding:8px;text-align:center">فروش</th><th style="padding:8px;text-align:center">مبلغ فروش</th>'
+        +'<th style="padding:8px;text-align:center">پیش‌فاکتور</th><th style="padding:8px;text-align:center">تأیید PF</th></tr></thead><tbody>';
+      var ids=Object.keys(experts).sort(function(a,b){return (USERS[a]||a).localeCompare(USERS[b]||b,'fa');});
+      if(!ids.length)body+='<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--text-muted)">داده‌ای یافت نشد</td></tr>';
+      ids.forEach(function(uid,i){
+        var s=experts[uid];
+        body+='<tr style="background:'+(i%2?'var(--bg-raised)':'var(--bg-card)')+'">'
+          +'<td style="padding:8px;font-weight:600">'+esc(USERS[uid]||uid)+'</td>'
+          +'<td style="padding:8px;text-align:center">'+(s.planned||0)+'</td>'
+          +'<td style="padding:8px;text-align:center">'+(s.done||0)+'</td>'
+          +'<td style="padding:8px;text-align:center">'+(s.salesCount||0)+'</td>'
+          +'<td style="padding:8px;text-align:center">'+Number(s.salesTotal||0).toLocaleString('fa-IR')+'</td>'
+          +'<td style="padding:8px;text-align:center">'+(s.proformas||0)+'</td>'
+          +'<td style="padding:8px;text-align:center">'+(s.proformaApproved||0)+'</td></tr>';
+      });
+      body+='</tbody></table></div>';
+      openModal('dmModal','📊 خلاصه تیم',body,'<button class="btn-secondary" onclick="closeModal(\'dmModal\')">بستن</button><button class="btn-primary" onclick="openDailyMonitor()">🔄</button>',{xl:true});
+    })
+    .catch(function(){showToast('❌ خطا در بارگذاری خلاصه تیم');});
+}
+
+function _renderWeeklySnapshotsModal(){
+  fetch('/api/manager-reports/weekly-snapshots?limit=12')
+    .then(function(r){return r.ok?r.json():Promise.reject();})
+    .then(function(d){
+      var snaps=d.snapshots||[];
+      var body=_dmTabBar('weekly')
+        +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+        +'<thead><tr style="background:var(--bg-raised)"><th style="padding:8px;text-align:right">هفته</th>'
+        +'<th style="padding:8px;text-align:center">تاریخ</th><th style="padding:8px;text-align:center">برنامه</th>'
+        +'<th style="padding:8px;text-align:center">انجام</th><th style="padding:8px;text-align:center">کارشناسان</th></tr></thead><tbody>';
+      if(!snaps.length)body+='<tr><td colspan="5" style="padding:20px;text-align:center;color:var(--text-muted)">اسنپ‌شاتی ذخیره نشده</td></tr>';
+      snaps.forEach(function(s,i){
+        var snap=s.snapshot||{};
+        body+='<tr style="background:'+(i%2?'var(--bg-raised)':'var(--bg-card)')+'">'
+          +'<td style="padding:8px;font-weight:600">'+esc(s.week_key||'—')+'</td>'
+          +'<td style="padding:8px;text-align:center">'+esc(snap.date||'—')+'</td>'
+          +'<td style="padding:8px;text-align:center">'+(snap.planned||0)+'</td>'
+          +'<td style="padding:8px;text-align:center">'+(snap.done||0)+'</td>'
+          +'<td style="padding:8px;text-align:center">'+(snap.experts||'—')+'</td></tr>';
+      });
+      body+='</tbody></table></div>';
+      openModal('dmModal','📊 اسنپ‌شات‌های هفتگی',body,'<button class="btn-secondary" onclick="closeModal(\'dmModal\')">بستن</button>',{lg:true});
+    })
+    .catch(function(){showToast('❌ خطا در بارگذاری اسنپ‌شات‌ها');});
+}
+window._dmTab='today';
 
 function sendReminderToAll(){
   var today=todayStr();

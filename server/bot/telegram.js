@@ -3255,16 +3255,25 @@ async function doSetCompetitor(chatId, sess, center, competitorName) {
 
 // ── Notify helpers ────────────────────────────────────────────────────────
 async function notifyUser(username, text, opts) {
+  const sent = [];
   try {
     const stored = await loadBotSessions();
     const extra = opts && typeof opts === 'object' ? opts : {};
     for (const [chatId, s] of Object.entries(stored)) {
       if (s.username === username && s.state === ST.IDLE) {
         const sendOpts = extra.reply_markup ? { reply_markup: extra.reply_markup } : {};
-        await sendMsg(parseInt(chatId), text, sendOpts).catch(function(){});
+        const res = await sendMsg(parseInt(chatId), text, sendOpts).catch(function(){ return null; });
+        if (res && res.ok && res.result && res.result.message_id) {
+          sent.push({ chatId: parseInt(chatId), messageId: res.result.message_id });
+        }
       }
     }
   } catch(e) {}
+  return sent;
+}
+
+async function editNotifRead(chatId, msgId, text) {
+  return editMsg(chatId, msgId, text, { reply_markup: { inline_keyboard: [] } });
 }
 
 async function notifyManagers(text) {
@@ -3772,4 +3781,4 @@ async function poll() {
 
 function stop() { _running = false; }
 
-module.exports = { poll, stop, notifyManagers, notifyAll, notifyUser };
+module.exports = { poll, stop, notifyManagers, notifyAll, notifyUser, editNotifRead };

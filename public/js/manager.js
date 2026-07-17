@@ -371,6 +371,8 @@ function _saveUserNotifPrefs(){
     method:'PUT',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({prefs:prefs})
+  }).then(function(){
+    if(prefs.channels.browser && typeof window._initWebPush==='function')window._initWebPush();
   }).catch(function(){});
 }
 

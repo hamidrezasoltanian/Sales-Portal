@@ -251,6 +251,7 @@ router.post('/send-pending', requireAuth, async function (req, res) {
       const notif = rowToObj(row);
       const prefs = await hub.getUserPrefs(notif.to);
       await hub.pushTelegram(notif, prefs);
+      await hub.pushBrowser(notif, prefs);
       await query(`UPDATE notifications SET sent_at = NOW() WHERE id = $1`, [notif.id]);
       const broadcast = require('./events').broadcast;
       if (broadcast) broadcast('notif_new', { to: notif.to, msg: notif.msg, id: notif.id });
@@ -281,6 +282,40 @@ router.post('/telegram-push', requireAuth, async function (req, res) {
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// ── Web Push (VAPID) ───────────────────────────────────────────────────────
+router.get('/push-vapid', requireAuth, function (req, res) {
+  try {
+    const wp = require('../lib/web-push-sender');
+    const key = wp.getPublicKey();
+    if (!key) return res.json({ configured: false, publicKey: null });
+    res.json({ configured: true, publicKey: key });
+  } catch (e) {
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+router.post('/push-subscribe', requireAuth, async function (req, res) {
+  try {
+    const sub = req.body.subscription || req.body;
+    const wp = require('../lib/web-push-sender');
+    if (!wp.getPublicKey()) return res.status(503).json({ error: 'Web Push پیکربندی نشده (VAPID)' });
+    await wp.saveSubscription(req.user.username, sub);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete('/push-subscribe', requireAuth, async function (req, res) {
+  try {
+    const wp = require('../lib/web-push-sender');
+    await wp.removeSubscription(req.user.username, req.body.endpoint || null);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

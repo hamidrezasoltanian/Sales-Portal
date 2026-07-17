@@ -216,7 +216,42 @@ async function pushTelegram(notif, prefs) {
   const tg = getTgNotifyRich();
   if (!tg) return;
   const kb = buildTelegramKeyboard(notif);
-  await tg(notif.to, '🔔 ' + notif.msg, kb ? { reply_markup: kb } : undefined).catch(function () {});
+  const tgResults = await tg(notif.to, '🔔 ' + notif.msg, kb ? { reply_markup: kb } : undefined);
+  if (tgResults && tgResults.length) {
+    const meta = Object.assign({}, notif.meta || {}, { tgMessages: tgResults });
+    await query(
+      'UPDATE notifications SET meta = $2 WHERE id = $1',
+      [notif.id, JSON.stringify(meta)]
+    ).catch(function () {});
+    notif.meta = meta;
+  }
+}
+
+async function pushBrowser(notif, prefs) {
+  if (!prefs || prefs.channels.browser === false) return;
+  try {
+    const wp = require('./web-push-sender');
+    if (!wp.getPublicKey()) return;
+    await wp.sendToUser(notif.to, {
+      title: '🔔 اعلان CRM',
+      body: notif.msg,
+      tag: 'notif-' + notif.id,
+      url: '/',
+      id: notif.id,
+    });
+  } catch (e) { /* web-push optional */ }
+}
+
+async function markTelegramRead(notif) {
+  const msgs = notif && notif.meta && notif.meta.tgMessages;
+  if (!msgs || !msgs.length) return;
+  let editFn = null;
+  try { editFn = require('../bot/telegram').editNotifRead; } catch (e) {}
+  if (!editFn) return;
+  const readText = '✅ <i>خوانده شد</i>\n' + (notif.msg || '');
+  for (const m of msgs) {
+    await editFn(m.chatId, m.messageId, readText).catch(function () {});
+  }
 }
 
 async function createNotification(opts) {
@@ -265,6 +300,7 @@ async function createNotification(opts) {
 
   if (shouldPush) {
     await pushTelegram(notif, userPrefs);
+    await pushBrowser(notif, userPrefs);
   }
 
   const broadcast = getBroadcast();
@@ -290,6 +326,7 @@ async function markNotifRead(id, username) {
   );
   if (!r.rows.length) return null;
   const notif = rowToObj(r.rows[0]);
+  await markTelegramRead(notif);
   const broadcast = getBroadcast();
   if (broadcast) broadcast('notif_updated', { id, to: notif.to, read: true });
   return notif;
@@ -302,7 +339,9 @@ async function recordAction(id, username, action) {
     [id, username, action]
   );
   if (!r.rows.length) return null;
-  return rowToObj(r.rows[0]);
+  const notif = rowToObj(r.rows[0]);
+  await markTelegramRead(notif);
+  return notif;
 }
 
 async function createAckReply(original, actorUsername, actorName) {
@@ -377,6 +416,8 @@ module.exports = {
   recordAction,
   createAckReply,
   pushTelegram,
+  pushBrowser,
+  markTelegramRead,
   createTelegramLinkToken,
   consumeTelegramLinkToken,
   calcTodayJ,

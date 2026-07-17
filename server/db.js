@@ -838,6 +838,17 @@ async function initSchema() {
   `);
   await query(`CREATE INDEX IF NOT EXISTS idx_tg_link_user ON telegram_link_tokens(username)`).catch(()=>{});
 
+  await query(`
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id SERIAL PRIMARY KEY,
+      username TEXT NOT NULL,
+      endpoint TEXT NOT NULL UNIQUE,
+      keys JSONB NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_push_sub_user ON push_subscriptions(username)`).catch(()=>{});
+
   // ════════════════════════════════════════
   // CHANGE LOG — extracted from DB.changeLog blob
   // ════════════════════════════════════════
