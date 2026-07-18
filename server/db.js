@@ -911,6 +911,48 @@ async function initSchema() {
       updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `).catch(()=>{});
+  await query(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS from_user TEXT`);
+  await query(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS priority SMALLINT DEFAULT 2`);
+  await query(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ`);
+  await query(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS action_taken TEXT`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_notif_to ON notifications(to_user)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_notif_read ON notifications(read)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_notif_at ON notifications(at DESC)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_notif_from ON notifications(from_user)`).catch(()=>{});
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS user_notif_prefs (
+      username TEXT PRIMARY KEY,
+      enabled BOOLEAN DEFAULT TRUE,
+      channels JSONB DEFAULT '{"web":true,"telegram":true,"browser":true}',
+      types JSONB DEFAULT '{}',
+      quiet_hours JSONB,
+      digest_mode TEXT DEFAULT 'instant',
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS telegram_link_tokens (
+      token TEXT PRIMARY KEY,
+      username TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_tg_link_user ON telegram_link_tokens(username)`).catch(()=>{});
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id SERIAL PRIMARY KEY,
+      username TEXT NOT NULL,
+      endpoint TEXT NOT NULL UNIQUE,
+      keys JSONB NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_push_sub_user ON push_subscriptions(username)`).catch(()=>{});
 
   // ════════════════════════════════════════
   // CHANGE LOG — extracted from DB.changeLog blob

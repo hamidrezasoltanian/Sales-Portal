@@ -6,6 +6,7 @@ const { requirePermission } = require('../permissions');
 const { requireAuth } = require('../auth');
 const hrLeave = require('../lib/hr-leave');
 const employeeContract = require('../lib/employee-contract');
+const hub = require('../lib/notification-hub');
 
 const router = express.Router();
 router.use(requireAuth);

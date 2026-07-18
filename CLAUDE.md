@@ -229,8 +229,8 @@ All dates are Persian/Solar Hijri, format `'YYYY/MM/DD'` (string comparison work
 | 3231 | `openCenterModal(rtype,id)` | center edit modal: status, owner, followup date, competitor field, map button, commission div, 🎯 خلاصه footer button |
 | 3839 | `renderWeekPlan()` | 7-day grid; syncs `#wpOwnerFilter` → `_wpFclFilters.owner` |
 | 3961 | `renderWpFullCenterList()` | unscheduled queue + all-centers list below the grid |
-| 4888 | `sendNotif(to,msg,centerKey)` | push in-app notification |
-| 4913 | `toggleNotifPanel()` | bell panel; manager «من/همه» toggle (`_notifViewAll`) |
+| 4888 | `sendNotif(to,msg,centerKey)` | push in-app notification (API → NotificationHub) |
+| — | Vue `NotificationsPanel` | bell panel; manager «من/همه» toggle; filters; proforma actions |
 | 5043 | `openDailyMonitor()` | manager daily activity report modal |
 | 5376 | `_TK_STATUSES` | default kanban columns (todo/doing/waiting/done) |
 | 5383 | `_getTkStatuses()` | per-user columns from `DB.settings.taskColumns[currentUser]`, else defaults — use this, never `_TK_STATUSES` directly, in rendering |
@@ -346,6 +346,10 @@ The receivables AI tab calls `https://api.anthropic.com/v1/messages` directly fr
 | Proforma SQL: zod validation, rowToObj mapper, manager-only approve/reject | server/routes/proforma.js | ✅ |
 | Proforma auto-migration: blob migrated to SQL on first startup | server/db.js _migrateProformasFromBlob() | ✅ |
 | Telegram bot: long-polling, CRM auth, proforma approve/reject inline keyboard, inventory check, QR scan | server/bot/telegram.js | ✅ |
+| NotificationHub + server scheduler + per-user prefs + Vue inbox with actions | server/lib/notification-hub.js, notification-scheduler.js, NotificationsPanel.vue | ✅ |
+| Web Push VAPID + push_subscriptions + SW push handler | web-push-sender.js, /api/notifications/push-* | ✅ |
+| TG ↔ web sync: tgMessages in meta + edit on read | notification-hub.js + telegram.js editNotifRead | ✅ |
+| Manager daily monitor: SQL `/daily` + team-summary + weekly-snapshots tabs | weekplan.js openDailyMonitor | ✅ |
 | Security middleware: Helmet CSP + compression (graceful fallback) | server/index.js | ✅ |
 | Vite + TypeScript + Vue 3 scaffold for incremental frontend migration | src/ + vite.config.ts + tsconfig.json | ✅ (placeholder) |
 | Slim PUT save: routine saves omit destructive collections; `_fullSync` for import | public/js/core.js + server/routes/data.js | ✅ |

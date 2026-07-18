@@ -3,6 +3,7 @@
 const express = require('express');
 const { query } = require('../db');
 const { requireAuth } = require('../auth');
+const hub = require('../lib/notification-hub');
 const { isManagerRole } = require('../lib/roles');
 const engine = require('../lib/notification-engine');
 
@@ -279,6 +280,142 @@ router.post('/telegram-push', requireAuth, async function (req, res) {
 
 // Invalidate global prefs cache when settings change — exported helper
 router.invalidatePrefsCaches = engine.invalidatePrefsCaches;
+
+
+// ── from telegram-notif merge ──
+router.post('/telegram-link', requireAuth, async function (req, res) {
+  try {
+    const data = await hub.createTelegramLinkToken(req.user.username);
+    res.json({
+      token: data.token,
+      expiresAt: data.expiresAt,
+      hint: 'در تلگرام دستور /link ' + data.token + ' را بفرستید',
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
+
+// ── from telegram-notif merge ──
+router.get('/prefs', requireAuth, async function (req, res) {
+  try {
+    const username = req.query.user && isManagerRole(req.user.role)
+      ? req.query.user
+      : req.user.username;
+    const prefs = await hub.getUserPrefs(username);
+    res.json({ username, prefs });
+  } catch (e) {
+    res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
+
+// ── from telegram-notif merge ──
+router.put('/prefs', requireAuth, async function (req, res) {
+  try {
+    const username = req.body.username && isManagerRole(req.user.role)
+      ? req.body.username
+      : req.user.username;
+    const saved = await hub.saveUserPrefs(username, req.body.prefs || req.body);
+    res.json({ username, prefs: saved });
+  } catch (e) {
+    res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
+
+// ── from telegram-notif merge ──
+router.get('/inbox', requireAuth, async function (req, res) {
+  try {
+    const isManager = isManagerRole(req.user.role);
+    const viewAll = isManager && req.query.all === 'true';
+    const targetUser = viewAll ? null : (req.query.to || req.user.username);
+    const conditions = [];
+    const params = [];
+
+    if (targetUser) {
+      params.push(targetUser);
+      conditions.push(`to_user = $${params.length}`);
+    }
+    if (req.query.unread === 'true') conditions.push('read = false');
+    if (req.query.type) {
+      params.push(req.query.type);
+      conditions.push(`type = $${params.length}`);
+    }
+
+    const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+    const sqlResult = await query(
+      `SELECT * FROM notifications ${where} ORDER BY at DESC LIMIT 200`,
+      params
+    );
+    res.json(sqlResult.rows.map(rowToObj));
+  } catch (e) {
+    console.error('[notifications GET /inbox]', e.message);
+    res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
+
+// ── from telegram-notif merge ──
+router.post('/:id/action', requireAuth, async function (req, res) {
+  try {
+    const action = (req.body.action || '').trim();
+    if (!action) return res.status(400).json({ error: 'action الزامی است' });
+
+    const r = await query('SELECT * FROM notifications WHERE id = $1', [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'اعلان یافت نشد' });
+    const row = r.rows[0];
+    const isManager = isManagerRole(req.user.role);
+    if (row.to_user !== req.user.username && !isManager) {
+      return res.status(403).json({ error: 'دسترسی غیرمجاز' });
+    }
+
+    const notif = await hub.recordAction(req.params.id, row.to_user, action);
+    const response = { ok: true, action, notif };
+
+    if (action === 'ack') {
+      await hub.createAckReply(rowToObj(row), req.user.username, req.user.display_name || req.user.username);
+    }
+
+    if (action === 'task' && row.meta && row.meta.taskId) {
+      response.taskId = row.meta.taskId;
+    }
+    if ((action === 'call' || action === 'brief' || action === 'center') && row.center_key) {
+      const parts = row.center_key.split('_');
+      response.center = { rtype: parts[0], rid: parts.slice(1).join('_'), centerKey: row.center_key };
+    }
+    if (action === 'proforma' && row.meta && row.meta.proformaId) {
+      response.proformaId = row.meta.proformaId;
+    }
+
+    res.json(response);
+  } catch (e) {
+    console.error('[notifications POST /:id/action]', e.message);
+    res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
+
+// ── from telegram-notif merge ──
+router.get('/push-vapid', requireAuth, function (req, res) {
+  try {
+    const wp = require('../lib/web-push-sender');
+    const key = wp.getPublicKey();
+    if (!key) return res.json({ configured: false, publicKey: null });
+    res.json({ configured: true, publicKey: key });
+  } catch (e) {
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// ── from telegram-notif merge ──
+router.post('/push-subscribe', requireAuth, async function (req, res) {
+  try {
+    const sub = req.body.subscription || req.body;
+    const wp = require('../lib/web-push-sender');
+    if (!wp.getPublicKey()) return res.status(503).json({ error: 'Web Push پیکربندی نشده (VAPID)' });
+    await wp.saveSubscription(req.user.username, sub);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 module.exports = router;
 module.exports.invalidatePrefsCaches = engine.invalidatePrefsCaches;

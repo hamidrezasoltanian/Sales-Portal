@@ -2000,19 +2000,51 @@ function _refreshNotifs() {
   if (!currentUser) return;
   fetch('/api/notifications?to=' + encodeURIComponent(currentUser))
     .then(function(r) { return r.ok ? r.json() : _notifCache; })
-    .then(function(arr) { _notifCache = arr; _notifLoaded = true; updateNotifBadge(); })
+    .then(function(arr) { _notifCache = arr; _notifLoaded = true;
+      if (typeof window._notifVueLoad === 'function') window._notifVueLoad(); updateNotifBadge(); })
     .catch(function() {});
 }
 
 // ── Browser Push Notifications ──────────────────────────────────────────────
+function _initWebPush() {
+  if (!('serviceWorker' in navigator) || !window.PushManager) return;
+  navigator.serviceWorker.register('/sw.js').catch(function() {});
+  fetch('/api/notifications/push-vapid')
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(d) {
+      if (!d || !d.publicKey) return;
+      return navigator.serviceWorker.ready.then(function(reg) {
+        return reg.pushManager.getSubscription().then(function(sub) {
+          if (sub) return sub;
+          var key = d.publicKey.replace(/-/g, '+').replace(/_/g, '/');
+          var raw = atob(key);
+          var arr = new Uint8Array(raw.length);
+          for (var i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+          return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: arr });
+        }).then(function(sub) {
+          if (!sub) return;
+          return fetch('/api/notifications/push-subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subscription: sub.toJSON() }),
+          });
+        });
+      });
+    })
+    .catch(function() {});
+}
+
 function _initBrowserNotif() {
   if (!('Notification' in window)) return;
-  if (Notification.permission === 'granted') { _pushGranted = true; return; }
+  if (Notification.permission === 'granted') { _pushGranted = true; if (typeof _initWebPush === 'function') _initWebPush(); return; }
   if (Notification.permission === 'denied') return;
   setTimeout(function() {
     Notification.requestPermission().then(function(p) {
       _pushGranted = (p === 'granted');
-      if (_pushGranted) _firePushNotif('Flow CRM', 'اعلان‌های مرورگر فعال شد ✅');
+      if (_pushGranted) {
+        _firePushNotif('Flow CRM', 'اعلان‌های مرورگر فعال شد ✅');
+        if (typeof _initWebPush === 'function') _initWebPush();
+      }
     });
   }, 3000);
 }

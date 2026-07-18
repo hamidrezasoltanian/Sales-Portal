@@ -48,3 +48,28 @@ self.addEventListener('fetch', function (e) {
     })
   );
 });
+self.addEventListener('push', function(e) {
+  var data = {};
+  try { data = e.data ? e.data.json() : {}; } catch(err) {}
+  var title = data.title || 'اعلان CRM';
+  var opts = {
+    body: data.body || '',
+    icon: '/favicon.ico',
+    tag: data.tag || 'crm-push',
+    data: { url: data.url || '/' },
+  };
+  e.waitUntil(self.registration.showNotification(title, opts));
+});
+self.addEventListener('message', function(e) {
+  if (!e.data || e.data.type !== 'crm-notif') return;
+  self.registration.showNotification(e.data.title || 'اعلان CRM', {
+    body: e.data.body || '',
+    icon: '/favicon.ico',
+    tag: e.data.tag || 'crm-notif',
+    data: { url: e.data.url || '/' },
+  });
+});
+self.addEventListener('notificationclick', function(e) {
+  e.notification.close();
+  e.waitUntil(clients.openWindow((e.notification.data && e.notification.data.url) || '/'));
+});

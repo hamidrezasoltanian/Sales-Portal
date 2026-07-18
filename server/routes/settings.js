@@ -74,6 +74,9 @@ router.put('/', requireAuth, async function (req, res) {
          ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW(), updated_by = $3`,
         [key, JSON.stringify(body[key]), user]
       );
+      if (key === 'notifPrefs') {
+        try { require('../lib/notification-hub').invalidateGlobalPrefsCache(); } catch (_) {}
+      }
     }
     if (keys.indexOf('notifPrefs') >= 0) {
       try { require('./notifications').invalidatePrefsCaches(); } catch (_) {}

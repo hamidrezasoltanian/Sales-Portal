@@ -41,6 +41,7 @@ const ST = {
   AWAIT_OUTCOME_NOTE:   'await_outcome_note',     // typing optional note after outcome
   AWAIT_STATUS_SEARCH:    'await_status_search',    // typing center name to change status
   AWAIT_COMPETITOR_TEXT:  'await_competitor_text',  // typing competitor name for briefCenter
+  AWAIT_SNOOZE_SEARCH:    'await_snooze_search',    // typing center to snooze followup
 };
 
 const sessions = {};
@@ -290,6 +291,41 @@ async function handleUpdate(upd) {
       return;
     }
 
+    // /link TOKEN — اتصال بدون رمز از طریق کد یکبارمصرف
+    if (text.startsWith('/link')) {
+      const token = text.slice(5).trim();
+      if (!token) {
+        await sendMsg(chatId, '🔗 برای اتصال: <code>/link کد۶رقمی</code>\nکد را از تنظیمات CRM → اتصال تلگرام بگیرید.');
+        return;
+      }
+      await doLinkByToken(chatId, token, sess);
+      return;
+    }
+
+    if (text === '/unlink') {
+      if (!sess.username) {
+        await sendMsg(chatId, 'شما متصل نیستید.');
+        return;
+      }
+      const name = sess.name || sess.username;
+      delete sessions[chatId];
+      await persistSession(chatId, true);
+      sessions[chatId] = { state: ST.AWAIT_USERNAME };
+      await sendMsg(chatId, '🔓 اتصال <b>' + name + '</b> قطع شد.', { reply_markup: { remove_keyboard: true } });
+      return;
+    }
+
+    if (text === '/digest' || text === '/settings') {
+      if (!sess.username) {
+        sess.state = ST.AWAIT_USERNAME;
+        await sendMsg(chatId, '🔐 ابتدا وارد شوید: /start');
+        return;
+      }
+      if (text === '/digest') { await handleDigest(chatId, sess); return; }
+      await handleNotifSettings(chatId, sess);
+      return;
+    }
+
     // State machine
     if (sess.state === ST.AWAIT_USERNAME) {
       if (!text || text.startsWith('/')) {
@@ -371,11 +407,21 @@ async function handleUpdate(upd) {
     if (sess.state === ST.AWAIT_SEARCH_Q) {
       if (text === '/cancel') {
         sess.state = ST.IDLE;
+        delete sess.searchMode;
         await sendMsg(chatId, '❌ لغو شد.', { reply_markup: menuFor(sess) });
         return;
       }
+      const mode = sess.searchMode || 'info';
+      delete sess.searchMode;
       sess.state = ST.IDLE;
-      await handleCenterInfo(chatId, sess, text);
+      await handleSearchByMode(chatId, sess, text, mode);
+      return;
+    }
+
+    if (sess.state === ST.AWAIT_SNOOZE_SEARCH) {
+      if (text === '/cancel') { sess.state = ST.IDLE; await sendMsg(chatId, '❌ لغو شد.', { reply_markup: menuFor(sess) }); return; }
+      sess.state = ST.IDLE;
+      await handleSnoozeSearch(chatId, sess, text);
       return;
     }
 
@@ -492,6 +538,19 @@ async function handleUpdate(upd) {
     if (text === '📊 آمار من'            || text === '/stats')      { await handleMyStats(chatId, sess); return; }
     if (text === '👥 گزارش تیم'          || text === '/team')       { await handleTeamReport(chatId, sess); return; }
     if (text === '🔍 جستجوی مرکز'      || text === '/search')     { await handleCenterSearch(chatId, sess); return; }
+    if (text === '📞 تماس سریع'         || text === '/call')       {
+      sess.state = ST.AWAIT_SEARCH_Q; sess.searchMode = 'call';
+      await sendMsg(chatId, '🔍 نام مرکز برای ثبت تماس سریع:', { reply_markup: { force_reply: true } }); return;
+    }
+    if (text === '📋 خلاصه تماس'        || text === '/brief')      {
+      sess.state = ST.AWAIT_SEARCH_Q; sess.searchMode = 'brief';
+      await sendMsg(chatId, '🔍 نام مرکز برای خلاصه قبل تماس:', { reply_markup: { force_reply: true } }); return;
+    }
+    if (text === '📊 پایپلاین من'       || text === '/pipeline')   { await handlePipeline(chatId, sess); return; }
+    if (text === '⏰ به‌تعویق فالوآپ'   || text.startsWith('/snooze')) {
+      sess.state = ST.AWAIT_SNOOZE_SEARCH;
+      await sendMsg(chatId, '🔍 نام مرکز برای به‌تعویق انداختن فالوآپ:', { reply_markup: { force_reply: true } }); return;
+    }
     if (text === '📊 گزارش معوق'        || text === '/overdue')    { await handleOverdueReport(chatId, sess); return; }
     if (text === '📈 KPI هفتگی'         || text === '/kpi')        { await handleWeeklyKPI(chatId, sess); return; }
     if (text === '📨 ارسال پیام'        || text === '/msg')        { await handleSendMessage(chatId, sess); return; }
@@ -1092,12 +1151,69 @@ async function handleCallback(cb) {
     return;
   }
 
+  // ── Notification inline actions (na:id:action) ────────────────────────
+  if (data.startsWith('na:')) {
+    const parts = data.split(':');
+    const notifId = parts[1];
+    const action = parts[2] || 'ack';
+    await doNotifAction(chatId, sess, notifId, action);
+    return;
+  }
+
+  if (data.startsWith('notif_show:')) {
+    const notifId = data.slice(11);
+    try {
+      const r = await query('SELECT * FROM notifications WHERE id = $1 AND to_user = $2', [notifId, sess.username]);
+      if (!r.rows.length) { await sendMsg(chatId, '❌ اعلان یافت نشد.'); return; }
+      const hub = require('../lib/notification-hub');
+      const notif = hub.rowToObj(r.rows[0]);
+      const kb = hub.buildTelegramKeyboard(notif);
+      await sendMsg(chatId, '🔔 ' + notif.msg, kb ? { reply_markup: kb } : { reply_markup: menuFor(sess) });
+    } catch (e) {
+      await sendMsg(chatId, '❌ خطا: ' + e.message);
+    }
+    return;
+  }
+
+  if (data.startsWith('snooze_days:')) {
+    const p = data.split(':');
+    const idx = parseInt(p[1]);
+    const days = parseInt(p[2]) || 7;
+    const center = (sess.snoozeResults || [])[idx];
+    if (!center) { await sendMsg(chatId, '❌ مرکز یافت نشد.'); return; }
+    const { addDJ } = require('../lib/jalali-utils');
+    const todayStr = toJalali(new Date());
+    const newDate = addDJ(todayStr, days);
+    await doSaveFollowup(chatId, sess, center, newDate);
+    return;
+  }
+
+  if (data.startsWith('snooze_pick:')) {
+    const idx = parseInt(data.slice(12));
+    const center = (sess.snoozeResults || [])[idx];
+    if (!center) { await sendMsg(chatId, '❌ مرکز یافت نشد.'); return; }
+    sess.snoozeCenter = center;
+    await sendMsg(chatId, '⏰ چند روز به‌تعویق بیندازیم؟', {
+      reply_markup: { inline_keyboard: [
+        [{ text: '۳ روز', callback_data: 'snooze_days:' + idx + ':3' }, { text: '۷ روز', callback_data: 'snooze_days:' + idx + ':7' }],
+        [{ text: '۱۴ روز', callback_data: 'snooze_days:' + idx + ':14' }],
+      ] },
+    });
+    return;
+  }
+
   // ── Center info: pick from multiple results ────────────────────────────
   if (data.startsWith('info_center:')) {
     const idx = parseInt(data.slice(12));
     const center = (sess.searchResults || [])[idx];
     if (!center) { await sendMsg(chatId, '❌ مرکز یافت نشد.'); return; }
-    await showCenterInfo(chatId, sess, center);
+    const mode = sess.pendingSearchMode || 'info';
+    delete sess.pendingSearchMode;
+    if (mode === 'brief') await doCenterBrief(chatId, sess, center.rtype || 'center', center.rid || '');
+    else if (mode === 'call') {
+      await doSaveNote(chatId, sess, center, '📞 تماس سریع از تلگرام');
+      await sendMsg(chatId, '✅ یادداشت تماس ثبت شد برای <b>' + center.name + '</b>', { reply_markup: menuFor(sess) });
+    } else await showCenterInfo(chatId, sess, center);
     return;
   }
 
@@ -1696,7 +1812,7 @@ async function handleWeekSchedule(chatId, sess) {
 async function handleNotifications(chatId, sess) {
   try {
     const r = await query(
-      `SELECT id, msg, center_key, at, read FROM notifications
+      `SELECT id, msg, center_key, at, read, type, meta, from_user FROM notifications
        WHERE to_user = $1 ORDER BY at DESC LIMIT 15`,
       [sess.username]
     );
@@ -1712,19 +1828,32 @@ async function handleNotifications(chatId, sess) {
     if (unread.length) text += ' | <b>' + unread.length + ' خوانده‌نشده</b>';
     text += '\n\n';
 
-    notifs.slice(0, 10).forEach(function(n) {
+    notifs.slice(0, 8).forEach(function(n) {
       const icon = n.read ? '·' : '🔵';
       const time = n.at ? toJalali(new Date(n.at)) : '';
-      text += icon + ' ' + (n.msg || '') + '\n';
+      const typeTag = n.type && n.type !== 'general' ? ' [' + n.type + ']' : '';
+      text += icon + ' ' + (n.msg || '') + typeTag + '\n';
       if (time) text += '   <i>' + time + '</i>\n';
     });
-    if (notifs.length > 10) text += '\n<i>و ' + (notifs.length - 10) + ' مورد دیگر...</i>';
+    if (notifs.length > 8) text += '\n<i>و ' + (notifs.length - 8) + ' مورد دیگر...</i>';
 
-    const inlineKb = unread.length ? {
-      inline_keyboard: [[{ text: '✅ همه خوانده شد', callback_data: 'notif_readall' }]],
-    } : null;
+    const hub = require('../lib/notification-hub');
+    const inlineKb = { inline_keyboard: [] };
+    const unreadList = notifs.filter(function (n) { return !n.read; }).slice(0, 3);
+    unreadList.forEach(function (n, i) {
+      const kb = hub.buildTelegramKeyboard(hub.rowToObj(n));
+      if (kb && kb.inline_keyboard && kb.inline_keyboard[0]) {
+        inlineKb.inline_keyboard.push([{ text: '▸ ' + (n.msg || '').slice(0, 28), callback_data: 'notif_show:' + n.id }]);
+      }
+    });
+    if (unread.length) {
+      inlineKb.inline_keyboard.push([{ text: '✅ همه خوانده شد', callback_data: 'notif_readall' }]);
+    }
 
-    await sendMsg(chatId, text, inlineKb ? { reply_markup: inlineKb } : { reply_markup: menuFor(sess) });
+    const opts = inlineKb.inline_keyboard.length
+      ? { reply_markup: inlineKb }
+      : { reply_markup: menuFor(sess) };
+    await sendMsg(chatId, text, opts);
   } catch(e) {
     await sendMsg(chatId, '❌ خطا: ' + e.message, { reply_markup: menuFor(sess) });
   }
@@ -1843,10 +1972,87 @@ async function handlePlanSearchResults(chatId, sess, searchText) {
 // ── 🔍 Center search / info ───────────────────────────────────────────────
 async function handleCenterSearch(chatId, sess) {
   sess.state = ST.AWAIT_SEARCH_Q;
+  delete sess.searchMode;
   await sendMsg(chatId,
     '🔍 <b>جستجوی مرکز</b>\n\nنام مرکز را بنویسید:\n(<code>/cancel</code> برای لغو)',
     { reply_markup: { force_reply: true } }
   );
+}
+
+async function handleSearchByMode(chatId, sess, searchText, mode) {
+  const isMgr = isManagerRole(sess.role);
+  const results = await searchCentersInDB(searchText, sess.username, isMgr);
+  if (!results.length) {
+    await sendMsg(chatId, '❌ مرکزی یافت نشد.', { reply_markup: menuFor(sess) });
+    return;
+  }
+  if (results.length > 1) {
+    sess.searchResults = results;
+    const rows = results.slice(0, 8).map(function (c, i) {
+      return [{ text: c.name.slice(0, 40), callback_data: 'info_center:' + i }];
+    });
+    await sendMsg(chatId, 'چند مرکز یافت شد — یکی را انتخاب کنید:', { reply_markup: { inline_keyboard: rows } });
+    sess.pendingSearchMode = mode;
+    return;
+  }
+  const center = results[0];
+  if (mode === 'brief') {
+    await doCenterBrief(chatId, sess, center.rtype || 'center', center.rid || '');
+  } else if (mode === 'call') {
+    await doSaveNote(chatId, sess, center, '📞 تماس سریع از تلگرام');
+    await sendMsg(chatId, '✅ یادداشت تماس ثبت شد برای <b>' + center.name + '</b>', { reply_markup: menuFor(sess) });
+  } else {
+    await showCenterInfo(chatId, sess, center);
+  }
+}
+
+async function handleSnoozeSearch(chatId, sess, searchText) {
+  const isMgr = isManagerRole(sess.role);
+  const results = await searchCentersInDB(searchText, sess.username, isMgr);
+  if (!results.length) {
+    await sendMsg(chatId, '❌ مرکزی یافت نشد.', { reply_markup: menuFor(sess) });
+    return;
+  }
+  sess.snoozeResults = results;
+  const rows = results.slice(0, 8).map(function (c, i) {
+    return [{ text: c.name.slice(0, 40), callback_data: 'snooze_pick:' + i }];
+  });
+  await sendMsg(chatId, '⏰ کدام مرکز را به‌تعویق بیندازیم؟', { reply_markup: { inline_keyboard: rows } });
+}
+
+async function handlePipeline(chatId, sess) {
+  const todayStr = toJalali(new Date());
+  try {
+    const r = await query(
+      `SELECT COALESCE(data->>'status','نامشخص') AS status,
+              COALESCE(data->>'lead','') AS lead,
+              COUNT(*)::int AS cnt
+       FROM center_edits
+       WHERE data->>'owner' = $1
+       GROUP BY data->>'status', data->>'lead'
+       ORDER BY cnt DESC`,
+      [sess.username]
+    );
+    const od = await query(
+      `SELECT COUNT(*)::int AS c FROM center_edits
+       WHERE data->>'owner' = $1 AND (data->>'followupDate') < $2
+         AND COALESCE(data->>'status','') NOT IN ('lost','inactive','غیرفعال','قرارداد بسته شد')`,
+      [sess.username, todayStr]
+    );
+    let text = '📊 <b>پایپلاین شما — ' + todayStr + '</b>\n\n';
+    if (!r.rows.length) {
+      text += 'مرکزی به نام شما ثبت نشده.';
+    } else {
+      r.rows.slice(0, 12).forEach(function (row) {
+        text += '• ' + row.status + (row.lead ? ' / ' + row.lead : '') + ': <b>' + row.cnt + '</b>\n';
+      });
+    }
+    const overdue = od.rows[0] ? od.rows[0].c : 0;
+    if (overdue) text += '\n⚠️ معوق: <b>' + overdue + '</b> مرکز';
+    await sendMsg(chatId, text, { reply_markup: menuFor(sess) });
+  } catch (e) {
+    await sendMsg(chatId, '❌ خطا: ' + e.message, { reply_markup: menuFor(sess) });
+  }
 }
 
 async function handleCenterInfo(chatId, sess, searchText) {
@@ -3044,15 +3250,26 @@ async function doSetCompetitor(chatId, sess, center, competitorName) {
 }
 
 // ── Notify helpers ────────────────────────────────────────────────────────
-async function notifyUser(username, text) {
+async function notifyUser(username, text, opts) {
+  const sent = [];
   try {
     const stored = await loadBotSessions();
+    const extra = opts && typeof opts === 'object' ? opts : {};
     for (const [chatId, s] of Object.entries(stored)) {
       if (s.username === username && s.state === ST.IDLE) {
-        await sendMsg(parseInt(chatId), text).catch(function(){});
+        const sendOpts = extra.reply_markup ? { reply_markup: extra.reply_markup } : {};
+        const res = await sendMsg(parseInt(chatId), text, sendOpts).catch(function(){ return null; });
+        if (res && res.ok && res.result && res.result.message_id) {
+          sent.push({ chatId: parseInt(chatId), messageId: res.result.message_id });
+        }
       }
     }
   } catch(e) {}
+  return sent;
+}
+
+async function editNotifRead(chatId, msgId, text) {
+  return editMsg(chatId, msgId, text, { reply_markup: { inline_keyboard: [] } });
 }
 
 async function notifyManagers(text) {
@@ -3088,8 +3305,142 @@ async function notifyAll(text) {
   } catch(e) {}
 }
 
+// ── 🔗 Link account / notification actions ─────────────────────────────────
+async function doLinkByToken(chatId, token, sess) {
+  const hub = require('../lib/notification-hub');
+  const username = await hub.consumeTelegramLinkToken(token, chatId);
+  if (!username) {
+    await sendMsg(chatId, '❌ کد نامعتبر یا منقضی شده.\nاز CRM یک کد جدید بگیرید.');
+    return;
+  }
+  try {
+    const userR = await query(
+      'SELECT username, display_name, role, permissions FROM app_users WHERE username = $1 AND active = true',
+      [username]
+    );
+    if (!userR.rows.length) {
+      await sendMsg(chatId, '❌ کاربر یافت نشد یا غیرفعال است.');
+      return;
+    }
+    const u = userR.rows[0];
+    Object.assign(sess, {
+      username: u.username,
+      name: u.display_name || u.username,
+      role: u.role,
+      permissions: u.permissions || {},
+      state: ST.IDLE,
+    });
+    delete sess.pendingUser;
+    await persistSession(chatId);
+    await sendMsg(chatId,
+      '✅ <b>اتصال موفق!</b>\n\n👤 ' + (u.display_name || u.username) + '\n🏷 ' + u.role,
+      { reply_markup: menuFor(sess) }
+    );
+  } catch (e) {
+    await sendMsg(chatId, '❌ خطا: ' + e.message);
+  }
+}
+
+async function doNotifAction(chatId, sess, notifId, action) {
+  const hub = require('../lib/notification-hub');
+  try {
+    const r = await query('SELECT * FROM notifications WHERE id = $1 AND to_user = $2', [notifId, sess.username]);
+    if (!r.rows.length) {
+      await sendMsg(chatId, '❌ اعلان یافت نشد.');
+      return;
+    }
+    const row = r.rows[0];
+    await hub.recordAction(notifId, sess.username, action);
+
+    if (action === 'ack') {
+      await hub.createAckReply(hub.rowToObj(row), sess.username, sess.name || sess.username);
+      await sendMsg(chatId, '✅ انجام شد و به فرستنده اطلاع داده شد.', { reply_markup: menuFor(sess) });
+      return;
+    }
+    if (action === 'today') {
+      await handleTodaySchedule(chatId, sess);
+      return;
+    }
+    if (action === 'task_done' && row.meta && row.meta.taskId) {
+      await doMarkTaskDone(chatId, sess, row.meta.taskId);
+      return;
+    }
+    if (action === 'task' && row.meta && row.meta.taskId) {
+      await sendMsg(chatId, '📋 وظیفه: ' + (row.meta.taskTitle || row.meta.taskId) + '\nاز /tasks لیست را ببینید.', { reply_markup: menuFor(sess) });
+      return;
+    }
+    if ((action === 'call' || action === 'brief' || action === 'center') && row.center_key) {
+      const parts = row.center_key.split('_');
+      const rtype = parts[0];
+      const rid = parts.slice(1).join('_');
+      if (action === 'brief' || action === 'call') {
+        await doCenterBrief(chatId, sess, rtype, rid);
+      } else {
+        await showCenterInfo(chatId, sess, { rtype: rtype, rid: rid, name: row.center_key });
+      }
+      return;
+    }
+    if (action === 'proforma' && row.meta && row.meta.proformaId) {
+      await sendMsg(chatId, '📄 پیش‌فاکتور: ' + (row.meta.proformaNo || row.meta.proformaId) + '\nاز /proformas مدیریت کنید.', { reply_markup: menuFor(sess) });
+      return;
+    }
+    await sendMsg(chatId, '✅ ثبت شد.', { reply_markup: menuFor(sess) });
+  } catch (e) {
+    await sendMsg(chatId, '❌ خطا: ' + e.message, { reply_markup: menuFor(sess) });
+  }
+}
+
+async function handleDigest(chatId, sess) {
+  const todayStr = toJalali(new Date());
+  let text = '📊 <b>خلاصه عملکرد — ' + todayStr + '</b>\n\n';
+  try {
+    const r = await query(
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE done = true OR (value->>'done')::boolean = true)::int AS done
+       FROM week_entries
+       WHERE COALESCE(added_by, value->>'addedBy') = $1
+         AND COALESCE(scheduled_date, value->>'scheduledDate') = $2`,
+      [sess.username, todayStr]
+    );
+    const row = r.rows[0] || { total: 0, done: 0 };
+    text += '📋 برنامه امروز: ' + row.total + ' | ✅ انجام: ' + row.done + '\n';
+
+    const od = await query(
+      `SELECT COUNT(*)::int AS cnt FROM center_edits
+       WHERE data->>'owner' = $1 AND (data->>'followupDate') < $2
+         AND COALESCE(data->>'status','') NOT IN ('lost','inactive','غیرفعال','قرارداد بسته شد')`,
+      [sess.username, todayStr]
+    );
+    const overdue = od.rows[0] ? od.rows[0].cnt : 0;
+    if (overdue) text += '⚠️ معوق: ' + overdue + ' مرکز\n';
+
+    const tk = await query(
+      `SELECT COUNT(*)::int AS cnt FROM tasks WHERE owner = $1 AND status <> 'done' AND done IS NOT TRUE`,
+      [sess.username]
+    );
+    text += '📌 وظایف باز: ' + ((tk.rows[0] && tk.rows[0].cnt) || 0);
+  } catch (e) {
+    text += 'خطا در بارگذاری آمار.';
+  }
+  await sendMsg(chatId, text, { reply_markup: menuFor(sess) });
+}
+
+async function handleNotifSettings(chatId, sess) {
+  const hub = require('../lib/notification-hub');
+  const prefs = await hub.getUserPrefs(sess.username);
+  const ch = prefs.channels || {};
+  let text = '⚙️ <b>تنظیمات اعلان</b>\n\n';
+  text += 'تلگرام: ' + (ch.telegram !== false ? '✅' : '❌') + '\n';
+  text += 'مرورگر: ' + (ch.browser !== false ? '✅' : '❌') + '\n';
+  text += 'حالت: ' + (prefs.digest_mode || 'instant') + '\n\n';
+  text += 'برای تغییر دقیق‌تر از تنظیمات CRM استفاده کنید.';
+  await sendMsg(chatId, text, { reply_markup: menuFor(sess) });
+}
+
 // ── 🌅 Daily morning report ───────────────────────────────────────────────
 let _lastReportDate = '';
+let _lastReminderDate = '';
+let _lastWeeklyDate = '';
 
 async function sendDailyReport() {
   try {
@@ -3295,7 +3646,19 @@ async function sendWeeklyDigest() {
 
     await notifyManagers(text);
 
-    // Send personal weekly KPI to each expert
+    // Personal weekly KPI to each expert
+    let salesStats = {};
+    try {
+      const salesRes = await query(
+        `SELECT username, COUNT(*)::int AS cnt FROM sales_log
+         WHERE updated_at >= NOW() - INTERVAL '7 days'
+         GROUP BY username`
+      );
+      salesRes.rows.forEach(function (row) {
+        salesStats[row.username] = { sales: row.cnt };
+      });
+    } catch (e) {}
+
     try {
       const stored = await loadBotSessions();
       for (const [chatIdStr, s] of Object.entries(stored)) {
@@ -3303,7 +3666,7 @@ async function sendWeeklyDigest() {
         try {
           const uStats = perExpert[s.username] || { calls: 0, visits: 0, overdue: 0 };
           const uDone  = doneCounts[s.username] || 0;
-          const uSales = 0; // sales count per expert — reserved for future sales_log aggregation
+          const uSales = (salesStats[s.username] && salesStats[s.username].sales) || 0;
           let expertKpi =
             '\ud83d\udcca <b>خلاصه هفته شما — ' + (s.name || s.username) + '</b>\n' +
             '\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n' +
@@ -3326,34 +3689,42 @@ async function sendWeeklyDigest() {
   }
 }
 
-let _lastWeeklyDate = '';
-let _lastReminderDate = '';
-
 async function sendExpertReminders() {
   try {
     const todayStr = toJalali(new Date());
-    const overdueRes = await query(
-      `SELECT COALESCE(data->>'owner','') AS owner, COUNT(*)::int AS cnt
-       FROM center_edits
-       WHERE (data->>'followupDate') IS NOT NULL
-         AND (data->>'followupDate') < $1
-         AND COALESCE(data->>'status','') NOT IN ('غیرفعال','قرارداد بسته شد','عدم نیاز فاکتور کنسل شد','lost','inactive')
-       GROUP BY data->>'owner'`,
-      [todayStr]
-    );
-    const byUser = {};
-    overdueRes.rows.forEach(function (row) {
-      if (row.owner) byUser[row.owner] = row.cnt;
-    });
+    const hub = require('../lib/notification-hub');
+    const digest = require('../lib/digest-builder');
+
     const stored = await loadBotSessions();
+    let pushed = 0;
+
     for (const [chatIdStr, s] of Object.entries(stored)) {
       if (!s.username || isManagerRole(s.role) || s.state !== ST.IDLE) continue;
-      const cnt = byUser[s.username] || 0;
-      if (!cnt) continue;
-      await sendMsg(parseInt(chatIdStr, 10),
-        '⚠️ <b>یادآوری صبح</b>\n' + cnt + ' مرکز با پیگیری معوق دارید.\n/mycenters یا /today'
-      ).catch(function () {});
+      try {
+        const items = await digest.morningBriefingForExpert(s.username, todayStr);
+        if (!items.length) continue;
+        const text = '⏰ <b>یادآوری صبح</b>\n\nهنوز ' + items.length + ' مرکز از برنامه امروز باقی مانده:\n• '
+          + items.slice(0, 4).join('\n• ')
+          + (items.length > 4 ? '\n...' : '');
+        await sendMsg(parseInt(chatIdStr), text, { reply_markup: menuFor(s) }).catch(function () {});
+        pushed++;
+      } catch (e2) {}
     }
+
+    // in-app notification for experts with linked sessions
+    const experts = await digest.getExpertsWithSessions();
+    for (const exp of experts) {
+      const items = await digest.morningBriefingForExpert(exp, todayStr);
+      if (!items.length) continue;
+      await hub.createNotification({
+        id: 'er_' + todayStr.replace(/\//g, '') + '_' + exp,
+        to: exp,
+        msg: '⏰ ' + items.length + ' مرکز از برنامه امروز هنوز انجام نشده',
+        type: 'followup',
+      });
+    }
+
+    console.log('[bot] Expert reminders: ' + pushed + ' telegram pushes for ' + todayStr);
   } catch (e) {
     console.error('[bot] expert reminders error:', e.message);
   }
@@ -3416,4 +3787,4 @@ async function poll() {
 
 function stop() { _running = false; }
 
-module.exports = { poll, stop, notifyManagers, notifyAll, notifyUser, notifyFinance };
+module.exports = { poll, stop, notifyManagers, notifyAll, notifyUser, notifyFinance, editNotifRead };

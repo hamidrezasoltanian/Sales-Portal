@@ -306,6 +306,7 @@ function saveSettings(){
     ckItems:DB.settings.ckItems,
     notifPrefs:DB.settings.notifPrefs
   };
+  if(_tgN)settingsPatch.telegramNotify=DB.settings.telegramNotify;
   if(_anthKey.trim())settingsPatch.anthropicKey=_anthKey.trim();
   if(_isManager()){
     if(DB.settings.statusList)settingsPatch.statusList=DB.settings.statusList;
@@ -339,6 +340,60 @@ function saveSettings(){
       console.warn('[saveSettings] /api/settings failed, falling back to blob save:',e.message);
       _finishSave();
     });
+}
+
+function _requestTelegramLink(){
+  fetch('/api/notifications/telegram-link',{method:'POST',headers:{'Content-Type':'application/json'}})
+    .then(function(r){return r.ok?r.json():r.json().then(function(d){throw new Error(d.error||'خطا');});})
+    .then(function(d){
+      var el=document.getElementById('tgLinkCode');
+      var hint=document.getElementById('tgLinkHint');
+      if(el){
+        el.style.display='block';
+        el.textContent='کد: '+d.token+' — در تلگرام: /link '+d.token;
+      }
+      if(hint)hint.textContent='کد ۱۵ دقیقه اعتبار دارد. در ربات تلگرام بفرستید:';
+      if(typeof showToast==='function')showToast('✅ کد اتصال تولید شد',2500);
+    })
+    .catch(function(e){if(typeof showToast==='function')showToast('❌ '+e.message,3000);});
+}
+
+function _loadUserNotifPrefs(){
+  fetch('/api/notifications/prefs')
+    .then(function(r){return r.ok?r.json():null;})
+    .then(function(d){
+      if(!d||!d.prefs)return;
+      var p=d.prefs, ch=p.channels||{};
+      var w=document.getElementById('stgUpWeb'); if(w)w.checked=ch.web!==false;
+      var t=document.getElementById('stgUpTg'); if(t)t.checked=ch.telegram!==false;
+      var b=document.getElementById('stgUpBrowser'); if(b)b.checked=ch.browser!==false;
+      var qs=document.getElementById('stgUpQuietStart');
+      var qe=document.getElementById('stgUpQuietEnd');
+      if(p.quiet_hours){ if(qs)qs.value=p.quiet_hours.start||''; if(qe)qe.value=p.quiet_hours.end||''; }
+      var dg=document.getElementById('stgUpDigest'); if(dg)dg.value=p.digest_mode||'instant';
+    }).catch(function(){});
+}
+
+function _saveUserNotifPrefs(){
+  var qs=(document.getElementById('stgUpQuietStart')||{}).value||'';
+  var qe=(document.getElementById('stgUpQuietEnd')||{}).value||'';
+  var prefs={
+    enabled:true,
+    channels:{
+      web:!!(document.getElementById('stgUpWeb')||{checked:true}).checked,
+      telegram:!!(document.getElementById('stgUpTg')||{checked:true}).checked,
+      browser:!!(document.getElementById('stgUpBrowser')||{checked:true}).checked
+    },
+    digest_mode:(document.getElementById('stgUpDigest')||{value:'instant'}).value||'instant',
+    quiet_hours:(qs&&qe)?{start:qs.trim(),end:qe.trim()}:null
+  };
+  fetch('/api/notifications/prefs',{
+    method:'PUT',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({prefs:prefs})
+  }).then(function(){
+    if(prefs.channels.browser && typeof window._initWebPush==='function')window._initWebPush();
+  }).catch(function(){});
 }
 
 function addTagRow(){

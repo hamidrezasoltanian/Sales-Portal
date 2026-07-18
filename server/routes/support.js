@@ -5,6 +5,7 @@ const router  = express.Router();
 const { query } = require('../db');
 
 const { requireAuth } = require('../auth');
+const hub = require('../lib/notification-hub');
 
 function isManagerRole(role) {
   return ['مدیر', 'سوپر ادمین'].includes(role);
@@ -121,12 +122,13 @@ router.post('/', requireAuth, async function(req, res) {
     // Push Telegram notification to assigned person
     if (assigned_to && assigned_to !== req.user.username) {
       try {
-        const notifId = 'ntf_' + Date.now();
-        await query(
-          `INSERT INTO notifications (id, to_user, msg, at)
-           VALUES ($1, $2, $3, NOW())`,
-          [notifId, assigned_to, '🎧 تیکت جدید: ' + title + (center_name ? ' — ' + center_name : '')]
-        );
+        await hub.notifySimple({
+          to: assigned_to,
+          from: req.user.username,
+          msg: '🎧 تیکت جدید: ' + title + (center_name ? ' — ' + center_name : ''),
+          type: 'support',
+          meta: { module: 'support', ticketId: id },
+        });
       } catch(_) {}
     }
 
@@ -216,22 +218,26 @@ router.put('/:id', requireAuth, async function(req, res) {
     // Notify reporter on resolve
     if (status === 'resolved' && ticket.reporter && ticket.reporter !== user.username) {
       try {
-        await query(
-          `INSERT INTO notifications (id, to_user, msg, at)
-           VALUES ($1, $2, $3, NOW())`,
-          ['ntf_' + Date.now(), ticket.reporter, '✅ تیکت «' + ticket.title + '» حل شد']
-        );
+        await hub.notifySimple({
+          to: ticket.reporter,
+          from: user.username,
+          msg: '✅ تیکت «' + ticket.title + '» حل شد',
+          type: 'support',
+          meta: { module: 'support', ticketId: ticket.id },
+        });
       } catch(_) {}
     }
 
     // Notify new assignee on handoff
     if (assigned_to !== undefined && assigned_to && assigned_to !== ticket.assigned_to && assigned_to !== user.username) {
       try {
-        await query(
-          `INSERT INTO notifications (id, to_user, msg, at)
-           VALUES ($1, $2, $3, NOW())`,
-          ['ntf_' + Date.now(), assigned_to, '🎧 تیکت به شما ارجاع شد: ' + ticket.title + (ticket.center_name ? ' — ' + ticket.center_name : '')]
-        );
+        await hub.notifySimple({
+          to: assigned_to,
+          from: user.username,
+          msg: '🎧 تیکت به شما ارجاع شد: ' + ticket.title + (ticket.center_name ? ' — ' + ticket.center_name : ''),
+          type: 'support',
+          meta: { module: 'support', ticketId: ticket.id },
+        });
       } catch(_) {}
     }
 
@@ -273,10 +279,13 @@ router.post('/:id/comment', requireAuth, async function(req, res) {
     const notifyTo = user.username === t.reporter ? t.assigned_to : t.reporter;
     if (notifyTo && !internal) {
       try {
-        await query(
-          `INSERT INTO notifications (id, to_user, msg, at) VALUES ($1, $2, $3, NOW())`,
-          ['ntf_' + Date.now(), notifyTo, '💬 پاسخ جدید در تیکت: ' + body.slice(0, 80)]
-        );
+        await hub.notifySimple({
+          to: notifyTo,
+          from: user.username,
+          msg: '💬 پاسخ جدید در تیکت: ' + body.slice(0, 80),
+          type: 'support',
+          meta: { module: 'support', ticketId: req.params.id },
+        });
       } catch(_) {}
     }
 

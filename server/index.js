@@ -292,7 +292,7 @@ async function start() {
       console.warn('[faradis-auto-sync] scheduler not started:', e.message);
     }
     try {
-      require('./lib/proforma-scheduler').startProformaScheduler();
+require('./lib/proforma-scheduler').startProformaScheduler();
     } catch (e) {
       console.warn('[proforma-scheduler] not started:', e.message);
     }

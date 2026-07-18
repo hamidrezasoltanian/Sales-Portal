@@ -920,6 +920,34 @@ router.post('/:id/action', requireAuth, async (req, res) => {
     }
     res.json(result.proforma);
     try { require('../lib/inbox-hooks').onProformaChange(req.params.id); } catch (_) {}
+
+    try {
+      const hub = require('../lib/notification-hub');
+      const updated = result.proforma;
+      const action = (typeof d !== 'undefined' && d && d.action) ? d.action : '';
+      const notifyEnabled = true;
+      const msg = 'پیش‌فاکتور ' + (updated.no || updated.id) + ' — ' + action
+        + ((d && d.note) ? (' — ' + d.note) : '');
+      if (updated && updated.created_by) {
+        await hub.createNotification({
+          id: 'pf_' + action + '_' + updated.id + '_' + updated.created_by,
+          to: updated.created_by,
+          from: req.user.username,
+          msg,
+          type: 'proforma',
+          meta: { proformaId: updated.id, proformaNo: updated.no, action },
+          skipDedup: true,
+        });
+      }
+      if (notifyEnabled) {
+        try {
+          const bot = require('../bot/telegram');
+          bot.notifyAll(msg).catch(function () {});
+        } catch (_) {}
+      }
+    } catch (e) {
+      console.error('[proforma notify]', e.message);
+    }
   } catch(e) {
     console.error('[proforma action]', e.message);
     res.status(500).json({ error: 'خطای سرور' });
