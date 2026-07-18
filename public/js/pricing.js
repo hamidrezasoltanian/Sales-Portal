@@ -1119,6 +1119,15 @@ function _openTaskModalLazy(tid, prefill) {
     else showToast('خطا در بارگذاری وظایف');
   }).catch(function() { showToast('خطا در بارگذاری وظایف'); });
 }
+function _openDataHubLazy() {
+  if (typeof openDataHub === 'function') { openDataHub(); return; }
+  if (typeof ensureTabScripts !== 'function') { showToast('ماژول داده در دسترس نیست'); return; }
+  ensureTabScripts('backup').then(function () {
+    if (typeof openDataHub === 'function') openDataHub();
+    else showToast('خطا در بارگذاری مرکز داده');
+  }).catch(function () { showToast('خطا در بارگذاری مرکز داده'); });
+}
+window._openDataHubLazy = _openDataHubLazy;
 
 function _cmSetFollowupDate(rtype, rid, mid, v) {
   var inp = document.getElementById('mfd_' + mid);
@@ -1873,7 +1882,8 @@ function _cmSetLastPurch(rtype,rid,id,v){
   if(cs)setE(rtype,rid,'customerStatus',cs);
 }
 function openCenterModal(rtype,id,centerKeyHint){
-  // Track recent centers
+  // Track recent centers (declared in core.js — guard if script order changes)
+  if(typeof _recentCenters==='undefined'||!_recentCenters)_recentCenters=[];
   var _rcKey=centerKeyHint||(typeof recK==='function'?recK(rtype,id):(rtype+'_'+id));
   _recentCenters=_recentCenters.filter(function(x){return x.key!==_rcKey;});
   _recentCenters.unshift({key:_rcKey,rtype:rtype,id:id,name:_getCenterName(rtype,id),ts:Date.now()});
@@ -2815,4 +2825,6 @@ function updateContactPhone(rtype,id,ci,pi,val){
   contacts[ci].phones[pi]=val;
   _saveContacts(rtype,id,contacts);
 }
+
+window.openCenterModal = openCenterModal;
 

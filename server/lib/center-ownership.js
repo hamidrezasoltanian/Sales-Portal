@@ -58,17 +58,25 @@ function buildOwnerMaps(centersMaster, extraRows) {
     }
   }
 
+  // Extra centers are stored as center_extras.id (often "pc_new_…" / "new_…")
+  // while edit keys are recK(rtype,id) → "pc_"+id or "center_"+id.
+  // Older bugs created ids like "pc_new_TS" → edit key "pc_pc_new_TS".
   const extraOwners = {};
+  const provinceByKey = {};
   (extraRows || []).forEach(function (row) {
-    if (row && row.id && row.owner) {
-      extraOwners['center_' + row.id] = row.owner;
-      if (row.province_id != null && row.row != null) {
-        extraOwners['pc_' + row.province_id + '||' + row.row] = row.owner;
-      }
+    if (!row || row.id == null) return;
+    const id = String(row.id);
+    const keys = ['center_' + id, 'pc_' + id, 'extra_' + id];
+    if (row.province_id != null && row.row != null) {
+      keys.push('pc_' + row.province_id + '||' + row.row);
     }
+    keys.forEach(function (k) {
+      if (row.owner) extraOwners[k] = row.owner;
+      if (row.province_id) provinceByKey[k] = String(row.province_id);
+    });
   });
 
-  return { staticOwners, extraOwners };
+  return { staticOwners, extraOwners, provinceByKey };
 }
 
 /**
@@ -103,24 +111,36 @@ function userOwnsCenter(username, centerKey, edits, ownerMaps) {
 }
 
 /** Province id from center_key — tehran centers use center_* prefix */
-function getCenterProvinceId(centerKey) {
+function getCenterProvinceId(centerKey, ownerMaps) {
   if (!centerKey || typeof centerKey !== 'string') return null;
+  if (ownerMaps && ownerMaps.provinceByKey && ownerMaps.provinceByKey[centerKey]) {
+    return ownerMaps.provinceByKey[centerKey];
+  }
   if (centerKey.startsWith('pc_')) {
     const rest = centerKey.slice(3);
     const sepIdx = rest.indexOf('||');
     if (sepIdx > 0) return rest.slice(0, sepIdx);
+    // Extra/manual ids (pc_new_*, pc_pc_new_*) are not province ids — leave unknown
+    if (rest.indexOf('new_') >= 0) return null;
     return rest;
   }
   if (centerKey.startsWith('center_')) return 'tehran';
+  if (centerKey.startsWith('extra_')) {
+    if (ownerMaps && ownerMaps.provinceByKey && ownerMaps.provinceByKey[centerKey]) {
+      return ownerMaps.provinceByKey[centerKey];
+    }
+    return null;
+  }
   return null;
 }
 
-function applyProvinceRestriction(allowedKeys, allowedProvinces) {
+function applyProvinceRestriction(allowedKeys, allowedProvinces, ownerMaps) {
   if (!allowedProvinces || !allowedProvinces.length) return allowedKeys;
   const out = new Set();
   allowedKeys.forEach(function (key) {
-    const pid = getCenterProvinceId(key);
-    if (pid && allowedProvinces.includes(pid)) out.add(key);
+    const pid = getCenterProvinceId(key, ownerMaps);
+    // Unknown province (manual extras without map): keep if already ownership-allowed
+    if (!pid || allowedProvinces.includes(pid)) out.add(key);
   });
   return out;
 }
@@ -172,7 +192,7 @@ function filterDbForUser(db, user, ownerMaps) {
 
   const provAllow = getUserProvinceAllowlist(user);
   if (provAllow) {
-    allowed = applyProvinceRestriction(allowed, provAllow);
+    allowed = applyProvinceRestriction(allowed, provAllow, ownerMaps);
   }
 
   const filtered = Object.assign({}, base);
@@ -281,7 +301,7 @@ function filterPutBodyForUser(body, user, serverEdits, ownerMaps) {
         rejected.push(label + ':' + key);
         return;
       }
-      if (provAllow && !applyProvinceRestriction(new Set([key]), provAllow).has(key)) {
+      if (provAllow && !applyProvinceRestriction(new Set([key]), provAllow, ownerMaps).has(key)) {
         rejected.push(label + ':' + key + ':province');
         return;
       }
@@ -307,7 +327,7 @@ function filterPutBodyForUser(body, user, serverEdits, ownerMaps) {
         ? entry.rtype + '_' + entry.rid
         : (k.split(':::')[1] || '');
       const provAllow = getUserProvinceAllowlist(user);
-      const provOk = !provAllow || !recKey || applyProvinceRestriction(new Set([recKey]), provAllow).has(recKey);
+      const provOk = !provAllow || !recKey || applyProvinceRestriction(new Set([recKey]), provAllow, ownerMaps).has(recKey);
       if (recKey && userOwnsCenter(user.username, recKey, serverEdits, ownerMaps) && provOk) {
         we[k] = entry;
       } else if (entry && entry.addedBy === user.username && provOk) {

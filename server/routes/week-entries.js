@@ -6,6 +6,7 @@ const { requireAuth } = require('../auth');
 const { requirePermission } = require('../permissions');
 const { isManagerRole } = require('../lib/roles');
 const { loadCenterAccessContext, canAccessCenter } = require('../lib/center-access');
+const { resolveCenterOwner } = require('../lib/center-ownership');
 
 const router = express.Router();
 
@@ -88,18 +89,31 @@ function rowToObj(r) {
 }
 
 // ── GET /api/week-entries ──────────────────────────────────────────────────
-// Query params: ?week_id=, ?owner= (filters added_by), ?done=false|true
+// Query params:
+//   ?week_id=   week start (Jalali)
+//   ?week_end=  week end — also include rows whose scheduled_date falls in [week_id, week_end]
+//               even if week_id column is stale (prevents "vanishing" day cards)
+//   ?owner=     center owner (NOT added_by)
+//   ?added_by=  creator username
+//   ?done=false|true
 router.get('/', requireAuth, async function (req, res) {
   try {
     const conditions = [];
     const params = [];
+    const weekId = req.query.week_id || null;
+    const weekEnd = req.query.week_end || null;
 
-    if (req.query.week_id) {
-      params.push(req.query.week_id);
+    if (weekId && weekEnd) {
+      params.push(weekId, weekEnd);
+      conditions.push(
+        `(week_id = $1 OR (scheduled_date IS NOT NULL AND scheduled_date <> '' AND scheduled_date >= $1 AND scheduled_date <= $2))`
+      );
+    } else if (weekId) {
+      params.push(weekId);
       conditions.push(`week_id = $${params.length}`);
     }
-    if (req.query.owner) {
-      params.push(req.query.owner);
+    if (req.query.added_by) {
+      params.push(req.query.added_by);
       conditions.push(`added_by = $${params.length}`);
     }
     if (req.query.done !== undefined) {
@@ -117,12 +131,28 @@ router.get('/', requireAuth, async function (req, res) {
       params
     );
     let rows = result.rows;
+    const context = (!isManagerRole(req.user.role) || req.query.owner)
+      ? await loadCenterAccessContext()
+      : null;
+
     if (!isManagerRole(req.user.role)) {
-      const context = await loadCenterAccessContext();
       rows = rows.filter(function (row) {
         return row.added_by === req.user.username || canAccessCenter(req.user, row.rec_key, context);
       });
     }
+
+    // owner = مسئول مرکز (نه added_by) — باگ قبلی باعث می‌شد مراکز تخصیص‌داده‌شده مدیر برای کارشناس ناپدید شوند
+    if (req.query.owner) {
+      const want = String(req.query.owner);
+      const edits = context ? context.edits : (await loadCenterAccessContext()).edits;
+      const ownerMaps = context ? context.ownerMaps : (await loadCenterAccessContext()).ownerMaps;
+      rows = rows.filter(function (row) {
+        const owner = resolveCenterOwner(row.rec_key, edits, ownerMaps);
+        if (owner) return owner === want;
+        return row.added_by === want;
+      });
+    }
+
     res.json(rows.map(rowToObj));
   } catch (e) {
     console.error('[week-entries GET /]', e.message);

@@ -175,7 +175,20 @@ function wpCurrentWeekId(){
 
 // ساخت کلید weekEntries: wsStr||rtype||rid
 function wpEntryKey(weekId,rtype,rid){return weekId+':::'+rtype+':::'+rid;}
-function wpParseEntryKey(k){var i1=k.indexOf(':::');var i2=k.indexOf(':::',i1+3);return{weekId:k.slice(0,i1),rtype:k.slice(i1+3,i2),rid:k.slice(i2+3)};}
+function wpParseEntryKey(k){
+  if(!k) return {weekId:'',rtype:'',rid:''};
+  var i1=k.indexOf(':::');
+  if(i1<0) return {weekId:k,rtype:'',rid:''};
+  var weekId=k.slice(0,i1);
+  var rest=k.slice(i1+3);
+  var i2=rest.indexOf(':::');
+  if(i2>=0) return {weekId:weekId,rtype:rest.slice(0,i2),rid:rest.slice(i2+3)};
+  var we=(typeof DB!=='undefined'&&DB.weekEntries)?DB.weekEntries[k]:null;
+  if(we&&we.rtype&&we.rid!=null&&we.rid!=='') return {weekId:weekId,rtype:we.rtype,rid:String(we.rid)};
+  var us=rest.indexOf('_');
+  if(us>0) return {weekId:weekId,rtype:rest.slice(0,us),rid:rest.slice(us+1)};
+  return {weekId:weekId,rtype:rest,rid:''};
+}
 
 function wpBuildSelect(){
   var sel=document.getElementById('wpSel');if(!sel)return;
@@ -335,10 +348,13 @@ function _wpMergeApiRows(weekId, rows){
     if(k.startsWith(weekId+':::'))delete DB.weekEntries[k];
   });
   rows.forEach(function(row){
-    if(!row.weekId||!row.rtype||row.rid===undefined)return;
-    var k=row.weekId+':::'+row.rtype+':::'+row.rid;
+    if(!row.rtype||row.rid===undefined)return;
+    // Keep server weekId when present; for stale week_id rows still store under their key
+    // so transfer/repair can find sqlId. Display also matches by scheduledDate (see render).
+    var rowWeek=row.weekId||weekId;
+    var k=rowWeek+':::'+row.rtype+':::'+row.rid;
     DB.weekEntries[k]={
-      id:row.id,sqlId:row.id,weekId:row.weekId,recKey:row.recKey,rtype:row.rtype,rid:row.rid,
+      id:row.id,sqlId:row.id,weekId:rowWeek,recKey:row.recKey,rtype:row.rtype,rid:row.rid,
       scheduledDate:row.scheduledDate,actionType:row.actionType,done:row.done,doneDate:row.doneDate,
       addedBy:row.addedBy,centerName:row.centerName,weekTagId:row.weekTagId,
       doneNote:row.doneNote,doneResult:row.doneResult
@@ -349,11 +365,26 @@ function _wpLoadWeekFromApi(cb){
   var sel=document.getElementById('wpSel');
   var weekId=sel&&sel.value;
   if(!weekId){if(typeof cb==='function')cb();return;}
+  var wk=(typeof wpGetWeeks==='function'?wpGetWeeks():[]).find(function(w){return w.id===weekId;});
+  var weekEnd=wk?wk.weStr:weekId;
   var owner=(document.getElementById('wpOwnerFilter')||{}).value||'';
-  var url='/api/week-entries?week_id='+encodeURIComponent(weekId);
+  var url='/api/week-entries?week_id='+encodeURIComponent(weekId)
+    +'&week_end='+encodeURIComponent(weekEnd);
+  // owner = مسئول مرکز (سرور دیگر added_by را اشتباهی فیلتر نمی‌کند)
   if(owner)url+='&owner='+encodeURIComponent(owner);
   fetch(url).then(function(r){return r.ok?r.json():null;}).then(function(rows){
     _wpMergeApiRows(weekId,rows);
+    // Auto-repair: entries scheduled in this week but stored under another week_id
+    if(typeof wpTransferWeekEntry==='function'&&rows&&rows.length){
+      rows.forEach(function(row){
+        if(!row||!row.id||!row.weekId||row.weekId===weekId)return;
+        if(!row.scheduledDate||row.scheduledDate<weekId||row.scheduledDate>weekEnd)return;
+        var oldKey=row.weekId+':::'+row.rtype+':::'+row.rid;
+        if(DB.weekEntries[oldKey]&&DB.weekEntries[oldKey].sqlId){
+          wpTransferWeekEntry(oldKey,weekId,{scheduledDate:row.scheduledDate,clearSchedule:false}).catch(function(){});
+        }
+      });
+    }
     if(typeof cb==='function')cb();
   }).catch(function(){if(typeof cb==='function')cb();});
 }
@@ -362,6 +393,15 @@ function renderWeekPlan(){
   _buildPCCache();
   wpBuildSelect();
   wpBuildOwnerFilter();
+  // یک‌بار در هر باز کردن تب: followupDateهای بدون کارت هفته را بساز/جابه‌جا کن
+  try {
+    if (typeof wpReconcileFollowupDates === 'function' && !window._wpReconcileOnce) {
+      window._wpReconcileOnce = true;
+      var n = wpReconcileFollowupDates({ allowCreate: true, allowMove: true });
+      if (n > 0) console.info('[wp] reconciled', n, 'followup→week entries');
+      setTimeout(function () { window._wpReconcileOnce = false; }, 60000);
+    }
+  } catch (eRec) {}
   _wpLoadWeekFromApi(_renderWeekPlanBody);
 }
 function _renderWeekPlanBody(){
@@ -385,6 +425,7 @@ function _renderWeekPlanBody(){
     var d = jAdd(wk.wsArr[0],wk.wsArr[1],wk.wsArr[2],i);
     days.push({str:d[0]+'/'+p2(d[1])+'/'+p2(d[2]), name:J_DAYS[i], isToday:d[0]+'/'+p2(d[1])+'/'+p2(d[2])===today});
   }
+  var daySet={};days.forEach(function(d){daySet[d.str]=true;});
 
   // راهنمای کوتاه یک‌بار (قابل بستن)
   try {
@@ -405,30 +446,35 @@ function _renderWeekPlanBody(){
 
   var getCenterOwner = function(rtype, rid) { return _wpGetOwner({rtype:rtype, rid:rid}); };
 
-  // جمع‌آوری تمامی مراکزِ تخصیص یافته به این هفته
+  // جمع‌آوری مراکز این هفته: هم با کلید weekId و هم با scheduledDate داخل بازه هفته
+  // (اگر week_id در SQL کهنه باشد، کارت از روز ناپدید نشود)
   var allEntries = [];
+  var seenRec={};
   Object.keys(DB.weekEntries||{}).forEach(function(k){
-    if(!k.startsWith(weekId+':::')) return;
-    var we = Object.assign({_key:k}, DB.weekEntries[k]);
+    var we0=DB.weekEntries[k];
+    if(!we0)return;
+    var inByKey=k.startsWith(weekId+':::');
+    var inByDate=!!(we0.scheduledDate&&daySet[we0.scheduledDate]);
+    if(!inByKey && !inByDate) return;
+    var we = Object.assign({_key:k}, we0);
     var rtype = we.rtype; var rid = we.rid;
+    var _rk=we.recKey||(rtype&&rid!=null?rtype+'_'+rid:'');
+    if(_rk&&seenRec[_rk])return;
+    if(_rk)seenRec[_rk]=true;
     var owner = '';
     if(rtype && rid){
       owner = getCenterOwner(rtype, rid) || we.addedBy || '';
-      // اعمال محدودیت نمایش برای کاربران غیر مدیر
-      var addedBy=we.addedBy||'';
       // نمایش بر اساس مسئول مرکز (نه اضافه‌کننده)
       if(!_isManager() && owner && owner !== currentUser) return;
     }
     we._owner = owner;
     we._ownerName = owner ? (USERS[owner] || owner) : 'بدون مسئول';
-    var _rk=we.recKey||(we.rtype&&we.rid?we.rtype+'_'+we.rid:'');
     _loadCNC();
     we._name = we.centerName || (_CNC&&_CNC[_rk]) || getRecLabel(_rk) || '?';
-    // ── filter by owner + search ──
     if(wpOwnerF){
       var effOwner=owner||'';
       if(effOwner && effOwner !== wpOwnerF) return;
-      if(!effOwner) return; // مرکز بدون مسئول در owner filter نشون نده
+      if(!effOwner) return;
     }
     if(wpSearchQ){
       var lbl=we._name||'';
@@ -585,7 +631,7 @@ function renderWpFullCenterList() {
   // ── Row renderers ─────────────────────────────────────────────────────
   var rowUnscheduled = function(c, n) {
     var oc = typeof umGetColor==='function' ? umGetColor(c.owner) : '#94a3b8';
-    var ek = c._key.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    var ekAttr = esc(c._key);
     var ri = String(c.rid).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     var aIcon = (typeof wpActLabel==='function'?wpActLabel(c.actionType||'call'):(c.actionType==='visit'?'🤝 ویزیت':'📞 تماس'));
     var aBg = (c.actionType==='visit' ? '#ede9fe' : ((c.actionType||'call')==='call' ? '#e0f2fe' : '#fef3c7'));
@@ -601,9 +647,9 @@ function renderWpFullCenterList() {
       +'<td><span style="font-size:10px;background:'+aBg+';color:'+aCol+';border-radius:4px;padding:2px 6px">'+aIcon+'</span></td>'
       +'<td></td>'
       +'<td style="white-space:nowrap">'
-        +'<button class="wp-fcl-act-btn wp-fcl-act-sched" onclick="wpSetScheduleFromKey(\''+ek+'\')">📅 تعیین روز</button> '
-        +'<button class="wp-fcl-act-btn" style="background:#fef3c7;color:#92400e;border-color:#fcd34d" onclick="wpMoveEntry(\''+ek+'\',\''+weekId+'\')">↪ هفته دیگر</button> '
-        +'<button class="wp-fcl-act-btn wp-fcl-act-remove" onclick="wpRemoveEntry(\''+ek+'\')">✕</button>'
+        +'<button class="wp-fcl-act-btn wp-fcl-act-sched" data-ekey="'+ekAttr+'" onclick="wpSetScheduleFromKey(this.getAttribute(\'data-ekey\'))">📅 تعیین روز</button> '
+        +'<button class="wp-fcl-act-btn" style="background:#fef3c7;color:#92400e;border-color:#fcd34d" data-ekey="'+ekAttr+'" onclick="wpMoveEntry(this.getAttribute(\'data-ekey\'),\''+weekId+'\')">↪ هفته دیگر</button> '
+        +'<button class="wp-fcl-act-btn wp-fcl-act-remove" data-ekey="'+ekAttr+'" onclick="wpRemoveEntry(this.getAttribute(\'data-ekey\'))">✕</button>'
       +'</td>'
     +'</tr>';
   };
@@ -925,15 +971,15 @@ function renderWpItem(entry,weekId){
   // نمایش ویژه پیگیری مطالبات
   if(rtype==='mtr'){
     var amtStr=entry.mtrAmount?Math.round(entry.mtrAmount).toLocaleString('fa')+' ت':'';
-    return '<div class="wp-item'+(done?' done':'')+'" data-ekey="'+k+'" draggable="true" ondragstart="event.stopPropagation();wpDragStart(event,\''+k+'\')" ondragend="wpDragEnd(event)" style="border-right-color:#dc2626;background:'+(done?'var(--bg-raised)':'#fef2f2')+'">'
+    return '<div class="wp-item'+(done?' done':'')+'" data-ekey="'+esc(k)+'" draggable="true" ondragstart="event.stopPropagation();wpDragStart(event,this.getAttribute(\'data-ekey\'))" ondragend="wpDragEnd(event)" style="border-right-color:#dc2626;background:'+(done?'var(--bg-raised)':'#fef2f2')+'">'
       +'<div style="display:flex;justify-content:space-between;align-items:flex-start;">'
       +'<div class="wp-item-name" style="color:#991b1b">📄 '+esc(entry.mtrCustomer||rid)+'</div>'
       +(amtStr?'<span style="font-size:9px;background:#fee2e2;color:#991b1b;padding:2px 6px;border-radius:10px;font-weight:700;white-space:nowrap">'+amtStr+'</span>':'')
       +'</div>'
       +'<div class="wp-item-meta" style="color:#dc2626">مطالبات — ف'+esc(rid)+(done?' ✓':'')+'</div>'
       +'<div class="wp-item-actions">'
-      +(done?'':`<button class="wp-btn done-btn" onclick="wpMarkDoneKey('`+k+`')">✓ وصول شد</button>`)
-      +`<button class="wp-btn" style="border-color:#dc2626;color:#991b1b" onclick="wpRemoveEntry('`+k+`')">✕</button>`
+      +(done?'':'<button type="button" class="wp-btn done-btn" data-ekey="'+esc(k)+'" onclick="wpMarkDoneKey(this.getAttribute(\'data-ekey\'))">✓ وصول شد</button>')
+      +'<button type="button" class="wp-btn" style="border-color:#dc2626;color:#991b1b" data-ekey="'+esc(k)+'" onclick="wpRemoveEntry(this.getAttribute(\'data-ekey\'))">✕</button>'
       +'</div></div>';
   }
   
@@ -953,18 +999,18 @@ function renderWpItem(entry,weekId){
     if(_dc)_todayDot='<span title="'+_dt+'" style="width:8px;height:8px;border-radius:50%;background:'+_dc+';display:inline-block;flex-shrink:0;border:1px solid rgba(0,0,0,.15)"></span>';
   }
 
-  return '<div class="wp-item'+(done?' done':'')+(!done&&isSel2?' wp-selected':'')+'" data-ekey="'+k+'" draggable="true" ondragstart="event.stopPropagation();wpDragStart(event,\''+k+'\')" ondragend="wpDragEnd(event)">'
-    + '<input type="checkbox" class="wp-item-cb" '+(isSel2?'checked':'')+' onclick="event.stopPropagation();wpToggleSelect(\''+(k)+'\')" title="انتخاب">'
+  return '<div class="wp-item'+(done?' done':'')+(!done&&isSel2?' wp-selected':'')+'" data-ekey="'+esc(k)+'" draggable="true" ondragstart="event.stopPropagation();wpDragStart(event,this.getAttribute(\'data-ekey\'))" ondragend="wpDragEnd(event)">'
+    + '<input type="checkbox" class="wp-item-cb" '+(isSel2?'checked':'')+' onclick="event.stopPropagation();wpToggleSelect(this.closest(\'.wp-item\').getAttribute(\'data-ekey\'))" title="انتخاب">'
     + '<div style="display:flex;justify-content:space-between;align-items:flex-start;padding-left:18px;">'
-    + '<div class="wp-item-name" onclick="openCenterModal(\''+rtype+'\',\''+rid+'\')" style="cursor:pointer;text-decoration:underline dotted;color:var(--brand);display:flex;align-items:center;gap:4px">'+_todayDot+esc(name)+'</div>'
-    + '<span style="font-size:9px; cursor:pointer; background:'+actBg+'; color:var(--text-primary); padding:2px 5px; border-radius:4px; white-space:nowrap;" onclick="toggleWpActionType(\''+k+'\')" title="تغییر نوع پیگیری با یک کلیک">'+actIcon+'</span>'
+    + '<div class="wp-item-name" data-open-center="1" data-rtype="'+esc(rtype)+'" data-rid="'+esc(String(rid))+'" style="cursor:pointer;text-decoration:underline dotted;color:var(--brand);display:flex;align-items:center;gap:4px">'+_todayDot+esc(name)+'</div>'
+    + '<span style="font-size:9px; cursor:pointer; background:'+actBg+'; color:var(--text-primary); padding:2px 5px; border-radius:4px; white-space:nowrap;" data-ekey="'+esc(k)+'" onclick="toggleWpActionType(this.getAttribute(\'data-ekey\'))" title="تغییر نوع پیگیری با یک کلیک">'+actIcon+'</span>'
     + '</div>'
     + (function(){var _ce=getE(rtype,rid);var _st=_ce.status||'بدون تماس';var _owId=_wpGetOwner(entry);var _ow=USERS[_owId]||_owId||'';var _fd=_ce.followupDate||'';var _owHtml=_ow?'<span style="display:inline-block;background:#dbeafe;color:#1e40af;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:600;margin-right:4px">👤 '+esc(_ow)+'</span>':'';return '<div class="wp-item-meta" style="margin-top:3px">'+_owHtml+'<span style="font-size:9px;color:var(--text-muted)">'+_st+( (_fd)?' 📅 '+_fd:'')+' '+(done?'✓ '+entry.doneDate:'')+'</span></div>';})()
     + '<div class="wp-item-actions">'
-    + (done?'' : '<button class="wp-btn done-btn" onclick="wpMarkDoneKey(\''+ k +'\')">✓ انجام شد</button>')
-    + '<button class="wp-btn move-btn" onclick="wpSetScheduleFromKey(\''+ k +'\')">📅 تنظیم</button>'
-    + '<button class="wp-btn" style="border-color:#0ea5e9;color:#0369a1" onclick="wpMoveEntry(\''+ k +'\',\''+ weekId +'\')">↪ هفته دیگر</button>'
-    + '<button class="wp-btn" style="border-color:#dc2626;color:#991b1b" onclick="wpRemoveEntry(\''+ k +'\')">✕</button>'
+    + (done?'' : '<button type="button" class="wp-btn done-btn" data-ekey="'+esc(k)+'" onclick="wpMarkDoneKey(this.getAttribute(\'data-ekey\'))">✓ انجام شد</button>')
+    + '<button type="button" class="wp-btn move-btn" data-ekey="'+esc(k)+'" onclick="wpSetScheduleFromKey(this.getAttribute(\'data-ekey\'))">📅 تنظیم</button>'
+    + '<button type="button" class="wp-btn" style="border-color:#0ea5e9;color:#0369a1" data-ekey="'+esc(k)+'" data-weekid="'+esc(weekId)+'" onclick="wpMoveEntry(this.getAttribute(\'data-ekey\'),this.getAttribute(\'data-weekid\'))">↪ هفته دیگر</button>'
+    + '<button type="button" class="wp-btn" style="border-color:#dc2626;color:#991b1b" data-ekey="'+esc(k)+'" onclick="wpRemoveEntry(this.getAttribute(\'data-ekey\'))">✕</button>'
     + '</div></div>';
 }
 var _wpSelected = new Set();
@@ -973,7 +1019,17 @@ function wpToggleSelect(eKey){
   if(_wpSelected.has(eKey)) _wpSelected.delete(eKey);
   else _wpSelected.add(eKey);
   _wpUpdateBulkBar();
-  var el = document.querySelector('.wp-item[data-ekey="'+eKey+'"]');
+  var el = null;
+  try {
+    if (window.CSS && typeof CSS.escape === 'function') {
+      el = document.querySelector('.wp-item[data-ekey="'+CSS.escape(eKey)+'"]');
+    }
+  } catch (e) {}
+  if (!el) {
+    el = Array.prototype.find.call(document.querySelectorAll('.wp-item[data-ekey]'), function (node) {
+      return node.getAttribute('data-ekey') === eKey;
+    });
+  }
   if(el){
     if(_wpSelected.has(eKey)) el.classList.add('wp-selected');
     else el.classList.remove('wp-selected');
@@ -1113,8 +1169,12 @@ function wpDoBulkMove(targetWeekId){
 }
 
 function wpMarkDoneKey(eKey){
+  if(!eKey)return;
   if(typeof openCenterInteraction==='function'){
-    if(!DB.weekEntries[eKey])return;
+    if(!DB.weekEntries[eKey]){
+      showToast('⚠ این کارت در حافظه نیست — صفحه را رفرش کنید');
+      return;
+    }
     var we=DB.weekEntries[eKey];
     var rtype=we.rtype||(we.recKey?we.recKey.split('_')[0]:'center');
     var rid=we.rid||(we.recKey?we.recKey.split('_').slice(1).join('_'):'');
@@ -1126,7 +1186,9 @@ function wpMarkDoneKey(eKey){
     });
     return;
   }
+  showToast('⚠ ماژول ثبت نتیجه لود نشده');
 }
+window.wpMarkDoneKey = wpMarkDoneKey;
 function _mdkSelectOutcome(lbl,val){if(typeof _ciSelectOutcome==='function')_ciSelectOutcome(lbl,val);}
 function _mdkLostSelect(btn,reason){if(typeof _ciLostSelect==='function')_ciLostSelect(btn,reason);}
 function _mdkCheckSubmit(){if(typeof _ciCheckSubmit==='function')_ciCheckSubmit();}
@@ -1335,13 +1397,17 @@ function wpMoveEntry(eKey,currentWeekId){
   if(!we)return;
   var recKey=we.recKey||(we.rtype+'_'+we.rid);
   function _open(){
-    var freshKey=eKey;
-    Object.keys(DB.weekEntries||{}).forEach(function(k){
-      var w2=DB.weekEntries[k];
-      if(!w2||w2.done)return;
-      if(typeof wpMatchRecKey==='function'?wpMatchRecKey(w2,recKey):(w2.recKey||(w2.rtype+'_'+w2.rid))!==recKey)return;
-      freshKey=k;
-    });
+    var freshKey=(DB.weekEntries[eKey]&&!DB.weekEntries[eKey].done)?eKey:null;
+    if(!freshKey){
+      Object.keys(DB.weekEntries||{}).forEach(function(k){
+        if(currentWeekId&&!k.startsWith(currentWeekId+':::'))return;
+        var w2=DB.weekEntries[k];
+        if(!w2||w2.done)return;
+        if(typeof wpMatchRecKey==='function'?!wpMatchRecKey(w2,recKey):(w2.recKey||(w2.rtype+'_'+w2.rid))!==recKey)return;
+        freshKey=k;
+      });
+    }
+    if(!freshKey)return;
     _wpMoveEntryRender(freshKey,currentWeekId);
   }
   if(typeof wpSyncCenterWeekEntriesFromApi==='function'){
@@ -2784,7 +2850,7 @@ function wpOpenTodayPlanModal(dateStr) {
         var resFg = en.doneResult === 'won' ? '#15803d' : en.doneResult === 'inactive' ? '#b91c1c' : '#0369a1';
         doneHtml = '<span style="background:' + resBg + ';color:' + resFg + ';padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600">✓ انجام شد (' + resText + ')</span>';
       } else {
-        doneHtml = '<button onclick="closeModal(\'todayPlanModal\'); wpMarkDoneKey(\'' + en.key + '\')" style="background:#22c55e;color:#fff;border:none;border-radius:5px;padding:5px 10px;cursor:pointer;font-size:11px;font-family:inherit;font-weight:600">✓ ثبت نتیجه</button>';
+        doneHtml = '<button type="button" data-ekey="'+esc(en.key)+'" onclick="closeModal(\'todayPlanModal\'); wpMarkDoneKey(this.getAttribute(\'data-ekey\'))" style="background:#22c55e;color:#fff;border:none;border-radius:5px;padding:5px 10px;cursor:pointer;font-size:11px;font-family:inherit;font-weight:600">✓ ثبت نتیجه</button>';
       }
 
       var removeBtn = '<button onclick="wpRemoveTodayPlanItem(\'' + en.key + '\', \'' + today + '\')" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:11px;font-family:inherit" title="حذف از امروز">❌ حذف</button>';

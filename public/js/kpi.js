@@ -53,60 +53,9 @@ function renderKPIHistoryChart(userId){
 }
 
 
-function ensureKPIDB(){
-  if(!DB.kpiTargets)DB.kpiTargets={};
-  if(!DB.callLog)DB.callLog=[];
-  if(!DB.visitLog)DB.visitLog=[];
-  if(!DB.salesLog)DB.salesLog=[];
-  if(!DB.missionLog)DB.missionLog=[];
-  if(typeof _migrateManagerTasksBlob==='function')_migrateManagerTasksBlob();
-}
+// ensureKPIDB, currentJMonth, jMonthBounds, getKPITarget, getCallsMonth,
+// getSalesMonth, getVisitsMonth, getWeekVisits, … live in core.js (eager).
 
-// ── تاریخ شمسی ──────────────────────────────────────────────────
-function currentJMonth(){var t=todayJ();return t[0]+'/'+p2(t[1]);}
-function jMonthBounds(key){
-  var pts=key.split('/');var jy=parseInt(pts[0]);var jm=parseInt(pts[1]);
-  var lastDay=jm<=6?31:jm<=11?30:29;
-  var g1=j2g(jy,jm,1);var g2=j2g(jy,jm,lastDay);
-  return{
-    startTs:new Date(g1[0],g1[1]-1,g1[2],0,0,0).getTime(),
-    endTs:new Date(g2[0],g2[1]-1,g2[2],23,59,59).getTime()
-  };
-}
-function jMonthLabel(key){
-  var pts=key.split('/');
-  return J_MONTHS[parseInt(pts[1])-1]+' '+pts[0];
-}
-function prevJMonths(n){
-  var t=todayJ();var jy=t[0];var jm=t[1];
-  var res=[];
-  for(var i=0;i<n;i++){
-    res.push(jy+'/'+p2(jm));
-    jm--;if(jm<1){jm=12;jy--;}
-  }
-  return res;
-}
-function workingDaysInJMonth(key){
-  var m=parseInt(key.split('/')[1]);
-  return m<=6?26:m<=11?25:24;
-}
-function dateStrToTs(d){ // "1404/01/15" → timestamp
-  var pts=d.split('/');return jMs(parseInt(pts[0]),parseInt(pts[1]),parseInt(pts[2]));
-}
-function currentWeekBounds(){
-  var d=new Date();
-  var dow=(d.getDay()+1)%7; // 0=sat(شنبه)..6=fri(جمعه)
-  var sat=new Date(d);sat.setDate(d.getDate()-dow);sat.setHours(0,0,0,0);
-  var fri=new Date(sat);fri.setDate(sat.getDate()+6);fri.setHours(23,59,59,999);
-  return{startTs:sat.getTime(),endTs:fri.getTime()};
-}
-
-// ── اهداف ────────────────────────────────────────────────────────
-function getKPITarget(userId,month){
-  ensureKPIDB();
-  var k=userId+':'+month;
-  return Object.assign({callsPerDay:10,visitsPerWeek:5,salesCount:5,salesAmount:0,cashPct:50},DB.kpiTargets[k]||{});
-}
 function saveKPITarget(userId,month,targets){
   ensureKPIDB();
   var k=userId+':'+month;
@@ -116,18 +65,9 @@ function saveKPITarget(userId,month,targets){
 }
 
 // ── داده‌های ماه — projection از call_log / visit_log (SQL via DB.* پس از reload) ──
-function getCallsMonth(userId,month){
-  ensureKPIDB();var b=jMonthBounds(month);
-  return (DB.callLog||[]).filter(function(l){var ts=dateStrToTs(l.date);return l.userId===userId&&ts>=b.startTs&&ts<=b.endTs;});
-}
-
-function getSalesMonth(userId,month){
-  ensureKPIDB();var b=jMonthBounds(month);
-  return DB.salesLog.filter(function(l){var ts=dateStrToTs(l.date);return l.userId===userId&&ts>=b.startTs&&ts<=b.endTs;});
-}
 function getMissionMonth(userId,month){
   ensureKPIDB();
-  return DB.missionLog.find(function(l){return l.userId===userId&&l.month===month;});
+  return (DB.missionLog||[]).find(function(l){return l.userId===userId&&l.month===month;});
 }
 function getAutoConversions(userId,month){
   var b=jMonthBounds(month);var n=0;
@@ -157,22 +97,6 @@ function _getOwnerForRecKey(recKey){
   var pts=recKey.split('_');var rtype=pts[0];var rid=pts.slice(1).join('_');
   return _wpGetOwner({rtype:rtype,rid:rid});
 }
-function getVisitsMonth(userId,month){
-  ensureKPIDB();var b=jMonthBounds(month);
-  var manV=(DB.visitLog||[]).filter(function(l){
-    var ts=dateStrToTs(l.date);return l.userId===userId&&ts>=b.startTs&&ts<=b.endTs;
-  });
-  var manTotal=manV.reduce(function(s,l){return s+(l.count||1);},0);
-  return{auto:[],manual:manV,total:manTotal,manTotal:manTotal};
-}
-function getWeekVisits(userId){
-  ensureKPIDB();var wb=currentWeekBounds();
-  var manV=(DB.visitLog||[]).filter(function(l){
-    var ts=dateStrToTs(l.date);return l.userId===userId&&ts>=wb.startTs&&ts<=wb.endTs;
-  });
-  return manV.reduce(function(s,l){return s+(l.count||1);},0);
-}
-
 // ── محاسبه KPI ───────────────────────────────────────────────────
 function calcKPIs(userId,month){
   ensureKPIDB();
@@ -534,7 +458,6 @@ function _renderDiscoverySection() {
   if(el) el.innerHTML = _buildDiscoveryHtml(_discoveredCenters || []);
 }
 
-var _recentCenters=[];
 var _discFilter='new';
 function _buildDiscoveryHtml(centers) {
   var filtered = _discFilter === 'all'

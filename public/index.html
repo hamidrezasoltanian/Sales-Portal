@@ -46,7 +46,7 @@ setTimeout(function(){
   if((tb&&tb.offsetHeight>=8)||(lo&&lo.style.display==='flex'))return;
   __showBootError('صفحه کامل بارگذاری نشد. Hard Refresh بزنید (Ctrl+Shift+R) یا کش مرورگر را پاک کنید.');
 },12000);
-window.__APP_BUILD='20260716i';
+window.__APP_BUILD='20260718f';
 if('serviceWorker' in navigator){
   navigator.serviceWorker.getRegistrations().then(function(regs){
     regs.forEach(function(r){r.unregister();});
@@ -54,8 +54,8 @@ if('serviceWorker' in navigator){
 }
 </script>
 <!-- Vazirmatn از jsDelivr — npm package، بدون Google dependency -->
-<link rel="stylesheet" href="/css/app.css?v=20260716i">
-<link rel="stylesheet" href="/dist/assets/main.css?v=20260716i">
+<link rel="stylesheet" href="/css/app.css?v=20260718f">
+<link rel="stylesheet" href="/dist/assets/main.css?v=20260718f">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" onerror="console.warn('XLSX CDN failed - only TSV format supported offline')"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
 </head>
@@ -126,7 +126,6 @@ if('serviceWorker' in navigator){
     <div class="sb-divider sb-manager-wrap" style="display:none"></div>
     <div class="sb-section-label sb-manager-wrap" style="display:none">مدیریت</div>
     <button class="tab-btn sb-manager-wrap" id="tab_kpi" onclick="switchTab('kpi')" title="KPI" style="display:none"><span class="sb-icon">📊</span><span class="sb-label">KPI</span></button>
-    <button class="tab-btn sb-manager-wrap" id="tab_manager" onclick="switchTab('manager')" title="بررسی مدیر" style="display:none"><span class="sb-icon">🔎</span><span class="sb-label">بررسی مدیر</span></button>
     <button class="tab-btn sb-manager-wrap" id="tab_changelog" onclick="switchTab('changelog')" title="لاگ تغییرات" style="display:none"><span class="sb-icon">🗃</span><span class="sb-label">لاگ تغییرات</span></button>
     <button class="tab-btn sb-manager-wrap" id="tab_reports" onclick="switchTab('reports')" title="گزارش‌های تحلیلی" style="display:none"><span class="sb-icon">📊</span><span class="sb-label">گزارش‌ها</span></button>
     <button class="tab-btn sb-manager-wrap" id="tab_week_planner" onclick="switchTab('week-planner')" title="تخصیص برنامه هفتگی" style="display:none"><span class="sb-icon">📋</span><span class="sb-label">تخصیص برنامه</span></button>
@@ -788,37 +787,31 @@ if('serviceWorker' in navigator){
   <button class="mob-tab" onclick="switchTab('support')"><span class="mob-icon">🎧</span>پشتیبانی</button>
   <button class="mob-tab" onclick="switchTab('calendar')"><span class="mob-icon">🗓</span>تقویم</button>
   <button class="mob-tab" onclick="switchTab('activity')"><span class="mob-icon">📊</span>فعالیت</button>
-  <button class="mob-tab sb-manager-wrap" onclick="switchTab('reports')"><span class="mob-icon">📈</span>گزارش‌ها</button>
+  <button class="mob-tab sb-manager-wrap" id="mob_tab_reports" onclick="switchTab('reports')"><span class="mob-icon">📈</span>گزارش‌ها</button>
   <button class="mob-tab sb-manager-wrap" onclick="switchTab('kpi')"><span class="mob-icon">🎯</span>KPI</button>
   <button class="mob-tab" onclick="switchTab('mtr')"><span class="mob-icon">💰</span>مطالبات</button>
 </nav>
 <!-- DATA — core modules; tab-specific scripts load on demand via tab-loader.js -->
-<script src="/js/safe-dom.js?v=20260716i"></script>
-<script src="/js/tab-loader.js?v=20260716i"></script>
-<script src="/js/roles.js?v=20260716i"></script>
-<script src="/js/core.js?v=20260716i"></script>
-<script src="/js/settings.js?v=20260716i"></script>
-<script src="/js/data.js?v=20260716i"></script>
-<script src="/js/ui-core.js?v=20260716i"></script>
-<script src="/js/kpi.js?v=20260716i"></script>
-<script src="/js/dashboard.js?v=20260716i"></script>
-<script src="/js/center-interactions.js?v=20260716i"></script>
-<script src="/js/provinces.js?v=20260716i"></script>
-<script src="/js/center-modal.js?v=20260716i"></script>
-<script src="/js/global-search.js?v=20260716i"></script>
-<script src="/js/center-deals.js?v=20260716i"></script>
-<script src="/js/center-files.js?v=20260716i"></script>
-<script src="/js/workflows.js?v=20260716i"></script>
-<script src="/js/pricing.js?v=20260716i"></script>
-<script src="/js/weekplan.js?v=20260716i"></script>
-<script src="/js/manager.js?v=20260716i"></script>
-<script src="/js/tasks.js?v=20260716i"></script>
-<script src="/js/payroll.js?v=20260716i"></script>
-<script src="/js/crm-complete.js?v=20260716i"></script>
-<script src="/js/onboarding.js?v=20260716i"></script>
-<script src="/js/backup.js?v=20260716i"></script>
-<script src="/js/data-hub.js?v=20260716i"></script>
-<script type="module" src="/dist/assets/main.js?v=20260716i"></script>
+<script src="/js/safe-dom.js?v=20260718f"></script>
+<script src="/js/tab-loader.js?v=20260718f"></script>
+<script src="/js/roles.js?v=20260718f"></script>
+<script src="/js/core.js?v=20260718f"></script>
+<script src="/js/settings.js?v=20260718f"></script>
+<script src="/js/data.js?v=20260718f"></script>
+<script src="/js/ui-core.js?v=20260718f"></script>
+<script src="/js/dashboard.js?v=20260718f"></script>
+<script src="/js/center-interactions.js?v=20260718f"></script>
+<script src="/js/provinces.js?v=20260718f"></script>
+<script src="/js/center-modal.js?v=20260718f"></script>
+<script src="/js/global-search.js?v=20260718f"></script>
+<script src="/js/center-deals.js?v=20260718f"></script>
+<script src="/js/center-files.js?v=20260718f"></script>
+<script src="/js/pricing.js?v=20260718f"></script>
+<script src="/js/weekplan.js?v=20260718f"></script>
+<script src="/js/manager.js?v=20260718f"></script>
+<script src="/js/crm-complete.js?v=20260718f"></script>
+<script src="/js/onboarding.js?v=20260718f"></script>
+<script type="module" src="/dist/assets/main.js?v=20260718f"></script>
 <script>
 (function(){
   if(!window.__APP_BUILD||sessionStorage.getItem('_build_ok_'+window.__APP_BUILD))return;

@@ -1,19 +1,6 @@
 /* ═══ public/js/dashboard.js ═══ */
 // ════════════════════════ DASHBOARD ═══════════════════
-// Fallback: ensureKPIDB lives in kpi.js (lazy-loaded). Dashboard is eager-loaded
-// and calls it before the KPI tab opens, so provide a safe base version here.
-// kpi.js redefines the fuller version once loaded.
-if (typeof window.ensureKPIDB !== 'function') {
-  window.ensureKPIDB = function () {
-    if (typeof DB === 'undefined' || !DB) return;
-    if (!DB.kpiTargets) DB.kpiTargets = {};
-    if (!DB.callLog) DB.callLog = [];
-    if (!DB.visitLog) DB.visitLog = [];
-    if (!DB.salesLog) DB.salesLog = [];
-    if (!DB.missionLog) DB.missionLog = [];
-    if (typeof _migrateManagerTasksBlob === 'function') _migrateManagerTasksBlob();
-  };
-}
+// ensureKPIDB / currentJMonth / getKPITarget / … are defined in core.js
 
 // ════════════════════════ PERSONAL USER DASHBOARD ══════════════
 // ════════════════════════ DASHBOARD HELPERS ════════════════════════

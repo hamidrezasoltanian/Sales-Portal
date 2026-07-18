@@ -22,17 +22,19 @@ async function loadCenterAccessContext() {
   return { edits, ownerMaps: buildOwnerMaps(centersMaster, extraR.rows) };
 }
 
-function provinceAllowed(user, centerKey) {
+function provinceAllowed(user, centerKey, ownerMaps) {
   const allowlist = getUserProvinceAllowlist(user);
   if (!allowlist || !allowlist.length) return true;
-  const provinceId = getCenterProvinceId(centerKey);
-  return !!provinceId && allowlist.includes(provinceId);
+  const provinceId = getCenterProvinceId(centerKey, ownerMaps);
+  // Unknown province (legacy extra keys): do not block solely on province list
+  if (!provinceId) return true;
+  return allowlist.includes(provinceId);
 }
 
 function canAccessCenter(user, centerKey, context) {
   if (!user || !centerKey) return false;
   if (isManagerRole(user.role)) return true;
-  if (!provinceAllowed(user, centerKey)) return false;
+  if (!provinceAllowed(user, centerKey, context && context.ownerMaps)) return false;
   const owner = resolveCenterOwner(centerKey, context.edits, context.ownerMaps);
   // Unassigned centers remain available for team intake.
   return !owner || owner === user.username;

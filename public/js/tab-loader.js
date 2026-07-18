@@ -9,7 +9,7 @@
     activity: ['activity-log.js'],
     changelog: [],
     tasks: ['tasks.js'],
-    kpi: ['tasks.js', 'manager-tasks.js'],
+    kpi: ['tasks.js', 'manager-tasks.js', 'kpi.js'],
     mtr: ['mtr.js'],
     proforma: ['proforma.js', 'proforma-analytics.js', 'proforma-phase2.js'],
     hcp: ['hcp.js'],
@@ -22,9 +22,11 @@
     home: ['home-cartable.js'],
     pricing: [],
     weekplan: [],
-    manager: ['tasks.js'],
+    manager: ['tasks.js', 'reports.js'],
     provinces: [],
-    letters: []
+    letters: [],
+    workflows: ['workflows.js'],
+    backup: ['backup.js', 'data-hub.js']
   };
 
   function _loadOne(file) {

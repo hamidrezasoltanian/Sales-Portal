@@ -19,7 +19,7 @@ function getFiltered(){
     if(fp&&String(e.potential||r.potential)!==fp)return false;
     var st=e.status||'بدون تماس';if(fs&&st!==fs)return false;
     var lead=(e.lead||r.lead||'').replace(/[ي]/g,'ی').replace(/[ك]/g,'ک').trim();if(fl&&lead!==fl)return false;
-    var owner=e.owner||r.owner||'';if(effectiveOwner&&owner!==effectiveOwner)return false;
+    var owner=typeof getCenterOwner==='function'?getCenterOwner(crtype,r.id):(e.owner||r.owner||'');if(effectiveOwner&&owner!==effectiveOwner)return false;
     if(ftp){var ctype=e.type||r.type||'';if(ctype.indexOf(ftp)<0)return false;}
     if(ft){var tgs=rTags(crtype,r.id);if(tgs.indexOf(ft)===-1)return false;}
     // Quick filter
@@ -381,7 +381,7 @@ function renderProvTable(){
         +pinBtn
         +(isStalled(crtype,r.id)&&rowCls!=='row-contracted'?'<span class="risk-badge" title="۳۰+ روز بدون فعالیت">🔴</span>':'')
         +(isOverdue(crtype,r.id)&&rowCls!=='row-stalled'?'<span class="risk-badge" title="پیگیری معوق">🟠</span>':'')
-        +(e.biopsyScore?'<span class="biopsy-badge" title="پتانسیل بیوپسی (امتیاز ۶-۱۰+) — '+(e.biopsyReasons||[]).join(' • ')+'">🔬 '+e.biopsyScore+'</span>':'')
+        +(e.biopsyScore?'<span class="biopsy-badge" title="پتانسیل بیوپسی (امتیاز ۶-۱۰+) — '+esc((e.biopsyReasons||[]).join(' • '))+'">🔬 '+e.biopsyScore+'</span>':'')
         +(typeof centerHasKol==='function'&&centerHasKol(crtype,r.id)?'<span title="مرکز دارای KOL / پزشک کلیدی" style="display:inline-block;background:#fdf4ff;color:#7e22ce;border:1px solid #e9d5ff;border-radius:9px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:3px">👨‍⚕️ KOL</span>':'')
         +(function(){
           var comps=typeof getCenterCompetitorsFromEdit==='function'?getCenterCompetitorsFromEdit(e):[];
@@ -391,31 +391,31 @@ function renderProvTable(){
           }).join('');
         })()
         +(function(){var _mi=typeof MTR_BY_CENTER!=='undefined'?MTR_BY_CENTER[r.id]:null;if(!_mi||!_mi.length)return '';var _ov=_mi.filter(function(x){return x.od>45;});var _warn=_mi.filter(function(x){return x.od>20&&x.od<=45;});var _col=_ov.length?'#dc2626':_warn.length?'#d97706':'#0ea5e9';return '<span title="مطالبات باز" style="background:'+_col+';color:var(--text-primary);border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700;margin-right:5px;cursor:default">💰 '+_mi.length+'</span>';})()
-        +'<button class="ctr-link" onclick="openCenterModal(\''+crtype+'\',\''+r.id+'\')">'+esc(displayName)+'</button>'
-        +'<button onclick="event.stopPropagation();openCallFocus(\''+crtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')" title="پانل تماس سریع" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:.55;vertical-align:middle" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.55">📞</button>'
-        +'<button onclick="event.stopPropagation();openPreCallBrief(\''+crtype+'\',\''+r.id+'\')" title="خلاصه قبل تماس" style="background:none;border:none;cursor:pointer;font-size:10px;padding:0 2px;opacity:.6">🎯</button>'
+        +'<button type="button" class="ctr-link" data-open-center="1" data-rtype="'+esc(crtype)+'" data-rid="'+esc(String(r.id))+'">'+esc(displayName)+'</button>'
+        +'<button type="button" data-open-callfocus="1" data-rtype="'+esc(crtype)+'" data-rid="'+esc(String(r.id))+'" data-name="'+esc(displayName)+'" title="پانل تماس سریع" style="background:none;border:none;cursor:pointer;font-size:12px;padding:1px 3px;opacity:.55;vertical-align:middle" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.55">📞</button>'
+        +'<button type="button" onclick="event.stopPropagation();openPreCallBrief(\''+escJs(crtype)+'\',\''+escJs(String(r.id))+'\')" title="خلاصه قبل تماس" style="background:none;border:none;cursor:pointer;font-size:10px;padding:0 2px;opacity:.6">🎯</button>'
         +phoneHtml
-        +(e.phones&&e.phones.length||e.address||e.contactName||(e.contacts&&e.contacts.length)?'<button onclick="event.stopPropagation();showContactPopup(event,\''+crtype+'\',\''+r.id+'\')" title="اطلاعات تماس" style="background:none;border:none;cursor:pointer;font-size:10px;padding:0 2px;color:#0369a1;vertical-align:middle">📋</button>':'')
+        +(e.phones&&e.phones.length||e.address||e.contactName||(e.contacts&&e.contacts.length)?'<button type="button" onclick="event.stopPropagation();showContactPopup(event,\''+escJs(crtype)+'\',\''+escJs(String(r.id))+'\')" title="اطلاعات تماس" style="background:none;border:none;cursor:pointer;font-size:10px;padding:0 2px;color:#0369a1;vertical-align:middle">📋</button>':'')
         +renderTagCell(crtype,r.id)+'</td>'
-      +'<td><select class="pot-btn pot-'+pot+'" onchange="setE(\''+crtype+'\',\''+r.id+'\',\'potential\',parseInt(this.value));this.className=\'pot-btn pot-\'+this.value">'
+      +'<td><select class="pot-btn pot-'+pot+'" onchange="setE(\''+escJs(crtype)+'\',\''+escJs(String(r.id))+'\',\'potential\',parseInt(this.value));this.className=\'pot-btn pot-\'+this.value">'
         +[1,2,3,4].map(function(v){return'<option value="'+v+'"'+(pot==v?' selected':'')+'>'+v+'</option>';}).join('')+'</select></td>'
-      +(function(){var typeOpts=[''].concat(TYPE_LIST);var curType=e.type||r.type||'';return'<td><select class="ed-inp" onchange="setE(\''+crtype+'\',\''+r.id+'\',\'type\',this.value)" style="width:90px">'+typeOpts.map(function(t){return'<option value="'+t+'"'+(curType===t?' selected':'')+'>'+(t||'-- نوع --')+'</option>';}).join('')+'</select></td>';})()
+      +(function(){var typeOpts=[''].concat(TYPE_LIST);var curType=e.type||r.type||'';return'<td><select class="ed-inp" onchange="setE(\''+escJs(crtype)+'\',\''+escJs(String(r.id))+'\',\'type\',this.value)" style="width:90px">'+typeOpts.map(function(t){return'<option value="'+esc(t)+'"'+(curType===t?' selected':'')+'>'+(t||'-- نوع --')+'</option>';}).join('')+'</select></td>';})()
 
-      +'<td><select class="ed-sel '+lc+'" onchange="setE(\''+crtype+'\',\''+r.id+'\',\'lead\',this.value);this.className=\'ed-sel \'+(window.LEAD_CLS[this.value]||\'lead-none\')">'
+      +'<td><select class="ed-sel '+lc+'" onchange="setE(\''+escJs(crtype)+'\',\''+escJs(String(r.id))+'\',\'lead\',this.value);this.className=\'ed-sel \'+(window.LEAD_CLS[this.value]||\'lead-none\')">'
         +LEAD_LIST.map(function(l){return'<option'+(l===lead?' selected':'')+'>'+l+'</option>';}).join('')+'</select>'+(e.oppGrade?'<span style="font-size:9px;font-weight:700;padding:1px 4px;border-radius:3px;background:'+(e.oppGrade==='A'?'#fef08a;color:#92400e':e.oppGrade==='B'?'#fed7aa;color:#c2410c':'#e2e8f0;color:#475569')+'">'+e.oppGrade+'</span>':'')+(e.oppValue?'<span style="font-size:9px;color:#7c3aed">'+e.oppValue+'M</span>':'')+(e.customerStatus==='dormant'?'<span title="مشتری خوابیده">😴</span>':'')+'</td>'
       +'<td style="white-space:nowrap"><span class="owner-dot" data-uid="'+encodeURIComponent(e.owner||r.owner||'')+'"></span>'
-      +'<select class="ed-sel" onchange="setE(\''+crtype+'\',\''+r.id+'\',\'owner\',this.value);var _d=this.previousElementSibling;if(_d)_d.style.background=window.umGetColor?umGetColor(this.value):\'#e2e8f0\'">'
+      +'<select class="ed-sel" onchange="setE(\''+escJs(crtype)+'\',\''+escJs(String(r.id))+'\',\'owner\',this.value);var _d=this.previousElementSibling;if(_d)_d.style.background=window.umGetColor?umGetColor(this.value):\'#e2e8f0\'">'
       +'<option value="">—</option>'
-        +(function(){var _act=typeof umGetActive==='function'?umGetActive():[];return _act.map(function(m){return'<option value="'+m.id+'"'+((e.owner||r.owner||'')==m.id?' selected':'')+'>'+m.name+'</option>';}).join('');})()+'</select>'+(function(){var _ow=e.owner||r.owner||'';if(!_ow)return'';var _om=_DEFAULT_MEMBERS&&_DEFAULT_MEMBERS.find(function(mm){return mm.id===_ow;});return(_om&&_om.active===false)?'<span title="مالک غیرفعال" style="font-size:9px;color:#dc2626;background:#fee2e2;border-radius:4px;padding:1px 4px;margin-right:2px">⚠</span>':'';})()+' </td>'
-      +'<td><select class="st-sel '+sc+'" onchange="onStatus(\''+crtype+'\',\''+r.id+'\',this)">'
+        +(function(){var _act=typeof umGetActive==='function'?umGetActive():[];return _act.map(function(m){return'<option value="'+esc(m.id)+'"'+((e.owner||r.owner||'')==m.id?' selected':'')+'>'+esc(m.name)+'</option>';}).join('');})()+'</select>'+(function(){var _ow=e.owner||r.owner||'';if(!_ow)return'';var _om=_DEFAULT_MEMBERS&&_DEFAULT_MEMBERS.find(function(mm){return mm.id===_ow;});return(_om&&_om.active===false)?'<span title="مالک غیرفعال" style="font-size:9px;color:#dc2626;background:#fee2e2;border-radius:4px;padding:1px 4px;margin-right:2px">⚠</span>':'';})()+' </td>'
+      +'<td><select class="st-sel '+sc+'" onchange="onStatus(\''+escJs(crtype)+'\',\''+escJs(String(r.id))+'\',this)">'
         +STATUS_LIST.map(function(s,i){return'<option class="'+STATUS_CLS[i]+'"'+(s===st?' selected':'')+'>'+s+'</option>';}).join('')+'</select>'
         +'<span class="st-print">'+st+'</span></td>'
-      +'<td style="white-space:nowrap">'+(_activeNoDate?'<span title="بدون تاریخ پیگیری" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f97316;margin-left:3px;vertical-align:middle"></span>':'')+'<input type="text" class="'+fdCls+'" value="'+fd+'" readonly onclick="openJDP(this,function(v){setE(\''+crtype+'\',\''+r.id+'\',\'followupDate\',v);this.value=v;renderBanner();renderProvTable();}.bind(this))" style="cursor:pointer;max-width:82px">'+'<button class="qfd-btn" onclick="event.stopPropagation();quickSetFd(\''+crtype+'\',\''+r.id+'\',1)" title="فردا">+۱</button>'+'<button class="qfd-btn" onclick="event.stopPropagation();quickSetFd(\''+crtype+'\',\''+r.id+'\',3)" title="۳ روز">+۳</button>'+'<button class="qfd-btn" onclick="event.stopPropagation();quickSetFd(\''+crtype+'\',\''+r.id+'\',7)" title="هفته">+۷</button></td>'
-      +'<td><button class="note-btn'+(notes.length?' has':'')+'" onclick="openNotes(\''+crtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">📝'+(notes.length?' '+notes.length:'')+'</button>'
-        +'<input style="margin-right:4px;width:100px;border:1px solid var(--border-input);border-radius:4px;padding:2px 5px;font-size:10px;direction:rtl" placeholder="یادداشت سریع" onkeydown="if(event.key===\'Enter\'&&this.value.trim()){addNote(\''+crtype+'\',\''+r.id+'\',this.value,this);}">'
+      +'<td style="white-space:nowrap">'+(_activeNoDate?'<span title="بدون تاریخ پیگیری" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f97316;margin-left:3px;vertical-align:middle"></span>':'')+'<input type="text" class="'+fdCls+'" value="'+esc(fd)+'" readonly onclick="openJDP(this,function(v){setE(\''+escJs(crtype)+'\',\''+escJs(String(r.id))+'\',\'followupDate\',v);this.value=v;renderBanner();renderProvTable();}.bind(this))" style="cursor:pointer;max-width:82px">'+'<button type="button" class="qfd-btn" onclick="event.stopPropagation();quickSetFd(\''+escJs(crtype)+'\',\''+escJs(String(r.id))+'\',1)" title="فردا">+۱</button>'+'<button type="button" class="qfd-btn" onclick="event.stopPropagation();quickSetFd(\''+escJs(crtype)+'\',\''+escJs(String(r.id))+'\',3)" title="۳ روز">+۳</button>'+'<button type="button" class="qfd-btn" onclick="event.stopPropagation();quickSetFd(\''+escJs(crtype)+'\',\''+escJs(String(r.id))+'\',7)" title="هفته">+۷</button></td>'
+      +'<td><button type="button" class="note-btn'+(notes.length?' has':'')+'" data-open-notes="1" data-rtype="'+esc(crtype)+'" data-rid="'+esc(String(r.id))+'" data-name="'+esc(displayName)+'">📝'+(notes.length?' '+notes.length:'')+'</button>'
+        +'<input style="margin-right:4px;width:100px;border:1px solid var(--border-input);border-radius:4px;padding:2px 5px;font-size:10px;direction:rtl" placeholder="یادداشت سریع" onkeydown="if(event.key===\'Enter\'&&this.value.trim()){addNote(\''+escJs(crtype)+'\',\''+escJs(String(r.id))+'\',this.value,this);}">'
         +notePreview+'</td>'
-      +(function(){var _rk2=crtype+'_'+r.id;var _inWk=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk2;});return '<td><button class="btn-assignweek" style="'+(_inWk?'background:#7c3aed':'')+'" onclick="openAssignWeekForCenter(\''+crtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')">'+(_inWk?'↪ در هفته':'📋 هفته')+'</button></td>';})()
-      +(function(){var _rk3=crtype+'_'+r.id;var _td=todayStr();var _inToday=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk3&&we.scheduledDate===_td;});return _inToday?'':'<button onclick="event.stopPropagation();quickAddToToday(\''+crtype+'\',\''+r.id+'\',\''+esc(displayName)+'\')" title="اضافه به برنامه امروز" style="font-size:10px;padding:1px 6px;border:1px solid #7c3aed;border-radius:4px;background:#f5f3ff;color:#7c3aed;cursor:pointer;margin-right:3px;font-family:inherit">+امروز</button>';})()
+      +(function(){var _rk2=crtype+'_'+r.id;var _inWk=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk2;});return '<td><button type="button" class="btn-assignweek" style="'+(_inWk?'background:#7c3aed':'')+'" data-assign-week="1" data-rtype="'+esc(crtype)+'" data-rid="'+esc(String(r.id))+'" data-name="'+esc(displayName)+'">'+(_inWk?'↪ در هفته':'📋 هفته')+'</button></td>';})()
+      +(function(){var _rk3=crtype+'_'+r.id;var _td=todayStr();var _inToday=Object.keys(DB.weekEntries||{}).some(function(k){var we=DB.weekEntries[k];return !we.done&&(we.recKey||(we.rtype+'_'+we.rid))===_rk3&&we.scheduledDate===_td;});return _inToday?'':'<button type="button" data-add-today="1" data-rtype="'+esc(crtype)+'" data-rid="'+esc(String(r.id))+'" data-name="'+esc(displayName)+'" title="اضافه به برنامه امروز" style="font-size:10px;padding:1px 6px;border:1px solid #7c3aed;border-radius:4px;background:#f5f3ff;color:#7c3aed;cursor:pointer;margin-right:3px;font-family:inherit">+امروز</button>';})()
       +'<td>'+lastContactHtml+'</td>'
       +'</tr>';
   }).join(''):'<tr><td colspan="12" style="text-align:center;padding:40px;color:#94a3b8">نتیجه‌ای یافت نشد</td></tr>';
@@ -423,6 +423,60 @@ function renderProvTable(){
   buildPresetSelector();
   _renderCenterStatsBar(data,rtype);
   var _rc=document.getElementById('rowCount');if(_rc)_rc.textContent='نمایش '+data.length+' مرکز';
+}
+
+// Event delegation: avoid fragile inline openCenterModal('…') handlers (quote / truncation bugs)
+if (!window._provCenterClickBound) {
+  window._provCenterClickBound = true;
+  document.addEventListener('click', function (ev) {
+    var t = ev.target;
+    if (!t || !t.closest) return;
+    var openBtn = t.closest('[data-open-center]');
+    if (openBtn) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      var rt = openBtn.getAttribute('data-rtype');
+      var rid = openBtn.getAttribute('data-rid');
+      if (rt && rid != null && typeof openCenterModal === 'function') openCenterModal(rt, rid);
+      else if (typeof showToast === 'function') showToast('⚠ باز کردن مرکز ممکن نیست — صفحه را رفرش کنید');
+      return;
+    }
+    var callBtn = t.closest('[data-open-callfocus]');
+    if (callBtn) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (typeof openCallFocus === 'function') {
+        openCallFocus(callBtn.getAttribute('data-rtype'), callBtn.getAttribute('data-rid'), callBtn.getAttribute('data-name') || '');
+      }
+      return;
+    }
+    var noteBtn = t.closest('[data-open-notes]');
+    if (noteBtn) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (typeof openNotes === 'function') {
+        openNotes(noteBtn.getAttribute('data-rtype'), noteBtn.getAttribute('data-rid'), noteBtn.getAttribute('data-name') || '');
+      }
+      return;
+    }
+    var weekBtn = t.closest('[data-assign-week]');
+    if (weekBtn) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (typeof openAssignWeekForCenter === 'function') {
+        openAssignWeekForCenter(weekBtn.getAttribute('data-rtype'), weekBtn.getAttribute('data-rid'), weekBtn.getAttribute('data-name') || '');
+      }
+      return;
+    }
+    var todayBtn = t.closest('[data-add-today]');
+    if (todayBtn) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (typeof quickAddToToday === 'function') {
+        quickAddToToday(todayBtn.getAttribute('data-rtype'), todayBtn.getAttribute('data-rid'), todayBtn.getAttribute('data-name') || '');
+      }
+    }
+  }, true);
 }
 function toggleCompactTable(){
   _compactTable=!_compactTable;
@@ -569,12 +623,21 @@ function _doAddCenter(){
     var owner=(document.getElementById('ac_owner')||{}).value||currentUser;
     var rtype=getProvType(_currentProvId);
     var maxRow=allCents.length>0?Math.max.apply(null,allCents.map(function(c){return c.row||0;})):0;
-    var id=rtype+'_new_'+Date.now();
+    // Use bare "new_TS" (not rtype+"_new_") so recK → pc_new_… / center_new_… (no double pc_pc_new_)
+    var id='new_'+Date.now();
 
     if(!DB.extra)DB.extra=[];
     var newCenter={id:id,row:maxRow+1,name:name,potential:pot,type:type,lead:lead,province_id:_currentProvId,owner:owner};
     DB.extra.push(newCenter);
     saveCenterExtraApi(newCenter);
+    // Seed edit row with owner so expert RBAC filter includes this center immediately
+    if(typeof setE==='function'){
+      setE(rtype,id,'owner',owner);
+      setE(rtype,id,'status','بدون تماس');
+      if(type)setE(rtype,id,'type',type);
+      if(lead)setE(rtype,id,'lead',lead);
+      if(pot)setE(rtype,id,'potential',pot);
+    }
     closeModal('addCenterModal');
     // Clear filters to ensure the new center is visible
     var _fp=document.getElementById('fPot');if(_fp)_fp.value='';
@@ -1000,12 +1063,13 @@ function bulkChangeOwner(){
 function _doBulkOwner(){
   var val=(document.getElementById('bulkOwnerSel')||{}).value||'';
   var keys=Array.from(_selectedCenters);
-  keys.forEach(function(key){
-    var parts=key.split('_');var rtype=parts[0];var rid=parts.slice(1).join('_');
-    setE(rtype,rid,'owner',val);
+  closeModal('bulkOwnerModal');
+  if(!keys.length)return;
+  _runBulkCenterPatch(keys, 'owner', val, function(ok, fail){
+    clearCenterSelection();
+    renderTable();
+    showToast('✅ مسئول '+ok+' مرکز تغییر کرد'+(fail?(' ('+fail+' خطا)'):''), 2000);
   });
-  closeModal('bulkOwnerModal');clearCenterSelection();renderTable();
-  showToast('✅ مسئول '+keys.length+' مرکز تغییر کرد',2000);
 }
 function bulkChangeStatus(){
   var keys=Array.from(_selectedCenters);
@@ -1018,6 +1082,70 @@ function bulkChangeStatus(){
     '<button class="btn-secondary" onclick="closeModal(\'bulkStatusModal\')">انصراف</button>'
     +'<button class="btn-primary" onclick="_doBulkStatus()">✅ تأیید</button>');
 }
+function _bulkCenterUpdates(keys, field, val) {
+  return keys.map(function (key) {
+    var parts = key.split('_');
+    var rtype = parts[0];
+    var rid = parts.slice(1).join('_');
+    var e = getE(rtype, rid);
+    return {
+      centerKey: key,
+      field: field,
+      val: val,
+      centerName: typeof _getCenterName === 'function' ? _getCenterName(rtype, rid) : rid,
+      oldValue: e[field] !== undefined ? e[field] : '',
+    };
+  });
+}
+
+function _applyBulkCenterFieldLocal(keys, field, val) {
+  keys.forEach(function (key) {
+    var parts = key.split('_');
+    var rtype = parts[0];
+    var rid = parts.slice(1).join('_');
+    var k = recK(rtype, rid);
+    if (!DB.edits[k]) DB.edits[k] = {};
+    var oldV = DB.edits[k][field];
+    DB.edits[k][field] = val;
+    DB.edits[k]._ts = nowTs();
+    if (field === 'status' || field === 'lead' || field === 'potential') DB.edits[k]._lastActivity = nowTs();
+    if (field === 'status') DB.edits[k]._statusChangedTs = nowTs();
+    DB.changeLog = DB.changeLog || [];
+    DB.changeLog.push({ at: new Date().toISOString(), by: currentUser, rkey: key, field: field, val: val });
+    if (DB.changeLog.length > 500) DB.changeLog = DB.changeLog.slice(-500);
+    if (String(oldV) !== String(val)) {
+      fetch('/api/changelog', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ at: new Date().toISOString(), by: currentUser, rkey: key, field: field, val: val }),
+      }).catch(function () {});
+    }
+  });
+  if (typeof _invalidateEditsCache === 'function') _invalidateEditsCache();
+  if (typeof wpReconcileFollowupDates === 'function') wpReconcileFollowupDates();
+}
+
+function _runBulkCenterPatch(keys, field, val, doneToast) {
+  if (!keys.length) return;
+  var updates = _bulkCenterUpdates(keys, field, val);
+  _applyBulkCenterFieldLocal(keys, field, val);
+  var bulkFn = typeof bulkPatchCenterFields === 'function' ? bulkPatchCenterFields : null;
+  if (!bulkFn) {
+    keys.forEach(function (key) {
+      var parts = key.split('_');
+      setE(parts[0], parts.slice(1).join('_'), field, val);
+    });
+    if (typeof doneToast === 'function') doneToast(keys.length, 0);
+    return;
+  }
+  bulkFn(updates).then(function (res) {
+    if (typeof doneToast === 'function') doneToast(res.updated || 0, res.failed || 0);
+  }).catch(function () {
+    showToast('❌ خطا در ذخیره گروهی — صفحه را رفرش کنید');
+  });
+}
+
 function bulkSetFollowup(){
   var keys=Array.from(_selectedCenters);
   if(!keys.length)return;
@@ -1025,24 +1153,23 @@ function bulkSetFollowup(){
   openJDP(tmp,function(v){
     document.body.removeChild(tmp);
     if(!v)return;
-    keys.forEach(function(k){
-      var parts=k.split('_');var rtype=parts[0];var id=parts.slice(1).join('_');
-      setE(rtype,id,'followupDate',v);
+    _runBulkCenterPatch(keys, 'followupDate', v, function(ok, fail){
+      clearCenterSelection();
+      renderTable();
+      showToast('✓ تاریخ پیگیری برای '+ok+' مرکز تنظیم شد'+(fail?(' ('+fail+' خطا)'):''));
     });
-    clearCenterSelection();
-    renderTable();
-    showToast('✓ تاریخ پیگیری برای '+keys.length+' مرکز تنظیم شد');
   });
 }
 function _doBulkStatus(){
   var val=(document.getElementById('bulkStatusSel')||{}).value||STATUS_LIST[0];
   var keys=Array.from(_selectedCenters);
-  keys.forEach(function(key){
-    var parts=key.split('_');var rtype=parts[0];var rid=parts.slice(1).join('_');
-    setE(rtype,rid,'status',val);
+  closeModal('bulkStatusModal');
+  if(!keys.length)return;
+  _runBulkCenterPatch(keys, 'status', val, function(ok, fail){
+    clearCenterSelection();
+    renderTable();
+    showToast('✅ وضعیت '+ok+' مرکز تغییر کرد'+(fail?(' ('+fail+' خطا)'):''), 2000);
   });
-  closeModal('bulkStatusModal');clearCenterSelection();renderTable();
-  showToast('✅ وضعیت '+keys.length+' مرکز تغییر کرد',2000);
 }
 function bulkExport(){
   var keys=Array.from(_selectedCenters);

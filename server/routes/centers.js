@@ -71,13 +71,154 @@ async function assertCenterAccess(req, centerKey) {
   if (isManagerRole(req.user.role)) return true;
   const ctx = await loadOwnerCtx();
   const provAllow = getUserProvinceAllowlist(req.user);
-  if (provAllow && !applyProvinceRestriction(new Set([centerKey]), provAllow).has(centerKey)) {
+  if (provAllow && !applyProvinceRestriction(new Set([centerKey]), provAllow, ctx.ownerMaps).has(centerKey)) {
     return false;
   }
   const owner = resolveCenterOwner(centerKey, ctx.edits, ctx.ownerMaps);
   if (owner === null) return true;
   return owner === req.user.username;
 }
+
+const BULK_PATCH_FIELDS = new Set(['status', 'owner', 'lead', 'potential', 'followupDate']);
+
+async function applyCenterFieldPatch(req, centerKey, opts) {
+  const field = opts.field;
+  const centerName = opts.centerName || '';
+  const oldValue = opts.oldValue;
+  const expectedTs = opts.expectedTs;
+  const skipConflict = !!opts.skipConflict;
+
+  if (!field || typeof field !== 'string') {
+    const err = new Error('field الزامی است');
+    err.status = 400;
+    throw err;
+  }
+
+  var patchVal = opts.val;
+  if (field === 'followupDate' && patchVal) {
+    const j = parseJalali(patchVal);
+    if (j) patchVal = formatJalali(j);
+  }
+
+  if (!skipConflict && expectedTs != null) {
+    const cur = await query('SELECT data FROM center_edits WHERE center_key = $1', [centerKey]);
+    if (cur.rows.length && cur.rows[0].data && cur.rows[0].data._ts != null
+        && Number(cur.rows[0].data._ts) !== Number(expectedTs)) {
+      const err = new Error('تغییرات مرکز توسط کاربر دیگری ذخیره شده است');
+      err.status = 409;
+      err.centerKey = centerKey;
+      err.field = field;
+      throw err;
+    }
+  }
+
+  const _ts = Date.now();
+  const patch = { [field]: patchVal, _ts };
+  if (field === 'status' || field === 'lead' || field === 'potential') patch._lastActivity = _ts;
+  if (field === 'status') patch._statusChangedTs = _ts;
+
+  const result = await query(
+    `INSERT INTO center_edits (center_key, data, updated_at, updated_by)
+     VALUES ($1, $2::jsonb, NOW(), $3)
+     ON CONFLICT (center_key) DO UPDATE
+       SET data = center_edits.data || EXCLUDED.data,
+           updated_at = NOW(),
+           updated_by = $3
+     RETURNING data, updated_at`,
+    [centerKey, JSON.stringify(patch), req.user.username]
+  );
+
+  const valStr = patchVal !== undefined && patchVal !== null ? JSON.stringify(patchVal) : null;
+  await query(
+    'INSERT INTO change_log (at, "by", rkey, field, val) VALUES (NOW(), $1, $2, $3, $4)',
+    [req.user.username, centerKey, field, valStr]
+  );
+
+  if (AUDIT_FIELDS.indexOf(field) >= 0 && String(oldValue ?? '') !== String(patchVal ?? '')) {
+    await query(
+      `INSERT INTO center_audit (center_key, center_name, field, old_value, new_value, changed_by)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [centerKey, centerName, field, String(oldValue ?? ''), String(patchVal ?? ''), req.user.username]
+    ).catch(function () {});
+  }
+
+  notifyCenterChange(req, { centerKey, field });
+  let inboxSync = null;
+  let inboxWarning = null;
+  if (field === 'followupDate' || field === 'status') {
+    inboxSync = await syncInboxAfterFollowupChange(req, centerKey, field);
+    inboxWarning = inboxWarningFromSync(inboxSync);
+  }
+
+  return {
+    centerKey,
+    _ts,
+    data: result.rows[0].data,
+    updatedAt: result.rows[0].updated_at,
+    inboxSync,
+    inboxWarning,
+  };
+}
+
+router.post('/bulk-patch', async function (req, res) {
+  try {
+    const updates = (req.body && req.body.updates) || [];
+    if (!Array.isArray(updates) || !updates.length) {
+      return res.status(400).json({ error: 'updates الزامی است' });
+    }
+    if (updates.length > 300) {
+      return res.status(400).json({ error: 'حداکثر ۳۰۰ مرکز در هر درخواست' });
+    }
+
+    const results = [];
+    let updated = 0;
+    let failed = 0;
+
+    for (const raw of updates) {
+      const centerKey = raw && raw.centerKey;
+      const field = raw && raw.field;
+      if (!centerKey || !field || !BULK_PATCH_FIELDS.has(field)) {
+        failed++;
+        results.push({ centerKey: centerKey || '', ok: false, error: 'invalid_update' });
+        continue;
+      }
+      if (!(await assertCenterAccess(req, centerKey))) {
+        failed++;
+        results.push({ centerKey, ok: false, error: 'forbidden' });
+        continue;
+      }
+      try {
+        const out = await applyCenterFieldPatch(req, centerKey, {
+          field,
+          val: raw.val,
+          centerName: raw.centerName || '',
+          oldValue: raw.oldValue,
+          skipConflict: true,
+        });
+        updated++;
+        results.push({
+          centerKey,
+          ok: true,
+          _ts: out._ts,
+          data: out.data,
+          inboxWarning: out.inboxWarning || null,
+        });
+      } catch (e) {
+        failed++;
+        results.push({ centerKey, ok: false, error: e.message || 'patch_failed' });
+      }
+    }
+
+    if (updated > 0) {
+      notifyCenterChange(req, { bulk: true, count: updated });
+    }
+
+    res.json({ ok: true, updated, failed, results });
+  } catch (e) {
+    console.error('[centers POST /bulk-patch]', e.message);
+    res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
 
 // ── Interactions (قبل از /:key برای تطبیق قطعی مسیر) ─────────────────────
 router.get('/:key/interactions', async function (req, res) {
@@ -214,71 +355,17 @@ router.patch('/:key', async function (req, res) {
       return res.status(403).json({ error: 'دسترسی غیرمجاز' });
     }
     const { field, val, centerName, oldValue, expectedTs } = req.body || {};
-    if (!field || typeof field !== 'string') {
-      return res.status(400).json({ error: 'field الزامی است' });
-    }
-
-    var patchVal = val;
-    if (field === 'followupDate' && patchVal) {
-      const j = parseJalali(patchVal);
-      if (j) patchVal = formatJalali(j);
-    }
-
-    if (expectedTs != null) {
-      const cur = await query('SELECT data FROM center_edits WHERE center_key = $1', [centerKey]);
-      if (cur.rows.length && cur.rows[0].data && cur.rows[0].data._ts != null
-          && Number(cur.rows[0].data._ts) !== Number(expectedTs)) {
-        return res.status(409).json({ error: 'تغییرات مرکز توسط کاربر دیگری ذخیره شده است', centerKey, field });
-      }
-    }
-
-    const _ts = Date.now();
-    const patch = { [field]: patchVal, _ts };
-    if (field === 'status' || field === 'lead' || field === 'potential') patch._lastActivity = _ts;
-    if (field === 'status') patch._statusChangedTs = _ts;
-
-    const result = await query(
-      `INSERT INTO center_edits (center_key, data, updated_at, updated_by)
-       VALUES ($1, $2::jsonb, NOW(), $3)
-       ON CONFLICT (center_key) DO UPDATE
-         SET data = center_edits.data || EXCLUDED.data,
-             updated_at = NOW(),
-             updated_by = $3
-       RETURNING data, updated_at`,
-      [centerKey, JSON.stringify(patch), req.user.username]
-    );
-
-    const valStr = patchVal !== undefined && patchVal !== null ? JSON.stringify(patchVal) : null;
-    await query(
-      'INSERT INTO change_log (at, "by", rkey, field, val) VALUES (NOW(), $1, $2, $3, $4)',
-      [req.user.username, centerKey, field, valStr]
-    );
-
-    if (AUDIT_FIELDS.indexOf(field) >= 0 && String(oldValue ?? '') !== String(patchVal ?? '')) {
-      await query(
-        `INSERT INTO center_audit (center_key, center_name, field, old_value, new_value, changed_by)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [centerKey, centerName || '', field, String(oldValue ?? ''), String(patchVal ?? ''), req.user.username]
-      ).catch(function () {});
-    }
-
-    notifyCenterChange(req, { centerKey, field });
-    let inboxSync = null;
-    let inboxWarning = null;
-    if (field === 'followupDate' || field === 'status') {
-      inboxSync = await syncInboxAfterFollowupChange(req, centerKey, field);
-      inboxWarning = inboxWarningFromSync(inboxSync);
-    }
-    res.json({
-      ok: true,
-      centerKey,
-      _ts,
-      data: result.rows[0].data,
-      updatedAt: result.rows[0].updated_at,
-      inboxSync,
-      inboxWarning,
+    const out = await applyCenterFieldPatch(req, centerKey, {
+      field, val, centerName, oldValue, expectedTs,
     });
+    res.json(Object.assign({ ok: true }, out));
   } catch (e) {
+    if (e.status === 409) {
+      return res.status(409).json({ error: e.message, centerKey: e.centerKey, field: e.field });
+    }
+    if (e.status === 400) {
+      return res.status(400).json({ error: e.message });
+    }
     console.error('[centers PATCH /:key]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });
   }

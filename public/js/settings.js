@@ -592,6 +592,95 @@ function _umProvinces(){
           +'<th style="padding:7px 10px;text-align:right;font-weight:600;color:var(--text-muted);border-bottom:1.5px solid var(--border)">مسئول</th>'
         +'</tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
+/** وقتی مسئول استان عوض می‌شود، owner همه مراکز همان استان هم به‌روز می‌شود. */
+function umPropagateProvOwnerToCenters(provId, newOwner, cb) {
+  if (typeof _buildPCCache === 'function') _buildPCCache();
+  var prType = getProvType(provId);
+  var centers = getProvCenters(provId);
+  var keys = [];
+  centers.forEach(function (c) {
+    var crtype = c.rtype || prType;
+    keys.push(recK(crtype, c.id));
+  });
+  keys = keys.filter(function (k, i, a) { return a.indexOf(k) === i; });
+
+  var needUpdate = keys.filter(function (key) {
+    var parts = key.split('_');
+    var rt = parts[0];
+    var rid = parts.slice(1).join('_');
+    var e = getE(rt, rid);
+    return String(e.owner || '') !== String(newOwner || '');
+  });
+
+  if (!needUpdate.length) {
+    if (cb) cb(0, 0);
+    return;
+  }
+
+  needUpdate.forEach(function (key) {
+    var parts = key.split('_');
+    var rt = parts[0];
+    var rid = parts.slice(1).join('_');
+    var k = recK(rt, rid);
+    if (!DB.edits[k]) DB.edits[k] = {};
+    var oldV = DB.edits[k].owner;
+    DB.edits[k].owner = newOwner || '';
+    DB.edits[k]._ts = nowTs();
+    if (String(oldV) !== String(newOwner || '')) {
+      DB.changeLog = DB.changeLog || [];
+      DB.changeLog.push({ at: new Date().toISOString(), by: currentUser, rkey: key, field: 'owner', val: newOwner || '' });
+      if (DB.changeLog.length > 500) DB.changeLog = DB.changeLog.slice(-500);
+    }
+  });
+  if (typeof _invalidateEditsCache === 'function') _invalidateEditsCache();
+
+  var updates = needUpdate.map(function (key) {
+    var parts = key.split('_');
+    var rt = parts[0];
+    var rid = parts.slice(1).join('_');
+    var e = getE(rt, rid);
+    return {
+      centerKey: key,
+      field: 'owner',
+      val: newOwner || '',
+      centerName: typeof _getCenterName === 'function' ? _getCenterName(rt, rid) : rid,
+      oldValue: e.owner !== undefined ? e.owner : '',
+    };
+  });
+
+  var bulkFn = typeof bulkPatchCenterFields === 'function' ? bulkPatchCenterFields : null;
+  if (!bulkFn) {
+    needUpdate.forEach(function (key) {
+      var parts = key.split('_');
+      setE(parts[0], parts.slice(1).join('_'), 'owner', newOwner || '');
+    });
+    if (cb) cb(needUpdate.length, 0);
+    return;
+  }
+
+  var CHUNK = 250;
+  var done = 0;
+  var failed = 0;
+  var idx = 0;
+  function nextChunk() {
+    if (idx >= updates.length) {
+      if (cb) cb(done, failed);
+      return;
+    }
+    var chunk = updates.slice(idx, idx + CHUNK);
+    idx += CHUNK;
+    bulkFn(chunk).then(function (res) {
+      done += res.updated || 0;
+      failed += res.failed || 0;
+      nextChunk();
+    }).catch(function () {
+      failed += chunk.length;
+      nextChunk();
+    });
+  }
+  nextChunk();
+}
+
 function umProvOwnerChanged(provId){
   var sel=document.getElementById('pown_'+provId);if(!sel)return;
   var newOwner=sel.value;
@@ -612,19 +701,28 @@ function umProvOwnerChanged(provId){
   setE(getProvType(provId),provId,'owner',newOwner);
   var dot=document.getElementById('pdot_'+provId);
   if(dot)dot.style.background=newOwner?umGetColor(newOwner):'var(--border)';
-  try{renderProvList&&renderProvList();}catch(e){}
-  // refresh expert cards
-  var cardsEl=document.getElementById('provExpertCards');
-  if(cardsEl){
-    var tmp=document.createElement('div');tmp.innerHTML=_umProvinces();
-    var newCards=tmp.querySelector('#provExpertCards');
-    if(newCards)cardsEl.innerHTML=newCards.innerHTML;
-  }
+  umPropagateProvOwnerToCenters(provId, newOwner, function (ok, fail) {
+    if (ok > 0) {
+      showToast('✅ مسئول ' + ok + ' مرکز این استان هم به‌روز شد' + (fail ? ' (' + fail + ' خطا)' : ''), 2500);
+    }
+    try { renderProvList && renderProvList(); } catch (e) {}
+    if (currentTab === 'weekplan' && typeof renderWeekPlan === 'function') setTimeout(renderWeekPlan, 100);
+    var cardsEl = document.getElementById('provExpertCards');
+    if (cardsEl) {
+      var tmp = document.createElement('div');
+      tmp.innerHTML = _umProvinces();
+      var newCards = tmp.querySelector('#provExpertCards');
+      if (newCards) cardsEl.innerHTML = newCards.innerHTML;
+    }
+  });
 }
 
 function umQuickAssignProvinces(){
   var active=umGetActive();if(!active.length)return;
   var provs=getAllProvinces();
+  var pending=provs.length;
+  var totalCenters=0;
+  var totalFailed=0;
   provs.forEach(function(p,i){
     var owner=active[i%active.length].id;
     setE(getProvType(p.id),p.id,'owner',owner);
@@ -632,10 +730,17 @@ function umQuickAssignProvinces(){
     if(sel)sel.value=owner;
     var dot=document.getElementById('pdot_'+p.id);
     if(dot)dot.style.background=umGetColor(owner);
+    umPropagateProvOwnerToCenters(p.id, owner, function(ok, fail){
+      totalCenters+=ok;
+      totalFailed+=fail;
+      pending--;
+      if(pending===0){
+        showToast('✅ '+provs.length+' استان و '+totalCenters+' مرکز بین '+active.length+' کارشناس تقسیم شد'+(totalFailed?' ('+totalFailed+' خطا)':''),3000);
+        setTimeout(function(){var w=document.getElementById('umWrap');if(w)w.innerHTML=_umBody();},300);
+        try{renderProvList&&renderProvList();}catch(e){}
+      }
+    });
   });
-  showToast('✅ '+provs.length+' استان بین '+active.length+' کارشناس تقسیم شد',2500);
-  // Refresh summary
-  setTimeout(function(){var w=document.getElementById('umWrap');if(w)w.innerHTML=_umBody();},300);
 }
 
 // ── Province History ──────────────────────────────────────────
@@ -986,7 +1091,10 @@ function setE(type,id,field,val){var k=recK(type,id);if(!DB.edits[k])DB.edits[k]
   }
   flashRow(id);
   if(currentTab==='kpi'&&(field==='status'||field==='lead'||field==='owner'))setTimeout(renderKPIPanel,300);
-  if(currentTab==='manager'&&(field==='status'||field==='lead'||field==='owner'||field==='followupDate'))setTimeout(renderManagerPanel,300);
+  if(currentTab==='manager'&&(field==='status'||field==='lead'||field==='owner'||field==='followupDate')){
+    if(typeof window._mgrOnRemoteDataChange==='function')window._mgrOnRemoteDataChange();
+    else setTimeout(renderManagerPanel,300);
+  }
   if(field==='followupDate'&&currentTab==='weekplan')setTimeout(renderWeekPlan,50);
   if((field==='followupDate'||field==='status')&&typeof _scheduleInboxRefresh==='function')_scheduleInboxRefresh();
   if(field==='owner'&&val&&typeof sendNotif==='function'){

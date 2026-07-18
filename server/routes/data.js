@@ -17,11 +17,17 @@ const router = express.Router();
 router.use(requireAuth);
 
 // Helper: load full DB from normalized SQL tables
-async function loadDBFromSQL(client) {
+async function loadDBFromSQL(client, opts) {
+  opts = opts || {};
   const c = client || pool;
+  const editsPromise = opts.preloadedEdits
+    ? Promise.resolve({ rows: Object.keys(opts.preloadedEdits).map(function (k) {
+        return { center_key: k, data: opts.preloadedEdits[k] };
+      }) })
+    : (opts.skipEdits ? Promise.resolve({ rows: [] }) : c.query('SELECT center_key, data FROM center_edits'));
   const [editsR, notesR, tagsR, settingsR, eventsR, checklistR, userKpiR, provKpiR, extraR,
          salesR, callR, visitR, missionR, provHistR, kpiHistR, weR, metaR, clR, hcpR, tasksR, mgrTasksR] = await Promise.all([
-    c.query('SELECT center_key, data FROM center_edits'),
+    editsPromise,
     c.query('SELECT center_key, notes FROM center_notes'),
     c.query('SELECT center_key, tags FROM center_tags'),
     c.query('SELECT key, value FROM app_settings'),
@@ -51,6 +57,8 @@ async function loadDBFromSQL(client) {
   
   if (hcpR && hcpR.rows) {
     hcpR.rows.forEach(function(r) {
+      // When serving an expert-scoped edit set, don't inflate with unrelated HCP centers
+      if (opts.preloadedEdits && !edits[r.center_key]) return;
       if (!edits[r.center_key]) edits[r.center_key] = { contacts: [] };
       if (!edits[r.center_key].contacts) edits[r.center_key].contacts = [];
       edits[r.center_key].contacts.push({
@@ -159,6 +167,18 @@ async function loadDBFromSQL(client) {
   };
 }
 
+// Helper: load ownership maps (master + extras) — edits already in db payload
+async function loadOwnerMapsOnly(client) {
+  const c = client || pool;
+  const [masterR, extraR] = await Promise.all([
+    c.query("SELECT key, data FROM centers_master WHERE key IN ('CENTERS', 'PC_RAW')"),
+    c.query('SELECT id, row_num as row, province_id, owner FROM center_extras'),
+  ]);
+  const centersMaster = {};
+  masterR.rows.forEach(function (r) { centersMaster[r.key] = r.data; });
+  return buildOwnerMaps(centersMaster, extraR.rows);
+}
+
 // Helper: load ownership context for RBAC filtering
 async function loadOwnerContext(client) {
   const c = client || pool;
@@ -174,13 +194,71 @@ async function loadOwnerContext(client) {
   return { ownerMaps: buildOwnerMaps(centersMaster, extraR.rows), edits };
 }
 
+/** For experts: load only owned center_edits (+ province keys they own) instead of all 9k rows. */
+async function loadEditsForExpert(client, username, ownerMaps) {
+  const c = client || pool;
+  const staticKeys = [];
+  Object.keys(ownerMaps.staticOwners || {}).forEach(function (k) {
+    if (ownerMaps.staticOwners[k] === username) staticKeys.push(k);
+  });
+  Object.keys(ownerMaps.extraOwners || {}).forEach(function (k) {
+    if (ownerMaps.extraOwners[k] === username) staticKeys.push(k);
+  });
+
+  // Direct owner on edit row + any static/extra keys
+  const ownedR = await c.query(
+    `SELECT center_key, data FROM center_edits
+     WHERE data->>'owner' = $1
+        OR center_key = ANY($2::text[])`,
+    [username, staticKeys]
+  );
+  const edits = {};
+  ownedR.rows.forEach(function (r) { edits[r.center_key] = r.data || {}; edits[r.center_key].contacts = []; });
+
+  // Province-level ownership: if user owns pc_p4 / center_tehran, pull child centers without explicit owner
+  const provKeys = Object.keys(edits).filter(function (k) {
+    if (!edits[k] || edits[k].owner !== username) return false;
+    if (k === 'center_tehran' || k === 'pc_tehran') return true;
+    return /^pc_[^|]+$/.test(k);
+  });
+  if (provKeys.length) {
+    const patterns = [];
+    provKeys.forEach(function (k) {
+      if (k === 'center_tehran' || k === 'pc_tehran') return; // tehran children are center_* with explicit owner usually
+      patterns.push(k + '||%');
+    });
+    if (patterns.length) {
+      const childR = await c.query(
+        `SELECT center_key, data FROM center_edits
+         WHERE center_key LIKE ANY($1::text[])
+           AND (data->>'owner' IS NULL OR data->>'owner' = '' OR data->>'owner' = $2)`,
+        [patterns, username]
+      );
+      childR.rows.forEach(function (r) {
+        if (!edits[r.center_key]) {
+          edits[r.center_key] = r.data || {};
+          edits[r.center_key].contacts = [];
+        }
+      });
+    }
+  }
+  return edits;
+}
+
 // GET /api/data/db — load from normalized SQL tables
 router.get('/db', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ');
-    const db = await loadDBFromSQL(client);
-    const { ownerMaps } = await loadOwnerContext(client);
+    const isMgr = isManagerRole(req.user.role);
+    const ownerMaps = await loadOwnerMapsOnly(client);
+    let db;
+    if (isMgr) {
+      db = await loadDBFromSQL(client);
+    } else {
+      const expertEdits = await loadEditsForExpert(client, req.user.username, ownerMaps);
+      db = await loadDBFromSQL(client, { preloadedEdits: expertEdits });
+    }
     await client.query('COMMIT');
     const filtered = filterDbForUser(db, req.user, ownerMaps);
     return res.json(filtered);

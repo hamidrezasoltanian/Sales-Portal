@@ -133,7 +133,7 @@ function openSettings(){
     +'<div style="font-size:13px;font-weight:700;color:var(--text-primary)">مرکز مدیریت داده</div>'
     +'<div style="font-size:11px;color:var(--text-muted);margin-top:3px">بکاپ خودکار ۳× روز · JSON · Excel · بازیابی · نسخه‌های SQL</div>'
     +'</div>'
-    +'<button onclick="closeModal(\'settingsModal\');openDataHub()" style="background:var(--brand);color:#fff;border:none;border-radius:8px;padding:9px 20px;cursor:pointer;font-size:12px;font-family:inherit;font-weight:700;white-space:nowrap">باز کردن ←</button>'
+    +'<button onclick="closeModal(\'settingsModal\');_openDataHubLazy()" style="background:var(--brand);color:#fff;border:none;border-radius:8px;padding:9px 20px;cursor:pointer;font-size:12px;font-family:inherit;font-weight:700;white-space:nowrap">باز کردن ←</button>'
     +'</div>'
     +(_isManager()?'<div style="margin-top:8px"><button onclick="closeModal(\'settingsModal\');openDistributionWizard()" style="background:#f5f3ff;color:#5b21b6;border:1px solid #c4b5fd;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:11px;font-family:inherit">🔀 تقسیم مراکز بین کارشناسان</button></div>':'')
     +'</div>';
@@ -410,12 +410,126 @@ function _mgrLoadPendingProformas() {
     .catch(function() { box.innerHTML = ''; });
 }
 
+var _mgrNavState = window._mgrNavState || {
+  level: 'L0',
+  reportTab: 'sales'
+};
+window._mgrNavState = _mgrNavState;
+
+window.openManagerLevel = function(level, opts){
+  opts = opts || {};
+  _mgrNavState.level = level || 'L0';
+  if (opts.reportTab) _mgrNavState.reportTab = opts.reportTab;
+  if (opts.expertId) _mgrNavState.expertId = opts.expertId;
+  if (opts.centerKey) _mgrNavState.centerKey = opts.centerKey;
+  if (currentTab !== 'manager') switchTab('manager');
+  else if (typeof renderManagerPanel === 'function') renderManagerPanel({ force: true });
+};
+
+var _mgrRemoteRefreshTimer = null;
+window._mgrOnRemoteDataChange = function(){
+  clearTimeout(_mgrRemoteRefreshTimer);
+  _mgrRemoteRefreshTimer = setTimeout(function(){
+    if (currentTab !== 'manager') return;
+    if ((_mgrNavState.level || 'L0') === 'L4') return;
+    _mgrRefreshTeamSummaryBackground(function(){
+      renderManagerPanel({ preserveScroll: true, soft: true });
+    });
+  }, 2500);
+};
+
+window._mgrForceRefreshPanel = function(){
+  window._teamSummaryCache = null;
+  renderManagerPanel({ force: true });
+};
+
+function _mgrRefreshTeamSummaryBackground(cb){
+  var today = typeof todayStr === 'function' ? todayStr() : '';
+  fetch('/api/manager-reports/team-summary?today=' + encodeURIComponent(today))
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(data){
+      if (data) window._teamSummaryCache = data;
+      if (cb) cb();
+    })
+    .catch(function(){ if (cb) cb(); });
+}
+
+window.openManagerReports = function(tabId){
+  window.openManagerLevel('L4', { reportTab: tabId || 'sales' });
+};
+
+function _mgrLevelButton(level, label, active){
+  return '<button onclick="openManagerLevel(\''+level+'\')" style="padding:7px 12px;border-radius:999px;border:1px solid '
+    +(active?'#6366f1':'#dbe3f0')+';background:'+(active?'#eef2ff':'#fff')+';color:'+(active?'#4338ca':'#475569')
+    +';font-size:12px;font-weight:'+(active?'700':'600')+';cursor:pointer;font-family:inherit">'+label+'</button>';
+}
+
+function _mgrHubHeader(level){
+  var info = {
+    L0: {
+      title: 'مرکز مدیر',
+      sub: 'از اینجا از نمای کلی تیم به جزئیات کارشناس/مرکز و روندهای ماهانه می‌روید.'
+    },
+    L4: {
+      title: 'روندها و گزارش‌های تحلیلی',
+      sub: 'این بخش شاخهٔ تحلیلی همان محور مدیر است؛ واحد زمانی‌اش ماهانه/چندماهه است.'
+    }
+  }[level] || {
+    title: 'مرکز مدیر',
+    sub: 'ناوبری یکپارچه مدیر'
+  };
+  return '<div style="background:linear-gradient(135deg,#f8fafc,#eef2ff);border:1px solid #dbeafe;border-radius:14px;padding:14px 16px;margin-bottom:14px">'
+    +'<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">'
+    +'<div>'
+    +'<div style="font-size:18px;font-weight:800;color:#1e293b;margin-bottom:4px">'+info.title+'</div>'
+    +'<div style="font-size:12px;color:#475569;line-height:1.8">'+info.sub+'</div>'
+    +'</div>'
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap">'
+    +_mgrLevelButton('L0','L0 / L1 نمای عملیاتی', level !== 'L4')
+    +_mgrLevelButton('L4','L4 روندها', level === 'L4')
+    +'</div>'
+    +'</div>'
+    +'<div style="margin-top:10px;font-size:11px;color:#64748b">مسیر: <b style="color:#334155">L0 نمای کلی</b> → <b style="color:#334155">L1 تیم امروز/هفته</b> → <b style="color:#334155">L2 کارشناس</b> → <b style="color:#334155">L3 مرکز</b> → <b style="color:#334155">L4 روند ماهانه</b></div>'
+    +'</div>';
+}
+
+function _renderManagerReportsLevel(el){
+  var quick = [
+    { id:'sales', label:'فروش', color:'#16a34a' },
+    { id:'pipeline', label:'قیف فروش', color:'#0284c7' },
+    { id:'activity', label:'فعالیت‌ها', color:'#7c3aed' },
+    { id:'competitor', label:'رقبا', color:'#dc2626' },
+    { id:'coverage', label:'پوشش استان', color:'#0f766e' },
+    { id:'targets', label:'اهداف فروش', color:'#d97706' }
+  ];
+  var html = '<div style="padding:14px">'+_mgrHubHeader('L4');
+  html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">';
+  quick.forEach(function(q){
+    var active = (window._rTab||'sales') === q.id;
+    html += '<button onclick="window._rSetTab(\''+q.id+'\');openManagerReports(\''+q.id+'\')" style="padding:8px 14px;border-radius:9px;border:1px solid '+(active?q.color:'#e2e8f0')+';background:'+(active?(q.color+'11'):'#fff')+';color:'+(active?q.color:'#334155')+';cursor:pointer;font-family:inherit;font-size:12px;font-weight:700">'+q.label+'</button>';
+  });
+  html += '</div><div id="reportsRoot"></div></div>';
+  el.innerHTML = html;
+  if (typeof window._rSetTab === 'function') window._rSetTab(_mgrNavState.reportTab || 'sales');
+  else if (typeof window.renderReportsPanel === 'function') window.renderReportsPanel();
+}
+
 var _teamSummaryFetching = false;
-function renderManagerPanel(){
+function renderManagerPanel(opts){
+  opts = opts || {};
   var el=document.getElementById('managerPanel');if(!el)return;
   var today=todayStr();
+  var scrollY = window.scrollY;
+  var panelScroll = el.scrollTop;
+
+  if ((_mgrNavState.level || 'L0') === 'L4') {
+    if (!opts.force && el.querySelector('#reportsRoot #rContent')) return;
+    _renderManagerReportsLevel(el);
+    return;
+  }
 
   if (!window._teamSummaryCache) {
+    if (opts.soft) return;
     if (!_teamSummaryFetching) {
       _teamSummaryFetching = true;
       el.innerHTML = '<div style="padding:48px;text-align:center;font-size:14px;color:var(--text-muted)">⏳ در حال بارگذاری اطلاعات عملیاتی تیم...</div>';
@@ -424,7 +538,7 @@ function renderManagerPanel(){
         .then(function(data) {
           window._teamSummaryCache = data;
           _teamSummaryFetching = false;
-          renderManagerPanel();
+          renderManagerPanel({ force: true });
         })
         .catch(function(err) {
           _teamSummaryFetching = false;
@@ -457,11 +571,13 @@ function renderManagerPanel(){
   });
 
   var html='<div style="padding:14px">';
+  html+=_mgrHubHeader('L0');
   // quick-action bar for manager
   html+='<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">'
     +'<button onclick="openDailyMonitor()" style="flex:1;min-width:200px;background:#1d4ed8;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">📋 گزارش فعالیت امروز</button>'
     +'<button onclick="openOverdueList()" style="flex:1;min-width:160px;background:#dc2626;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">🔴 پیگیری‌های معوق</button>'
-    +'<button onclick="window._teamSummaryCache=null;renderManagerPanel()" style="flex:1;min-width:140px;background:var(--bg-raised);color:var(--text-secondary);border:1px solid var(--border);border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">🔄 بروزرسانی</button>'
+    +'<button onclick="openManagerReports(\'sales\')" style="flex:1;min-width:160px;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">📈 روندها و گزارش‌ها</button>'
+    +'<button onclick="window._mgrForceRefreshPanel()" style="flex:1;min-width:140px;background:var(--bg-raised);color:var(--text-secondary);border:1px solid var(--border);border-radius:8px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">🔄 بروزرسانی</button>'
     +'</div>';
   html+='<div id="mgrPendingPf"></div>';
   // summary cards
@@ -1193,10 +1309,16 @@ function renderManagerPanel(){
     +'</div>';
 
   html+='<div style="text-align:center;margin-top:10px">'
-    +'<button onclick="renderManagerPanel()" style="background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 16px;cursor:pointer;font-size:12px;font-family:inherit">🔄 بروزرسانی</button>'
+    +'<button onclick="window._mgrForceRefreshPanel()" style="background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:6px 16px;cursor:pointer;font-size:12px;font-family:inherit">🔄 بروزرسانی</button>'
     +'</div></div>';
 
   el.innerHTML=html;
+  if (opts.preserveScroll) {
+    requestAnimationFrame(function(){
+      window.scrollTo(0, scrollY);
+      el.scrollTop = panelScroll;
+    });
+  }
   _mgrLoadPendingProformas();
   _loadMgrWinLossCard();
   _maybeSaveWeeklySnapshot();
@@ -2389,7 +2511,7 @@ async function init(){
     if(_st&&['home','provinces','weekplan','calendar','checklist','activity','kpi','manager','mtr','pricing','tasks','changelog','proforma','support','hr','trade-kpi','workflows','letters','reports','hcp'].indexOf(_st)>=0)currentTab=_st;
     if(_spid)_currentProvId=_spid;
   }catch(e){}
-  if(!_st) currentTab=_isManager()?'manager':'home';
+  if(!_st) currentTab=_isManager()?'reports':'home';
   if(window.innerWidth<768) currentTab='home';
   if(_isManager()){
     document.querySelectorAll('.sb-manager-wrap').forEach(function(el){el.style.display='';});

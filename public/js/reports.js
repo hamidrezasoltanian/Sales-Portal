@@ -186,10 +186,10 @@
         var convRate = totalPFs > 0 ? Math.round((totalApproved / totalPFs) * 100) : 0;
 
         var html = '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">' +
-          _card('مجموع فروش نهایی', _fmtMoney(grandTotal), months.length + ' ماه گذشته', '#10b981') +
-          _card('نرخ تبدیل', convRate + '٪', totalApproved + ' فروش از ' + totalPFs + ' پیش‌فاکتور', '#6366f1') +
+          _card('مجموع مبلغ پیش‌فاکتور نهایی', _fmtMoney(grandTotal), months.length + ' ماه گذشته', '#10b981') +
+          _card('نرخ تبدیل', convRate + '٪', totalApproved + ' مورد نهایی از ' + totalPFs + ' پیش‌فاکتور', '#6366f1') +
           _card('تعداد پیش‌فاکتور (کل)', _fmtNum(totalPFs), 'شامل همه وضعیت‌ها', '#f59e0b') +
-          _card('فروش نهایی', _fmtNum(totalApproved), 'تأیید + فاکتور شده', '#8b5cf6') +
+          _card('پیش‌فاکتور نهایی', _fmtNum(totalApproved), 'تأیید + فاکتور شده', '#8b5cf6') +
           '</div>';
 
         // Table: employees × months
@@ -201,7 +201,7 @@
             if (!row) return '<td style="padding:6px 10px;text-align:center;color:#9ca3af">—</td>';
             return '<td style="padding:6px 10px;text-align:center;font-size:.82rem">' +
               '<div style="font-weight:600;color:#10b981">' + _fmtMoney(row.approved_total) + '</div>' +
-              '<div style="color:#9ca3af;font-size:.75rem">' + row.approved_count + '/' + row.count + ' فروش</div>' +
+              '<div style="color:#9ca3af;font-size:.75rem">' + row.approved_count + '/' + row.count + ' پیش‌فاکتور نهایی</div>' +
               '</td>';
           }).join('');
           return '<tr style="border-bottom:1px solid #f1f5f9">' +
@@ -992,14 +992,14 @@
 
       el.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px">' +
         _card('هدف کل تیم', _fmtMoney(totalTarget), 'ماه ' + _tgtMonth, '#6366f1') +
-        _card('فروش واقعی', _fmtMoney(totalActual), 'پیش‌فاکتور تأیید', '#10b981') +
+        _card('عملکرد بر مبنای پیش‌فاکتور', _fmtMoney(totalActual), 'پیش‌فاکتور تأیید/فاکتور شده', '#10b981') +
         _card('درصد تحقق', totalPct + '٪', 'کل تیم', summaryColor) +
       '</div>' +
       '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">' +
         '<thead><tr style="background:#f8fafc">' +
           '<th style="padding:10px 12px;text-align:right;font-size:.83rem">کارشناس</th>' +
           '<th style="padding:10px 12px;text-align:right;font-size:.83rem">هدف ماه (ریال)</th>' +
-          '<th style="padding:10px 12px;text-align:right;font-size:.83rem">فروش واقعی</th>' +
+          '<th style="padding:10px 12px;text-align:right;font-size:.83rem">عملکرد پیش‌فاکتور</th>' +
           '<th style="padding:10px 12px;text-align:right;font-size:.83rem">پیشرفت</th>' +
         '</tr></thead>' +
         '<tbody>' + rows + '</tbody>' +
@@ -1523,9 +1523,9 @@
 
       var html =
         '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px">' +
-          _card('فروش ماه', _fmtMoney(salesAmt),
+          _card('عملکرد ماه', _fmtMoney(salesAmt),
             salesPct !== null ? ('هدف: ' + _fmtMoney(targetAmt)) : 'هدف تعریف نشده', salesColor) +
-          (salesPct !== null ? _card('تحقق هدف', salesPct + '٪', myActual.proforma_count + ' فاکتور تأیید', salesColor) : '') +
+          (salesPct !== null ? _card('تحقق هدف', salesPct + '٪', myActual.proforma_count + ' پیش‌فاکتور نهایی', salesColor) : '') +
           _card('وظایف', doneTasks + ' / ' + myTasks.length,
             pendingTasks > 0 ? pendingTasks + ' سررسید گذشته 🔴' : 'بدون تأخیر', pendingTasks > 0 ? '#ef4444' : '#10b981') +
           _card('مرخصی', usedLeave + ' / ' + totalLeave + ' روز',

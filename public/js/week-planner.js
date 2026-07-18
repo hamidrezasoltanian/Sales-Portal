@@ -2,8 +2,12 @@
 (function () {
   'use strict';
 
+  var WP_ALL_EXPERTS = '__all__';
+
   var _wpState = {
     expertId: '',
+    expertList: [],
+    filterExpert: '',
     weekId: '',
     weekEnd: '',
     customStart: '',
@@ -131,6 +135,15 @@
     var edits = db.edits || {};
     var centers = [];
     var weekEntries = db.weekEntries || {};
+    var allMode = expertId === WP_ALL_EXPERTS;
+    var ownerSet = null;
+    if (allMode) {
+      ownerSet = {};
+      (_wpState.expertList || []).forEach(function (u) { ownerSet[u.id] = true; });
+    } else if (expertId) {
+      ownerSet = {};
+      ownerSet[expertId] = true;
+    }
 
     // Pre-build scheduled set for O(1) lookup instead of O(n) .some() per center
     var _wpScheduledSet = new Set();
@@ -148,7 +161,7 @@
         provCenters.forEach(function(c) {
           var e = edits[rtype + '_' + c.id] || {};
           var owner = e.owner || c.owner || '';
-          if (owner !== expertId) return;
+          if (!ownerSet || !ownerSet[owner]) return;
           if (['غیرفعال'].includes(e.status || '')) return;
 
           var fd = e.followupDate || '';
@@ -158,6 +171,7 @@
           var daysSince = lastChangeMs ? Math.round((Date.now() - lastChangeMs) / 86400000) : null;
 
           var alreadyScheduled = _wpScheduledSet.has(rtype + '_' + c.id);
+          var ownerName = (typeof USERS !== 'undefined' && USERS[owner]) ? USERS[owner] : owner;
 
           centers.push({
             id: c.id, rtype: rtype, rkey: rtype+'_'+c.id,
@@ -172,6 +186,8 @@
             alreadyScheduled: alreadyScheduled,
             provId: p.id,
             provName: p.name || p.id,
+            ownerId: owner,
+            ownerName: ownerName,
           });
         });
       });
@@ -232,6 +248,11 @@
     // lead
     if (_wpState.filterLead) {
       centers = centers.filter(function(c) { return c.lead === _wpState.filterLead; });
+    }
+
+    // expert (only in all-experts mode)
+    if (_wpState.expertId === WP_ALL_EXPERTS && _wpState.filterExpert) {
+      centers = centers.filter(function(c) { return c.ownerId === _wpState.filterExpert; });
     }
 
     // sort
@@ -415,7 +436,7 @@
 
     el.innerHTML =
       '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:.8rem;color:#1e40af;line-height:1.6">' +
-        '<b>تخصیص مراکز چیست؟</b> انتخاب مرکزهای مشخص برای یک کارشناس در یک بازه. این کارها «تعهد ثابت» می‌شوند و در برنامه هفته او ظاهر می‌شوند. برای عدد کلی هدف → زیرتب «اهداف».' +
+        '<b>تخصیص مراکز چیست؟</b> انتخاب مرکزهای مشخص برای یک کارشناس یا <b>همه کارشناسان</b> در یک بازه. با «همه کارشناسان» می‌توانید انتخاب گروهی و تخصیص یک‌جا برای چند نفر انجام دهید. برای عدد کلی هدف → زیرتب «اهداف».' +
       '</div>' +
       '<div style="background:#fff;border-radius:12px;padding:18px 20px;border:1px solid #e2e8f0;margin-bottom:14px">' +
         '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">' +
@@ -438,11 +459,17 @@
 
     // Fill expert dropdown from /api/users (all active)
     function fillExperts(users) {
+      _wpState.expertList = users || [];
       var sel = document.getElementById('wpExpertSel');
       if (!sel) return;
       var hint = document.getElementById('wpExpertHint');
-      if (hint) hint.textContent = '(' + users.length + ' نفر)';
+      if (hint) {
+        hint.textContent = _wpState.expertId === WP_ALL_EXPERTS
+          ? '(همه — ' + users.length + ' نفر)'
+          : '(' + users.length + ' نفر)';
+      }
       sel.innerHTML = '<option value="">— انتخاب کنید —</option>' +
+        '<option value="' + WP_ALL_EXPERTS + '"' + ((_wpState.expertId === WP_ALL_EXPERTS) ? ' selected' : '') + '>👥 همه کارشناسان</option>' +
         users.map(function (u) {
           var label = esc(u.name) + (u.role ? ' — ' + esc(u.role) : '');
           return '<option value="' + esc(u.id) + '"' + ((_wpState.expertId === u.id) ? ' selected' : '') + '>' + label + '</option>';
@@ -468,9 +495,12 @@
     if (!el) return;
 
     var workDays = _workDays(range.start, range.end);
-    var expertName = (typeof USERS !== 'undefined' && USERS[_wpState.expertId])
-      ? USERS[_wpState.expertId]
-      : _wpState.expertId;
+    var allMode = _wpState.expertId === WP_ALL_EXPERTS;
+    var expertName = allMode
+      ? 'همه کارشناسان'
+      : ((typeof USERS !== 'undefined' && USERS[_wpState.expertId])
+        ? USERS[_wpState.expertId]
+        : _wpState.expertId);
 
     // Unique statuses and provinces from loaded centers
     var statusSet = {}, provSet = {};
@@ -522,6 +552,20 @@
         return '<option value="'+esc(pid)+'"'+(_wpState.filterProvId===pid?' selected':'')+'>'+esc(provSet[pid])+'</option>';
       }).join('');
 
+    var expertOpts = '';
+    if (allMode) {
+      var ownerSet = {};
+      _wpState.centers.forEach(function(c) {
+        if (c.ownerId) ownerSet[c.ownerId] = c.ownerName || c.ownerId;
+      });
+      expertOpts = '<option value="">همه کارشناسان</option>' +
+        Object.keys(ownerSet).sort(function(a, b) {
+          return (ownerSet[a] || '').localeCompare(ownerSet[b] || '', 'fa');
+        }).map(function(oid) {
+          return '<option value="'+esc(oid)+'"'+(_wpState.filterExpert===oid?' selected':'')+'>'+esc(ownerSet[oid])+'</option>';
+        }).join('');
+    }
+
     var sortOpts =
       '<option value="priority"'+(_wpState.sortBy==='priority'?' selected':'')+'>اولویت</option>' +
       '<option value="lastcontact"'+(_wpState.sortBy==='lastcontact'?' selected':'')+'>آخرین تماس</option>' +
@@ -538,6 +582,7 @@
         sel('wpFContact', _wpState.filterLastContact, "window._wpSetFilter('lastcontact',this.value)", contactOpts) +
         sel('wpFSched', _wpState.filterScheduled, "window._wpSetFilter('scheduled',this.value)", scheduledOpts) +
         sel('wpFProv', _wpState.filterProvId, "window._wpSetFilter('prov',this.value)", provOpts) +
+        (allMode ? sel('wpFExpert', _wpState.filterExpert, "window._wpSetFilter('expert',this.value)", expertOpts) : '') +
         sel('wpFLead', _wpState.filterLead, "window._wpSetFilter('lead',this.value)", leadOpts) +
         '<div style="display:flex;align-items:center;gap:5px;margin-right:auto">' +
           '<span style="font-size:.75rem;color:#6b7280;white-space:nowrap">مرتب بر اساس:</span>' +
@@ -563,6 +608,7 @@
       var overdueTag = c.isOverdue ? '<span style="font-size:.68rem;padding:2px 6px;background:#fef2f2;color:#dc2626;border-radius:10px;display:inline-block">معوق</span>' : '';
       var schedTag   = c.alreadyScheduled ? '<span style="font-size:.68rem;padding:2px 6px;background:#f0fdf4;color:#16a34a;border-radius:10px;display:inline-block">✓ برنامه دارد</span>' : '';
       var provTag    = '<span style="font-size:.68rem;padding:2px 6px;background:#f1f5f9;color:#64748b;border-radius:10px;display:inline-block">'+esc(c.provName||c.provId)+'</span>';
+      var ownerTag   = allMode ? '<span style="font-size:.68rem;padding:2px 6px;background:#dbeafe;color:#1e40af;border-radius:10px;display:inline-block">👤 '+esc(c.ownerName||c.ownerId)+'</span>' : '';
 
       var typeCell = '';
       if (_wpState.actionType === 'all') {
@@ -582,7 +628,7 @@
         '</td>' +
         '<td style="padding:8px 10px">' +
           '<div style="font-weight:600;font-size:.88rem">'+esc(c.name)+'</div>' +
-          '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">'+provTag+(c.status?'<span style="font-size:.68rem;padding:2px 6px;background:#f8fafc;color:#64748b;border-radius:10px;display:inline-block">'+esc(c.status)+'</span>':'')+overdueTag+schedTag+'</div>' +
+          '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">'+ownerTag+provTag+(c.status?'<span style="font-size:.68rem;padding:2px 6px;background:#f8fafc;color:#64748b;border-radius:10px;display:inline-block">'+esc(c.status)+'</span>':'')+overdueTag+schedTag+'</div>' +
         '</td>' +
         '<td style="padding:8px 10px;white-space:nowrap;text-align:center">' +
           '<span style="font-size:.85rem;font-weight:700;color:'+potColor(c.potential)+'">P'+c.potential+'</span>' +
@@ -605,6 +651,21 @@
     var typeHead = _wpState.actionType === 'all'
       ? '<th style="padding:8px 10px;font-size:.75rem;font-weight:600;color:#6b7280;text-align:right">نوع اقدام</th>'
       : '';
+
+    function _wpSelectedExpertCount(keys) {
+      var s = {};
+      keys.forEach(function (k) {
+        var c = _wpState.centers.find(function (x) { return x.rkey === k; });
+        if (c && c.ownerId) s[c.ownerId] = true;
+      });
+      return Object.keys(s).length;
+    }
+
+    function _wpPreviewScopeLabel(keys) {
+      if (!allMode) return 'برای ' + esc(expertName) + ' — ' + range.start;
+      var nExp = _wpSelectedExpertCount(keys);
+      return 'برای ' + keys.length + ' مرکز از ' + nExp + ' کارشناس — ' + range.start;
+    }
 
     // ── preview ───────────────────────────────────────────────────────────────
     var previewHtml = '';
@@ -652,7 +713,7 @@
           '<button onclick="window.wpOpenPlannerBulkMove()" style="padding:10px 24px;background:#8b5cf6;color:white;border:none;border-radius:8px;font-family:inherit;font-size:.95rem;cursor:pointer;font-weight:700">' +
             '🔄 انتقال به هفته دیگر (بدون روز)' +
           '</button>' +
-          '<span style="font-size:.8rem;color:#6b7280;margin-right:12px">برای '+esc(expertName)+' — '+range.start+'</span>' +
+          '<span style="font-size:.8rem;color:#6b7280;margin-right:12px">'+_wpPreviewScopeLabel(selectedKeys)+'</span>' +
         '</div>';
     }
 
@@ -661,7 +722,9 @@
 
         // top bar
         '<div style="padding:12px 18px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">' +
-          '<span style="font-size:.88rem;font-weight:600;color:#374151">'+esc(expertName)+' — '+range.start+' تا '+range.end+' ('+workDays.length+' روز کاری) · '+esc(actLabel)+'</span>' +
+          '<span style="font-size:.88rem;font-weight:600;color:#374151">'+esc(expertName)
+            +(allMode ? ' ('+new Set(_wpState.centers.map(function(c){return c.ownerId;})).size+' کارشناس)' : '')
+            +' — '+range.start+' تا '+range.end+' ('+workDays.length+' روز کاری) · '+esc(actLabel)+'</span>' +
           '<span style="font-size:.82rem;color:#6366f1;font-weight:600">'+filtered.length+' مرکز</span>' +
         '</div>' +
 
@@ -724,9 +787,21 @@
     withDay.forEach(function(k){ var d=_wpState.selected[k]; if(!dayBuckets[d])dayBuckets[d]=[]; dayBuckets[d].push(k); });
     withoutDay.forEach(function(k){ var d=autoSpread[k]; if(!dayBuckets[d])dayBuckets[d]=[]; dayBuckets[d].push(k); });
 
-    var expertName = (typeof USERS !== 'undefined' && USERS[_wpState.expertId])
-      ? USERS[_wpState.expertId]
-      : _wpState.expertId;
+    var expertName = _wpState.expertId === WP_ALL_EXPERTS
+      ? 'همه کارشناسان'
+      : ((typeof USERS !== 'undefined' && USERS[_wpState.expertId])
+        ? USERS[_wpState.expertId]
+        : _wpState.expertId);
+
+    function _wpScopeLabel(keys) {
+      if (_wpState.expertId !== WP_ALL_EXPERTS) return 'برای ' + esc(expertName) + ' — ' + range.start;
+      var s = {};
+      keys.forEach(function (k) {
+        var c = _wpState.centers.find(function (x) { return x.rkey === k; });
+        if (c && c.ownerId) s[c.ownerId] = true;
+      });
+      return 'برای ' + keys.length + ' مرکز از ' + Object.keys(s).length + ' کارشناس — ' + range.start;
+    }
 
     previewEl.style.display = '';
     var typeSummary = '';
@@ -763,7 +838,7 @@
         '<button onclick="window.wpOpenPlannerBulkMove()" style="padding:10px 24px;background:#8b5cf6;color:white;border:none;border-radius:8px;font-family:inherit;font-size:.95rem;cursor:pointer;font-weight:700">' +
           '🔄 انتقال به هفته دیگر (بدون روز)' +
         '</button>' +
-        '<span style="font-size:.8rem;color:#6b7280;margin-right:12px">برای '+esc(expertName)+' — '+range.start+'</span>' +
+        '<span style="font-size:.8rem;color:#6b7280;margin-right:12px">'+_wpScopeLabel(selectedKeys)+'</span>' +
       '</div>';
   }
 
@@ -783,6 +858,13 @@
     _wpState.expertId = v;
     _wpState.selected = {};
     _wpState.rowTypes = {};
+    if (v !== WP_ALL_EXPERTS) _wpState.filterExpert = '';
+    var hint = document.getElementById('wpExpertHint');
+    if (hint && _wpState.expertList.length) {
+      hint.textContent = v === WP_ALL_EXPERTS
+        ? '(همه — ' + _wpState.expertList.length + ' نفر)'
+        : '(' + _wpState.expertList.length + ' نفر)';
+    }
   };
 
   window._wpOnActionTypeChange = function(v) {
@@ -817,6 +899,7 @@
     if (key === 'scheduled')    _wpState.filterScheduled = val;
     if (key === 'prov')         _wpState.filterProvId = val;
     if (key === 'lead')         _wpState.filterLead = val;
+    if (key === 'expert')       _wpState.filterExpert = val;
     if (key === 'sort')         _wpState.sortBy = val;
     _wpState.visibleCount = 80;
     _wpRenderList(_computeRange());
@@ -831,7 +914,11 @@
       _wpState.customStart = ((document.getElementById('wpCustomStart')||{}).value||'').trim();
       _wpState.customEnd   = ((document.getElementById('wpCustomEnd')||{}).value||'').trim();
     }
-    if (!expertId) { if (typeof showToast==='function') showToast('کارشناس را انتخاب کنید'); return; }
+    if (!expertId) { if (typeof showToast==='function') showToast('کارشناس یا «همه کارشناسان» را انتخاب کنید'); return; }
+    if (expertId === WP_ALL_EXPERTS && !_wpState.expertList.length) {
+      if (typeof showToast==='function') showToast('لیست کاربران هنوز بارگذاری نشده — چند ثانیه صبر کنید');
+      return;
+    }
     var range = _computeRange();
     if (!range.start||!range.end) { if (typeof showToast==='function') showToast('بازه زمانی را تعریف کنید'); return; }
     _loadCenters(expertId);
@@ -893,7 +980,7 @@
     var withoutDay = selectedKeys.filter(function(k){ return !_wpState.selected[k]; });
     var autoSpread = _autoSpread(withoutDay, workDays);
     var weekId = _wpState.weekId || range.start;
-    var expertId = _wpState.expertId;
+    var singleExpert = _wpState.expertId !== WP_ALL_EXPERTS;
 
     var entries = [];
     selectedKeys.forEach(function(rkey) {
@@ -901,12 +988,13 @@
       if (!c) return;
       var scheduledDate = _wpState.selected[rkey] || autoSpread[rkey] || workDays[0] || '';
       var actionType = _wpResolveActionType(rkey);
+      var assignee = singleExpert ? _wpState.expertId : (c.ownerId || _wpState.expertId);
       entries.push({
         id: 'we_'+Date.now()+'_'+Math.random().toString(36).slice(2,5)+'_'+c.id.slice(-4),
         weekId: weekId, recKey: c.rtype+'_'+c.id,
         rtype: c.rtype, rid: c.id,
         scheduledDate: scheduledDate, actionType: actionType,
-        addedBy: expertId, centerName: c.name,
+        addedBy: assignee, centerName: c.name,
         assignmentSource: 'manager_fixed',
       });
     });
@@ -973,25 +1061,26 @@
   window.wpDoPlannerBulkMove = function(targetWeekId) {
     var selectedKeys = Object.keys(_wpState.selected);
     if (!selectedKeys.length) return;
-    
-    var expertId = _wpState.expertId;
+
+    var singleExpert = _wpState.expertId !== WP_ALL_EXPERTS;
 
     var entries = [];
     selectedKeys.forEach(function(rkey) {
       var c = _wpState.centers.find(function(x){ return x.rkey === rkey; });
       if (!c) return;
       var actionType = _wpResolveActionType(rkey);
-      
+      var assignee = singleExpert ? _wpState.expertId : (c.ownerId || _wpState.expertId);
+
       if (typeof wpRemoveFromOtherWeeks === 'function') {
         wpRemoveFromOtherWeeks(c.rtype + '_' + c.id, targetWeekId);
       }
-      
+
       entries.push({
         id: 'we_'+Date.now()+'_'+Math.random().toString(36).slice(2,5)+'_'+c.id.slice(-4),
         weekId: targetWeekId, recKey: c.rtype+'_'+c.id,
         rtype: c.rtype, rid: c.id,
         scheduledDate: null, actionType: actionType,
-        addedBy: expertId, centerName: c.name,
+        addedBy: assignee, centerName: c.name,
         assignmentSource: 'manager_fixed',
       });
     });

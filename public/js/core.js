@@ -53,6 +53,7 @@ var _quickFilter='';
 var _sortField='';
 var _sortDir=1;
 var _selectedCenters=new Set();
+var _recentCenters=[]; // recently opened centers (dashboard + center modal)
 var _provView='grid'; // 'grid' | 'list' | 'kanban'
 var _compactTable=false;
 var _nextTagId=1;var _nextWkId=1;var _nextEvId=1;
@@ -86,8 +87,99 @@ function addDaysToJalali(dateStr,days){
 }
 function wkStart(jy,jm,jd){var dow=jDow(jy,jm,jd);var g=j2g(jy,jm,jd);var d=new Date(g[0],g[1]-1,g[2]-dow,12);return g2j(d.getFullYear(),d.getMonth()+1,d.getDate());}
 
+// KPI date/helpers used by dashboard + manager (must stay eager — kpi.js is lazy-loaded)
+function ensureKPIDB(){
+  if(typeof DB==='undefined'||!DB)return;
+  if(!DB.kpiTargets)DB.kpiTargets={};
+  if(!DB.callLog)DB.callLog=[];
+  if(!DB.visitLog)DB.visitLog=[];
+  if(!DB.salesLog)DB.salesLog=[];
+  if(!DB.missionLog)DB.missionLog=[];
+  if(typeof _migrateManagerTasksBlob==='function')_migrateManagerTasksBlob();
+}
+function currentJMonth(){var t=todayJ();return t[0]+'/'+p2(t[1]);}
+function jMonthBounds(key){
+  var pts=String(key||'').split('/');var jy=parseInt(pts[0],10);var jm=parseInt(pts[1],10);
+  if(!jy||!jm)return{startTs:0,endTs:0};
+  var lastDay=jm<=6?31:jm<=11?30:29;
+  var g1=j2g(jy,jm,1);var g2=j2g(jy,jm,lastDay);
+  return{
+    startTs:new Date(g1[0],g1[1]-1,g1[2],0,0,0).getTime(),
+    endTs:new Date(g2[0],g2[1]-1,g2[2],23,59,59).getTime()
+  };
+}
+function jMonthLabel(key){
+  var pts=String(key||'').split('/');
+  return (J_MONTHS[parseInt(pts[1],10)-1]||'')+' '+(pts[0]||'');
+}
+function prevJMonths(n){
+  var t=todayJ();var jy=t[0];var jm=t[1];
+  var res=[];
+  for(var i=0;i<n;i++){
+    res.push(jy+'/'+p2(jm));
+    jm--;if(jm<1){jm=12;jy--;}
+  }
+  return res;
+}
+function workingDaysInJMonth(key){
+  var m=parseInt(String(key||'').split('/')[1],10);
+  return m<=6?26:m<=11?25:24;
+}
+function dateStrToTs(d){
+  if(!d)return 0;
+  var pts=String(d).split('/');
+  return jMs(parseInt(pts[0],10),parseInt(pts[1],10),parseInt(pts[2],10));
+}
+function currentWeekBounds(){
+  var d=new Date();
+  var dow=(d.getDay()+1)%7;
+  var sat=new Date(d);sat.setDate(d.getDate()-dow);sat.setHours(0,0,0,0);
+  var fri=new Date(sat);fri.setDate(sat.getDate()+6);fri.setHours(23,59,59,999);
+  return{startTs:sat.getTime(),endTs:fri.getTime()};
+}
+function getKPITarget(userId,month){
+  ensureKPIDB();
+  var k=userId+':'+month;
+  return Object.assign({callsPerDay:10,visitsPerWeek:5,salesCount:5,salesAmount:0,cashPct:50},(DB.kpiTargets&&DB.kpiTargets[k])||{});
+}
+function getCallsMonth(userId,month){
+  ensureKPIDB();var b=jMonthBounds(month);
+  return (DB.callLog||[]).filter(function(l){var ts=dateStrToTs(l.date);return l.userId===userId&&ts>=b.startTs&&ts<=b.endTs;});
+}
+function getSalesMonth(userId,month){
+  ensureKPIDB();var b=jMonthBounds(month);
+  return (DB.salesLog||[]).filter(function(l){var ts=dateStrToTs(l.date);return l.userId===userId&&ts>=b.startTs&&ts<=b.endTs;});
+}
+function getVisitsMonth(userId,month){
+  ensureKPIDB();var b=jMonthBounds(month);
+  var manV=(DB.visitLog||[]).filter(function(l){
+    var ts=dateStrToTs(l.date);return l.userId===userId&&ts>=b.startTs&&ts<=b.endTs;
+  });
+  var manTotal=manV.reduce(function(s,l){return s+(l.count||1);},0);
+  return{auto:[],manual:manV,total:manTotal,manTotal:manTotal};
+}
+function getWeekVisits(userId){
+  ensureKPIDB();var wb=currentWeekBounds();
+  var manV=(DB.visitLog||[]).filter(function(l){
+    var ts=dateStrToTs(l.date);return l.userId===userId&&ts>=wb.startTs&&ts<=wb.endTs;
+  });
+  return manV.reduce(function(s,l){return s+(l.count||1);},0);
+}
+
 // ════════════════════════ HELPERS ══════════════════════
 function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+/** Escape for embedding inside a single-quoted JS string in an HTML attribute (onclick=...). */
+function escJs(s){
+  return String(s==null?'':s)
+    .replace(/\\/g,'\\\\')
+    .replace(/'/g,"\\'")
+    .replace(/\u2028/g,'\\u2028')
+    .replace(/\u2029/g,'\\u2029')
+    .replace(/\n/g,'\\n')
+    .replace(/\r/g,'\\r');
+}
+window.esc = esc;
+window.escJs = escJs;
 function _safeColor(c){return(typeof c==='string'&&(/^#[0-9a-fA-F]{3,8}$/.test(c)||/^rgb/.test(c)||/^hsl/.test(c)))?c:'#888888';}
 function fNorm(s){return(s||'').toString().toLowerCase().replace(/[ي]/g,'ی').replace(/[ك]/g,'ک').replace(/[أإآا]/g,'ا').replace(/[\u200c\u200d]/g,' ').replace(/[۰-۹]/g,function(d){return'0123456789'['۰۱۲۳۴۵۶۷۸۹'.indexOf(d)];}).replace(/\s+/g,' ').trim();}
 function fMatch(q,t){return!q||fNorm(t).indexOf(fNorm(q))>=0;}
@@ -221,14 +313,12 @@ function _sseReloadDB(byUser) {
       delete merged._serverTs; delete merged._clientTs;
       Object.keys(merged).forEach(function(k) { DB[k] = merged[k]; });
       _lastSyncedDB = JSON.parse(JSON.stringify(DB));
-      if (merged.edits || merged.weekEntries || merged.salesLog) {
-        window._teamSummaryCache = null;
-      }
       if (!_saveDebounceTimer) {
         if (currentTab === 'weekplan' && typeof renderWeekPlan === 'function') renderWeekPlan();
         else if (currentTab === 'provinces' && typeof renderDashboard === 'function') { renderDashboard(); if(typeof renderTable==='function')renderTable(); }
         else if (currentTab === 'activity' && typeof renderActivity === 'function') renderActivity();
         else if (currentTab === 'kpi' && typeof renderKPIPanel === 'function') renderKPIPanel();
+        else if (currentTab === 'manager' && typeof window._mgrOnRemoteDataChange === 'function') window._mgrOnRemoteDataChange();
         else if (currentTab === 'manager' && typeof renderManagerPanel === 'function') renderManagerPanel();
       }
       var _tgSuffix = triggeredBy && triggeredBy.endsWith(':bot') ? ' (تلگرام)' : '';
@@ -910,8 +1000,8 @@ function wpTransferWeekEntry(eKey, targetWeekId, opts) {
   var we = DB.weekEntries[eKey];
   if (!we) return Promise.resolve(null);
   var parsed = typeof wpParseEntryKey === 'function' ? wpParseEntryKey(eKey) : null;
-  var rtype = parsed ? parsed.rtype : we.rtype;
-  var rid = parsed ? parsed.rid : we.rid;
+  var rtype = we.rtype || (parsed && parsed.rtype) || '';
+  var rid = we.rid != null && we.rid !== '' ? String(we.rid) : ((parsed && parsed.rid) || '');
   var recKey = we.recKey || (rtype + '_' + rid);
   var newKey = typeof wpEntryKey === 'function'
     ? wpEntryKey(targetWeekId, rtype, rid)
@@ -1157,6 +1247,12 @@ function patchCenterField(centerKey, field, val, opts) {
     return r.ok ? r.json() : r.json().then(function (j) { return Promise.reject(j); });
   })
     .then(function (j) {
+      if (j && j._ts != null && DB.edits && DB.edits[centerKey]) {
+        DB.edits[centerKey]._ts = j._ts;
+      }
+      if (j && j.data && DB.edits && DB.edits[centerKey]) {
+        DB.edits[centerKey] = Object.assign({}, DB.edits[centerKey] || {}, j.data);
+      }
       if (j && j.inboxWarning && typeof showToast === 'function') {
         showToast('⚠ ' + j.inboxWarning, 5000);
       }
@@ -1170,6 +1266,36 @@ function patchCenterField(centerKey, field, val, opts) {
       throw e;
     });
 }
+
+function bulkPatchCenterFields(updates) {
+  if (!updates || !updates.length) return Promise.resolve({ ok: true, updated: 0, failed: 0, results: [] });
+  return fetch('/api/centers/bulk-patch', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-Cid': _sseClientId },
+    body: JSON.stringify({ updates: updates }),
+  }).then(function (r) {
+    return r.ok ? r.json() : r.json().then(function (j) { return Promise.reject(j); });
+  }).then(function (res) {
+    if (!DB.edits) DB.edits = {};
+    (res.results || []).forEach(function (row) {
+      if (!row.ok || !row.centerKey) return;
+      DB.edits[row.centerKey] = Object.assign({}, DB.edits[row.centerKey] || {}, row.data || {});
+      if (row._ts != null) DB.edits[row.centerKey]._ts = row._ts;
+    });
+    if (typeof _invalidateEditsCache === 'function') _invalidateEditsCache();
+    var needsInbox = (updates || []).some(function (u) {
+      return u && (u.field === 'followupDate' || u.field === 'status');
+    });
+    if (needsInbox && typeof _scheduleInboxRefresh === 'function') _scheduleInboxRefresh();
+    if (currentTab === 'manager' && typeof window._mgrOnRemoteDataChange === 'function') {
+      window._mgrOnRemoteDataChange();
+    }
+    return res;
+  });
+}
+
+window.bulkPatchCenterFields = bulkPatchCenterFields;
 
 function postCenterNote(centerKey, text, extra) {
   return fetch('/api/centers/' + encodeURIComponent(centerKey) + '/notes', {
