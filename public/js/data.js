@@ -110,6 +110,20 @@ function _buildPCCache(){
   return filteredBase.concat(extras).concat(movedIn);
 }
 
+/** Province edit key: center_tehran for Tehran, pc_{id} for others */
+function getProvinceEditKey(provId) {
+  if (!provId) return '';
+  return getProvType(provId) + '_' + provId;
+}
+
+/** Province id for a center row */
+function getCenterProvinceId(rtype, rid) {
+  if (!rtype || rid == null || rid === '') return '';
+  if (rtype === 'center' && String(rid) !== 'tehran') return 'tehran';
+  if (rtype === 'pc') return String(rid).split('||')[0] || '';
+  return '';
+}
+
 /** Province default owner: DB.edits override, then PROVINCES hardcoded fallback. */
 function _getProvinceOwner(provId) {
   if (!provId) return '';
@@ -122,12 +136,18 @@ function _getProvinceOwner(provId) {
 
 /**
  * Canonical center owner resolution (keep all copies in sync with this).
- * Chain: edits.owner → static center → province owner → extra.owner
+ * Chain: edits.owner → province owner → static center → extra.owner
  */
 function getCenterOwner(rtype, rid) {
   if (!rtype || rid == null || rid === '') return '';
   var e = getE(rtype, rid);
   if (e && e.owner) return e.owner;
+
+  var provId = getCenterProvinceId(rtype, rid);
+  if (provId) {
+    var po = _getProvinceOwner(provId);
+    if (po) return po;
+  }
 
   if (rtype === 'center') {
     if (typeof CENTERS !== 'undefined') {
@@ -136,13 +156,10 @@ function getCenterOwner(rtype, rid) {
     }
   } else if (rtype === 'pc') {
     if (typeof _buildPCCache === 'function') { try { _buildPCCache(); } catch (_) {} }
-    if (typeof _PC_CACHE !== 'undefined') {
-      var provId = String(rid).split('||')[0];
+    if (typeof _PC_CACHE !== 'undefined' && provId) {
       var arr = _PC_CACHE[provId] || [];
       var pc = arr.find(function(x) { return String(x.id) === String(rid); });
       if (pc && pc.owner) return pc.owner;
-      var po = _getProvinceOwner(provId);
-      if (po) return po;
     }
   }
 

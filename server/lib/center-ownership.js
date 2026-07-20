@@ -79,8 +79,22 @@ function buildOwnerMaps(centersMaster, extraRows) {
   return { staticOwners, extraOwners, provinceByKey };
 }
 
+function getProvinceEditKey(provId) {
+  if (!provId) return '';
+  if (provId === 'tehran') return 'center_tehran';
+  return 'pc_' + provId;
+}
+
+function resolveProvinceOwner(provId, edits) {
+  if (!provId || !edits) return null;
+  const key = getProvinceEditKey(provId);
+  const pe = edits[key];
+  if (pe && pe.owner) return pe.owner;
+  return null;
+}
+
 /**
- * Canonical owner resolution (mirrors frontend _wpGetOwner chain).
+ * Canonical owner resolution (mirrors frontend getCenterOwner chain).
  * @param {string} centerKey - e.g. center_42 or pc_tehran||3
  * @param {object} edits - DB.edits map
  * @param {object} ownerMaps - from buildOwnerMaps
@@ -88,19 +102,15 @@ function buildOwnerMaps(centersMaster, extraRows) {
 function resolveCenterOwner(centerKey, edits, ownerMaps) {
   const edit = edits && edits[centerKey];
   if (edit && edit.owner) return edit.owner;
+
+  const provId = getCenterProvinceId(centerKey, ownerMaps);
+  if (provId) {
+    const po = resolveProvinceOwner(provId, edits);
+    if (po) return po;
+  }
+
   if (ownerMaps.staticOwners[centerKey]) return ownerMaps.staticOwners[centerKey];
   if (ownerMaps.extraOwners[centerKey]) return ownerMaps.extraOwners[centerKey];
-  // Province-level owner fallback for pc centers
-  if (centerKey.startsWith('pc_')) {
-    const rest = centerKey.slice(3);
-    const sepIdx = rest.indexOf('||');
-    if (sepIdx > 0) {
-      const provId = rest.slice(0, sepIdx);
-      const provKey = 'pc_' + provId;
-      const provEdit = edits && edits[provKey];
-      if (provEdit && provEdit.owner) return provEdit.owner;
-    }
-  }
 
   return null;
 }

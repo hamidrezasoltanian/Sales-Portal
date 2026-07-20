@@ -100,6 +100,10 @@ async function tick() {
 }
 
 function startAutoBackupScheduler() {
+  if (process.env.AUTO_BACKUP_SCHEDULER !== 'true') {
+    console.log('[auto-backup] scheduler disabled — backups run via cron (scripts/setup-backup-cron.sh). On-demand: POST /api/backups/run');
+    return;
+  }
   if (process.env.AUTO_BACKUP_ENABLED === 'false') {
     console.log('[auto-backup] disabled (AUTO_BACKUP_ENABLED=false)');
     return;
@@ -163,7 +167,8 @@ async function getStatus() {
   } catch (e) { /* table may not exist yet */ }
 
   return {
-    enabled: process.env.AUTO_BACKUP_ENABLED !== 'false',
+    enabled: process.env.AUTO_BACKUP_SCHEDULER === 'true' && process.env.AUTO_BACKUP_ENABLED !== 'false',
+    cronPrimary: process.env.AUTO_BACKUP_SCHEDULER !== 'true',
     timezone: TZ,
     schedule: SCHEDULE.map(function (s) { return s.label; }),
     retentionDays: RETENTION_DAYS,

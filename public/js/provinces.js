@@ -25,7 +25,7 @@ function getFiltered(){
     // Quick filter
     if(_quickFilter==='overdue')return isOverdue(crtype,r.id);
     if(_quickFilter==='nofollowup'){return !e.followupDate;}
-    if(_quickFilter==='noowner'){return !(e.owner||r.owner);}
+    if(_quickFilter==='noowner'){var _noOw=typeof getCenterOwner==='function'?getCenterOwner(crtype,r.id):(e.owner||r.owner||'');return !_noOw;}
     if(_quickFilter==='stalled')return isStalled(crtype,r.id);
     if(_quickFilter==='pot1'){return (e.potential||r.potential)==1;}
     if(_quickFilter==='inweek'){
@@ -74,7 +74,7 @@ function renderProvList(){
   var effectiveProvOwner=_plOwner||(_isExpert()?currentUser:'');
   var filtProvs=provs.filter(function(p){
     if(_plSearch){var n=fNorm(p.name);if(n.indexOf(fNorm(_plSearch))<0)return false;}
-    if(effectiveProvOwner&&p.id!=='tehran'){var ow=typeof getCenterOwner==='function'?getCenterOwner('pc',p.id):(getE('pc',p.id).owner||p.owner||'');if(ow!==effectiveProvOwner)return false;}
+    if(effectiveProvOwner){var ow=typeof getCenterOwner==='function'?getCenterOwner(getProvType(p.id),p.id):(getE(getProvType(p.id),p.id).owner||p.owner||'');if(ow!==effectiveProvOwner)return false;}
     return true;
   });
   // ترتیب‌بندی استان‌ها
@@ -294,7 +294,7 @@ function renderProvTable(){
       else if(_sortField==='lastActivity'){va=ea._lastActivity||ea._ts||0;vb=eb._lastActivity||eb._ts||0;}
       else if(_sortField==='type'){va=ea.type||a.type||'ω';vb=eb.type||b.type||'ω';}
       else if(_sortField==='lead'){va=LEAD_LIST.indexOf(ea.lead||a.lead||'');vb=LEAD_LIST.indexOf(eb.lead||b.lead||'');if(va<0)va=999;if(vb<0)vb=999;}
-      else if(_sortField==='owner'){va=USERS[ea.owner||a.owner||'']||'ω';vb=USERS[eb.owner||b.owner||'']||'ω';}
+      else if(_sortField==='owner'){va=USERS[(typeof getCenterOwner==='function'?getCenterOwner(art,a.id):(ea.owner||a.owner||''))]||'ω';vb=USERS[(typeof getCenterOwner==='function'?getCenterOwner(brt,b.id):(eb.owner||b.owner||''))]||'ω';}
       if(va<vb)return -_sortDir;if(va>vb)return _sortDir;return 0;
     });
   }
@@ -328,6 +328,7 @@ function renderProvTable(){
     var crtype=r.rtype||rtype;
     var e=getE(crtype,r.id);
     var displayName=_getCenterName(crtype,r.id);
+    var centerOwner=typeof getCenterOwner==='function'?getCenterOwner(crtype,r.id):(e.owner||r.owner||'');
     var st=e.status||'بدون تماس';var sc=stCls(st);
     var lead=e.lead||r.lead||'سرنخ';var lc=lCls(lead);
     var pot=e.potential!==undefined?e.potential:r.potential;
@@ -403,10 +404,10 @@ function renderProvTable(){
 
       +'<td><select class="ed-sel '+lc+'" onchange="setE(\''+escJs(crtype)+'\',\''+escJs(String(r.id))+'\',\'lead\',this.value);this.className=\'ed-sel \'+(window.LEAD_CLS[this.value]||\'lead-none\')">'
         +LEAD_LIST.map(function(l){return'<option'+(l===lead?' selected':'')+'>'+l+'</option>';}).join('')+'</select>'+(e.oppGrade?'<span style="font-size:9px;font-weight:700;padding:1px 4px;border-radius:3px;background:'+(e.oppGrade==='A'?'#fef08a;color:#92400e':e.oppGrade==='B'?'#fed7aa;color:#c2410c':'#e2e8f0;color:#475569')+'">'+e.oppGrade+'</span>':'')+(e.oppValue?'<span style="font-size:9px;color:#7c3aed">'+e.oppValue+'M</span>':'')+(e.customerStatus==='dormant'?'<span title="مشتری خوابیده">😴</span>':'')+'</td>'
-      +'<td style="white-space:nowrap"><span class="owner-dot" data-uid="'+encodeURIComponent(e.owner||r.owner||'')+'"></span>'
+      +'<td style="white-space:nowrap"><span class="owner-dot" data-uid="'+encodeURIComponent(centerOwner)+'"></span>'
       +'<select class="ed-sel" onchange="setE(\''+escJs(crtype)+'\',\''+escJs(String(r.id))+'\',\'owner\',this.value);var _d=this.previousElementSibling;if(_d)_d.style.background=window.umGetColor?umGetColor(this.value):\'#e2e8f0\'">'
       +'<option value="">—</option>'
-        +(function(){var _act=typeof umGetActive==='function'?umGetActive():[];return _act.map(function(m){return'<option value="'+esc(m.id)+'"'+((e.owner||r.owner||'')==m.id?' selected':'')+'>'+esc(m.name)+'</option>';}).join('');})()+'</select>'+(function(){var _ow=e.owner||r.owner||'';if(!_ow)return'';var _om=_DEFAULT_MEMBERS&&_DEFAULT_MEMBERS.find(function(mm){return mm.id===_ow;});return(_om&&_om.active===false)?'<span title="مالک غیرفعال" style="font-size:9px;color:#dc2626;background:#fee2e2;border-radius:4px;padding:1px 4px;margin-right:2px">⚠</span>':'';})()+' </td>'
+        +(function(){var _act=typeof umGetActive==='function'?umGetActive():[];return _act.map(function(m){return'<option value="'+esc(m.id)+'"'+(centerOwner==m.id?' selected':'')+'>'+esc(m.name)+'</option>';}).join('');})()+'</select>'+(function(){var _ow=centerOwner;if(!_ow)return'';var _om=_DEFAULT_MEMBERS&&_DEFAULT_MEMBERS.find(function(mm){return mm.id===_ow;});return(_om&&_om.active===false)?'<span title="مالک غیرفعال" style="font-size:9px;color:#dc2626;background:#fee2e2;border-radius:4px;padding:1px 4px;margin-right:2px">⚠</span>':'';})()+' </td>'
       +'<td><select class="st-sel '+sc+'" onchange="onStatus(\''+escJs(crtype)+'\',\''+escJs(String(r.id))+'\',this)">'
         +STATUS_LIST.map(function(s,i){return'<option class="'+STATUS_CLS[i]+'"'+(s===st?' selected':'')+'>'+s+'</option>';}).join('')+'</select>'
         +'<span class="st-print">'+st+'</span></td>'
@@ -697,7 +698,7 @@ function renderKanban(){
     else if(_sortField==='potential'){va=parseInt(ea.potential||a.potential||9);vb=parseInt(eb.potential||b.potential||9);}
     else if(_sortField==='type'){va=ea.type||a.type||'ω';vb=eb.type||b.type||'ω';}
     else if(_sortField==='lead'){va=LEAD_LIST.indexOf(ea.lead||a.lead||'');vb=LEAD_LIST.indexOf(eb.lead||b.lead||'');if(va<0)va=999;if(vb<0)vb=999;}
-    else if(_sortField==='owner'){va=USERS[ea.owner||a.owner||'']||'ω';vb=USERS[eb.owner||b.owner||'']||'ω';}
+    else if(_sortField==='owner'){va=USERS[(typeof getCenterOwner==='function'?getCenterOwner(art,a.id):(ea.owner||a.owner||''))]||'ω';vb=USERS[(typeof getCenterOwner==='function'?getCenterOwner(brt,b.id):(eb.owner||b.owner||''))]||'ω';}
     else if(_sortField==='followupDate'){va=ea.followupDate||'9999';vb=eb.followupDate||'9999';}
     if(va<vb)return -_sortDir;if(va>vb)return _sortDir;return 0;
   });}
@@ -748,7 +749,7 @@ function renderCards(){
     else if(_sortField==='status'){va=STATUS_LIST.indexOf(ea.status||'بدون تماس');vb=STATUS_LIST.indexOf(eb.status||'بدون تماس');}
     else if(_sortField==='type'){va=ea.type||a.type||'ω';vb=eb.type||b.type||'ω';}
     else if(_sortField==='lead'){va=LEAD_LIST.indexOf(ea.lead||a.lead||'');vb=LEAD_LIST.indexOf(eb.lead||b.lead||'');if(va<0)va=999;if(vb<0)vb=999;}
-    else if(_sortField==='owner'){va=USERS[ea.owner||a.owner||'']||'ω';vb=USERS[eb.owner||b.owner||'']||'ω';}
+    else if(_sortField==='owner'){va=USERS[(typeof getCenterOwner==='function'?getCenterOwner(art,a.id):(ea.owner||a.owner||''))]||'ω';vb=USERS[(typeof getCenterOwner==='function'?getCenterOwner(brt,b.id):(eb.owner||b.owner||''))]||'ω';}
     else if(_sortField==='followupDate'){va=ea.followupDate||'9999';vb=eb.followupDate||'9999';}
     else if(_sortField==='lastActivity'){va=ea._lastActivity||ea._ts||0;vb=eb._lastActivity||eb._ts||0;}
     if(va<vb)return -_sortDir;if(va>vb)return _sortDir;return 0;
@@ -813,7 +814,7 @@ function renderPipeline() {
         +'<div style="padding:4px 8px;font-size:10px;color:var(--text-muted);border-bottom:1px solid var(--border)">'+pct+'% از کل</div>'
         +'<div class="pipeline-col-body">'
         +items.slice(0,50).map(function(item){
-          var owner=USERS[item.e.owner||item.r.owner||'']||'';
+          var owner=USERS[(typeof getCenterOwner==='function'?getCenterOwner(item.crtype,item.r.id):(item.e.owner||item.r.owner||''))]||'';
           var displayName=_getCenterName(item.crtype,item.r.id);
           return'<div class="pipeline-card" style="border-right-color:'+ST_COLORS[idx]+'" onclick="openCenterModal(\''+item.crtype+'\',\''+item.r.id+'\')">'
             +'<div class="pc-name">'+esc(displayName)+'</div>'
@@ -928,8 +929,8 @@ function renderMobileList(data,rtype,today){
     else if(isOverdue(crtype,r.id))rowCls+=' row-overdue';
     else if(fd&&fd<=addDaysToJalali(today,3))rowCls+=' row-upcoming';
     else if(isStalled(crtype,r.id))rowCls+=' row-stalled';
-    var ownerName=USERS[e.owner||r.owner||'']||e.owner||r.owner||'';
-    var ownerColor=window.umGetColor?umGetColor(e.owner||r.owner||''):'#e2e8f0';
+    var ownerName=USERS[(typeof getCenterOwner==='function'?getCenterOwner(crtype,r.id):(e.owner||r.owner||''))]||(typeof getCenterOwner==='function'?getCenterOwner(crtype,r.id):(e.owner||r.owner||''));
+    var ownerColor=window.umGetColor?umGetColor(typeof getCenterOwner==='function'?getCenterOwner(crtype,r.id):(e.owner||r.owner||'')):'#e2e8f0';
     var notes=DB.notes[recK(crtype,r.id)]||[];
     var lastTs=e._lastActivity||e._ts||0;
     var daysSince=lastTs?Math.floor((nowTs()-lastTs)/86400000):null;
@@ -1194,7 +1195,7 @@ function bulkExport(){
     var r=centers.find(function(x){return x.id===rid;});
     if(!r)return;
     var e=getE(rt,rid);
-    rows.push([r.name,e.potential||r.potential||'',e.type||r.type||'',USERS[e.owner||r.owner||'']||'',e.status||'بدون تماس',e.followupDate||'']);
+    rows.push([r.name,e.potential||r.potential||'',e.type||r.type||'',USERS[(typeof getCenterOwner==='function'?getCenterOwner(rtype,r.id):(e.owner||r.owner||''))]||'',e.status||'بدون تماس',e.followupDate||'']);
   });
   var ws=XLSX.utils.aoa_to_sheet(rows);
   var wb=XLSX.utils.book_new();
@@ -1389,7 +1390,7 @@ function exportCurrentXlsx(){
   var rows=[['ردیف','نام مرکز','پتانسیل','نوع','سرنخ','مسئول','وضعیت','پیگیری بعدی','تلفن']];
   data.forEach(function(r){
     var e=getE(rtype,r.id);
-    rows.push([r.row,r.name,e.potential||r.potential||'',e.type||r.type||'',e.lead||r.lead||'',USERS[e.owner||r.owner||'']||'',e.status||'بدون تماس',e.followupDate||'',(e.phones&&e.phones[0])||'']);
+    rows.push([r.row,r.name,e.potential||r.potential||'',e.type||r.type||'',e.lead||r.lead||'',USERS[(typeof getCenterOwner==='function'?getCenterOwner(rtype,r.id):(e.owner||r.owner||''))]||'',e.status||'بدون تماس',e.followupDate||'',(e.phones&&e.phones[0])||'']);
   });
   var ws=XLSX.utils.aoa_to_sheet(rows);
   var wb=XLSX.utils.book_new();
@@ -1499,7 +1500,7 @@ function renderAllCenters(viewMode){
       '<td><span class="pot-badge pot-'+pot+'">'+pot+'</span></td>',
       '<td><span style="font-size:11px">'+esc(e.type||r.type||'')+'</span></td>',
       '<td><span class="'+lc+'" style="padding:2px 6px;border-radius:4px;font-size:11px">'+lead+'</span></td>',
-      '<td style="font-size:11px">'+esc(USERS[e.owner||r.owner||'']||e.owner||r.owner||'—')+'</td>',
+      '<td style="font-size:11px">'+esc(USERS[(typeof getCenterOwner==='function'?getCenterOwner(rtype,r.id):(e.owner||r.owner||''))]||(typeof getCenterOwner==='function'?getCenterOwner(rtype,r.id):(e.owner||r.owner||''))||'—')+'</td>',
       '<td><select class="st-sel '+sc+'">'+STATUS_LIST.map(function(s,i){return'<option class="'+STATUS_CLS[i]+'"'+(s===st?' selected':'')+'>'+s+'</option>';}).join('')+'</select></td>',
       '<td><input type="text" class="'+fdCls+'" value="'+fd+'" readonly style="cursor:pointer;width:98px"></td>',
       '<td><button class="note-btn'+(notes.length?' has':'')+'">📝'+(notes.length?' '+notes.length:'')+'</button></td>'

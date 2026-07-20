@@ -1992,6 +1992,7 @@ function openCenterModal(rtype,id,centerKeyHint){
   var inpStyle='cm-inp';
 
   var body='<div class="cm-profile">'
+    +'<div id="cmMergeSuggestBox" style="display:none;margin-bottom:10px"></div>'
     +'<div class="cm-profile-hero">'
     +'<div class="cm-profile-hero-title">'+esc(displayName)+'</div>'
     +'<div class="cm-profile-hero-meta">'
@@ -2265,6 +2266,9 @@ function openCenterModal(rtype,id,centerKeyHint){
   }
   body+='</div>'; // .cm-profile
   openModal('cm_'+id,'🏥 '+esc(displayName),body,foot,{xl:true});
+  (function(_ck){
+    if(typeof _cmLoadMergeSuggestions==='function')_cmLoadMergeSuggestions(_ck,'cm_'+id);
+  })(centerKeyHint||(typeof recK==='function'?recK(rtype,id):(rtype+'_'+id)));
   if (typeof ensureCenterNotesLoaded === 'function') {
     ensureCenterNotesLoaded(recK(rtype, id), rtype, id);
   }

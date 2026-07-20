@@ -154,6 +154,7 @@ const faradisData = require('./routes/faradis-data');
 app.use('/api/faradis-data', faradisData);
 app.use('/api/letters', require('./routes/letters'));
 app.use('/api/trash', require('./routes/trash'));
+app.use('/api/center-merge', require('./routes/center-merge'));
 
 app.get('/api/health', async function (req, res) {
   const start = Date.now();

@@ -68,7 +68,8 @@ function _dhTrashPanelHtml(isMgr) {
     return '<div style="font-size:12px;color:var(--text-muted);padding:20px;text-align:center">سطل زباله فقط برای مدیر و سوپر ادمین قابل مشاهده است.</div>';
   }
   return '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">حذف‌های اخیر مراکز، وظایف، پزشکان، یادداشت‌ها، فرصت‌ها و فایل‌ها — قابل بازیابی توسط مدیر یا سوپر ادمین.</div>'
-    + '<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">'
+    + '<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center">'
+    + '<input type="search" id="dhTrashSearch" placeholder="🔍 جستجو نام، کلید، حذف‌کننده…" oninput="_dhTrashSearchDebounced()" style="flex:1;min-width:160px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px">'
     + '<select id="dhTrashFilter" onchange="_dhLoadTrash()" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:12px">'
     + '<option value="">همه انواع</option>'
     + '<option value="center">مراکز</option>'
@@ -87,7 +88,9 @@ function _dhLoadTrash() {
   var el = document.getElementById('dhTrashList');
   if (!el) return;
   var type = (document.getElementById('dhTrashFilter') || {}).value || '';
-  var url = '/api/trash?limit=100' + (type ? '&type=' + encodeURIComponent(type) : '');
+  var q = (document.getElementById('dhTrashSearch') || {}).value || '';
+  q = q.trim();
+  var url = '/api/trash?limit=200' + (type ? '&type=' + encodeURIComponent(type) : '') + (q ? '&q=' + encodeURIComponent(q) : '');
   el.innerHTML = '⏳ بارگذاری...';
   fetch(url, { credentials: 'same-origin' })
     .then(function (r) {
@@ -99,7 +102,7 @@ function _dhLoadTrash() {
     .then(function (d) {
       var items = d.items || [];
       if (!items.length) {
-        el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted)">سطل زباله خالی است ✨</div>';
+        el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted)">' + (q ? 'نتیجه‌ای یافت نشد' : 'سطل زباله خالی است ✨') + '</div>';
         return;
       }
       el.innerHTML = '<table style="width:100%;border-collapse:collapse">'
@@ -154,6 +157,12 @@ function _dhPurgeTrash(id) {
 window._dhLoadTrash = _dhLoadTrash;
 window._dhRestoreTrash = _dhRestoreTrash;
 window._dhPurgeTrash = _dhPurgeTrash;
+var _dhTrashSearchTimer = null;
+function _dhTrashSearchDebounced() {
+  if (_dhTrashSearchTimer) clearTimeout(_dhTrashSearchTimer);
+  _dhTrashSearchTimer = setTimeout(_dhLoadTrash, 280);
+}
+window._dhTrashSearchDebounced = _dhTrashSearchDebounced;
 
 function _dhAutoPanelHtml(isMgr) {
   if (!isMgr) {
@@ -231,7 +240,7 @@ function _dhLoadBackupStatus() {
     var latest = s.latestFile;
     el.innerHTML = '<div style="text-align:right">'
       + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">'
-      + _dhStatBox('وضعیت', s.enabled ? '✅ فعال' : '⏸ غیرفعال', s.enabled ? '#16a34a' : '#94a3b8')
+      + _dhStatBox('وضعیت', s.cronPrimary ? '⏰ Cron (OS)' : (s.enabled ? '✅ Node' : '⏸ غیرفعال'), s.cronPrimary ? '#0ea5e9' : (s.enabled ? '#16a34a' : '#94a3b8'))
       + _dhStatBox('نگهداری', s.retentionDays + ' روز', '#6366f1')
       + _dhStatBox('زمان‌بندی', '11 · 13 · 18', '#0ea5e9')
       + _dhStatBox('تعداد فایل', String(s.fileCount || 0), '#f59e0b')
@@ -239,6 +248,11 @@ function _dhLoadBackupStatus() {
       + '<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:10px;font-size:11px">'
       + '<div><strong>منطقه زمانی:</strong> ' + esc(s.timezone) + ' · <strong>الان:</strong> ' + esc(s.tehranNow) + '</div>'
       + '<div style="margin-top:4px;color:var(--text-muted)">مسیر: <code style="font-size:10px">' + esc(s.backupDir) + '</code></div>'
+      + '<div style="margin-top:4px;font-size:10px;color:var(--text-muted)">'
+      + (s.cronPrimary
+        ? '⏰ زمان‌بندی روی cron (مستقل از PM2) · health-check هر ساعت'
+        : '⚠️ Node scheduler فعال — توصیه: AUTO_BACKUP_SCHEDULER=false + setup-backup-cron.sh')
+      + '</div>'
       + (latest ? '<div style="margin-top:6px">آخرین بکاپ: <strong>' + esc(latest.name) + '</strong> (' + esc(latest.sizeHuman) + ') — ' + esc(latest.createdAt.slice(0, 16).replace('T', ' ')) + '</div>' : '<div style="margin-top:6px;color:#dc2626">هنوز بکاپی ثبت نشده</div>')
       + '</div>'
       + '<div style="display:flex;gap:8px;margin-bottom:12px">'

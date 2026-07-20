@@ -57,6 +57,53 @@ PROVINCE_MAP = {
 # Reverse map: province id → province name (for looking up PC_RAW by name key)
 PROV_ID_TO_NAME = {v: k for k, v in PROVINCE_MAP.items()}
 
+
+def pc_row(entry):
+    """Row index from PC_RAW entry (array or dict format)."""
+    if isinstance(entry, list):
+        return entry[0]
+    if isinstance(entry, dict):
+        return entry.get('row', entry.get('n', 0))
+    return 0
+
+
+def pc_name(entry):
+    if isinstance(entry, list):
+        return (entry[1] or '').strip()
+    if isinstance(entry, dict):
+        return (entry.get('name') or '').strip()
+    return ''
+
+
+def find_pc_by_name(pc_raw, prov_id, name):
+    """Find existing center in PC_RAW by Persian name key (matches UI loader)."""
+    name = (name or '').strip()
+    pname = PROV_ID_TO_NAME.get(prov_id, '')
+    for key in [pname, prov_id]:
+        if not key:
+            continue
+        lst = pc_raw.get(key, [])
+        if not isinstance(lst, list):
+            continue
+        for entry in lst:
+            if pc_name(entry) == name:
+                return entry, key
+    return None, pname or prov_id
+
+
+def next_pc_row(pc_raw, prov_id):
+    pname = PROV_ID_TO_NAME.get(prov_id, prov_id)
+    max_row = 0
+    for key in [pname, prov_id]:
+        lst = pc_raw.get(key, [])
+        if not isinstance(lst, list):
+            continue
+        for entry in lst:
+            r = pc_row(entry)
+            if r > max_row:
+                max_row = r
+    return max_row + 1
+
 # ─── Tag mapping ──────────────────────────────────────────────────────────────
 POTENTIAL_MAP = {
     'پرمصرف': 1,
@@ -414,6 +461,7 @@ def main():
     added_tehran = 0
     updated_edits = 0
     skipped_existing = 0
+    touched_edit_keys = set()
 
     for c in customers:
         name = c['name']
@@ -441,32 +489,23 @@ def main():
                 added_tehran += 1
         elif c['prov_id']:
             prov_id = c['prov_id']
-            if prov_id not in PC_RAW:
+            pname = PROV_ID_TO_NAME.get(prov_id, prov_id)
+            # UI reads PC_RAW by Persian province name — always use pname key
+            if pname not in PC_RAW or not isinstance(PC_RAW.get(pname), list):
+                PC_RAW[pname] = PC_RAW[pname] if isinstance(PC_RAW.get(pname), list) else []
+            # Migrate legacy id-key bucket into name-key list
+            if isinstance(PC_RAW.get(prov_id), list) and PC_RAW[prov_id]:
+                PC_RAW[pname] = PC_RAW[pname] + PC_RAW[prov_id]
                 PC_RAW[prov_id] = []
-            # Search in BOTH id-key (PC_RAW['p1']) and name-key (PC_RAW['فارس'])
-            # Old centers are stored under name keys; Mizito-added ones under id keys
-            pname = PROV_ID_TO_NAME.get(prov_id, '')
-            name_key_list = PC_RAW.get(pname, []) if pname else []
-            id_key_list = PC_RAW[prov_id]
-            existing = next(
-                (x for lst in [id_key_list, name_key_list]
-                 for x in lst if isinstance(x, dict) and x.get('name', '').strip() == name),
-                None
-            )
+
+            existing, _ = find_pc_by_name(PC_RAW, prov_id, name)
             if existing:
-                n_idx = existing.get('row', existing.get('n', 0))
+                n_idx = pc_row(existing)
                 edit_key = f"pc_{prov_id}||{n_idx}"
                 skipped_existing += 1
             else:
-                n_idx = len(id_key_list)
-                PC_RAW[prov_id].append({
-                    'row': n_idx,
-                    'name': name,
-                    'type': c['type'],
-                    'lead': 'سرنخ',
-                    'owner': '',
-                    '_mizito': True,
-                })
+                n_idx = next_pc_row(PC_RAW, prov_id)
+                PC_RAW[pname].append([n_idx, name, c['potential'], c['type'], c['lead']])
                 edit_key = f"pc_{prov_id}||{n_idx}"
                 added_pc += 1
         else:
@@ -517,6 +556,8 @@ def main():
         if c['product_tags']:
             DB['rTags'][edit_key] = c['product_tags']
 
+        touched_edit_keys.add(edit_key)
+
     print(f'\nResults:')
     print(f'  Added to PC_RAW (provinces): {added_pc}')
     print(f'  Added to CENTERS (Tehran):   {added_tehran}')
@@ -544,6 +585,19 @@ def main():
            ON CONFLICT (key) DO UPDATE SET value = %s, updated_at = NOW(), updated_by = 'mizito_import'""",
         (json.dumps(DB, ensure_ascii=False), json.dumps(DB, ensure_ascii=False))
     )
+
+    # Upsert touched rows into normalized center_edits (primary CRM store)
+    for ek in touched_edit_keys:
+        ed = DB['edits'].get(ek)
+        if not ed:
+            continue
+        cur.execute(
+            """INSERT INTO center_edits (center_key, data, updated_at, updated_by)
+               VALUES (%s, %s, NOW(), 'mizito_import')
+               ON CONFLICT (center_key) DO UPDATE SET
+                 data = EXCLUDED.data, updated_at = NOW(), updated_by = 'mizito_import'""",
+            (ek, json.dumps(ed, ensure_ascii=False))
+        )
 
     conn.commit()
     cur.close()

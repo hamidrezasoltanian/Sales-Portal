@@ -835,8 +835,8 @@ function umPropagateProvOwnerToCenters(provId, newOwner, cb) {
     var parts = key.split('_');
     var rt = parts[0];
     var rid = parts.slice(1).join('_');
-    var e = getE(rt, rid);
-    return String(e.owner || '') !== String(newOwner || '');
+    var cur = typeof getCenterOwner === 'function' ? getCenterOwner(rt, rid) : '';
+    return String(cur || '') !== String(newOwner || '');
   });
 
   if (!needUpdate.length) {

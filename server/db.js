@@ -2258,6 +2258,30 @@ async function initSchema() {
   await query(`CREATE INDEX IF NOT EXISTS idx_deleted_entities_type ON deleted_entities(entity_type, deleted_at DESC)`).catch(() => {});
   await query(`CREATE INDEX IF NOT EXISTS idx_deleted_entities_active ON deleted_entities(deleted_at DESC) WHERE restored_at IS NULL AND purged_at IS NULL`).catch(() => {});
 
+  await query(`
+    CREATE TABLE IF NOT EXISTS center_merge_suggestions (
+      id                  SERIAL PRIMARY KEY,
+      source_key          VARCHAR(400) NOT NULL,
+      target_key          VARCHAR(400) NOT NULL,
+      source_display_name VARCHAR(500),
+      target_display_name VARCHAR(500),
+      match_score         SMALLINT NOT NULL DEFAULT 0,
+      match_reason        VARCHAR(40) NOT NULL DEFAULT 'name_fuzzy',
+      source_snapshot     JSONB NOT NULL DEFAULT '{}',
+      status              VARCHAR(20) NOT NULL DEFAULT 'pending',
+      dismissed_by        VARCHAR(100),
+      dismissed_at        TIMESTAMPTZ,
+      deferred_until      TIMESTAMPTZ,
+      merged_at           TIMESTAMPTZ,
+      merged_by           VARCHAR(100),
+      created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {});
+  await query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_cms_pair_active ON center_merge_suggestions(source_key, target_key) WHERE status IN ('pending', 'deferred')`).catch(() => {});
+  await query(`CREATE INDEX IF NOT EXISTS idx_cms_target_pending ON center_merge_suggestions(target_key) WHERE status = 'pending'`).catch(() => {});
+  await query(`CREATE INDEX IF NOT EXISTS idx_cms_source ON center_merge_suggestions(source_key)`).catch(() => {});
+
   await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`).catch(() => {});
   await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS deleted_by VARCHAR(100)`).catch(() => {});
   await query(`CREATE INDEX IF NOT EXISTS idx_tasks_deleted ON tasks(deleted_at) WHERE deleted_at IS NOT NULL`).catch(() => {});

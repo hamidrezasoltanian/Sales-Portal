@@ -20,6 +20,7 @@ router.get('/', requireManager, async function (req, res) {
   try {
     const items = await listTrash({
       entityType: req.query.type || null,
+      q: req.query.q || req.query.search || null,
       limit: req.query.limit,
       offset: req.query.offset,
     });

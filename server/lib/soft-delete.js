@@ -260,6 +260,7 @@ async function softDeleteCenter(payload, deletedBy) {
 
 async function listTrash(opts) {
   const entityType = opts && opts.entityType;
+  const q = opts && opts.q ? String(opts.q).trim() : '';
   const limit = Math.min(Math.max(parseInt(opts && opts.limit, 10) || 50, 1), 200);
   const offset = Math.max(parseInt(opts && opts.offset, 10) || 0, 0);
   const params = [];
@@ -269,6 +270,11 @@ async function listTrash(opts) {
   if (entityType) {
     params.push(entityType);
     sql += ` AND entity_type = $${params.length}`;
+  }
+  if (q) {
+    params.push('%' + q + '%');
+    const p = '$' + params.length;
+    sql += ` AND (title ILIKE ${p} OR center_key ILIKE ${p} OR entity_id ILIKE ${p} OR deleted_by ILIKE ${p})`;
   }
   params.push(limit, offset);
   sql += ` ORDER BY deleted_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`;
