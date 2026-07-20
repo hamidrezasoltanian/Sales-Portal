@@ -1685,7 +1685,7 @@ function mtrShowSendQueue(byFollower,app,sourceCtx){
   var noPhoneCnt=queue.filter(function(q){return!q.phone;}).length;
 
   var body='<div>'
-    +(noPhoneCnt?'<div style="background:#fef3c720;border:1px solid #fcd34d44;border-radius:7px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:#92400e">⚠ '+noPhoneCnt+' کارشناس شماره ندارند — <button onclick="openUserMgmt()" style="background:none;border:none;color:#0ea5e9;cursor:pointer;font-family:inherit;font-size:11px;text-decoration:underline">ثبت شماره در تنظیمات</button></div>':'')
+    +(noPhoneCnt?'<div style="background:#fef3c720;border:1px solid #fcd34d44;border-radius:7px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:#92400e">⚠ '+noPhoneCnt+' کارشناس شماره ندارند — <button onclick="openUserMgmt()" style="background:none;border:none;color:#0ea5e9;cursor:pointer;font-family:inherit;font-size:11px;text-decoration:underline">ثبت شماره در HR ← کاربران</button></div>':'')
     +(app!=='sms'?'<div style="background:'+appBg+';border:1px solid '+appBorder+';border-radius:7px;padding:8px 12px;margin-bottom:10px;font-size:11px;color:'+appColor+'">💡 روی دکمه هر کارشناس کلیک کنید تا '+appLabel+' باز شود. هر کلیک یک پنجره جداگانه باز می‌کند.</div>':'')
     +'<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">'+rows+'</div>'
   +'</div>';

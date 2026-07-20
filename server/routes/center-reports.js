@@ -33,7 +33,7 @@ router.get('/:centerKey/timeline', requirePermission('provinces', 'view'), requi
         [ck, from, to]
       ).catch(function () { return { rows: [] }; }),
       query(
-        `SELECT id, no, status, total, jalali_date, created_by FROM proformas
+        `SELECT id, no, status, total, jalali_date, created_by, loss_reason, loss_competitor, manager_note FROM proformas
          WHERE center_key = $1 ORDER BY created_at DESC LIMIT 50`,
         [ck]
       ).catch(function () { return { rows: [] }; }),
@@ -124,6 +124,9 @@ router.get('/:centerKey/timeline', requirePermission('provinces', 'view'), requi
         no: p.no,
         status: p.status,
         total: Number(p.total),
+        lossReason: p.loss_reason || '',
+        lossCompetitor: p.loss_competitor || '',
+        note: p.manager_note || '',
         sortKey: p.jalali_date,
       });
     });

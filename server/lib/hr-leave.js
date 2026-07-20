@@ -155,7 +155,11 @@ async function resolveApprover(employeeUsername, onDate) {
      WHERE u.username = $1`,
     [employeeUsername]
   );
-  let approver = (u.rows[0] && (u.rows[0].direct_manager || u.rows[0].emp_manager)) || '';
+  let approver = (u.rows[0] && u.rows[0].direct_manager) || '';
+  // Fallback only if SoT empty (legacy HR-only rows)
+  if (!approver && u.rows[0] && u.rows[0].emp_manager) {
+    approver = u.rows[0].emp_manager;
+  }
 
   const deleg = await query(
     `SELECT delegate_username FROM approval_delegations

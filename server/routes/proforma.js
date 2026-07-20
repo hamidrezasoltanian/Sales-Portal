@@ -80,10 +80,11 @@ const CreateSchema = z.object({
 });
 
 const ActionSchema = z.object({
-  action: z.enum(['send','approve','reject','cancel','reopen','negotiate','expire','approve_disc','reject_disc']),
+  action: z.enum(['send','approve','reject','cancel','reopen','negotiate','expire','approve_disc','reject_disc','rollback','customer_confirm','customer_revise','customer_reject']),
   note:   z.string().default(''),
   lossReason:     z.string().default(''),
   lossCompetitor: z.string().default(''),
+  toStatus:       z.string().default(''),
 });
 
 function isManagerRole(role) {
@@ -104,7 +105,7 @@ function canEditProforma(user, row) {
   if (row.status === 'draft') {
     return row.created_by === user.username || isManagerRole(user.role);
   }
-  if (row.status === 'sent') {
+  if (row.status === 'sent' || row.status === 'awaiting_customer') {
     return row.created_by === user.username || isManagerRole(user.role);
   }
   if (row.status === 'approved') return isManagerRole(user.role);
@@ -228,6 +229,10 @@ function rowToObj(r) {
     supportOwner:   r.support_owner || '',
     auditLog:       r.audit_log || [],
     lastFollowupAt: r.last_followup_at || null,
+    invoiceId:      r.invoice_id || '',
+    invoiceNo:      r.invoice_no || '',
+    invoiceCommissionOwner: r.invoice_commission_owner || '',
+    invoiceCommissionOwnerName: r.invoice_commission_owner_name || '',
   };
 }
 
@@ -241,15 +246,29 @@ router.get('/', requireAuth, async (req, res) => {
     const params     = [];
     let   idx        = 1;
 
-    if (status) { conditions.push(`status = $${idx++}`); params.push(status); }
-    if (center) { conditions.push(`center_key = $${idx++}`); params.push(center); }
-    if (owner)  { conditions.push(`created_by = $${idx++}`); params.push(owner); }
-    if (q)      { conditions.push(`(center_name ILIKE $${idx} OR items::text ILIKE $${idx})`); params.push('%' + q + '%'); idx++; }
-    if (!isManager) { conditions.push(`created_by = $${idx++}`); params.push(req.user.username); }
+    if (status) { conditions.push(`p.status = $${idx++}`); params.push(status); }
+    if (center) { conditions.push(`p.center_key = $${idx++}`); params.push(center); }
+    if (owner)  { conditions.push(`p.created_by = $${idx++}`); params.push(owner); }
+    if (q)      { conditions.push(`(p.center_name ILIKE $${idx} OR p.items::text ILIKE $${idx})`); params.push('%' + q + '%'); idx++; }
+    if (!isManager) { conditions.push(`p.created_by = $${idx++}`); params.push(req.user.username); }
 
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
     const rows  = await query(
-      `SELECT * FROM proformas ${where} ORDER BY created_at DESC LIMIT 500`,
+      `SELECT p.*,
+              inv.id AS invoice_id,
+              inv.invoice_no AS invoice_no,
+              inv.commission_owner AS invoice_commission_owner,
+              inv.commission_owner_name AS invoice_commission_owner_name
+       FROM proformas p
+       LEFT JOIN LATERAL (
+         SELECT id, invoice_no, commission_owner, commission_owner_name
+         FROM invoices
+         WHERE proforma_id = p.id
+         ORDER BY created_at DESC
+         LIMIT 1
+       ) inv ON TRUE
+       ${where}
+       ORDER BY p.created_at DESC LIMIT 500`,
       params
     );
     res.json(rows.rows.map(rowToObj));
@@ -454,7 +473,7 @@ router.get('/calendar', requireAuth, async (req, res) => {
   try {
     const isManager = ['مدیر', 'سوپر ادمین'].includes(req.user.role);
     const params = [];
-    let where = " WHERE status IN ('sent','negotiating','approved','pending_disc') AND expiry_date IS NOT NULL AND expiry_date != ''";
+    let where = " WHERE status IN ('sent','negotiating','approved','pending_disc','awaiting_customer') AND expiry_date IS NOT NULL AND expiry_date != ''";
     if (!isManager) { where += ' AND created_by = $1'; params.push(req.user.username); }
     const r = await query(
       `SELECT id, no, center_name, center_key, expiry_date, status, total,
@@ -480,9 +499,9 @@ router.get('/workload', requireAuth, async (req, res) => {
       SELECT COALESCE(NULLIF(sales_owner,''), created_by) AS expert,
              COUNT(*)::int AS open_count,
              COALESCE(SUM(total),0) AS open_value,
-             COUNT(*) FILTER (WHERE status IN ('sent','negotiating'))::int AS pending_count
+             COUNT(*) FILTER (WHERE status IN ('sent','negotiating','awaiting_customer'))::int AS pending_count
       FROM proformas
-      WHERE status IN ('sent','negotiating','approved')
+      WHERE status IN ('sent','negotiating','approved','awaiting_customer')
       GROUP BY 1 ORDER BY open_count DESC
     `);
     res.json({ ok: true, rows: r.rows.map(x => ({
@@ -594,10 +613,44 @@ router.post('/:id/followup', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/proforma/:id/fulfillment — parallel warehouse and finance work after manager approval
+router.get('/:id/fulfillment', requireAuth, async (req, res) => {
+  try {
+    const pf = await query('SELECT id, no, status, created_by FROM proformas WHERE id = $1', [req.params.id]);
+    if (!pf.rows.length) return res.status(404).json({ error: 'پیش‌فاکتور یافت نشد' });
+    if (!canViewProforma(req.user, pf.rows[0])) return res.status(403).json({ error: 'دسترسی ندارید' });
+    const [dispatches, invoice] = await Promise.all([
+      query(`SELECT id, txn_no, status, qty, created_at FROM wms_transactions
+             WHERE proforma_id = $1 ORDER BY created_at ASC`, [req.params.id]).catch(function () { return { rows: [] }; }),
+      query(`SELECT id, invoice_no, status, created_at FROM invoices
+             WHERE proforma_id = $1 ORDER BY created_at DESC LIMIT 1`, [req.params.id]).catch(function () { return { rows: [] }; }),
+    ]);
+    res.json({
+      ok: true, proformaId: req.params.id, status: pf.rows[0].status,
+      warehouse: { queued: pf.rows[0].status === 'approved' || pf.rows[0].status === 'invoiced', dispatches: dispatches.rows },
+      finance: { queued: pf.rows[0].status === 'approved', invoice: invoice.rows[0] || null },
+    });
+  } catch (e) { res.status(500).json({ error: 'خطای سرور' }); }
+});
+
 // ── GET /api/proforma/:id ───────────────────────────────────────────────────
 router.get('/:id', requireAuth, async (req, res) => {
   try {
-    const r = await query('SELECT * FROM proformas WHERE id = $1', [req.params.id]);
+    const r = await query(
+      `SELECT p.*,
+              inv.id AS invoice_id,
+              inv.invoice_no AS invoice_no,
+              inv.commission_owner AS invoice_commission_owner,
+              inv.commission_owner_name AS invoice_commission_owner_name
+       FROM proformas p
+       LEFT JOIN LATERAL (
+         SELECT id, invoice_no, commission_owner, commission_owner_name
+         FROM invoices WHERE proforma_id = p.id
+         ORDER BY created_at DESC LIMIT 1
+       ) inv ON TRUE
+       WHERE p.id = $1`,
+      [req.params.id]
+    );
     if (!r.rows.length) return res.status(404).json({ error: 'پیشفاکتور یافت نشد' });
     if (!canViewProforma(req.user, r.rows[0])) {
       return res.status(403).json({ error: 'دسترسی ندارید' });
@@ -892,18 +945,6 @@ router.post('/:id/revise', requireAuth, async (req, res) => {
 });
 
 // ── POST /api/proforma/:id/action — workflow ────────────────────────────────
-const TRANSITIONS = {
-  draft:         ['send','cancel'],
-  pending_disc:  ['approve_disc','reject_disc','cancel'],
-  sent:          ['negotiate','approve','reject','cancel','expire'],
-  negotiating:   ['approve','reject','cancel','expire'],
-  approved:      ['cancel','reject'],
-  rejected:      ['reopen'],
-  cancelled:     ['reopen'],
-  expired:       ['reopen'],
-  invoiced:      [],
-};
-
 router.post('/:id/action', requireAuth, async (req, res) => {
   try {
     const d = validate(ActionSchema, req.body, res);
@@ -914,6 +955,7 @@ router.post('/:id/action', requireAuth, async (req, res) => {
       note: d.note || '',
       lossReason: d.lossReason || '',
       lossCompetitor: d.lossCompetitor || '',
+      toStatus: d.toStatus || '',
     });
     if (!result.ok) {
       return res.status(result.status).json({ error: result.error });

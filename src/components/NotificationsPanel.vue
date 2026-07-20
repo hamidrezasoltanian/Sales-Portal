@@ -140,7 +140,28 @@ function typeLabel(t: string) {
 
 function centerLabel(ck: string) {
   const w = window as any;
-  if (typeof w._clGetName === 'function') return w._clGetName(ck) || ck;
+  if (typeof w.getRecLabel === 'function') {
+    const n = w.getRecLabel(ck);
+    if (n && n !== '?' && n !== ck) return n;
+  }
+  if (typeof w._getCenterNameFromKey === 'function') {
+    const n = w._getCenterNameFromKey(ck);
+    if (n && n !== ck) return n;
+  }
+  if (typeof w._clGetName === 'function') {
+    const n = w._clGetName(ck);
+    if (n && n !== '?' && n !== ck) return n;
+  }
+  // Last resort: strip type prefix for display only if still a raw key
+  const us = ck.indexOf('_');
+  if (us > 0) {
+    const tp = ck.slice(0, us);
+    const id = ck.slice(us + 1);
+    if (typeof w._getCenterName === 'function') {
+      const n = w._getCenterName(tp, id);
+      if (n && n !== id) return n;
+    }
+  }
   return ck;
 }
 
@@ -199,14 +220,35 @@ function close() { open.value = false; }
 function setViewAll(v: boolean) { viewAll.value = v; load(); }
 
 async function load() {
+  const w = window as any;
+  if (w._sessionExpired) return;
   loading.value = true;
   try {
     const q = viewAll.value ? '?all=true' : '';
     const ft = !viewAll.value && filterType.value !== 'all' ? (q ? '&' : '?') + 'type=' + filterType.value : '';
-    const r = await fetch('/api/notifications/inbox' + q + ft);
-    if (r.ok) items.value = await r.json();
+    const r = await fetch('/api/notifications/inbox' + q + ft, { credentials: 'same-origin' });
+    if (r.status === 401) {
+      stopPolling();
+      w._handleSessionExpired?.();
+      return;
+    }
+    if (r.ok) {
+      const parse = typeof (w as any).safeResponseJson === 'function'
+        ? (w as any).safeResponseJson(r)
+        : r.json();
+      items.value = await parse;
+    }
+  } catch (e) {
+    console.warn('[notifications] load failed', e);
   } finally {
     loading.value = false;
+  }
+}
+
+function stopPolling() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
   }
 }
 
@@ -315,13 +357,16 @@ const vClickOutside = {
 onMounted(() => {
   load();
   refreshTimer = setInterval(load, 60000);
+  (window as any)._stopNotifVuePolling = stopPolling;
 });
 
 onUnmounted(() => {
-  if (refreshTimer) clearInterval(refreshTimer);
+  stopPolling();
+  const w = window as any;
+  if (w._stopNotifVuePolling === stopPolling) delete w._stopNotifVuePolling;
 });
 
-defineExpose({ load });
+defineExpose({ load, stopPolling });
 </script>
 
 <style scoped>

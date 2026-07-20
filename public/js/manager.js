@@ -46,9 +46,10 @@ function openSettings(){
   var body='<div style="margin-bottom:14px;background:linear-gradient(135deg,#f0f9ff,#faf5ff);border:1px solid #bae6fd;border-radius:10px;padding:12px 16px">'
     +'<div style="font-size:11px;font-weight:700;color:#0c4a6e;margin-bottom:10px">⚡ دسترسی سریع به تنظیمات</div>'
     +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px">'
-    +'<button onclick="closeModal(\'settingsModal\');openUserMgmt()" style="display:flex;flex-direction:column;align-items:center;gap:3px;background:#fff;border:1px solid #c7d2fe;border-radius:8px;padding:8px;cursor:pointer;font-size:11px;font-family:inherit;color:#4338ca">👥<span>مدیریت کاربران</span></button>'
+    +'<button onclick="closeModal(\'settingsModal\');openUserMgmt()" style="display:flex;flex-direction:column;align-items:center;gap:3px;background:#fff;border:1px solid #c7d2fe;border-radius:8px;padding:8px;cursor:pointer;font-size:11px;font-family:inherit;color:#4338ca">👥<span>کاربران (HR)</span></button>'
     +(_isManager()?'<button onclick="switchTab(\'kpi\');closeModal(\'settingsModal\')" style="display:flex;flex-direction:column;align-items:center;gap:3px;background:#fff;border:1px solid #bbf7d0;border-radius:8px;padding:8px;cursor:pointer;font-size:11px;font-family:inherit;color:#16a34a">📊<span>پنل KPI</span></button>':'')
     +'<button onclick="openTkColumnsModal();closeModal(\'settingsModal\')" style="display:flex;flex-direction:column;align-items:center;gap:3px;background:#fff;border:1px solid #fde68a;border-radius:8px;padding:8px;cursor:pointer;font-size:11px;font-family:inherit;color:#92400e">📌<span>ستون‌های وظایف</span></button>'
+    +((typeof _canEditActionTypes==='function'?_canEditActionTypes():_isManager())?'<button onclick="openActionTypesSettings();closeModal(\'settingsModal\')" style="display:flex;flex-direction:column;align-items:center;gap:3px;background:#fff;border:1px solid #a5b4fc;border-radius:8px;padding:8px;cursor:pointer;font-size:11px;font-family:inherit;color:#4338ca">📋<span>انواع پیگیری</span></button>':'')
     +'</div></div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px">'
     +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">نام شرکت</label>'
@@ -64,12 +65,17 @@ function openSettings(){
     +'<input id="stgAnthropicKey" class="ed-inp" style="width:100%" type="password" value="'+esc(anthropicKey)+'" placeholder="sk-ant-api03-...">'
     +'<div style="font-size:10px;color:var(--text-muted);margin-top:3px">برای جستجوی هوشمند مراکز (KPI ← مراکز کشف‌شده)</div>'
     +'</div>'
+    +'<div style="margin:10px 0 14px"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px">📩 اعلان تلگرام</label>'
+    +'<label style="display:flex;align-items:center;gap:8px;cursor:pointer">'
+    +'<input type="checkbox" id="stgTelegramNotify"'+(s.telegramNotify!==false?' checked':'')+' style="width:16px;height:16px;cursor:pointer">'
+    +'<span style="font-size:12px;color:var(--text-secondary)">ارسال اعلان تلگرام هنگام ارسال/تأیید/رد پیش‌فاکتور</span>'
+    +'</label></div>'
     +'<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between">'
     +'<div>'
     +'<div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:3px">👥 مدیریت کاربران</div>'
-    +'<div style="font-size:11px;color:var(--text-muted)">کارشناسان، نقش‌ها، رنگ‌ها، مالکیت استان‌ها و جابجایی مراکز</div>'
+    +'<div style="font-size:11px;color:var(--text-muted)">در تب HR ← کاربران (پروفایل، نقش، دپارتمان، استان‌ها)</div>'
     +'</div>'
-    +'<button onclick="closeModal(\'settingsModal\');openUserMgmt()" style="background:var(--brand);color:#fff;border:none;border-radius:6px;padding:7px 16px;cursor:pointer;font-size:12px;font-family:inherit;font-weight:600">باز کردن ←</button>'
+    +'<button onclick="closeModal(\'settingsModal\');openUserMgmt()" style="background:var(--brand);color:#fff;border:none;border-radius:6px;padding:7px 16px;cursor:pointer;font-size:12px;font-family:inherit;font-weight:600">باز کردن در HR ←</button>'
     +'</div>'
     +'<div>'
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
@@ -94,8 +100,8 @@ function openSettings(){
     }).join('')
     +'</div></div>';
 
-  // بخش ویرایش لیست‌های سیستمی — فقط مدیر
-  if(_isManager()){
+  // بخش ویرایش لیست‌های سیستمی — مدیر / سوپر ادمین
+  if(_isManager()||(typeof _isSuperAdmin==='function'&&_isSuperAdmin())||(typeof _canEditActionTypes==='function'&&_canEditActionTypes())){
     body+='<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">'
       +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
       +'<label style="font-size:12px;font-weight:700">⚙ ویرایش لیست‌های سیستمی</label>'
@@ -111,6 +117,14 @@ function openSettings(){
       +'<div><label style="font-size:11px;font-weight:700;display:block;margin-bottom:4px">🏥 نوع مراکز</label>'
       +'<textarea id="stgTypeList" style="width:100%;height:130px;padding:6px 8px;border:1px solid var(--border-input);border-radius:6px;font-size:11px;direction:rtl;font-family:inherit;resize:none;background:var(--bg-input);color:var(--text-primary);box-sizing:border-box">'+TYPE_LIST.join('\n')+'</textarea></div>'
       +'</div>'
+      +'<div style="margin:12px 0 6px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">'
+      +'<div><label style="font-size:11px;font-weight:700;display:block;margin-bottom:2px">📋 انواع پیگیری (برنامه هفته)</label>'
+      +'<div style="font-size:10px;color:var(--text-muted)">ویرایش / حذف / افزودن با دکمه اختصاصی — یا هر خط: شناسه|برچسب</div></div>'
+      +'<button type="button" onclick="openActionTypesSettings()" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:11px;font-family:inherit;font-weight:600">✏️ ویرایش انواع</button>'
+      +'</div>'
+      +'<textarea id="stgActionTypeList" style="width:100%;height:110px;padding:6px 8px;border:1px solid var(--border-input);border-radius:6px;font-size:11px;direction:rtl;font-family:inherit;resize:vertical;background:var(--bg-input);color:var(--text-primary);box-sizing:border-box">'
+      +(typeof actionTypeListToText==='function'?actionTypeListToText():'call|📞 تماس\nvisit|🤝 ملاقات\nprice_send|📄 ارسال قیمت\nsample_send|🧪 ارسال نمونه\ncommittee|🏛 پیگیری کمیته\nmeeting|👥 جلسه\nfollowup|🔄 پیگیری')
+      +'</textarea>'
       +'<div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin:12px 0 6px">پروفایل مرکز — Prospect و ارسال</div>'
       +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">'
       +'<div><label style="font-size:11px;font-weight:700;display:block;margin-bottom:4px">🛒 نحوه خرید</label>'
@@ -119,6 +133,13 @@ function openSettings(){
       +'<textarea id="stgCenterPaymentTermsList" style="width:100%;height:110px;padding:6px 8px;border:1px solid var(--border-input);border-radius:6px;font-size:11px;direction:rtl;font-family:inherit;resize:none;background:var(--bg-input);color:var(--text-primary);box-sizing:border-box">'+CENTER_PAYMENT_TERMS_LIST.join('\n')+'</textarea></div>'
       +'<div><label style="font-size:11px;font-weight:700;display:block;margin-bottom:4px">🚚 روش ارسال</label>'
       +'<textarea id="stgShipMethodList" style="width:100%;height:110px;padding:6px 8px;border:1px solid var(--border-input);border-radius:6px;font-size:11px;direction:rtl;font-family:inherit;resize:none;background:var(--bg-input);color:var(--text-primary);box-sizing:border-box">'+SHIP_METHOD_LIST.join('\n')+'</textarea></div>'
+      +'</div>'
+      +'<div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin:12px 0 6px">سازمان — نقش و دپارتمان</div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+      +'<div><label style="font-size:11px;font-weight:700;display:block;margin-bottom:4px">👥 نقش‌ها</label>'
+      +'<textarea id="stgRoleList" style="width:100%;height:110px;padding:6px 8px;border:1px solid var(--border-input);border-radius:6px;font-size:11px;direction:rtl;font-family:inherit;resize:none;background:var(--bg-input);color:var(--text-primary);box-sizing:border-box">'+(typeof getOrgRoles==='function'?getOrgRoles():ALL_ROLES).join('\n')+'</textarea></div>'
+      +'<div><label style="font-size:11px;font-weight:700;display:block;margin-bottom:4px">🏷 دپارتمان‌ها</label>'
+      +'<textarea id="stgDeptList" style="width:100%;height:110px;padding:6px 8px;border:1px solid var(--border-input);border-radius:6px;font-size:11px;direction:rtl;font-family:inherit;resize:none;background:var(--bg-input);color:var(--text-primary);box-sizing:border-box">'+(typeof getOrgDepartments==='function'?getOrgDepartments():DEPARTMENTS).join('\n')+'</textarea></div>'
       +'</div></div>';
   }
   var foot='<button class="btn-secondary" onclick="closeModal(\'settingsModal\')">انصراف</button>'
@@ -282,7 +303,7 @@ function saveSettings(){
     if(colorEl)t.color=colorEl.value;
   });
   // ذخیره لیست‌های سفارشی
-  if(_isManager()){
+  if(_isManager()||(typeof _isSuperAdmin==='function'&&_isSuperAdmin())||(typeof _canEditActionTypes==='function'&&_canEditActionTypes())){
     var _staTa=document.getElementById('stgStatusList');
     if(_staTa){var _sl=_staTa.value.split('\n').map(function(l){return l.trim();}).filter(Boolean);if(_sl.length>=2){DB.settings.statusList=_sl;STATUS_LIST=_sl;}}
     var _ldTa=document.getElementById('stgLeadList');
@@ -295,9 +316,32 @@ function saveSettings(){
     if(_cptTa){var _cptl=_cptTa.value.split('\n').map(function(l){return l.trim();}).filter(Boolean);if(_cptl.length>=1){DB.settings.centerPaymentTermsList=_cptl;CENTER_PAYMENT_TERMS_LIST=_cptl;}}
     var _smTa=document.getElementById('stgShipMethodList');
     if(_smTa){var _sml=_smTa.value.split('\n').map(function(l){return l.trim();}).filter(Boolean);if(_sml.length>=1){DB.settings.shipMethodList=_sml;SHIP_METHOD_LIST=_sml;}}
+    var _rlTa=document.getElementById('stgRoleList');
+    if(_rlTa){
+      var _rl=_rlTa.value.split('\n').map(function(l){return l.trim();}).filter(Boolean);
+      if(_rl.length>=1){
+        ['مدیر','سوپر ادمین'].forEach(function(r){ if(_rl.indexOf(r)<0) _rl.unshift(r); });
+        DB.settings.roleList=_rl;
+      }
+    }
+    var _dlTa=document.getElementById('stgDeptList');
+    if(_dlTa){var _dl=_dlTa.value.split('\n').map(function(l){return l.trim();}).filter(Boolean);if(_dl.length>=1){DB.settings.departmentList=_dl;}}
+    var _atTa=document.getElementById('stgActionTypeList');
+    if(_atTa&&typeof parseActionTypeListText==='function'){
+      var _atMap=parseActionTypeListText(_atTa.value);
+      if(Object.keys(_atMap).length>=1){
+        var _atList=Object.keys(_atMap).map(function(id){return{id:id,label:_atMap[id]};});
+        DB.settings.actionTypeList=_atList;
+        if(typeof applyActionTypeLabels==='function')applyActionTypeLabels(_atMap);
+      }
+    }
+    if(typeof applyOrgCatalog==='function')applyOrgCatalog();
   }
   var _mtrSyncEl=document.getElementById('stgMtrSync');
   if(_mtrSyncEl)DB.settings.mtrSyncEnabled=_mtrSyncEl.checked;
+
+  var _tgN=document.getElementById('stgTelegramNotify');
+  if(_tgN)DB.settings.telegramNotify=_tgN.checked;
 
   var settingsPatch={
     companyName:DB.settings.companyName,
@@ -308,13 +352,16 @@ function saveSettings(){
   };
   if(_tgN)settingsPatch.telegramNotify=DB.settings.telegramNotify;
   if(_anthKey.trim())settingsPatch.anthropicKey=_anthKey.trim();
-  if(_isManager()){
+  if(_isManager()||(typeof _isSuperAdmin==='function'&&_isSuperAdmin())||(typeof _canEditActionTypes==='function'&&_canEditActionTypes())){
     if(DB.settings.statusList)settingsPatch.statusList=DB.settings.statusList;
     if(DB.settings.leadList)settingsPatch.leadList=DB.settings.leadList;
     if(DB.settings.typeList)settingsPatch.typeList=DB.settings.typeList;
     if(DB.settings.purchaseMethodList)settingsPatch.purchaseMethodList=DB.settings.purchaseMethodList;
     if(DB.settings.centerPaymentTermsList)settingsPatch.centerPaymentTermsList=DB.settings.centerPaymentTermsList;
     if(DB.settings.shipMethodList)settingsPatch.shipMethodList=DB.settings.shipMethodList;
+    if(DB.settings.roleList)settingsPatch.roleList=DB.settings.roleList;
+    if(DB.settings.departmentList)settingsPatch.departmentList=DB.settings.departmentList;
+    if(DB.settings.actionTypeList)settingsPatch.actionTypeList=DB.settings.actionTypeList;
     if(_mtrSyncEl)settingsPatch.mtrSyncEnabled=DB.settings.mtrSyncEnabled;
   }
 
@@ -775,16 +822,23 @@ function renderManagerPanel(opts){
         scheduledToday++;
         if(!byExpertProgress[owner]) byExpertProgress[owner]={sched:0,done:0,name:USERS[owner]||owner};
         byExpertProgress[owner].sched++;
-        var acts = _getTodayActivities(we.rtype||'center', we.rid||'', todayW);
-        if(we.done || acts.length>0){
+        var isDoneDay = typeof _wpDoneOnReportDay === 'function'
+          ? _wpDoneOnReportDay(we, we.rtype||'center', we.rid||'', todayW)
+          : (we.done || (typeof _getTodayActivities === 'function' && _getTodayActivities(we.rtype||'center', we.rid||'', todayW).length > 0));
+        if(isDoneDay){
           doneToday++;
           byExpertProgress[owner].done++;
         }
       } else if(we.scheduledDate && we.scheduledDate < todayW && !we.done){
-        var actOnDay = typeof _getActivitiesOnDate === 'function'
-          ? _getActivitiesOnDate(we.rtype||'center', we.rid||'', we.scheduledDate)
-          : [];
-        if(actOnDay.length===0) overdueTotal++;
+        var stillOpen = typeof _wpDoneOnReportDay === 'function'
+          ? !_wpDoneOnReportDay(we, we.rtype||'center', we.rid||'', we.scheduledDate)
+          : true;
+        if(stillOpen){
+          var actOnDay = typeof _getActivitiesOnDate === 'function'
+            ? _getActivitiesOnDate(we.rtype||'center', we.rid||'', we.scheduledDate)
+            : [];
+          if(actOnDay.length===0) overdueTotal++;
+        }
       }
     });
     var pctToday = scheduledToday>0 ? Math.round((doneToday/scheduledToday)*100) : 0;
@@ -891,7 +945,7 @@ function renderManagerPanel(opts){
       var own=_wpGetOwner(we)||'';
       var ownName=USERS[own]||own;
       var clr=typeof umGetColor==='function'?umGetColor(own):'#6366f1';
-      var name = we.centerName || getRecLabel(we.recKey || (we.rtype + '_' + we.rid)) || '';
+      var name = (typeof resolveWeekEntryDisplayName==='function'?resolveWeekEntryDisplayName(we):(we.centerName||getRecLabel(we.recKey||(we.rtype+'_'+we.rid))||''));
       html+='<div style="border:1px solid var(--border);border-radius:7px;padding:8px 10px;margin-bottom:6px;font-size:11px">'
         +'<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">'
         +'<span style="width:8px;height:8px;border-radius:50%;background:'+clr+'"></span>'
@@ -2183,7 +2237,7 @@ function buildReportEntriesHtml(memberId,fromDate,toDate){
         }
       }catch(_e){}
     }
-    var displayName = we.centerName || getRecLabel(we.recKey || (we.rtype + '_' + we.rid)) || '';
+    var displayName = (typeof resolveWeekEntryDisplayName==='function'?resolveWeekEntryDisplayName(we):(we.centerName||getRecLabel(we.recKey||(we.rtype+'_'+we.rid))||''));
     var outcomeText = we.doneResult ? ('[' + esc(we.doneResult) + '] ' + esc(we.doneNote || '')) : (we.doneNote ? esc(we.doneNote) : '—');
     
     html+='<tr style="background:'+bg+';border-bottom:1px solid var(--border)">';
@@ -2289,7 +2343,11 @@ function _buildRptSalesHtml(cache){
   if(pfs.length){
     html+='<div style="font-weight:700;font-size:11px;margin-bottom:6px">📄 پیشفاکتورها</div><div style="max-height:25vh;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg-raised)"><th>شماره</th><th>تاریخ</th><th>وضعیت</th><th>مبلغ</th></tr></thead><tbody>';
     pfs.forEach(function(p,i){
-      html+='<tr style="background:'+(i%2?'var(--bg-raised)':'var(--bg-card)')+'"><td style="padding:4px 8px">'+esc(p.no||'')+'</td><td style="padding:4px 8px">'+esc(p.jalaliDate||'')+'</td><td style="padding:4px 8px">'+esc(p.status||'')+'</td><td style="padding:4px 8px">'+Number(p.total||0).toLocaleString('fa-IR')+'</td></tr>';
+      var stLbl = (typeof _pfStatusLabel === 'function' ? _pfStatusLabel(p.status) : (p.status||''));
+      var stChip = (typeof _pfStatusChipHtml === 'function')
+        ? _pfStatusChipHtml(p.status, p.id)
+        : esc(stLbl);
+      html+='<tr style="background:'+(i%2?'var(--bg-raised)':'var(--bg-card)')+'"><td style="padding:4px 8px">'+esc(p.no||'')+'</td><td style="padding:4px 8px">'+esc(p.jalaliDate||'')+'</td><td style="padding:4px 8px">'+stChip+'</td><td style="padding:4px 8px">'+Number(p.total||0).toLocaleString('fa-IR')+'</td></tr>';
     });
     html+='</tbody></table></div>';
   }
@@ -2529,7 +2587,9 @@ async function init(){
     // Check auth first
     var authR=await fetch('/api/auth/me',{credentials:'same-origin'});
     if(authR.status===401){showLoginOverlay();return;}
-    var authData=await authR.json();
+    var ct=(authR.headers.get('content-type')||'');
+    if(!authR.ok||ct.indexOf('json')<0){showLoginOverlay();return;}
+    var authData=typeof safeResponseJson==='function'?await safeResponseJson(authR):await authR.json();
     currentUser=authData.username||currentUser;
     window._authUserRole=authData.role||'';
     window._myPermissions=authData.permissions||{};
@@ -2548,7 +2608,12 @@ async function init(){
   _initBrowserNotif();
   setTimeout(_sendWeeklyDigest,3000);
   buildUSERS();updateNotifBadge();
-  fetch('/api/inbox/count').then(function(r){return r.json();}).then(function(d){
+  fetch('/api/inbox/count').then(function(r){
+    if(!r.ok)return null;
+    var ct=(r.headers.get('content-type')||'');
+    if(ct.indexOf('application/json')<0)return null;
+    return r.json();
+  }).then(function(d){
     var b=document.getElementById('homeInboxBadge');
     if(!b)return;
     var n=Number(d.count)||0;

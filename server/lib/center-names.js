@@ -48,6 +48,10 @@ function isWeakDisplayName(name) {
   if (/^c \d+$/i.test(s)) return true;
   if (/^mz_t_\d+$/i.test(s)) return true;
   if (/^new\s+\d+$/i.test(s)) return true;
+  if (/^(center|pc)_/.test(s)) return true;
+  if (/^(c_|mz_t_|p\d+\|\|)/.test(s)) return true;
+  if (/\bp\d+\|\|/.test(s)) return true;
+  if (/^\d+$/.test(s)) return true;
   return false;
 }
 
@@ -78,11 +82,31 @@ async function loadMasterNameMap(keys) {
   if (pcLookups.length) {
     const r = await query("SELECT data FROM centers_master WHERE key = 'PC_RAW'");
     const raw = (r.rows[0] && r.rows[0].data) || {};
+    // PC_RAW keys are Persian province names; also accept prov id if present
+    const PROV_NAMES = {
+      p1: 'فارس', p2: 'اصفهان', p3: 'سیستان و بلوچستان', p4: 'مازندران',
+      p5: 'آذربایجان شرقی', p6: 'لرستان', p7: 'بوشهر', p8: 'گلستان',
+      p9: 'خراسان جنوبی', p10: 'چهارمحال و بختیاری', p11: 'کهگیلویه و بویراحمد',
+      p12: 'خراسان رضوی', p13: 'یزد', p14: 'قم', p15: 'زنجان', p16: 'مرکزی',
+      p17: 'گیلان', p18: 'قزوین', p19: 'سمنان', p20: 'خوزستان', p21: 'کرمانشاه',
+      p22: 'ایلام', p23: 'کرمان', p24: 'همدان', p25: 'اردبیل', p26: 'آذربایجان غربی',
+      p27: 'کردستان', p28: 'هرمزگان', p29: 'البرز', p30: 'خراسان شمالی',
+    };
     pcLookups.forEach(function (lk) {
       const provId = lk.rid.split('||')[0];
-      const arr = raw[provId] || [];
-      const c = arr.find(function (x) { return String(x.id) === lk.rid; });
-      if (c && c.name) map[lk.key] = c.name;
+      const rowNum = lk.rid.split('||')[1];
+      const byId = raw[provId] || [];
+      const byName = raw[PROV_NAMES[provId] || ''] || [];
+      const arr = [].concat(byId, byName);
+      let c = arr.find(function (x) {
+        return String(x.id || (provId + '||' + (x.row != null ? x.row : x[0]))) === lk.rid;
+      });
+      if (!c && rowNum != null) {
+        c = arr.find(function (x) {
+          return String(x.row != null ? x.row : x[0]) === String(rowNum);
+        });
+      }
+      if (c && (c.name || c[1])) map[lk.key] = c.name || c[1];
     });
   }
 
@@ -187,6 +211,7 @@ module.exports = {
   centerKeyAliases,
   fallbackLabel,
   titleCenterName,
+  isWeakDisplayName,
   loadCenterNameMap,
   loadMasterNameMap,
   resolveCenterDisplayName,

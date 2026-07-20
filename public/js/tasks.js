@@ -702,17 +702,21 @@ function _getTaskCenterName(centerKey){
 
 function _clGetName(rkey){
   if(!rkey) return '?';
+  if(typeof getRecLabel==='function'){
+    var n=getRecLabel(rkey);
+    if(n&&n!=='?') return n;
+  }
   var parts = rkey.split('_'); var tp = parts[0]; var id = parts.slice(1).join('_');
   var ov = (DB.edits[rkey]||{}).nameOverride;
   if(ov) return ov;
   if(tp === 'center'){
-    var c = CENTERS.find(function(x){return x.id===id;}); if(c) return c.name;
-    var ex = (DB.extra||[]).find(function(x){return x.id===id;}); if(ex) return ex.name;
+    var c = (CENTERS||[]).find(function(x){return String(x.id)===String(id);}); if(c) return c.name;
+    var ex = (DB.extra||[]).find(function(x){return String(x.id)===String(id);}); if(ex) return ex.name;
   } else if(tp === 'pc'){
-    _buildPCCache();
+    if(typeof _buildPCCache==='function') _buildPCCache();
     var provId = id.split('||')[0];
-    var arr = _PC_CACHE[provId]||[];
-    var pc = arr.find(function(x){return x.id===id;}); if(pc) return pc.name;
+    var arr = (_PC_CACHE&&_PC_CACHE[provId])||[];
+    var pc = arr.find(function(x){return String(x.id)===String(id);}); if(pc) return pc.name;
   }
   return id;
 }

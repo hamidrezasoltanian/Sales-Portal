@@ -2,7 +2,7 @@
 
 const express = require('express');
 const multer  = require('multer');
-const { query } = require('../db');
+const { query, pool } = require('../db');
 const { requirePermission } = require('../permissions');
 const { requireAuth } = require('../auth');
 const { searchLetterCenters, resolveCenterName } = require('../lib/letterCenters');
@@ -78,7 +78,22 @@ function toJalaliYear() {
   return jY;
 }
 
-// تولید خودکار شماره اندیکاتور بر اساس سال مالی، پیشوند دپارتمان و نوع نامه
+function isManagerUser(user) {
+  return user && (user.role === 'مدیر' || user.role === 'سوپر ادمین');
+}
+
+function isSuperAdminUser(user) {
+  return user && user.role === 'سوپر ادمین';
+}
+
+async function getIndicatorStartNumber() {
+  const r = await query(`SELECT value FROM letter_settings WHERE key = 'indicator_start_number'`);
+  const n = parseInt(r.rows[0] && r.rows[0].value, 10);
+  return Number.isFinite(n) && n >= 1 ? n : 1;
+}
+
+// تولید خودکار شماره اندیکاتور بر اساس سال شمسی، پیشوند دپارتمان و نوع نامه
+// شمارنده در ابتدای هر سال شمسی از شماره شروع (تنظیم‌شده توسط سوپرادمین) ریست می‌شود
 async function generateIndicatorNumber(type, departmentPrefix) {
   const basePrefix = departmentPrefix || 'الف';
   const typeLetter = type === 'outgoing' ? 'ص' : (type === 'internal' ? 'د' : 'و');
@@ -86,8 +101,8 @@ async function generateIndicatorNumber(type, departmentPrefix) {
 
   const now = new Date();
   const jalaliYear = toJalaliYear();
-  
-  // دریافت شماره ماه شمسی
+  const startNum = await getIndicatorStartNumber();
+
   let jm = '01';
   try {
     const faDateParts = now.toLocaleDateString('fa-IR-u-nu-latn').split('/');
@@ -100,44 +115,62 @@ async function generateIndicatorNumber(type, departmentPrefix) {
 
   const datePart = String(jalaliYear).substring(1, 4) + jm; // e.g. 40503 for 1405/03
 
-  const indRes = await query(
-    `SELECT id, last_sequence FROM letter_indicators WHERE department_prefix = $1 AND letter_type = $2 LIMIT 1`,
-    [basePrefix, type]
-  );
+  // قفل نرم برای جلوگیری از شماره تکراری همزمان
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const indRes = await client.query(
+      `SELECT id, last_sequence FROM letter_indicators
+       WHERE jalali_year = $1 AND department_prefix = $2 AND letter_type = $3
+       FOR UPDATE`,
+      [jalaliYear, basePrefix, type]
+    );
 
-  let nextSeq = 1;
-  if (indRes.rows.length > 0) {
-    nextSeq = parseInt(indRes.rows[0].last_sequence) + 1;
-    await query(
-      `UPDATE letter_indicators SET last_sequence = $1 WHERE id = $2`,
-      [nextSeq, indRes.rows[0].id]
-    );
-  } else {
-    const maxRes = await query(
-      `SELECT indicator_number FROM letters WHERE type = $1 AND department_prefix = $2 AND indicator_number IS NOT NULL`,
-      [type, basePrefix]
-    );
-    let maxSeq = 0;
-    for (const row of maxRes.rows) {
-      if (row.indicator_number) {
-        const parts = row.indicator_number.split('-');
-        if (parts.length >= 2) {
-          const seq = parseInt(parts[1]);
-          if (!isNaN(seq) && seq > maxSeq) {
-            maxSeq = seq;
-          }
-        }
+    let nextSeq;
+    if (indRes.rows.length > 0) {
+      const last = parseInt(indRes.rows[0].last_sequence, 10) || 0;
+      nextSeq = Math.max(last + 1, startNum);
+      await client.query(
+        `UPDATE letter_indicators SET last_sequence = $1, updated_at = NOW() WHERE id = $2`,
+        [nextSeq, indRes.rows[0].id]
+      );
+    } else {
+      // سازگاری با شمارنده قدیمی (بدون سال): به سال جاری منتقل شود
+      const legacy = await client.query(
+        `SELECT id, last_sequence FROM letter_indicators
+         WHERE department_prefix = $1 AND letter_type = $2
+           AND (jalali_year IS NULL OR jalali_year = 0 OR jalali_year = 1)
+         ORDER BY id LIMIT 1 FOR UPDATE`,
+        [basePrefix, type]
+      );
+      if (legacy.rows.length) {
+        const last = parseInt(legacy.rows[0].last_sequence, 10) || 0;
+        nextSeq = Math.max(last + 1, startNum);
+        await client.query(
+          `UPDATE letter_indicators
+           SET jalali_year = $1, fiscal_year_id = $1, last_sequence = $2, updated_at = NOW()
+           WHERE id = $3`,
+          [jalaliYear, nextSeq, legacy.rows[0].id]
+        );
+      } else {
+        nextSeq = startNum;
+        await client.query(
+          `INSERT INTO letter_indicators (jalali_year, fiscal_year_id, department_prefix, letter_type, last_sequence, updated_at)
+           VALUES ($1, $1, $2, $3, $4, NOW())`,
+          [jalaliYear, basePrefix, type, nextSeq]
+        );
       }
     }
-    nextSeq = maxSeq + 1;
-    await query(
-      `INSERT INTO letter_indicators (fiscal_year_id, department_prefix, letter_type, last_sequence) VALUES (1, $1, $2, $3)`,
-      [basePrefix, type, nextSeq]
-    );
-  }
+    await client.query('COMMIT');
 
-  const seqPart = String(nextSeq).padStart(3, '0');
-  return `${fullPrefix}-${seqPart}-${datePart}`;
+    const seqPart = String(nextSeq).padStart(3, '0');
+    return `${fullPrefix}-${seqPart}-${datePart}`;
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 async function logLetterChange(letterId, username, field, oldVal, newVal, extra) {
@@ -150,8 +183,59 @@ async function logLetterChange(letterId, username, field, oldVal, newVal, extra)
   );
 }
 
-function isManagerUser(user) {
-  return user.role === 'مدیر' || user.role === 'سوپر ادمین';
+/** پس از حذف/لغو امضا — بازگرداندن نامه به میز کار امضا در صورت نیاز */
+async function revertLetterAfterSignatureRemoval(letterId) {
+  const totalRes = await query('SELECT COUNT(*) FROM letter_signers WHERE letter_id = $1', [letterId]);
+  const total = parseInt(totalRes.rows[0].count, 10);
+  if (total === 0) return;
+
+  const pendingRes = await query(
+    "SELECT COUNT(*) FROM letter_signers WHERE letter_id = $1 AND status != 'signed'",
+    [letterId]
+  );
+  const pendingCount = parseInt(pendingRes.rows[0].count, 10);
+  if (pendingCount === 0) return;
+
+  await query(`
+    UPDATE letters
+    SET status = 'approved_for_sign', indicator_number = NULL, registered_at = NULL,
+        signature_status = 'partial', updated_at = NOW()
+    WHERE id = $1 AND status IN ('registered', 'in_referral')
+  `, [letterId]);
+}
+
+/** سوپر ادمین: به‌روزرسانی لیست امضاکنندگان بدون پاک کردن وضعیت امضاهای باقی‌مانده */
+async function mergeLetterSignersSuperAdmin(letterId, signers, letter) {
+  const incoming = (signers || []).map(String);
+  const existingRes = await query(
+    'SELECT user_id, status FROM letter_signers WHERE letter_id = $1',
+    [letterId]
+  );
+  const existingMap = {};
+  let hadSignedRemoval = false;
+  existingRes.rows.forEach((r) => { existingMap[r.user_id] = r.status; });
+
+  for (const row of existingRes.rows) {
+    if (!incoming.includes(row.user_id)) {
+      if (row.status === 'signed') hadSignedRemoval = true;
+      await query('DELETE FROM letter_signers WHERE letter_id = $1 AND user_id = $2', [letterId, row.user_id]);
+    }
+  }
+
+  for (const uid of incoming) {
+    if (existingMap[uid]) continue;
+    await query(
+      "INSERT INTO letter_signers (letter_id, user_id, status) VALUES ($1, $2, 'pending')",
+      [letterId, uid]
+    );
+    if (letter.status === 'registered' || letter.status === 'in_referral') {
+      hadSignedRemoval = true;
+    }
+  }
+
+  if (hadSignedRemoval) {
+    await revertLetterAfterSignatureRemoval(letterId);
+  }
 }
 
 /** ارسال نامه صادره به میز کار امضا — ارجاع + نوتیفیکیشن */
@@ -486,6 +570,80 @@ router.put('/print-template', requireAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     console.error('[letters PUT /print-template]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET/PUT /indicator-settings — شماره شروع اندیکاتور (سوپرادمین)
+// شمارنده هر سال شمسی از این عدد شروع می‌شود و الگوی شماره تکرار می‌گردد
+// ─────────────────────────────────────────────
+router.get('/indicator-settings', requireAuth, async (req, res) => {
+  try {
+    if (!isManagerUser(req.user)) {
+      return res.status(403).json({ error: 'دسترسی ندارید' });
+    }
+    const jalaliYear = toJalaliYear();
+    const startNumber = await getIndicatorStartNumber();
+    const counters = await query(
+      `SELECT jalali_year, department_prefix, letter_type, last_sequence, updated_at
+       FROM letter_indicators
+       WHERE jalali_year = $1
+       ORDER BY department_prefix, letter_type`,
+      [jalaliYear]
+    );
+    res.json({
+      jalali_year: jalaliYear,
+      start_number: startNumber,
+      next_number_hint: startNumber,
+      pattern: 'پیشوند/نوع-شماره-YYMM',
+      example: `الف/ص-${String(startNumber).padStart(3, '0')}-${String(jalaliYear).substring(1, 4)}01`,
+      can_edit: isSuperAdminUser(req.user),
+      counters: counters.rows,
+      note: 'در ابتدای هر سال شمسی، شمارنده از شماره شروع مجدداً آغاز می‌شود و بخش تاریخ در شماره به سال جدید به‌روز می‌شود.',
+    });
+  } catch (e) {
+    console.error('[letters GET /indicator-settings]', e.message);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+router.put('/indicator-settings', requireAuth, async (req, res) => {
+  try {
+    if (!isSuperAdminUser(req.user)) {
+      return res.status(403).json({ error: 'فقط سوپر ادمین می‌تواند شماره شروع را تنظیم کند' });
+    }
+    const b = req.body || {};
+    const startNumber = parseInt(b.start_number, 10);
+    if (!Number.isFinite(startNumber) || startNumber < 1 || startNumber > 999999) {
+      return res.status(400).json({ error: 'شماره شروع باید عدد صحیح بین ۱ تا ۹۹۹۹۹۹ باشد' });
+    }
+
+    await query(`
+      INSERT INTO letter_settings (key, value, updated_at, updated_by)
+      VALUES ('indicator_start_number', $1, NOW(), $2)
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW(), updated_by = EXCLUDED.updated_by
+    `, [String(startNumber), req.user.username]);
+
+    const jalaliYear = toJalaliYear();
+    // اختیاری: تنظیم شمارنده سال جاری طوری که نامه بعدی از start_number شروع شود
+    if (b.apply_to_current_year) {
+      await query(
+        `UPDATE letter_indicators
+         SET last_sequence = GREATEST(last_sequence, $1 - 1), updated_at = NOW()
+         WHERE jalali_year = $2`,
+        [startNumber, jalaliYear]
+      );
+    }
+
+    res.json({
+      ok: true,
+      start_number: startNumber,
+      jalali_year: jalaliYear,
+      applied_to_current_year: !!b.apply_to_current_year,
+    });
+  } catch (e) {
+    console.error('[letters PUT /indicator-settings]', e.message);
     res.status(500).json({ error: 'خطای سرور' });
   }
 });
@@ -829,9 +987,10 @@ router.put('/:id', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'دسترسی غیرمجاز' });
     }
 
+    const isSuperAdmin = isSuperAdminUser(req.user);
     if (letter.status !== 'draft') {
       const contentChanged = subject !== undefined || body !== undefined || body_docx !== undefined;
-      if (contentChanged) {
+      if (contentChanged && !isSuperAdmin) {
         return res.status(400).json({ error: 'فقط پیش‌نویس‌ها قابل ویرایش متن هستند' });
       }
     }
@@ -954,9 +1113,14 @@ router.put('/:id', requireAuth, async (req, res) => {
 
     // بروزرسانی امضاکنندگان
     if (signers && (type || letter.type) === 'outgoing') {
-      await query('DELETE FROM letter_signers WHERE letter_id = $1', [letterId]);
-      for (const sig of signers) {
-        await query('INSERT INTO letter_signers (letter_id, user_id, status) VALUES ($1, $2, \'pending\')', [letterId, String(sig)]);
+      if (isSuperAdmin) {
+        await mergeLetterSignersSuperAdmin(letterId, signers, letter);
+        await logLetterChange(letterId, username, 'signers', null, signers.join(','), { note: 'super_admin_merge' });
+      } else if (letter.status === 'draft') {
+        await query('DELETE FROM letter_signers WHERE letter_id = $1', [letterId]);
+        for (const sig of signers) {
+          await query('INSERT INTO letter_signers (letter_id, user_id, status) VALUES ($1, $2, \'pending\')', [letterId, String(sig)]);
+        }
       }
     }
 
@@ -1249,14 +1413,16 @@ router.post('/:id/unsign', requireAuth, async (req, res) => {
     // بازگردانی وضعیت امضا
     await query(`
       UPDATE letter_signers
-      SET status = 'accepted', signed_at = NULL
+      SET status = 'pending', signed_at = NULL, sign_type = NULL
       WHERE letter_id = $1 AND user_id = $2
     `, [letterId, username]);
 
+    await revertLetterAfterSignatureRemoval(letterId);
+
     await query(`
       UPDATE letters
-      SET status = 'approved_for_sign', indicator_number = NULL, signature_status = 'partial', updated_at = NOW()
-      WHERE id = $1
+      SET updated_at = NOW()
+      WHERE id = $1 AND status = 'approved_for_sign'
     `, [letterId]);
 
     // ثبت در لاگ ارجاع
@@ -1271,6 +1437,68 @@ router.post('/:id/unsign', requireAuth, async (req, res) => {
   } catch (e) {
     await query('ROLLBACK');
     console.error('[letters unsign error]', e);
+    res.status(500).json({ error: e.message || 'خطای سرور' });
+  }
+});
+
+// ─────────────────────────────────────────────
+// POST /:id/admin-unsign — حذف امضا توسط سوپر ادمین (هر امضاکننده، هر وضعیت)
+// ─────────────────────────────────────────────
+router.post('/:id/admin-unsign', requireAuth, async (req, res) => {
+  const letterId = parseInt(req.params.id, 10);
+  const targetUser = String(req.body.username || '').trim();
+  const adminNote = String(req.body.note || '').trim();
+
+  if (!isSuperAdminUser(req.user)) {
+    return res.status(403).json({ error: 'فقط سوپر ادمین می‌تواند امضا را حذف کند' });
+  }
+  if (!targetUser) {
+    return res.status(400).json({ error: 'نام کاربری امضاکننده الزامی است' });
+  }
+
+  try {
+    await query('BEGIN');
+
+    const letterRes = await query('SELECT * FROM letters WHERE id = $1 AND is_deleted = FALSE', [letterId]);
+    if (!letterRes.rows.length) {
+      await query('ROLLBACK');
+      return res.status(404).json({ error: 'نامه یافت نشد' });
+    }
+
+    const signerCheck = await query(
+      'SELECT status FROM letter_signers WHERE letter_id = $1 AND user_id = $2',
+      [letterId, targetUser]
+    );
+    if (!signerCheck.rows.length) {
+      await query('ROLLBACK');
+      return res.status(404).json({ error: 'امضاکننده در این نامه یافت نشد' });
+    }
+    if (signerCheck.rows[0].status !== 'signed') {
+      await query('ROLLBACK');
+      return res.status(400).json({ error: 'این کاربر هنوز امضا نکرده است' });
+    }
+
+    await query(`
+      UPDATE letter_signers
+      SET status = 'pending', signed_at = NULL, sign_type = NULL
+      WHERE letter_id = $1 AND user_id = $2
+    `, [letterId, targetUser]);
+
+    await revertLetterAfterSignatureRemoval(letterId);
+
+    await query(`
+      INSERT INTO letter_referrals (letter_id, sender_id, receiver_id, action_type, note, is_completed, completed_at, completion_note)
+      VALUES ($1, $2, $2, 'for_signature', 'حذف امضا توسط سوپر ادمین', TRUE, NOW(), $3)
+    `, [letterId, req.user.username, `حذف امضای ${targetUser}${adminNote ? ' — ' + adminNote : ''}`]);
+
+    await logLetterChange(letterId, req.user.username, 'admin_unsign', targetUser, 'pending', { note: adminNote || 'super_admin_unsign' });
+
+    await query('COMMIT');
+    emitLetterChanged(letterId, req.user.username, { action: 'admin_unsign', target: targetUser });
+    res.json({ ok: true });
+  } catch (e) {
+    await query('ROLLBACK');
+    console.error('[letters admin-unsign error]', e);
     res.status(500).json({ error: e.message || 'خطای سرور' });
   }
 });

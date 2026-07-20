@@ -44,7 +44,8 @@ function postCenterInteraction(centerKey, payload) {
     },
     body: JSON.stringify(payload),
   }).then(function (r) {
-    return r.json().then(function (j) {
+    var parse = typeof safeResponseJson === 'function' ? safeResponseJson(r) : r.json();
+    return parse.then(function (j) {
       if (!r.ok) return Promise.reject(j);
       return j;
     });

@@ -13,11 +13,13 @@ const SETTINGS_KEYS = new Set([
   'ckItems', 'statusList', 'leadList', 'typeList', 'purchaseMethodList',
   'centerPaymentTermsList', 'shipMethodList', 'onboardingDisabled',
   'firstUse', 'taskColumns', 'mtrSyncEnabled', 'telegramNotify', 'pricing_buy_costs',
+  'roleList', 'departmentList', 'actionTypeList',
 ]);
 
 const MANAGER_ONLY_KEYS = new Set([
   'statusList', 'leadList', 'typeList', 'purchaseMethodList',
   'centerPaymentTermsList', 'shipMethodList', 'mtrSyncEnabled', 'anthropicKey',
+  'roleList', 'departmentList', 'actionTypeList',
 ]);
 
 function maskSettings(row) {

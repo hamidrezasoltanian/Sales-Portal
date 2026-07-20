@@ -627,6 +627,15 @@ router.put('/finance/:id', requireAuth, async function(req, res) {
   try {
     if (req.body.verified) {
       if (!isManager(req.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
+      const evidence = await query(
+        `SELECT 1 FROM trade_attachments
+         WHERE entity_type='finance' AND entity_id=$1
+         LIMIT 1`,
+        [req.params.id]
+      );
+      if (!evidence.rows.length) {
+        return res.status(422).json({ error: 'برای تأیید بهبود مالی، حداقل یک مدرک یا سند هزینه لازم است' });
+      }
       await query(
         'UPDATE trade_finance_items SET verified_by=$1, status=$2 WHERE id=$3',
         [req.user.username, 'verified', req.params.id]

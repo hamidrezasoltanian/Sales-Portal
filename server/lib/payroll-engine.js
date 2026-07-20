@@ -143,16 +143,17 @@ async function getLeavePayrollImpact(employee, month) {
 
 async function getCommissionEligibleSales(employee, month) {
   // Deterministic rule: ONLY paid invoices in month; no proforma fallback (prevents double-count).
-  // Attribution: COALESCE(sales_owner, created_by) on linked proforma.
+  // Attribution: frozen invoices.commission_owner at issue time (fallback created_by for legacy rows).
   const r = await query(
     `SELECT i.id AS invoice_id, i.invoice_no, i.total, i.jalali_date, i.proforma_id,
             p.no AS proforma_no,
-            COALESCE(NULLIF(TRIM(p.sales_owner), ''), p.created_by) AS attributed_to,
+            COALESCE(NULLIF(TRIM(i.commission_owner), ''), i.created_by) AS attributed_to,
+            i.commission_owner_name AS attributed_name,
             p.commission_amt AS pricing_commission_amt
      FROM invoices i
-     JOIN proformas p ON p.id = i.proforma_id
+     LEFT JOIN proformas p ON p.id = i.proforma_id
      WHERE i.status = 'paid' AND i.jalali_date LIKE $2
-       AND COALESCE(NULLIF(TRIM(p.sales_owner), ''), p.created_by) = $1
+       AND COALESCE(NULLIF(TRIM(i.commission_owner), ''), i.created_by) = $1
      ORDER BY i.jalali_date, i.id`,
     [employee, month + '%']
   );
@@ -164,6 +165,8 @@ async function getCommissionEligibleSales(employee, month) {
       proforma_no: row.proforma_no,
       jalali_date: row.jalali_date,
       total: parseFloat(row.total) || 0,
+      attributed_to: row.attributed_to,
+      attributed_name: row.attributed_name || '',
       pricing_commission_amt: parseFloat(row.pricing_commission_amt) || 0,
     };
   });
@@ -172,7 +175,7 @@ async function getCommissionEligibleSales(employee, month) {
   return {
     salesTotal,
     source: 'paid_invoices_only',
-    rule: 'paid_invoices_only; attribution=COALESCE(sales_owner,created_by); no proforma fallback',
+    rule: 'paid_invoices_only; attribution=invoices.commission_owner_at_issue; no proforma fallback',
     invoiceCount: lines.length,
     lines,
     pricing_commission_total: pricingCommissionTotal,
@@ -202,6 +205,40 @@ async function getStoredRecord(employee, month) {
   return r.rows[0] || null;
 }
 
+async function getAttendanceWorkingDays(employee, month, mdays) {
+  try {
+    const r = await query(
+      `SELECT COUNT(*)::int AS present
+       FROM attendance_logs
+       WHERE employee = $1 AND jalali_date LIKE $2 AND check_in IS NOT NULL`,
+      [employee, month + '%']
+    );
+    const present = (r.rows[0] && r.rows[0].present) || 0;
+    if (present <= 0) return { hasData: false, presentDays: 0, workingDays: null };
+    return {
+      hasData: true,
+      presentDays: present,
+      workingDays: Math.min(mdays, present),
+    };
+  } catch (_) {
+    return { hasData: false, presentDays: 0, workingDays: null };
+  }
+}
+
+async function getApprovedCorrections(employee, month) {
+  try {
+    const r = await query(
+      `SELECT COALESCE(SUM(amount),0)::float AS total
+       FROM payroll_corrections
+       WHERE employee = $1 AND apply_month = $2 AND status = 'approved'`,
+      [employee, month]
+    );
+    return parseFloat(r.rows[0] && r.rows[0].total) || 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
 async function calcEmployeePayroll(user, month, options) {
   options = options || {};
   const stored = await getStoredRecord(user.username, month);
@@ -216,8 +253,18 @@ async function calcEmployeePayroll(user, month, options) {
   const contract = await getActiveContract(user.username, month);
   const mdays = monthWorkingDays(hrSettings);
   const leaveImpact = await getLeavePayrollImpact(user.username, month);
-  const workingDays = Math.max(0, mdays - leaveImpact.unpaidLeaveDays);
+  const att = await getAttendanceWorkingDays(user.username, month, mdays);
+  let workingDays;
+  let attendanceSource = 'leave_only';
+  if (att.hasData) {
+    // Presence from attendance_logs; still subtract unpaid leave if logged separately
+    workingDays = Math.max(0, att.workingDays - leaveImpact.unpaidLeaveDays);
+    attendanceSource = 'attendance_logs';
+  } else {
+    workingDays = Math.max(0, mdays - leaveImpact.unpaidLeaveDays);
+  }
   const vars = await getApprovedVariables(user.username, month);
+  const correctionAmount = await getApprovedCorrections(user.username, month);
 
   const salaryInsurable = parseFloat(contract.salary_insurable) || parseFloat(contract.base_salary) || 0;
   const salaryNonInsurable = parseFloat(contract.salary_non_insurable) || 0;
@@ -252,11 +299,21 @@ async function calcEmployeePayroll(user, month, options) {
     const sales = await getCommissionEligibleSales(user.username, month);
     salesTotal = sales.salesTotal;
     salesSource = sales.source;
-    // Sales employees: tier KPI multiplier not tied to trade_kpi_monthly (trade-only table).
-    // Until sales_kpi_monthly exists, tier ladder uses global settings without KPI boost.
-    kpiScore = null;
-    kpiAbove = false;
-    kpiBonus = 0;
+    // Sales KPI SoT: finalized sales_kpi_monthly (server calc) — never client math
+    let salesKpiRow = null;
+    try {
+      const salesKpi = require('./sales-kpi');
+      salesKpiRow = await salesKpi.getFinalizedRow(user.username, month);
+    } catch (_) {}
+    if (salesKpiRow) {
+      kpiScore = parseFloat(salesKpiRow.overall);
+      kpiAbove = kpiScore >= (parseFloat(commSettings.kpi_threshold) || 80);
+      kpiBonus = 0;
+    } else {
+      kpiScore = null;
+      kpiAbove = false;
+      kpiBonus = 0;
+    }
     const pct = parseFloat(contract.commission_pct) > 0 ? contract.commission_pct : commSettings.base_pct;
     const comm = calcCommission(salesTotal, commSettings, kpiAbove, pct);
     commissionPct = comm.rate;
@@ -271,11 +328,11 @@ async function calcEmployeePayroll(user, month, options) {
     : null;
 
   const overtimePay = vars.overtime;
-  const bonusTotal = vars.bonus + kpiBonus;
-  const penaltyTotal = vars.penalty;
+  const bonusTotal = vars.bonus + kpiBonus + Math.max(0, correctionAmount);
+  const penaltyTotal = vars.penalty + Math.max(0, -correctionAmount);
   const advanceTotal = vars.advance;
 
-  const grossPay = continuousBenefits + commissionAmount + overtimePay + vars.bonus + kpiBonus;
+  const grossPay = continuousBenefits + commissionAmount + overtimePay + vars.bonus + kpiBonus + Math.max(0, correctionAmount);
   const insurableBase = proratedInsurable + proratedHousing + proratedGrocery;
   const deductions = calcLegalDeductionsOnInsurable(insurableBase, grossPay, dedSettings, taxBrackets);
   const rawNet = grossPay - deductions.total_deductions - advanceTotal - penaltyTotal;
@@ -295,6 +352,8 @@ async function calcEmployeePayroll(user, month, options) {
     finalized,
     month_working_days: mdays,
     working_days: workingDays,
+    attendance_source: attendanceSource,
+    attendance_present_days: att.presentDays || 0,
     unpaid_leave_days: leaveImpact.unpaidLeaveDays,
     annual_leave_days: annualLeave,
     leave_days: annualLeave + leaveImpact.unpaidLeaveDays,
@@ -320,6 +379,7 @@ async function calcEmployeePayroll(user, month, options) {
     bonus_total: bonusTotal,
     penalty_total: penaltyTotal,
     advance_total: advanceTotal,
+    correction_amount: correctionAmount,
     gross_pay: grossPay,
     total_pay: grossPay,
     insurance: deductions.insurance,
@@ -328,7 +388,7 @@ async function calcEmployeePayroll(user, month, options) {
     net_pay: netPay,
     net_debt_carry: netDebtCarry,
     calc_snapshot: {
-      rule_sales: 'paid_invoices_only; attribution=COALESCE(sales_owner,created_by)',
+      rule_sales: 'paid_invoices_only; attribution=invoices.commission_owner_at_issue',
       rule_commission_base: (parseFloat(contract.commission_pct) > 0
         ? 'contract.commission_pct=' + contract.commission_pct
         : 'global.base_pct=' + (commSettings.base_pct || 1)),
@@ -336,6 +396,8 @@ async function calcEmployeePayroll(user, month, options) {
         contract_id: contract.id,
         leave: leaveImpact,
         variables: vars,
+        corrections: correctionAmount,
+        attendance: att,
         sales: tradeUser ? null : (typeof salesBreakdown !== 'undefined' ? salesBreakdown : null),
         trade_kpi: tradeUser ? { month, note: 'trade_kpi_monthly only' } : null,
       },
@@ -545,14 +607,45 @@ async function recalcAndSaveEmployee(employee, month, actor, options) {
   return { ok: true, row };
 }
 
-async function transitionStatus(employee, month, toStatus, actor, note, options) {
-  options = options || {};
-  const payrollWorkflow = require('./payroll-workflow');
-  const r = await query(
+async function ensureDraftRecord(employee, month, actor) {
+  const existing = await query(
     'SELECT status FROM payroll_records WHERE employee = $1 AND month = $2',
     [employee, month]
   );
-  if (!r.rows.length) return { error: 'رکورد حقوق یافت نشد', status: 404 };
+  if (existing.rows.length) return { ok: true, created: false, status: existing.rows[0].status };
+
+  const users = await query(
+    `SELECT username, display_name, role, department, salary_amount, commission_pct
+     FROM app_users WHERE username = $1 AND active = true`,
+    [employee]
+  );
+  if (!users.rows.length) return { error: 'کارمند یافت نشد', status: 404 };
+
+  const settingsRes = await query(`SELECT * FROM commission_settings WHERE id='default'`);
+  const settings = settingsRes.rows[0] || {};
+  const row = await calcEmployeePayroll(users.rows[0], month, { commSettings: settings });
+  row.status = WORKFLOW.DRAFT;
+  await upsertDraftRecord(row, month, actor || 'system');
+  return { ok: true, created: true, status: WORKFLOW.DRAFT };
+}
+
+async function transitionStatus(employee, month, toStatus, actor, note, options) {
+  options = options || {};
+  const payrollWorkflow = require('./payroll-workflow');
+  let r = await query(
+    'SELECT status FROM payroll_records WHERE employee = $1 AND month = $2',
+    [employee, month]
+  );
+  if (!r.rows.length) {
+    // محاسبه زنده هنوز ذخیره نشده — برای پیشروی ورک‌فلو اول پیش‌نویس بساز
+    const ensured = await ensureDraftRecord(employee, month, actor);
+    if (ensured.error) return ensured;
+    r = await query(
+      'SELECT status FROM payroll_records WHERE employee = $1 AND month = $2',
+      [employee, month]
+    );
+    if (!r.rows.length) return { error: 'رکورد حقوق یافت نشد — ابتدا «پیش‌نویس» را بزنید', status: 404 };
+  }
   const from = r.rows[0].status || WORKFLOW.DRAFT;
   if (LOCKED_STATUSES.has(from) && toStatus !== WORKFLOW.PUBLISHED && toStatus !== WORKFLOW.DRAFT) {
     return { error: 'رکورد قفل شده — برای ویرایش ابتدا به پیش‌نویس بازگردانید', status: 403 };
@@ -627,8 +720,11 @@ module.exports = {
   calcMonthPayroll,
   calcCommissionReconciliation,
   upsertDraftRecord,
+  ensureDraftRecord,
   transitionStatus,
   reopenPayrollRecord,
   recalcAndSaveEmployee,
   assertPayrollMonthEditable,
+  getAttendanceWorkingDays,
+  getApprovedCorrections,
 };

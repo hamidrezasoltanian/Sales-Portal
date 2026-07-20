@@ -50,6 +50,8 @@ async function requireAuth(req, res, next) {
   // Check active status + load permissions (cached 5 min)
   let userPerms = {};
   let userDept = '';
+  let userManagerScope = null;
+  let userDirectManager = '';
   try {
     const cached = _activeCache.get(decoded.username);
     let active;
@@ -58,10 +60,12 @@ async function requireAuth(req, res, next) {
       active = cached.active;
       userPerms = cached.permissions || {};
       userDept = cached.department || '';
+      userManagerScope = cached.manager_scope || null;
+      userDirectManager = cached.direct_manager || '';
       tokenVersion = cached.token_version;
     } else {
       const userResult = await query(
-        'SELECT active, permissions, department, COALESCE(token_version, 0) AS token_version FROM app_users WHERE username = $1',
+        'SELECT active, permissions, department, COALESCE(token_version, 0) AS token_version, manager_scope, direct_manager FROM app_users WHERE username = $1',
         [decoded.username]
       );
       if (userResult.rows.length === 0) {
@@ -70,11 +74,15 @@ async function requireAuth(req, res, next) {
       active = userResult.rows[0].active;
       userPerms = userResult.rows[0].permissions || {};
       userDept = userResult.rows[0].department || '';
+      userManagerScope = userResult.rows[0].manager_scope || null;
+      userDirectManager = userResult.rows[0].direct_manager || '';
       tokenVersion = userResult.rows[0].token_version;
       _activeCache.set(decoded.username, {
         active,
         permissions: userPerms,
         department: userDept,
+        manager_scope: userManagerScope,
+        direct_manager: userDirectManager,
         token_version: tokenVersion,
         ts: Date.now(),
       });
@@ -91,7 +99,15 @@ async function requireAuth(req, res, next) {
     return res.status(503).json({ error: 'سرویس احراز هویت موقتاً در دسترس نیست' });
   }
 
-  req.user = { username: decoded.username, role: decoded.role, name: decoded.name, permissions: userPerms, department: userDept };
+  req.user = {
+    username: decoded.username,
+    role: decoded.role,
+    name: decoded.name,
+    permissions: userPerms,
+    department: userDept,
+    manager_scope: userManagerScope,
+    direct_manager: userDirectManager,
+  };
   next();
 }
 

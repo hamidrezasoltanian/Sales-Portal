@@ -224,7 +224,8 @@ router.get('/centers/:centerKey/affiliations', async (req, res) => {
   try {
     const centerKey = decodeURIComponent(req.params.centerKey);
     const result = await query(
-      `SELECT a.*, p.name as hcp_name, p.specialty as hcp_specialty, p.rank as hcp_rank, p.phones as hcp_phones, p.medical_council_no as hcp_mc_no
+      `SELECT a.*, p.name as hcp_name, p.specialty as hcp_specialty, p.rank as hcp_rank,
+              p.phones as hcp_phones, p.medical_council_no as hcp_mc_no, p.notes as hcp_notes
        FROM hcp_affiliations a
        JOIN healthcare_professionals p ON a.hcp_id = p.id AND p.deleted_at IS NULL
        WHERE a.center_key = $1

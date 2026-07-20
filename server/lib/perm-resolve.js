@@ -1,6 +1,6 @@
 'use strict';
 
-const { ROLE_DEFAULTS } = require('./roles');
+const { ROLE_DEFAULTS, getRoleModuleDefaults } = require('./roles');
 const { SEGREGATED_MODULES, normalizeLevel } = require('./permissions-schema');
 
 /**
@@ -17,10 +17,8 @@ function resolvePermLevel(user, module) {
   }
 
   const role = user.role;
-  if (role && ROLE_DEFAULTS[role] && ROLE_DEFAULTS[role].modules) {
-    const def = ROLE_DEFAULTS[role].modules[module];
-    if (def !== undefined) return normalizeLevel(def);
-  }
+  const defs = getRoleModuleDefaults ? getRoleModuleDefaults(role) : ((ROLE_DEFAULTS[role] || {}).modules || {});
+  if (defs && defs[module] !== undefined) return normalizeLevel(defs[module]);
 
   return 'none';
 }

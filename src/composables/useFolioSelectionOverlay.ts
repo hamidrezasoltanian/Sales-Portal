@@ -41,7 +41,7 @@ export function useFolioSelectionOverlay(opts: {
 
     const paged = editor.getEditorRef();
     const state = paged?.getState();
-    if (!state) {
+    if (!paged || !state) {
       clearFolioSelection(host);
       return;
     }

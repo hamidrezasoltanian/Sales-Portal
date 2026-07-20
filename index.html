@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>
+/* Bardeen و افزونه‌ها (page-events.js) گاهی e.key ندارند → .length روی undefined */
+(function () {
+  function _kbdPatchKey(e) {
+    if (!e || typeof e !== 'object') return;
+    var k = e.key;
+    if (typeof k === 'string' && k.length) return;
+    var fb = (e.code && e.code !== 'Unidentified') ? e.code : 'Unidentified';
+    try { Object.defineProperty(e, 'key', { value: fb, configurable: true }); } catch (_) {}
+  }
+  document.addEventListener('keydown', _kbdPatchKey, true);
+  document.addEventListener('keyup', _kbdPatchKey, true);
+})();
+</script>
+<title>پورتال فروش آتنا زیست درمان v2.1</title>
+<!-- cache-bust: v2.1 -->
+<style id="boot-critical">
+  .top-bar{display:flex!important;background:linear-gradient(135deg,#1e1b4b 0%,#4f46e5 100%)!important;color:#fff!important;min-height:48px;visibility:visible!important}
+  .sidebar{display:flex!important;background:#fff!important;visibility:visible!important}
+</style>
+<script>
+window.__bootErrors=[];
+function __showBootError(msg){
+  var el=document.getElementById('bootError');
+  var m=document.getElementById('bootErrorMsg');
+  if(el)el.style.display='block';
+  if(m)m.textContent=msg;
+}
+window.addEventListener('error',function(e){
+  window.__bootErrors.push(e.message||String(e));
+  __showBootError('خطای جاوااسکریپت: '+window.__bootErrors.join(' | '));
+});
+window.addEventListener('unhandledrejection',function(e){
+  window.__bootErrors.push(String(e.reason&&(e.reason.message||e.reason)||e));
+  __showBootError('خطا: '+window.__bootErrors.join(' | '));
+});
+setTimeout(function(){
+  if(window.__appBooted)return;
+  var tb=document.querySelector('.top-bar');
+  var lo=document.getElementById('loginOverlay');
+  if((tb&&tb.offsetHeight>=8)||(lo&&lo.style.display==='flex'))return;
+  __showBootError('صفحه کامل بارگذاری نشد. Hard Refresh بزنید (Ctrl+Shift+R) یا کش مرورگر را پاک کنید.');
+},12000);
+window.__APP_BUILD='20260723x';
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.getRegistrations().then(function(regs){
+    regs.forEach(function(r){r.unregister();});
+  }).catch(function(){});
+}
+</script>
+<!-- Vazirmatn از jsDelivr — npm package، بدون Google dependency -->
+<link rel="stylesheet" href="/css/app.css?v=20260723x">
+<link rel="stylesheet" href="/dist/assets/main.css?v=20260723x">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" onerror="console.warn('XLSX CDN failed - only TSV format supported offline')"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
+</head>
+<body>
+
+<div id="bootError" style="display:none;position:fixed;inset:0;z-index:100000;background:#f8fafc;padding:32px;direction:rtl;font-family:Tahoma,sans-serif;overflow:auto">
+  <h2 style="color:#1e1b4b;margin-bottom:12px">خطا در بارگذاری اپ</h2>
+  <p id="bootErrorMsg" style="color:#334155;margin-bottom:16px;white-space:pre-wrap"></p>
+  <button type="button" onclick="location.reload()" style="padding:10px 20px;background:#4f46e5;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-family:inherit">تلاش مجدد</button>
+</div>
+
+<!-- LOADING SPINNER -->
+<div id="loadingSpinner" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(255,255,255,.92);align-items:center;justify-content:center;flex-direction:column;gap:14px">
+  <div style="width:48px;height:48px;border:4px solid #e0e7ff;border-top-color:#6366f1;border-radius:50%;animation:spin .7s linear infinite"></div>
+  <div style="font-family:Vazirmatn,sans-serif;color:#6366f1;font-size:14px;font-weight:600">در حال بارگذاری…</div>
+</div>
+<style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+
+<!-- TOP BAR -->
+<div class="top-bar">
+  <h1 id="companyNameH1">پورتال فروش آتنا زیست درمان</h1>
+  <div class="top-area-right">
+    <button id="menuToggle" onclick="toggleTopMenu()" aria-label="منو">☰</button>
+    <div id="topMenuDropdown">
+    <span id="uSelDot" style="width:10px;height:10px;border-radius:50%;background:#8b5cf6;display:inline-block;margin-left:6px;vertical-align:middle;flex-shrink:0"></span>
+    <span id="currentUserDisplay" style="font-size:12px;color:var(--topbar-text);font-weight:600;margin-left:4px"></span>
+    <button class="top-btn" id="tab_checklist" onclick="switchTab('checklist')" title="چک‌لیست روزانه" style="font-size:15px;padding:4px 8px">☑</button>
+    <button class="top-btn" id="tab_activity_btn" onclick="switchTab('activity')" title="فعالیت‌ها" style="font-size:13px">📜</button>
+    <span class="notif-bell-wrap"><div id="vue-notifications" style="display:inline-block"></div></span>
+    <span id="vue-sync-status" style="display:inline-block;vertical-align:middle"></span>
+    <button class="top-btn" onclick="openGSearch()" title="جستجو سریع (Ctrl+K)" style="background:rgba(255,255,255,.15);font-size:13px">🔍 <span style="font-size:11px;opacity:.7">Ctrl+K</span></button>
+    <button class="top-btn" onclick="doLogout()" style="background:rgba(220,38,38,.2);border-color:rgba(220,38,38,.4)">خروج</button>
+    <button class="top-btn" id="themeTglBtn" onclick="toggleTheme()" title="تغییر تم" style="font-size:13px;min-width:72px">🌙 دارک</button>
+    <button class="top-btn sb-manager-wrap" onclick="openUserMgmt()" title="مدیریت کاربران — تب HR" style="display:none;background:rgba(139,92,246,.2);border-color:rgba(139,92,246,.4)">👥 کاربران</button>
+    <button class="top-btn" onclick="openSettings()" title="تنظیمات" style="background:rgba(255,255,255,.15);font-weight:700">⚙ تنظیمات</button>
+    <button class="top-btn" onclick="_openDataHubLazy()" title="Ctrl+B" style="background:rgba(14,165,233,.2);border-color:rgba(14,165,233,.4);font-weight:700">💾 داده</button>
+    <input type="file" id="restoreInp" accept=".json" style="display:none" onchange="unifiedRestore(event)">
+    <input type="file" id="importCentersInp" accept=".xlsx,.xls" style="display:none" onchange="importCentersFromExcel(event)">
+    <input type="file" id="unifiedMergeInp" accept=".json" multiple style="display:none" onchange="unifiedHandleMergeFiles(event)">
+
+    </div><!-- /topMenuDropdown -->
+  </div><!-- /top-area-right -->
+</div><!-- /top-bar -->
+
+<!-- SIDEBAR -->
+<nav class="sidebar" id="appSidebar">
+  <div class="sb-logo">
+    <span class="sb-logo-mark">👆</span>
+    <span class="sb-logo-text">Click CRM</span>
+    <button class="sb-collapse-btn" id="sbCollapseBtn" onclick="toggleSidebar()" title="جمع/باز کردن منو" aria-label="جمع کردن منو">⟩</button>
+  </div>
+  <div class="sb-nav">
+    <button class="tab-btn" id="tab_home" onclick="switchTab('home')" title="خانه"><span class="sb-icon">🏠</span><span class="sb-label">خانه<span id="homeInboxBadge" class="sb-tab-badge"></span></span></button>
+    <button class="tab-btn active" id="tab_provinces" onclick="switchTab('provinces')" title="استان‌ها"><span class="sb-icon">🗺</span><span class="sb-label">استان‌ها</span></button>
+    <button class="tab-btn" id="tab_weekplan" onclick="switchTab('weekplan')" title="برنامه هفته"><span class="sb-icon">📋</span><span class="sb-label">برنامه هفته<span id="wpDueBadge" class="sb-tab-badge"></span></span></button>
+    <button class="tab-btn" id="tab_calendar" onclick="switchTab('calendar')" title="تقویم"><span class="sb-icon">📅</span><span class="sb-label">تقویم</span></button>
+    <button class="tab-btn" id="tab_tasks" onclick="switchTab('tasks')" title="وظایف"><span class="sb-icon">📌</span><span class="sb-label">وظایف</span></button>
+    <button class="tab-btn" id="tab_workflows" onclick="switchTab('workflows')" title="گردش‌کار"><span class="sb-icon">🔄</span><span class="sb-label">گردش‌کار</span></button>
+    <button class="tab-btn" id="tab_mtr" onclick="switchTab('mtr')" title="مطالبات"><span class="sb-icon">💰</span><span class="sb-label"><span id="mtrBadge"></span>مطالبات</span></button>
+    <button class="tab-btn" id="tab_pricing" onclick="switchTab('pricing')" title="قیمت‌گذاری"><span class="sb-icon">🏷</span><span class="sb-label">قیمت‌گذاری</span></button>
+    <button class="tab-btn" id="tab_proforma" onclick="switchTab('proforma')" title="پیشفاکتور"><span class="sb-icon">📄</span><span class="sb-label">پیشفاکتور</span></button>
+    <button class="tab-btn" id="tab_letters" onclick="switchTab('letters')" title="دبیرخانه"><span class="sb-icon">✉️</span><span class="sb-label"><span id="lettersBadge"></span>دبیرخانه</span></button>
+    <a href="/wms" class="tab-btn" id="tab_wms" title="انبار WMS" style="text-decoration:none"><span class="sb-icon">🏭</span><span class="sb-label">انبار</span></a>
+    <button class="tab-btn" id="tab_support" onclick="switchTab('support')" title="پشتیبان فروش"><span class="sb-icon">🎧</span><span class="sb-label">پشتیبانی</span></button>
+    <button class="tab-btn" id="tab_hcp" onclick="switchTab('hcp')" title="مخاطبین و پزشکان"><span class="sb-icon">👨‍⚕️</span><span class="sb-label">مخاطبین و پزشکان</span></button>
+    <button class="tab-btn sb-manager-wrap" id="tab_hr" onclick="switchTab('hr')" title="منابع انسانی" style="display:none"><span class="sb-icon">👥</span><span class="sb-label">HR</span></button>
+    <button class="tab-btn sb-trade-wrap" id="tab_trade_kpi" onclick="switchTab('trade-kpi')" title="بازرگانی و KPI" style="display:none"><span class="sb-icon">🏭</span><span class="sb-label">بازرگانی</span></button>
+    <div class="sb-divider sb-manager-wrap" style="display:none"></div>
+    <div class="sb-section-label sb-manager-wrap" style="display:none">مدیریت</div>
+    <button class="tab-btn sb-manager-wrap" id="tab_kpi" onclick="switchTab('kpi')" title="KPI" style="display:none"><span class="sb-icon">📊</span><span class="sb-label">KPI</span></button>
+    <button class="tab-btn sb-manager-wrap" id="tab_changelog" onclick="switchTab('changelog')" title="لاگ تغییرات" style="display:none"><span class="sb-icon">🗃</span><span class="sb-label">لاگ تغییرات</span></button>
+    <button class="tab-btn sb-manager-wrap" id="tab_reports" onclick="switchTab('reports')" title="گزارش‌های تحلیلی" style="display:none"><span class="sb-icon">📊</span><span class="sb-label">گزارش‌ها</span></button>
+    <button class="tab-btn sb-manager-wrap" id="tab_week_planner" onclick="switchTab('week-planner')" title="تخصیص برنامه هفتگی" style="display:none"><span class="sb-icon">📋</span><span class="sb-label">تخصیص برنامه</span></button>
+    <button class="tab-btn sb-manager-wrap" id="tab_faradis_match" onclick="switchTab('faradis-match')" title="تطبیق فرادیس" style="display:none"><span class="sb-icon">🔗</span><span class="sb-label">تطبیق</span></button>
+  </div>
+</nav>
+<script>
+(function(){
+  try{ if(localStorage.getItem('_sbCollapsed')==='1') document.body.classList.add('sb-collapsed'); }catch(e){}
+  window.toggleSidebar=function(){
+    var collapsed=document.body.classList.toggle('sb-collapsed');
+    try{ localStorage.setItem('_sbCollapsed', collapsed?'1':'0'); }catch(e){}
+    var b=document.getElementById('sbCollapseBtn');
+    if(b){ b.setAttribute('aria-label', collapsed?'باز کردن منو':'جمع کردن منو'); }
+  };
+})();
+</script>
+<div class="content-area">
+
+<!-- TOP BAR -->
+<div id="homePanel" style="display:none;padding:12px 14px"></div>
+<!-- DASHBOARD -->
+<div id="userDashPanel"></div>
+      <div id="dash" style="padding:12px 14px"></div>
+
+<!-- TODAY BANNER (with filters) -->
+<div id="banner" style="display:none" class="today-banner">
+  <div class="tb-head">
+    <span class="tb-title" id="tb_title">📅 پیگیری‌های امروز و معوق</span>
+    <span id="bannerRoleTag" style="display:none;font-size:11px;background:#ede9fe;color:#6d28d9;border-radius:10px;padding:2px 8px;font-weight:600;margin-right:6px"></span>
+    <div class="tb-filters">
+      <select id="bannerUser" class="tb-filter" onchange="setBannerUser(this.value)">
+        <option value="">همه کارشناسان</option>
+      </select>
+      <select id="bannerTag" class="tb-filter" onchange="setBannerTag(this.value)">
+        <option value="">همه برچسب‌ها</option>
+      </select>
+      <button id="tb_toggle" onclick="var t=document.getElementById('tb_items');var collapsed=t.style.display==='none';t.style.display=collapsed?'':'none';this.textContent=collapsed?'▲':'▼'" style="background:none;border:1px solid #fcd34d;border-radius:4px;cursor:pointer;font-size:10px;padding:2px 7px;color:#92400e;font-family:inherit">▲</button>
+    </div>
+  </div>
+  <div class="today-items" id="tb_items"></div>
+</div>
+
+<!-- FILTERS -->
+<div class="filters-bar no-print" id="filtersBar">
+  <button class="btn-act btn-back" id="provBackBtn" style="display:none" onclick="appBack()">◀ بازگشت</button>
+  <span id="provViewHead" style="font-weight:700;color:var(--text-primary)"></span>
+  <span id="allCentersToggle" style="display:flex;gap:4px;align-items:center">
+    <button id="viewProvBtn" class="vb active" onclick="setProvView('grid')" title="نمایش استان‌ها">🗺 استان‌ها</button>
+    <button id="viewAllListBtn" class="vb" onclick="setProvView('list')" title="همه مراکز — لیست">📋 همه</button>
+    <button id="viewAllKbBtn" class="vb" onclick="setProvView('kanban')" title="همه مراکز — کانبان">📊 کانبان</button>
+  </span>
+  <button id="filterToggleBtn" onclick="toggleFiltersCollapse()" title="نمایش/پنهان فیلترها" style="display:none;padding:4px 9px;border:1px solid var(--border-input);border-radius:6px;background:var(--bg-input);color:var(--text-secondary);font-size:12px;cursor:pointer;font-family:inherit">🔽 فیلترها</button>
+  <span class="fl">جستجو:</span>
+  <input type="text" id="srch" placeholder="نام مرکز..." oninput="renderTable()" style="display:none">
+  <div id="filterCollapsible" style="display:contents">
+  <span class="fl" id="lblPot" style="display:none">پتانسیل:</span>
+  <select id="fPot" onchange="renderTable()" style="display:none"><option value="">همه</option><option>1</option><option>2</option><option>3</option><option>4</option></select>
+  <span class="fl" id="lblSt" style="display:none">وضعیت:</span>
+  <select id="fStatus" onchange="renderTable()" style="display:none"><option value="">همه</option></select>
+  <span class="fl" id="lblLd" style="display:none">سرنخ:</span>
+  <select id="fLead" onchange="renderTable()" style="display:none"><option value="">همه</option><option>مشتری</option><option>لید</option><option>فرصت</option><option>سرنخ</option><option>ندارد</option><option>بدون مصرف</option></select>
+  <span class="fl" id="lblOw" style="display:none">مسئول:</span>
+  <select id="fOwner" onchange="renderTable()" style="display:none"><option value="">همه</option></select>
+  <span class="fl" id="lblTp" style="display:none">نوع:</span>
+  <select id="fType" onchange="renderTable()" style="display:none"><option value="">همه انواع</option></select>
+  <span class="fl" id="lblTg" style="display:none">برچسب:</span>
+  <select id="fTag" onchange="renderTable()" style="display:none"><option value="">همه</option></select>
+  </div>
+  <select id="provSortSel" style="display:none;padding:4px 7px;border:1px solid var(--border-input);border-radius:5px;font-size:11px;background:var(--bg-input);color:var(--text-primary);font-family:inherit" onchange="renderTable()">
+    <option value="default">⇅ ترتیب پیش‌فرض</option>
+    <option value="alpha">الفبا</option>
+    <option value="potential">پتانسیل</option>
+    <option value="owner">کارشناس</option>
+    <option value="custom">شخصی</option>
+  </select>
+  <button id="provTreeBtn" style="display:none;padding:4px 9px;border:1px solid var(--border-input);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:12px;cursor:pointer" onclick="toggleProvTreeView()" title="نمای درختی استان‌ها">🌳 درختی</button>
+  <select id="sortSel" style="display:none;padding:4px 7px;border:1px solid var(--border-input);border-radius:5px;font-size:11px;background:var(--bg-input);color:var(--text-primary);font-family:inherit" onchange="setCenterSortFromSel(this.value)">
+    <option value="">⇅ مرتب‌سازی</option>
+    <option value="name_asc">نام ↑ (الف→ی)</option>
+    <option value="name_desc">نام ↓ (ی→الف)</option>
+    <option value="potential_asc">پتانسیل ↑</option>
+    <option value="potential_desc">پتانسیل ↓</option>
+    <option value="type_asc">نوع</option>
+    <option value="status_asc">وضعیت</option>
+    <option value="lead_asc">سرنخ</option>
+    <option value="owner_asc">مسئول</option>
+    <option value="followupDate_asc">پیگیری بعدی ↑</option>
+    <option value="followupDate_desc">پیگیری بعدی ↓</option>
+    <option value="lastActivity_desc">آخرین تماس ↓</option>
+  </select>
+  <span class="view-sw" id="viewSw" style="display:none">
+    <button class="vb active" id="vb_list" onclick="setViewMode('list')" title="لیست">📋</button>
+    <button class="vb" id="vb_card" onclick="setViewMode('card')" title="کارت">🗂</button>
+    <button class="vb" id="vb_pipeline" onclick="setViewMode('pipeline')" title="Pipeline">🔀</button>
+    <button class="vb" id="vb_kanban" onclick="setViewMode('kanban')" title="کانبان">📊</button>
+  </span>
+  <button class="btn-act btn-excel" id="csvBtn" style="display:none" onclick="exportCSV()">📊 CSV</button>
+  <button class="btn-act" id="xlsBtn" style="display:none" onclick="exportCurrentXlsx()">📊 Excel</button>
+  <select id="filterPresetSel" style="display:none;padding:5px 8px;border:1px solid var(--border-input);border-radius:5px;font-size:11px;background:var(--bg-input);color:var(--text-primary);font-family:inherit" onchange="loadFilterPreset(this.value)">
+    <option value="">📁 پریست‌ها</option>
+  </select>
+  <button id="savePresetBtn" style="display:none;font-size:10px;padding:4px 8px;border:1px solid #0ea5e9;border-radius:5px;background:#f0f9ff;color:#0369a1;cursor:pointer;font-family:inherit" onclick="saveFilterPreset()">💾 ذخیره فیلتر</button>
+  <button class="btn-act btn-print no-print" id="printBtn" style="display:none" onclick="doPrint()">🖨 چاپ</button>
+  <button class="btn-act btn-addcenter" id="addCenterBtn" style="display:none" onclick="addCenter()">➕ مرکز جدید</button>
+</div>
+
+<!-- BULK TOOLBAR -->
+<div id="centersBulkBar" class="bulk-toolbar">
+  <span id="centersBulkCount"></span>
+  <button onclick="bulkAddToWeekPlan()" style="background:#0ea5e9;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">&#x1F4CB; افزودن به هفته</button>
+  <button onclick="bulkChangeOwner()" style="background:#8b5cf6;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">&#x1F464; تغییر مسئول</button>
+  <button onclick="bulkChangeStatus()" style="background:#f59e0b;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">&#x1F504; تغییر وضعیت</button>
+  <button onclick="bulkSetFollowup()" style="background:#ec4899;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">&#x1F4C5; تاریخ پیگیری</button>
+  <button onclick="bulkExport()" style="background:#22c55e;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">&#x2B07; خروجی</button>
+  <button onclick="bulkDeleteCenters()" id="bulkDeleteBtn" style="background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">&#x1F5D1; حذف</button>
+  <button onclick="clearCenterSelection()" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">&#x2715; انصراف</button>
+</div>
+<!-- QUICK FILTERS -->
+<div id="quickFilters" style="display:none;padding:4px 8px;gap:6px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--border);background:var(--bg-page)">
+  <span style="font-size:11px;color:var(--text-muted);font-weight:600">فیلتر سریع:</span>
+  <button class="qf-btn" onclick="applyQuickFilter('overdue')" id="qf_overdue">&#x1F534; پیگیری سررسیده</button>
+  <button class="qf-btn" onclick="applyQuickFilter('nofollowup')" id="qf_nofollowup">&#x1F4EB; بدون follow-up</button>
+  <button class="qf-btn" onclick="applyQuickFilter('noowner')" id="qf_noowner">&#x1F464; بدون مسئول</button>
+  <button class="qf-btn" onclick="applyQuickFilter('stalled')" id="qf_stalled">&#x23F8; بدون فعالیت ۳۰+ روز</button>
+  <button class="qf-btn" onclick="applyQuickFilter('pot1')" id="qf_pot1">&#x2B50; پتانسیل ۱</button>
+  <button class="qf-btn" onclick="applyQuickFilter('inweek')" id="qf_inweek">📅 در برنامه هفته</button>
+  <button class="qf-btn" onclick="applyQuickFilter('none')" id="qf_none" style="color:var(--text-muted)">&#x2715; پاک</button>
+</div>
+<!-- TABLE AREA -->
+<div id="tableArea">
+  <div id="emptyDBMsg" style="display:none;text-align:center;padding:60px 20px">
+    <div style="font-size:48px;margin-bottom:16px">📋</div>
+    <div style="font-size:16px;font-weight:700;color:var(--text-primary);margin-bottom:8px">دیتابیس مراکز خالی است</div>
+    <div style="font-size:13px;color:var(--text-muted);margin-bottom:20px">برای شروع، فایل اکسل مراکز خود را از طریق دکمه <strong>📦 دیتابیس مراکز</strong> در بالای صفحه وارد کنید.</div>
+    <button onclick="openDBManager()" data-secondary="1" style="background:#0ea5e9;color:var(--text-primary);border:none;padding:10px 20px;border-radius:7px;font-size:13px;cursor:pointer;font-family:inherit">📦 وارد کردن دیتابیس مراکز</button>
+  </div>
+  <div id="provGrid" class="prov-grid" style="display:none"></div>
+  <div class="table-wrap">
+    <div id="centerStatsBar" style="display:none;padding:6px 10px;background:var(--bg-raised);border-radius:6px;margin-bottom:6px;font-size:11px;gap:12px;flex-wrap:wrap;align-items:center"></div>
+    <table id="mainTable" style="display:none"><thead id="tableHead"></thead><tbody id="tableBody"></tbody></table>
+    <div id="mobCtrList" style="display:none"></div>
+    <div id="kanbanView" style="display:none"></div>
+    <div id="cardView" style="display:none"></div>
+    <div id="pipelineView" style="display:none"></div>
+    <div id="rowCount" class="row-count"></div>
+  </div>
+</div>
+
+<!-- WEEK PLAN PANEL -->
+<div id="wpPanel" class="wp-panel" style="display:none">
+  <div class="wp-filter-bar">
+    <span class="wp-filter-label">🔍 فیلتر</span>
+    <select id="wpOwnerFilter" class="wp-filter-select" onchange="_wpFclFilters.owner=this.value;renderWeekPlan()">
+      <option value="">همه کارشناسان</option>
+    </select>
+    <select id="wpDefaultActType" class="wp-filter-select" title="نوع پیش‌فرض هنگام افزودن مرکز به هفته" style="min-width:130px">
+      <option value="call">📞 تماس</option>
+    </select>
+    <input id="wpSearch" class="wp-filter-search" type="search" placeholder="جستجوی نام مرکز..." oninput="renderWeekPlan()">
+    <button type="button" class="wp-filter-clear" onclick="wpClearFilters()">✕ پاک</button>
+  </div>
+  <div class="wp-toolbar">
+    <div class="wp-toolbar-year">
+      <button type="button" class="cal-nb" onclick="wpYearNav(-1)">◀</button>
+      <span id="wpYearLabel" class="wp-year-label"></span>
+      <button type="button" class="cal-nb" onclick="wpYearNav(1)">▶</button>
+    </div>
+    <div class="wp-toolbar-week">
+      <button type="button" class="cal-nb" onclick="wpNav(-1)" title="هفته قبل">‹</button>
+      <select id="wpSel" class="wp-week-select" onchange="renderWeekPlan()"></select>
+      <button type="button" class="cal-nb" onclick="wpNav(1)" title="هفته بعد">›</button>
+    </div>
+    <div class="wp-toolbar-btns">
+      <button type="button" class="cal-nb cal-today-btn wp-tbtn" onclick="wpGoThisWeek()">این هفته</button>
+      <button type="button" class="wp-tbtn wp-tbtn-indigo" onclick="wpOpenTodayPlanModal()" title="برنامه امروز با جزئیات بیشتر">📋 امروز</button>
+      <button type="button" class="wp-tbtn wp-tbtn-green" onclick="wpExportExcel()" title="دانلود Excel برنامه هفته">⬇ Excel</button>
+      <button type="button" id="wpDailyMonBtn" class="wp-tbtn wp-tbtn-purple" onclick="openDailyMonitor()" style="display:none" title="گزارش فعالیت روزانه هفته">📊 گزارش</button>
+    </div>
+  </div>
+  <div id="wpBulkBar">
+    <span id="wpBulkCount"></span>
+    <button onclick="wpBulkMoveDay()" style="background:#0ea5e9;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">📅 جابجایی روز</button>
+    <button onclick="wpBulkMove()" style="background:#f59e0b;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">↪ تعیین هفته</button>
+    <button onclick="wpClearSelection()" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">✕ انصراف</button>
+  </div>
+  <div class="wp-days" id="wpDays"></div>
+  <div id="wpFullCenterList"></div>
+</div>
+
+<!-- CALENDAR PANEL -->
+<div id="calPanel" style="display:none">
+  <div class="cal-toolbar">
+    <div class="cal-nav-group">
+      <button class="cal-nb" onclick="calNav(-1)">◀</button>
+      <button class="cal-nb cal-today-btn" onclick="calGoToday()">امروز</button>
+      <button class="cal-nb" onclick="calNav(1)">▶</button>
+      <span class="cal-title" id="calTitle"></span>
+    </div>
+    <div class="cal-view-group">
+      <button class="cal-vb active" id="calVb_month" onclick="calSetView('month')">ماهانه</button>
+      <button class="cal-vb" id="calVb_week" onclick="calSetView('week')">هفتگی</button>
+      <button class="cal-vb" id="calVb_list" onclick="calSetView('list')">لیست</button>
+      <button class="cal-new-btn" onclick="openEvModal()">➕ رویداد جدید</button>
+    </div>
+  </div>
+  <div class="cal-type-bar">
+    <span style="font-size:11px;color:var(--text-muted);font-weight:600">نمایش:</span>
+    <button class="cal-tf-btn active" id="calTf_" onclick="calSetTypeFilter('')">همه</button>
+    <button class="cal-tf-btn" id="calTf_event" onclick="calSetTypeFilter('event')">🗓 رویداد</button>
+    <button class="cal-tf-btn" id="calTf_followup" onclick="calSetTypeFilter('followup')">📅 پیگیری</button>
+    <button class="cal-tf-btn" id="calTf_week" onclick="calSetTypeFilter('week')">📋 برنامه هفته</button>
+  </div>
+  <div id="calBody"></div>
+</div>
+
+<!-- CHECKLIST PANEL -->
+<div id="ckPanel" class="ck-panel" style="display:none">
+  <div class="ck-toolbar">
+    <div style="display:flex;gap:6px;align-items:center">
+      <button class="ck-nav-btn" onclick="ckNav(-1)">◀</button>
+      <span id="ckDate"></span>
+      <button class="ck-nav-btn" onclick="ckNav(1)">▶</button>
+      <button class="ck-nav-btn" onclick="ckToday()">امروز</button>
+    </div>
+    <div class="ck-score">امتیاز: <span id="ckSc">۰</span> / 27</div>
+  </div>
+  <div class="ck-list" id="ckList"></div>
+</div>
+
+<!-- ACTIVITY PANEL -->
+<div id="actPanel" style="display:none"></div>
+
+<!-- CHANGELOG PANEL -->
+<div id="tasksPanel" style="display:none;max-width:1200px;margin:0 auto">
+  <div id="vue-tasks"></div>
+  <div id="tasksVanillaWrap"></div>
+</div>
+<div id="workflowsPanel" style="display:none;max-width:1400px;margin:0 auto;padding:0 12px"></div>
+<div id="lettersPanel" style="display:none;height:calc(100vh - 60px)"><div id="vue-letters" style="height:100%"></div></div>
+<div id="changelogPanel" style="display:none;padding:14px 16px;max-width:1200px;margin:0 auto"></div>
+
+<!-- MANAGER KPI PANEL -->
+<div id="kpiPanel" style="display:none;padding:16px;max-width:1100px;margin:0 auto"></div>
+<div id="managerPanel" style="display:none"></div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- Show province filters when province is open -->
+
+<!-- ══ RECEIVABLES PANEL ══ -->
+<div id="mtrPanel" style="display:none">
+
+
+<div class="hdr">
+  <div><div class="hdr-t">💰 مطالبات</div><div style="font-size:10px;color:var(--text-muted);margin-top:2px">مدیریت فاکتورهای باز و پیگیری</div></div>
+  <div class="hdr-mid">
+    <label>امروز:</label>
+    <button class="date-btn" id="mtr-todayBtn" onclick="pickDate(TODAY_STR,function(v){if(v){setToday(v);if(DATA.length)rebuildAndRender();}})">—</button>
+  </div>
+  <div class="hdr-btns" style="display:flex;gap:5px;flex-shrink:0">
+    <button class="hbtn hbtn-dark" onclick="document.getElementById('mtr-fi').click()" title="آپلود فایل">📂</button>
+    <button class="hbtn hbtn-dark" onclick="printView()" title="پرینت" id="mtr-printBtn" style="display:none">🖨️</button>
+  </div>
+</div>
+
+<input type="file" id="mtr-fi" accept=".txt,.tsv,.xlsx,.xls,.csv" style="display:none" onchange="handleFI(this)">
+
+<input type="file" id="mtr-compFI" accept=".txt,.tsv,.xlsx,.xls,.csv" style="display:none" onchange="handleCompFI(this)">
+
+<div class="print-hdr">
+  <h2>گزارش مطالبات — آتنا زیست درمان</h2>
+  <div id="mtr-printMeta" style="font-size:12px;color:#666;margin-top:5px"></div>
+</div>
+
+<div class="tabs" id="mtr-tabsBar" style="display:none">
+  <button class="tbtn on" id="mtr-t-priority" onclick="mtrSwitchTab('priority')">🔴 اولویت</button>
+  <button class="tbtn" id="mtr-t-aging" onclick="mtrSwitchTab('aging')">📊 سن</button>
+  <button class="tbtn" id="mtr-t-byrep" onclick="mtrSwitchTab('byrep')">👤 کارشناس</button>
+  <button class="tbtn" id="mtr-t-forecast" onclick="mtrSwitchTab('forecast')">📅 برآورد</button>
+  <button class="tbtn" id="mtr-t-compare" onclick="mtrSwitchTab('compare')">🔄 مقایسه</button>
+  <button class="tbtn" id="mtr-t-ai" onclick="mtrSwitchTab('ai')">🤖 AI</button>
+</div>
+<div class="mtr-search-bar" id="mtr-searchBar"><div class="mtr-search-wrap"><span class="mtr-search-icon">🔍</span><input class="mtr-search-inp" id="mtr-searchInp" placeholder="جستجو در مشتری، شماره فاکتور، کارشناس..." oninput="MTR_SEARCH=this.value;var cl=document.getElementById('mtr-searchClear');if(cl)cl.style.display=this.value?'block':'none';render()"><span class="mtr-search-clear" id="mtr-searchClear" onclick="MTR_SEARCH='';document.getElementById('mtr-searchInp').value='';this.style.display='none';render()">✕</span></div></div>
+<div class="reminder" id="mtr-remBar" style="display:none"></div>
+<div class="wrap" id="mtr-main">
+  <div class="upzone" onclick="document.getElementById('mtr-fi').click()">
+    <div style="font-size:42px;margin-bottom:9px">📊</div>
+    <div style="font-size:15px;font-weight:700;color:var(--text-primary);margin-bottom:6px">فایل مطالبات آپلود کنید</div>
+    <div style="font-size:11px;color:var(--text-muted);line-height:1.9">xlsx یا txt خروجی فرادیس · مبالغ به ریال · تاریخ جلالی</div>
+  </div>
+</div>
+<div class="toast" id="mtr-toast" style="opacity:0"></div>
+
+</div>
+
+<!-- QUICK SEARCH OVERLAY -->
+<div id="qsOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;align-items:flex-start;justify-content:center;padding-top:80px" onclick="if(event.target===this)closeQS()">
+  <div style="background:var(--card);border-radius:12px;width:min(560px,95vw);max-height:70vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+    <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center">
+      <span style="font-size:16px">🔍</span>
+      <input id="qsInput" type="text" dir="rtl" placeholder="جستجو در مراکز، یادداشت‌ها، برنامه هفته..." style="flex:1;border:none;outline:none;font-size:14px;background:transparent;color:var(--text-primary);font-family:inherit" oninput="qsSearch(this.value)">
+      <kbd onclick="closeQS()" style="font-size:10px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);cursor:pointer">Esc</kbd>
+    </div>
+    <div id="qsResults" style="overflow-y:auto;padding:8px;max-height:55vh"><div style="text-align:center;padding:20px;color:var(--text-muted);font-size:12px">برای جستجو تایپ کنید (Ctrl+K برای باز کردن)</div></div>
+  </div>
+</div>
+
+<!-- LOGIN OVERLAY -->
+<div id="loginOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(4px);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:var(--card,#fff);border-radius:16px;padding:32px;min-width:320px;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center;border:1px solid var(--border)">
+    <div style="font-size:40px;margin-bottom:12px">🏥</div>
+    <h2 style="margin-bottom:4px;font-size:18px;color:var(--text-primary)">پورتال فروش آتنا</h2>
+    <p style="color:var(--text-muted,#64748b);font-size:12px;margin-bottom:20px">زیست درمان</p>
+    <input id="loginUser" type="text" placeholder="نام کاربری" dir="ltr" style="width:100%;padding:10px;border:1.5px solid var(--border-input,#cbd5e1);border-radius:8px;margin-bottom:10px;font-size:13px;font-family:inherit;background:var(--bg-input,#f8fafc);color:var(--text-primary,#0f172a);box-sizing:border-box">
+    <input id="loginPass" type="password" placeholder="رمز عبور" dir="ltr" style="width:100%;padding:10px;border:1.5px solid var(--border-input,#cbd5e1);border-radius:8px;margin-bottom:16px;font-size:13px;font-family:inherit;background:var(--bg-input,#f8fafc);color:var(--text-primary,#0f172a);box-sizing:border-box" onkeydown="if(event.key==='Enter')doLogin()">
+    <button onclick="doLogin()" style="width:100%;padding:11px;background:#0ea5e9;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">ورود</button>
+    <div id="loginErr" style="color:#dc2626;font-size:12px;margin-top:10px;display:none"></div>
+  </div>
+</div>
+
+<!-- ══════════ PRICING PANEL ══════════ -->
+<div id="pricingPanel" style="display:none">
+
+<!-- Sub-tabs -->
+<div class="pl-tabs" id="pl-tabs">
+  <button class="pl-tbtn on" id="pl-t-rep" onclick="plSwitchTab('rep')">📋 نماینده</button>
+  <button class="pl-tbtn" id="pl-t-expert" onclick="plSwitchTab('expert')">🔍 کارشناس فروش</button>
+  <button class="pl-tbtn" id="pl-t-mgmt" onclick="plSwitchTab('mgmt')">⚙️ مدیریت</button>
+</div>
+
+<!-- ── REP TAB ── -->
+<div id="pl-rep">
+  <div class="pl-ctrl">
+    <div class="pl-cg"><span class="pl-cl">نوع تسویه:</span>
+      <div class="pl-btn-row" id="pl-pay-btns">
+        <button class="on" onclick="plSetPay('d30')">۳۰ روزه</button>
+        <button onclick="plSetPay('d60')">۶۰ روزه</button>
+        <button onclick="plSetPay('cash')">نقدی</button>
+      </div>
+    </div>
+    <div class="pl-cg"><span class="pl-cl">نمایش:</span>
+      <div class="pl-btn-row" id="pl-view-btns">
+        <button onclick="plSetView('unit')">واحد</button>
+        <button class="on" onclick="plSetView('both')">هر دو</button>
+        <button onclick="plSetView('total')">کل</button>
+      </div>
+    </div>
+    <button onclick="plClearAll()" style="padding:5px 12px;border-radius:7px;cursor:pointer;font-size:11px;font-weight:700;font-family:inherit;border:2px solid #fcd34d;background:#fef9c3;color:#854d0e">🗑 پاک</button>
+    <span style="font-size:11px;color:var(--text-muted);margin-right:auto" id="pl-upd-date"></span>
+  </div>
+  <div class="pl-content">
+    <div class="pl-card">
+      <div class="pl-card-head">
+        <span>لیست قیمت ویژه نمایندگان</span>
+        <span class="pl-chip" id="pl-rep-chip">تعداد سفارش را وارد کنید</span>
+      </div>
+      <div class="pl-tbl-wrap">
+        <table class="pl-tbl">
+          <thead><tr>
+            <th class="tc" style="width:32px">#</th>
+            <th>نام محصول</th>
+            <th class="tc" style="width:72px">تعداد</th>
+            <th style="width:110px">بازه قیمتی</th>
+            <th id="pl-th-unit" style="width:145px">قیمت واحد (ریال)</th>
+            <th id="pl-th-total" style="width:150px">قیمت کل (ریال)</th>
+            <th class="tc" style="width:65px">تخفیف</th>
+          </tr></thead>
+          <tbody id="pl-rep-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="pl-summary" id="pl-rep-summary">
+      <div class="pl-sum-item"><div class="pl-sum-lbl">اقلام سفارش</div><div class="pl-sum-val" id="pl-s-items">۰</div><div class="pl-sum-sub">نوع کالا</div></div>
+      <div class="pl-sum-item"><div class="pl-sum-lbl">مجموع تعداد</div><div class="pl-sum-val" id="pl-s-qty">۰</div><div class="pl-sum-sub">عدد</div></div>
+      <div class="pl-sum-item"><div class="pl-sum-lbl">جمع کل سفارش</div><div class="pl-sum-val" id="pl-s-total" style="font-size:14px">—</div><div class="pl-sum-sub">ریال</div></div>
+      <div class="pl-sum-item"><div class="pl-sum-lbl">نوع تسویه</div><div class="pl-sum-val" id="pl-s-pay" style="font-size:14px">۳۰ روزه</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── EXPERT TAB ── -->
+<div id="pl-expert" style="display:none">
+  <div class="pl-content">
+    <div class="pl-csel">
+      <div class="pl-sel-grp">
+        <span class="pl-sel-lbl">نوع مرکز:</span>
+        <select class="pl-sel" id="pl-center-sel" onchange="plRenderExpert()"></select>
+      </div>
+      <div class="pl-sel-grp">
+        <span class="pl-sel-lbl">پورسانت می‌دهید؟</span>
+        <div class="pl-toggle-row">
+          <label class="pl-toggle">
+            <input type="checkbox" id="pl-comm-toggle" onchange="plRenderExpert()">
+            <span class="pl-toggle-sl"></span>
+          </label>
+          <span id="pl-comm-toggle-lbl" style="font-size:12px;color:var(--text-muted)">خیر</span>
+        </div>
+      </div>
+      <div class="pl-sel-grp" id="pl-comm-type-grp" style="display:none">
+        <span class="pl-sel-lbl">نوع پورسانت:</span>
+        <select class="pl-sel" id="pl-comm-type-sel" onchange="plRenderExpert()"></select>
+      </div>
+      <div class="pl-sel-grp">
+        <span class="pl-sel-lbl">جستجوی مرکز:</span>
+        <input type="text" class="pl-text-inp" id="pl-center-name" placeholder="نام مرکز یا بیمارستان...">
+      </div>
+    </div>
+    <div class="pl-card">
+      <div class="pl-card-head">
+        <span id="pl-expert-title">قیمت‌های پیشنهادی</span>
+        <span class="pl-chip" id="pl-expert-chip">بیمارستان</span>
+      </div>
+      <div class="pl-tbl-wrap">
+        <table class="pl-tbl">
+          <thead><tr>
+            <th class="tc" style="width:32px">#</th>
+            <th>نام محصول</th>
+            <th class="tc" style="width:72px">تعداد</th>
+            <th style="width:140px">قیمت مرکز (ریال)</th>
+            <th id="pl-th-comm" style="width:130px">پورسانت (ریال)</th>
+            <th id="pl-th-margin" style="width:110px">حاشیه شرکت</th>
+            <th style="width:145px">جمع کل (ریال)</th>
+          </tr></thead>
+          <tbody id="pl-expert-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="pl-summary">
+      <div class="pl-sum-item"><div class="pl-sum-lbl">جمع فروش</div><div class="pl-sum-val" id="pl-e-sell">—</div><div class="pl-sum-sub">ریال</div></div>
+      <div class="pl-sum-item"><div class="pl-sum-lbl">جمع پورسانت</div><div class="pl-sum-val" id="pl-e-comm">—</div><div class="pl-sum-sub">ریال</div></div>
+      <div class="pl-sum-item" id="pl-e-margin-wrap"><div class="pl-sum-lbl">سود خالص شرکت</div><div class="pl-sum-val" id="pl-e-margin">—</div><div class="pl-sum-sub">ریال</div></div>
+      <div class="pl-sum-item" id="pl-e-pct-wrap"><div class="pl-sum-lbl">میانگین مارژین</div><div class="pl-sum-val" id="pl-e-pct">—</div><div class="pl-sum-sub">درصد</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── MGMT TAB ── -->
+<div id="pl-mgmt" style="display:none">
+
+  <!-- Lock screen -->
+  <div id="pl-mgmt-lock">
+    <div class="pl-content">
+      <div class="pl-card" style="padding:0">
+        <div class="pl-lock">
+          <div class="pl-lock-icon">🔐</div>
+          <div class="pl-lock-title">دسترسی محدود</div>
+          <div class="pl-lock-sub">این بخش نیاز به رمز عبور دارد</div>
+          <div class="pl-pw-row">
+            <input type="password" class="pl-pw-inp" id="pl-pw-inp" placeholder="رمز عبور" maxlength="12"
+              onkeydown="if(event.key==='Enter')plCheckPw()">
+            <button onclick="plCheckPw()" style="padding:9px 18px;border-radius:8px;border:none;background:var(--brand);color:#fff;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer">ورود</button>
+          </div>
+          <div class="pl-pw-err" id="pl-pw-err">رمز عبور اشتباه است</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Management panel (unlocked) -->
+  <div id="pl-mgmt-panel" style="display:none">
+  <div class="pl-content" style="padding-top:8px">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+      <button onclick="plLockMgmt()" style="padding:5px 14px;border-radius:7px;border:2px solid #fca5a5;background:#fee2e2;color:#dc2626;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer">🔒 قفل</button>
+    </div>
+    <div style="display:flex;gap:6px;border-bottom:2px solid var(--border);margin-bottom:16px;overflow-x:auto">
+      <button class="pl-tbtn on" id="pl-mt-overview" onclick="plSwitchMtab('overview')" style="border-bottom-width:3px">📊 بررسی قیمت‌ها</button>
+      <button class="pl-tbtn" id="pl-mt-update" onclick="plSwitchMtab('update')" style="border-bottom-width:3px">🔄 بروزرسانی</button>
+      <button class="pl-tbtn" id="pl-mt-comm" onclick="plSwitchMtab('comm')" style="border-bottom-width:3px">💰 پورسانت‌ها</button>
+      <button class="pl-tbtn" id="pl-mt-sett" onclick="plSwitchMtab('sett')" style="border-bottom-width:3px">⚙️ تنظیمات</button>
+    </div>
+
+    <!-- Overview -->
+    <div id="pl-m-overview">
+      <div class="pl-card">
+        <div class="pl-card-head"><span>جدول قیمت‌ها و مارژین</span></div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;padding:0 2px">کلیک روی هر قیمت برای ویرایش مستقیم</div>
+        <div class="pl-tbl-wrap">
+          <table class="pl-tbl">
+            <thead><tr>
+              <th style="width:28px">#</th>
+              <th>محصول</th>
+              <th class="tc">خرید</th>
+              <th class="tc">بیمارستان</th>
+              <th class="tc" style="width:52px">مارژین</th>
+              <th class="tc">همکار</th>
+              <th class="tc">پزشک</th>
+              <th class="tc">بیمار</th>
+            </tr></thead>
+            <tbody id="pl-overview-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Update -->
+    <div id="pl-m-update" style="display:none">
+      <div class="pl-method-cards">
+        <div class="pl-method-card sel" id="pl-mc-rate" onclick="plSelMethod('rate')">
+          <div class="pl-mc-icon">💱</div>
+          <div class="pl-mc-title">تغییر نرخ ارز</div>
+          <div class="pl-mc-desc">درصد تغییر نرخ ارز را وارد کنید. قیمت خرید و فروش همه محصولات متناسب تغییر می‌کند.</div>
+        </div>
+        <div class="pl-method-card" id="pl-mc-buy" onclick="plSelMethod('buy')">
+          <div class="pl-mc-icon">🏷</div>
+          <div class="pl-mc-title">قیمت خرید جدید</div>
+          <div class="pl-mc-desc">قیمت خرید جدید هر محصول را وارد کنید. سیستم قیمت فروش پیشنهادی را محاسبه می‌کند.</div>
+        </div>
+        <div class="pl-method-card" id="pl-mc-pct" onclick="plSelMethod('pct')">
+          <div class="pl-mc-icon">📈</div>
+          <div class="pl-mc-title">درصد افزایش قیمت فروش</div>
+          <div class="pl-mc-desc">درصد افزایش یکنواخت روی همه قیمت‌های فروش اعمال می‌شود.</div>
+        </div>
+      </div>
+      <div id="pl-method-rate" class="pl-upd-area">
+        <div class="pl-ui-title">📌 تغییر نرخ ارز</div>
+        <div class="pl-info-box" style="margin-bottom:12px">با وارد کردن درصد تغییر نرخ ارز، قیمت خرید همه محصولات به نسبت تغییر می‌کند و قیمت‌های فروش متناسباً پیشنهاد می‌شود.<br><b>مثال:</b> نرخ ۱۵٪ افزایش داشته → عدد ۱۵ وارد کنید</div>
+        <div class="pl-inp-grid">
+          <div class="pl-inp-row"><span class="pl-inp-lbl">درصد تغییر نرخ ارز (%)</span><input type="number" class="pl-num-inp" id="pl-rate-pct" placeholder="مثال: 15" step="0.1"></div>
+        </div>
+        <div style="margin-top:12px"><button onclick="plPreviewUpdate('rate')" style="padding:6px 14px;border-radius:7px;cursor:pointer;font-size:12px;font-weight:700;font-family:inherit;border:none;background:var(--brand);color:#fff">🔍 پیش‌نمایش</button></div>
+      </div>
+      <div id="pl-method-buy" class="pl-upd-area" style="display:none">
+        <div class="pl-ui-title">🏷 قیمت خرید جدید</div>
+        <div class="pl-info-box" style="margin-bottom:12px">قیمت خرید جدید هر محصول را وارد کنید. فیلدهای خالی تغییر نمی‌کنند.</div>
+        <div id="pl-buy-grid" class="pl-inp-grid"></div>
+        <div style="margin-top:12px"><button onclick="plPreviewUpdate('buy')" style="padding:6px 14px;border-radius:7px;cursor:pointer;font-size:12px;font-weight:700;font-family:inherit;border:none;background:var(--brand);color:#fff">🔍 پیش‌نمایش</button></div>
+      </div>
+      <div id="pl-method-pct" class="pl-upd-area" style="display:none">
+        <div class="pl-ui-title">📈 درصد افزایش قیمت فروش</div>
+        <div class="pl-info-box" style="margin-bottom:12px">درصد افزایش روی همه قیمت‌های فروش اعمال می‌شود. قیمت خرید تغییر نمی‌کند.</div>
+        <div class="pl-inp-grid">
+          <div class="pl-inp-row"><span class="pl-inp-lbl">درصد افزایش قیمت فروش (%)</span><input type="number" class="pl-num-inp" id="pl-sell-pct" placeholder="مثال: 10" step="0.1"></div>
+        </div>
+        <div style="margin-top:12px"><button onclick="plPreviewUpdate('pct')" style="padding:6px 14px;border-radius:7px;cursor:pointer;font-size:12px;font-weight:700;font-family:inherit;border:none;background:var(--brand);color:#fff">🔍 پیش‌نمایش</button></div>
+      </div>
+      <div id="pl-preview-section" class="pl-card" style="display:none;margin-top:12px">
+        <div class="pl-card-head">
+          <span>پیش‌نمایش قیمت‌های جدید</span>
+          <div style="display:flex;gap:7px">
+            <button onclick="plApplyUpdate()" style="padding:5px 12px;border-radius:6px;border:none;background:#16a34a;color:#fff;font-family:inherit;font-size:11px;font-weight:700;cursor:pointer">✅ اعمال</button>
+            <button onclick="plCancelPreview()" style="padding:5px 12px;border-radius:6px;border:2px solid #fca5a5;background:#fee2e2;color:#dc2626;font-family:inherit;font-size:11px;font-weight:700;cursor:pointer">❌ انصراف</button>
+          </div>
+        </div>
+        <div class="pl-tbl-wrap">
+          <table class="pl-tbl">
+            <thead><tr>
+              <th>#</th><th>محصول</th>
+              <th class="tc">قیمت خرید فعلی</th><th class="tc">قیمت خرید جدید</th>
+              <th class="tc">فرادیس فعلی</th><th class="tc">پیشنهاد فرادیس</th>
+              <th class="tc">بیمارستان فعلی</th><th class="tc">پیشنهاد بیمارستان</th>
+              <th class="tc">تغییر%</th>
+            </tr></thead>
+            <tbody id="pl-preview-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Commissions -->
+    <div id="pl-m-comm" style="display:none">
+      <div class="pl-info-box" style="margin-bottom:14px">مقادیر پورسانت به‌ازای هر محصول و سطح ۱/۲/۳ (ریال) — از جدول <code>commission_rules</code> خوانده و ذخیره می‌شود.</div>
+      <div class="pl-comm-grid" id="pl-comm-edit-grid"></div>
+      <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+        <button onclick="plSaveComm()" style="padding:7px 16px;border-radius:7px;border:none;background:#16a34a;color:#fff;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer">💾 ذخیره پورسانت‌ها</button>
+        <button onclick="plResetComm()" style="padding:7px 16px;border-radius:7px;border:2px solid #fca5a5;background:#fee2e2;color:#dc2626;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer">🔄 بازگشت به مقادیر اولیه</button>
+      </div>
+      <div class="pl-status" id="pl-comm-status"></div>
+    </div>
+
+    <!-- Settings -->
+    <div id="pl-m-sett" style="display:none">
+      <div class="pl-info-box" style="margin-bottom:14px">تمام برچسب‌ها، نام‌ها و مرزهای سطوح در اینجا قابل تنظیم هستند.</div>
+      <div class="pl-sett-sec">
+        <div class="pl-sett-title">📊 سطوح تعداد (بازه‌های قیمتی)</div>
+        <div class="pl-sett-desc">نام هر سطح و حداکثر تعداد آن را تنظیم کنید. سطح آخر بدون سقف است.</div>
+        <div class="pl-sett-grid" id="pl-sett-tiers"></div>
+      </div>
+      <div class="pl-sett-sec">
+        <div class="pl-sett-title">💳 نوع تسویه</div>
+        <div class="pl-sett-desc">نام نمایشی هر نوع تسویه را ویرایش کنید.</div>
+        <div class="pl-sett-grid" id="pl-sett-pay"></div>
+      </div>
+      <div class="pl-sett-sec">
+        <div class="pl-sett-title">🏥 مراکز فروش</div>
+        <div class="pl-sett-desc">نام هر نوع مرکز که در تب کارشناس نمایش داده می‌شود.</div>
+        <div class="pl-sett-grid" id="pl-sett-centers"></div>
+      </div>
+      <div class="pl-sett-sec">
+        <div class="pl-sett-title">🏷 برچسب انواع پورسانت</div>
+        <div class="pl-sett-desc">نام هر نوع پورسانت که در منوی کشویی کارشناس نمایش داده می‌شود.</div>
+        <div class="pl-sett-grid" id="pl-sett-commlabels"></div>
+      </div>
+      <div class="pl-sett-sec">
+        <div class="pl-sett-title">📁 نام دسته‌های پورسانت</div>
+        <div class="pl-sett-desc">نام هر دسته محصول برای گروه‌بندی پورسانت‌ها.</div>
+        <div class="pl-sett-grid" id="pl-sett-commnames"></div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+        <button onclick="plSaveSett()" style="padding:7px 16px;border-radius:7px;border:none;background:#16a34a;color:#fff;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer">💾 ذخیره همه تنظیمات</button>
+        <button onclick="plResetSett()" style="padding:7px 16px;border-radius:7px;border:2px solid #fca5a5;background:#fee2e2;color:#dc2626;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer">🔄 بازگشت به پیش‌فرض</button>
+      </div>
+      <div class="pl-status" id="pl-sett-status"></div>
+    </div>
+
+  </div>
+  </div><!-- /pl-mgmt-panel -->
+</div><!-- /pl-mgmt -->
+</div><!-- /pricingPanel -->
+
+<!-- PROFORMA PANEL -->
+<div id="proformaPanel" style="display:none;padding:12px 16px 16px"><div id="vue-proforma" data-user-role="" style="display:none" aria-hidden="true"></div><div id="pfVanillaRoot"></div></div>
+
+<!-- SUPPORT PANEL -->
+<div id="supportPanel" style="display:none;padding:16px">
+  <div id="supportRoot"></div>
+</div>
+
+<!-- HCP PANEL -->
+<div id="hcpPanel" style="display:none;padding:16px;max-width:1200px;margin:0 auto"></div>
+
+<!-- HR PANEL -->
+<div id="hrPanel" style="display:none;padding:16px">
+  <div id="hrRoot"></div>
+</div>
+
+<!-- TRADE KPI PANEL -->
+<div id="tradeKPIPanel" style="display:none;padding:16px">
+  <div id="tradeKPIRoot"></div>
+</div>
+
+<!-- WEEK PLANNER PANEL -->
+<div id="weekPlannerPanel" style="display:none;padding:12px 14px"></div>
+
+<!-- REPORTS PANEL -->
+<div id="reportsPanel" style="display:none;padding:16px">
+  <div id="reportsRoot"></div>
+</div>
+
+<!-- FARADIS MATCH PANEL -->
+<div id="faradisMatchPanel" style="display:none;padding:12px 14px"></div>
+
+<div id="centerContactPopup" class="contact-popup">
+  <div id="ccp-name" class="contact-popup-name"></div>
+  <div id="ccp-body"></div>
+</div>
+<div id="gSearchOverlay" onclick="if(event.target===this)closeGSearch()">
+  <div id="gSearchBox">
+    <input id="gSearchInput" placeholder="جستجو در مراکز، رویدادها... (Ctrl+K)" oninput="gSearchQuery(this.value)" onkeydown="gSearchKey(event)" autocomplete="off" dir="auto">
+    <div id="gSearchResults"><div class="gs-empty">برای جستجو تایپ کنید…</div></div>
+  </div>
+</div>
+</div><!-- /content-area -->
+<nav class="mobile-nav" id="mobileNav">
+  <button class="mob-tab" id="mob_home" onclick="switchTab('home')"><span class="mob-icon">🏠</span>خانه</button>
+  <button class="mob-tab" onclick="switchTab('provinces')"><span class="mob-icon">🗺</span>استان‌ها</button>
+  <button class="mob-tab" onclick="switchTab('weekplan')"><span class="mob-icon">📅</span>هفته</button>
+  <button class="mob-tab" onclick="switchTab('tasks')"><span class="mob-icon">📌</span>وظایف</button>
+  <button class="mob-tab" onclick="switchTab('proforma')"><span class="mob-icon">📄</span>پیش‌فاکتور</button>
+  <button class="mob-tab" onclick="switchTab('support')"><span class="mob-icon">🎧</span>پشتیبانی</button>
+  <button class="mob-tab" onclick="switchTab('calendar')"><span class="mob-icon">🗓</span>تقویم</button>
+  <button class="mob-tab" onclick="switchTab('activity')"><span class="mob-icon">📊</span>فعالیت</button>
+  <button class="mob-tab sb-manager-wrap" id="mob_tab_reports" onclick="switchTab('reports')"><span class="mob-icon">📈</span>گزارش‌ها</button>
+  <button class="mob-tab sb-manager-wrap" onclick="switchTab('kpi')"><span class="mob-icon">🎯</span>KPI</button>
+  <button class="mob-tab" onclick="switchTab('mtr')"><span class="mob-icon">💰</span>مطالبات</button>
+</nav>
+<!-- DATA — core modules; tab-specific scripts load on demand via tab-loader.js -->
+<script src="/js/safe-dom.js?v=20260723x"></script>
+<script src="/js/tab-loader.js?v=20260723x"></script>
+<script src="/js/roles.js?v=20260723x"></script>
+<script src="/js/core.js?v=20260723x"></script>
+<script src="/js/settings.js?v=20260723x"></script>
+<script src="/js/data.js?v=20260723x"></script>
+<script src="/js/ui-core.js?v=20260723x"></script>
+<script src="/js/dashboard.js?v=20260723x"></script>
+<script src="/js/center-interactions.js?v=20260723x"></script>
+<script src="/js/provinces.js?v=20260723x"></script>
+<script src="/js/center-modal.js?v=20260723x"></script>
+<script src="/js/global-search.js?v=20260723x"></script>
+<script src="/js/center-deals.js?v=20260723x"></script>
+<script src="/js/center-files.js?v=20260723x"></script>
+<script src="/js/pricing.js?v=20260723x"></script>
+<script src="/js/weekplan.js?v=20260723x"></script>
+<script src="/js/manager.js?v=20260723x"></script>
+<script src="/js/crm-complete.js?v=20260723x"></script>
+<script src="/js/onboarding.js?v=20260723x"></script>
+<script type="module" src="/dist/assets/main.js?v=20260723x"></script>
+<script>
+(function(){
+  if(!window.__APP_BUILD||sessionStorage.getItem('_build_ok_'+window.__APP_BUILD))return;
+  var match=false;
+  document.querySelectorAll('script[src]').forEach(function(s){
+    if(s.src.indexOf('provinces.js')>=0&&s.src.indexOf(window.__APP_BUILD)>=0)match=true;
+  });
+  if(!match){
+    sessionStorage.setItem('_build_ok_'+window.__APP_BUILD,'1');
+    var base=location.href.split('#')[0].replace(/[?&]_cb=\d+/,'');
+    location.replace(base+(base.indexOf('?')>=0?'&':'?')+'_cb='+Date.now());
+  }else{
+    sessionStorage.setItem('_build_ok_'+window.__APP_BUILD,'1');
+  }
+})();
+</script>
+</body>
+</html>

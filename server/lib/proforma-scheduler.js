@@ -13,7 +13,7 @@ async function runNearExpiryTelegramReminders() {
     `SELECT id, no, center_name, expiry_date,
             COALESCE(NULLIF(sales_owner,''), created_by) AS owner
      FROM proformas
-     WHERE status IN ('sent','negotiating')
+     WHERE status IN ('sent','negotiating','awaiting_customer')
        AND expiry_date IS NOT NULL AND expiry_date != ''
        AND expiry_date >= $1 AND expiry_date <= $2`,
     [today, in3]

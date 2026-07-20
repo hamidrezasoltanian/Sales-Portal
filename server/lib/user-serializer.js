@@ -41,7 +41,9 @@ function serializeUser(row, requester) {
     const out = Object.assign({}, base, {
       department: row.department || '',
       direct_manager: row.direct_manager || '',
+      share_with_manager: !!row.share_with_manager,
       permissions: row.permissions || {},
+      manager_scope: row.manager_scope || null,
     });
     if (row.commission_pct !== undefined && row.commission_pct !== null) {
       out.commission_pct = row.commission_pct;

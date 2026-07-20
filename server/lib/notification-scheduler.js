@@ -173,7 +173,28 @@ async function runWeeklyManagerDigest() {
   }
   if (!lines.length) return 0;
 
-  const msg = '📊 خلاصه هفتگی تیم ' + today + ':\n' + lines.join('\n');
+  let msg = '📊 خلاصه هفتگی تیم ' + today + ':\n' + lines.join('\n');
+
+  // Append server sales KPI scores for current Jalali month
+  try {
+    const salesKpi = require('./sales-kpi');
+    const month = salesKpi.currentJMonth();
+    const kpiLines = [];
+    for (const u of experts) {
+      try {
+        const fin = await salesKpi.getFinalizedRow(u.username, month);
+        const data = fin || await salesKpi.calcKPIs(u.username, month);
+        const overall = fin ? fin.overall : data.overall;
+        kpiLines.push((u.display_name || u.username) + ': ' + overall + '/100');
+      } catch (_) {}
+    }
+    if (kpiLines.length) {
+      msg += '\n\n📈 KPI فروش ' + month + ':\n' + kpiLines.join('\n');
+    }
+  } catch (e) {
+    console.warn('[notif-scheduler] weekly KPI:', e.message);
+  }
+
   let sent = 0;
   for (const m of managers) {
     const result = await emitNotification({

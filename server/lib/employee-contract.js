@@ -6,6 +6,12 @@ function uid(prefix) {
   return prefix + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
 }
 
+function numOr(val, fallback) {
+  if (val === undefined || val === null || val === '') return fallback;
+  const n = parseFloat(val);
+  return isNaN(n) ? fallback : n;
+}
+
 async function getActiveContract(employee) {
   if (!employee) return null;
   const r = await query(
@@ -19,9 +25,31 @@ async function getActiveContract(employee) {
 
 async function upsertEmployeeContract(employee, data, createdBy) {
   if (!employee) throw new Error('کارمند الزامی است');
-  const insurable = parseFloat(data.salary_insurable) || 0;
-  const nonInsurable = parseFloat(data.salary_non_insurable) || 0;
+
+  const prev = await getActiveContract(employee);
+  const uPrev = await query(
+    'SELECT salary_amount, commission_pct FROM app_users WHERE username = $1',
+    [employee]
+  ).catch(function () { return { rows: [] }; });
+  const appPrev = uPrev.rows[0] || {};
+
+  const insurable = numOr(
+    data.salary_insurable,
+    prev ? parseFloat(prev.salary_insurable) || 0 : parseFloat(appPrev.salary_amount) || 0
+  );
+  const nonInsurable = numOr(
+    data.salary_non_insurable,
+    prev ? parseFloat(prev.salary_non_insurable) || 0 : 0
+  );
   const baseSalary = insurable + nonInsurable;
+  const commissionPct = numOr(
+    data.commission_pct,
+    prev ? parseFloat(prev.commission_pct) || 0 : parseFloat(appPrev.commission_pct) || 0
+  );
+  const salesTarget = numOr(
+    data.sales_target,
+    prev ? parseFloat(prev.sales_target) || 0 : 0
+  );
 
   await query('UPDATE employee_contracts SET active = FALSE WHERE employee = $1', [employee]);
 
@@ -34,30 +62,30 @@ async function upsertEmployeeContract(employee, data, createdBy) {
     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
     [
       id, employee, baseSalary, insurable, nonInsurable,
-      parseFloat(data.housing_allowance) || 0,
-      parseFloat(data.grocery_allowance) || 0,
-      parseFloat(data.child_allowance) || 0,
-      parseFloat(data.commission_pct) || 0,
-      parseFloat(data.sales_target) || 0,
-      data.start_date || null,
-      data.end_date || null,
-      data.contract_notes || data.notes || null,
+      numOr(data.housing_allowance, prev ? parseFloat(prev.housing_allowance) || 0 : 0),
+      numOr(data.grocery_allowance, prev ? parseFloat(prev.grocery_allowance) || 0 : 0),
+      numOr(data.child_allowance, prev ? parseFloat(prev.child_allowance) || 0 : 0),
+      commissionPct,
+      salesTarget,
+      data.start_date != null && data.start_date !== ''
+        ? data.start_date
+        : (prev ? prev.start_date : null),
+      data.end_date != null && data.end_date !== ''
+        ? data.end_date
+        : (prev ? prev.end_date : null),
+      data.contract_notes || data.notes || (prev ? prev.notes : null),
       createdBy || null,
     ]
   );
 
-  if (insurable > 0 || nonInsurable > 0) {
-    await query(
-      'UPDATE app_users SET salary_amount = $2 WHERE username = $1',
-      [employee, insurable]
-    ).catch(function () {});
-  }
-  if (data.commission_pct != null && data.commission_pct !== '') {
-    await query(
-      'UPDATE app_users SET commission_pct = $2 WHERE username = $1',
-      [employee, parseFloat(data.commission_pct) || 0]
-    ).catch(function () {});
-  }
+  // Keep app_users in sync — Faradis/reports read commission_pct from here
+  await query(
+    `UPDATE app_users SET
+       commission_pct = $2,
+       salary_amount = CASE WHEN $3 > 0 THEN $3 ELSE salary_amount END
+     WHERE username = $1`,
+    [employee, commissionPct, insurable]
+  ).catch(function () {});
 
   return r.rows[0];
 }

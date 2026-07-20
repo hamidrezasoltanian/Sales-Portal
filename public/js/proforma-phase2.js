@@ -168,7 +168,7 @@ async function pfRejectDiscount(pfId) {
 
 function _pfPhase2Wrap() {
   if (typeof PF_STATUS !== 'undefined' && !PF_STATUS.pending_disc) {
-    PF_STATUS.pending_disc = { label: 'انتظار تأیید تخفیف', cls: 'bo' };
+    PF_STATUS.pending_disc = { label: 'انتظار تأیید تخفیف', short: 'تخفیف', cls: 'bo' };
   }
 
   if (typeof _pfGetFilteredList === 'function' && !_pfGetFilteredList._phase2) {

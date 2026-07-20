@@ -231,13 +231,9 @@ function renderKPIPanel(){
   ensureKPIDB();
   if(!_kpiUser||!USERS[_kpiUser])_kpiUser=USERS[currentUser]?currentUser:Object.keys(USERS)[0];
   if(!_kpiMonth)_kpiMonth=currentJMonth();
-  var _renderBody=function(){
-  var data;
-  try{data=calcKPIs(_kpiUser,_kpiMonth);}catch(err){
-    var el=document.getElementById('kpiPanel');
-    if(el)el.innerHTML='<div style="color:#dc2626;padding:20px;background:#fef2f2;border-radius:8px;margin:20px;font-size:12px"><strong>خطا در محاسبه KPI:</strong><br>'+esc(err.message)+'</div>';
-    console.error('KPI error:',err);return;
-  }
+  var el=document.getElementById('kpiPanel');
+  if(el)el.innerHTML='<div style="padding:24px;text-align:center;color:#64748b;font-size:13px">⏳ در حال محاسبه KPI از سرور…</div>';
+  var _renderBody=function(data){
 
   var _salesMembers=(_DEFAULT_MEMBERS||[]).filter(function(m){return m.role==='کارشناس فروش'&&m.active!==false;});
   if(!_salesMembers.length)_salesMembers=Object.keys(USERS).map(function(u){return{id:u,name:USERS[u]};});
@@ -614,9 +610,39 @@ function renderKPIPanel(){
     }).catch(function() {});
   }
   };
-  if(typeof loadKpiActualsFromApi==='function'){
-    loadKpiActualsFromApi(_kpiUser,_kpiMonth).then(_renderBody);
-  }else{_renderBody();}
+  // Preload server KPIs into cache, then render (display-only client)
+  var preload = [fetchKPIs(_kpiUser, _kpiMonth)];
+  prevJMonths(6).forEach(function (m) {
+    preload.push(fetchKPIs(_kpiUser, m).catch(function () { return null; }));
+  });
+  if (_isManager()) {
+    Object.keys(USERS).forEach(function (u) {
+      if (u === 'guest') return;
+      preload.push(fetchKPIs(u, _kpiMonth).catch(function () { return null; }));
+    });
+  }
+  function _afterLoad() {
+    var data;
+    try {
+      data = calcKPIs(_kpiUser, _kpiMonth);
+    } catch (err) {
+      var el2 = document.getElementById('kpiPanel');
+      if (el2) el2.innerHTML = '<div style="color:#dc2626;padding:20px;background:#fef2f2;border-radius:8px;margin:20px;font-size:12px"><strong>خطا در محاسبه KPI:</strong><br>' + esc(err.message) + '</div>';
+      console.error('KPI error:', err);
+      return;
+    }
+    _renderBody(data);
+  }
+  var start = typeof loadKpiActualsFromApi === 'function'
+    ? loadKpiActualsFromApi(_kpiUser, _kpiMonth)
+    : Promise.resolve();
+  start
+    .then(function () { return Promise.all(preload); })
+    .then(_afterLoad)
+    .catch(function (err) {
+      var el3 = document.getElementById('kpiPanel');
+      if (el3) el3.innerHTML = '<div style="color:#dc2626;padding:20px">خطا: ' + esc((err && err.message) || err) + '</div>';
+    });
 }
 
 function _renderKPIHistory(userId,month){

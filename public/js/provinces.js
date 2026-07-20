@@ -587,6 +587,17 @@ function getAllCentersAcrossAllProvinces() {
   });
 }
 
+// Keep duplicate detection local to the provinces module.  The receivables
+// module has a similarly named helper but is loaded later, so relying on it
+// made adding a center fail before that module was available.
+function _provCenterNameSimilar(a, b) {
+  var left = fNorm(String(a || '')).replace(/\s+/g, '');
+  var right = fNorm(String(b || '')).replace(/\s+/g, '');
+  if (!left || !right || left === right) return left === right;
+  if (Math.min(left.length, right.length) < 5) return false;
+  return left.indexOf(right) !== -1 || right.indexOf(left) !== -1;
+}
+
 function getProvNameFromId(provId) {
   if (provId === 'tehran') return 'تهران';
   var p = (typeof PROVINCES !== 'undefined' ? PROVINCES : []).find(function(x){return x.id === provId;});
@@ -604,7 +615,7 @@ function _doAddCenter(){
 
     var allCents = getAllCentersAcrossAllProvinces();
     var dup = allCents.find(function(c){return fNorm(c.name)===fNorm(name);});
-    var similar = !dup && allCents.find(function(c){return _centerNameSimilar(c.name,name);});
+    var similar = !dup && allCents.find(function(c){return _provCenterNameSimilar(c.name,name);});
 
     if(dup){
       var dpId = dup.province_id || (dup.id && dup.id.indexOf('||') >= 0 ? dup.id.split('||')[0] : 'tehran');
@@ -1385,4 +1396,125 @@ function exportCurrentXlsx(){
   XLSX.utils.book_append_sheet(wb,ws,'مراکز');
   XLSX.writeFile(wb,'centers_'+(_currentProvId||'all')+'_'+todayStr().replace(/\//g,'-')+'.xlsx');
   showToast('✅ Excel دانلود شد ('+data.length+' مرکز)',2500);
+}
+
+// ════════════════════════ ALL CENTERS VIEW ══════════════════
+function setProvView(mode){
+  _provView=mode;
+  ['grid','list','kanban'].forEach(function(m){
+    var b=document.getElementById('viewProvBtn');var bl=document.getElementById('viewAllListBtn');var bk=document.getElementById('viewAllKbBtn');
+    if(b)b.classList.toggle('active',mode==='grid');
+    if(bl)bl.classList.toggle('active',mode==='list');
+    if(bk)bk.classList.toggle('active',mode==='kanban');
+  });
+  if(mode==='grid')renderProvList();
+  else renderAllCenters(mode);
+}
+
+function renderAllCenters(viewMode){
+  var pg=document.getElementById('provGrid');if(pg)pg.style.display='none';
+  var tbl=document.getElementById('mainTable');
+  var kb=document.getElementById('kanbanView');
+  var cv=document.getElementById('cardView');
+  // filter controls
+  ['srch','fPot','fStatus','fLead','fOwner','fType','fTag'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='';});
+  rebuildFilters();
+  // collect all centers
+  var q=(document.getElementById('srch')||{}).value||'';
+  var fp=(document.getElementById('fPot')||{}).value||'';
+  var fs=(document.getElementById('fStatus')||{}).value||'';
+  var fl=(document.getElementById('fLead')||{}).value||'';
+  var fo=(document.getElementById('fOwner')||{}).value||'';
+  var ftp=document.getElementById('fType')?document.getElementById('fType').value:'';
+  var _ftgEl=document.getElementById('fTag');var ftg=_ftgEl&&_ftgEl.value?parseInt(_ftgEl.value):0;
+  var effectiveOwner=fo||_globalOwnerFilter||(_isExpert()?currentUser:'');
+  var allRows=[];
+  _getAllowedProvinces(getAllProvinces()).forEach(function(p){
+    var tp=getProvType(p.id);
+    getProvCenters(p.id).forEach(function(c){
+      var e=getE(tp,c.id);
+      if(q&&!fMatch(q,c.name))return;
+      if(fp&&String(e.potential!==undefined?e.potential:c.potential)!==fp)return;
+      var st=e.status||'بدون تماس';if(fs&&st!==fs)return;
+      var lead=(e.lead||c.lead||'').replace(/[ي]/g,'ی').replace(/[ك]/g,'ک').trim();if(fl&&lead!==fl)return;
+      var owner=e.owner||c.owner||'';if(effectiveOwner&&owner!==effectiveOwner)return;
+      if(ftp){var ctype=e.type||c.type||'';if(ctype.indexOf(ftp)<0)return;}
+      if(ftg){var tgs=rTags(tp,c.id);if(tgs.indexOf(ftg)===-1)return;}
+      allRows.push({r:c,rtype:tp,prov:p.name});
+    });
+  });
+  var _rc=document.getElementById('rowCount');if(_rc)_rc.textContent='نمایش '+allRows.length+' مرکز از همه استان‌ها';
+
+  if(viewMode==='kanban'){
+    if(tbl)tbl.style.display='none';if(cv)cv.style.display='none';
+    if(kb)kb.style.display='';
+    var groups={};STATUS_LIST.forEach(function(s){groups[s]=[];});
+    allRows.forEach(function(item){var st=getE(item.rtype,item.r.id).status||'بدون تماس';(groups[st]=groups[st]||[]).push(item);});
+    kb.innerHTML='<div class="kanban-board">'+STATUS_LIST.map(function(st,idx){
+      var rows=groups[st]||[];
+      return'<div class="kanban-col"><div class="kanban-col-head '+H_CLS[idx]+'">'+st+' <span class="kanban-cnt">'+rows.length+'</span></div>'
+        +'<div class="kanban-col-body">'+rows.map(function(item){
+          var e=getE(item.rtype,item.r.id);var fd=e.followupDate||'';
+          return'<div class="kanban-card" data-rt="'+item.rtype+'" data-rid="'+item.r.id+'" onclick="openCenterModal(this.dataset.rt,this.dataset.rid)">'
+            +'<div class="kanban-card-name">'+esc(item.r.name)+'</div>'
+            +'<div class="kanban-card-meta">'
+            +'<span style="font-size:9px;color:#94a3b8">'+esc(item.prov)+'</span>'
+            +'<span class="pot-badge pot-'+(e.potential||item.r.potential)+'">'+(e.potential||item.r.potential)+'</span>'
+            +(fd?'<span class="kc-date">'+fd+'</span>':'')
+            +'</div></div>';
+        }).join('')+'</div></div>';
+    }).join('')+'</div>';
+    return;
+  }
+  // list view
+  if(kb)kb.style.display='none';if(cv)cv.style.display='none';
+  if(tbl)tbl.style.display='';
+  var today=todayStr();
+  var head=document.getElementById('tableHead');
+  var body=document.getElementById('tableBody');
+  head.innerHTML='<tr><th>#</th><th>مرکز</th><th>استان</th><th>پتانسیل</th><th>نوع</th><th>سرنخ</th><th>مسئول</th><th>وضعیت</th><th>پیگیری</th><th>یادداشت</th></tr>';
+  // DOM-based row building (no string escaping issues)
+  body.innerHTML='';
+  if(!allRows.length){
+    var emptyR=document.createElement('tr');emptyR.innerHTML='<td colspan="10" style="text-align:center;padding:40px;color:#94a3b8">نتیجه‌ای یافت نشد</td>';
+    body.appendChild(emptyR);
+  }else{allRows.forEach(function(item,idx){
+    var r=item.r;var rtype=item.rtype;var e=getE(rtype,r.id);
+    var st=e.status||'بدون تماس';var sc=stCls(st);
+    var lead=e.lead||r.lead||'سرنخ';var lc=lCls(lead);
+    var pot=e.potential!==undefined?e.potential:r.potential;
+    var fd=e.followupDate||'';var today2=todayStr();
+    var fdCls='fd-inp'+(fd&&fd<today2?' ov':fd&&fd===today2?' today':'');
+    var notes=DB.notes[recK(rtype,r.id)]||[];
+    var ov=isOverdue(rtype,r.id);var stall=isStalled(rtype,r.id);
+    var tr=document.createElement('tr');
+    tr.setAttribute('data-rowid',r.id);
+    if(stall)tr.style.background='#fef2f2';else if(ov)tr.style.background='#fffbeb';
+    // cells
+    var cells=[
+      '<td>'+(idx+1)+'</td>',
+      '<td>'+(stall?'<span class="risk-badge">🔴</span>':ov?'<span class="risk-badge">🟠</span>':'')
+        +'<button class="ctr-link">'+esc(r.name)+'</button>'+renderTagCell(rtype,r.id)+'</td>',
+      '<td style="font-size:10px;color:var(--text-muted)">'+esc(item.prov)+'</td>',
+      '<td><span class="pot-badge pot-'+pot+'">'+pot+'</span></td>',
+      '<td><span style="font-size:11px">'+esc(e.type||r.type||'')+'</span></td>',
+      '<td><span class="'+lc+'" style="padding:2px 6px;border-radius:4px;font-size:11px">'+lead+'</span></td>',
+      '<td style="font-size:11px">'+esc(USERS[e.owner||r.owner||'']||e.owner||r.owner||'—')+'</td>',
+      '<td><select class="st-sel '+sc+'">'+STATUS_LIST.map(function(s,i){return'<option class="'+STATUS_CLS[i]+'"'+(s===st?' selected':'')+'>'+s+'</option>';}).join('')+'</select></td>',
+      '<td><input type="text" class="'+fdCls+'" value="'+fd+'" readonly style="cursor:pointer;width:98px"></td>',
+      '<td><button class="note-btn'+(notes.length?' has':'')+'">📝'+(notes.length?' '+notes.length:'')+'</button></td>'
+    ];
+    tr.innerHTML=cells.join('');
+    // event listeners via DOM
+    var nameBtn=tr.querySelector('.ctr-link');
+    if(nameBtn)(function(rt,rid){nameBtn.addEventListener('click',function(){openCenterModal(rt,rid);});})(rtype,r.id);
+    var stSel=tr.querySelector('.st-sel');
+    if(stSel)(function(rt,rid){stSel.addEventListener('change',function(){onStatus(rt,rid,stSel);});})(rtype,r.id);
+    var fdInp=tr.querySelector('.fd-inp');
+    if(fdInp)(function(rt,rid,inp){inp.addEventListener('click',function(){openJDP(inp,function(v){setE(rt,rid,'followupDate',v);inp.value=v;renderBanner();});});})(rtype,r.id,fdInp);
+    var noteBtn=tr.querySelector('.note-btn');
+    if(noteBtn)(function(rt,rid,nm){noteBtn.addEventListener('click',function(){openNotes(rt,rid,nm);});})(rtype,r.id,r.name);
+    body.appendChild(tr);
+  });}
+  //empty marker'<tr><td colspan="10" style="text-align:center;padding:40px;color:#94a3b8">نتیجه‌ای یافت نشد</td></tr>';
 }

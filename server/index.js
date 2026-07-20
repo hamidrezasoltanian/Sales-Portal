@@ -138,6 +138,7 @@ app.use('/api/migrate', require('./routes/migrate'));
 app.use('/api/support', require('./routes/support'));
 app.use('/api/hr', require('./routes/hr'));
 app.use('/api/trade-kpi', require('./routes/trade-kpi'));
+app.use('/api/trade-files', require('./routes/trade-files'));
 app.use('/api/trade-templates', require('./routes/trade-templates'));
 app.use('/api/trade-cases', require('./routes/trade-cases'));
 app.use('/api/trade-reports', require('./routes/trade-reports'));
@@ -214,7 +215,12 @@ app.get('/wms', function (req, res) {
 const publicDir = path.join(__dirname, '..', 'public');
 if (fs.existsSync(publicDir)) {
   app.use(function(req, res, next) {
-    if (/\.(js|css|html)$/.test(req.path) || req.path === '/') res.setHeader('Cache-Control', 'no-cache');
+    if (req.path === '/' || req.path === '/index.html' || /\.html$/i.test(req.path)) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+    } else if (/\.(js|css)$/.test(req.path)) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
     next();
   });
   app.use(express.static(publicDir));
@@ -223,6 +229,15 @@ if (fs.existsSync(publicDir)) {
 app.get('*', function (req, res) {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ error: 'مسیر API یافت نشد' });
+  }
+  // Never SPA-fallback asset URLs — otherwise missing JS/CSS returns index.html
+  // and callers that do response.json() throw: Unexpected token '<' ... <!DOCTYPE
+  if (/\.(js|mjs|cjs|css|map|json|ico|png|jpe?g|gif|webp|svg|woff2?|ttf|eot|txt)$/i.test(req.path)) {
+    return res.status(404).type('text/plain').send('Not found');
+  }
+  const accept = String(req.headers.accept || '');
+  if (accept.indexOf('application/json') !== -1 && accept.indexOf('text/html') === -1) {
+    return res.status(404).json({ error: 'یافت نشد' });
   }
   const indexPath = path.join(publicDir, 'index.html');
   if (fs.existsSync(indexPath)) {
@@ -300,6 +315,11 @@ require('./lib/proforma-scheduler').startProformaScheduler();
       require('./lib/notification-scheduler').startNotificationScheduler();
     } catch (e) {
       console.warn('[notif-scheduler] not started:', e.message);
+    }
+    try {
+      require('./lib/sales-kpi-scheduler').startSalesKpiScheduler();
+    } catch (e) {
+      console.warn('[sales-kpi-scheduler] not started:', e.message);
     }
     if (process.env.TELEGRAM_BOT_TOKEN) {
       const bot = require('./bot/telegram');

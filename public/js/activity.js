@@ -42,7 +42,7 @@ function filterDailyMonitor(){
     seenKeys.add(key);
     var e = getE(rtype,rid);
     var owner = _wpGetOwner(we);
-    var name = we.centerName||getRecLabel(rtype+'_'+rid)||'?';
+    var name = (typeof resolveWeekEntryDisplayName==='function'?resolveWeekEntryDisplayName(we):(we.centerName||getRecLabel(rtype+'_'+rid)||'?'));
     var acts = _getTodayActivities(rtype,rid,today);
     var isDone = we.done||acts.length>0;
     todayEntries.push({key:k,rtype:rtype,rid:rid,name:name,owner:owner,actType:we.actionType||'call',status:e.status||'بدون تماس',activities:acts,done:isDone});
@@ -125,7 +125,7 @@ function filterDailyMonitor(){
     var acts = _getActivitiesOnDate(we.rtype||'center', we.rid||'', we.scheduledDate);
     if(acts.length > 0) return;
     if(!overdueByOwner[owner]) overdueByOwner[owner] = [];
-    overdueByOwner[owner].push({name: we.centerName||getRecLabel((we.rtype||'center')+'_'+(we.rid||'')), date: we.scheduledDate});
+    overdueByOwner[owner].push({name: (typeof resolveWeekEntryDisplayName==='function'?resolveWeekEntryDisplayName(we):(we.centerName||getRecLabel((we.rtype||'center')+'_'+(we.rid||'')))), date: we.scheduledDate});
   });
 
   var allMem = (DB.settings && DB.settings.members) || _DEFAULT_MEMBERS;
@@ -233,7 +233,7 @@ function sendReminderToAll(){
     var acts=_getTodayActivities(rtype,rid,today);
     if(acts.length>0)return;
     if(!experts[owner])experts[owner]=[];
-    experts[owner].push(we.centerName||getRecLabel(rtype+'_'+rid)||'?');
+    experts[owner].push((typeof resolveWeekEntryDisplayName==='function'?resolveWeekEntryDisplayName(we):(we.centerName||getRecLabel(rtype+'_'+rid)||'?')));
   });
   var cnt=0;
   Object.keys(experts).forEach(function(exp){
@@ -285,7 +285,7 @@ function sendReminderToExpert(expertUser){
     }
     if(owner!==expertUser)return;
     var acts=_getTodayActivities(rtype,rid,today);
-    if(acts.length===0)noActEntries.push(we.centerName||getRecLabel(rtype+'_'+rid)||'?');
+    if(acts.length===0)noActEntries.push((typeof resolveWeekEntryDisplayName==='function'?resolveWeekEntryDisplayName(we):(we.centerName||getRecLabel(rtype+'_'+rid)||'?')));
   });
   if(!noActEntries.length){showToast('✅ این کارشناس برای همه مراکز گزارش داده است');return;}
   var msg='لطفاً برای مراکز زیر که امروز برنامه دارید گزارش وارد کنید: '+noActEntries.slice(0,5).join('، ')+(noActEntries.length>5?' و '+(noActEntries.length-5)+' مرکز دیگر':'');

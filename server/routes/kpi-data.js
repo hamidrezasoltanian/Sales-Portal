@@ -5,6 +5,7 @@ const { query } = require('../db');
 const { requireAuth, requireManager } = require('../auth');
 const { isManagerRole } = require('../lib/roles');
 const { p2 } = require('../lib/jalali-mini');
+const salesKpi = require('../lib/sales-kpi');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -20,6 +21,167 @@ function jMonthBounds(month) {
     end: jy + '/' + p2(jm) + '/' + p2(lastDay),
   };
 }
+
+function resolveUsername(req) {
+  if (isManagerRole(req.user.role)) {
+    return req.query.user || req.query.username || req.body?.userId || req.body?.username || req.user.username;
+  }
+  return req.user.username;
+}
+
+// GET /api/kpi-data/calc?user=&month= — live server calc (display SoT)
+router.get('/calc', async function (req, res) {
+  try {
+    const month = req.query.month || salesKpi.currentJMonth();
+    const username = resolveUsername(req);
+    const data = await salesKpi.calcKPIs(username, month);
+    // Prefer finalized row for past months if present
+    const fin = await salesKpi.getFinalizedRow(username, month);
+    if (fin && fin.finalized) {
+      return res.json({
+        ok: true,
+        finalized: true,
+        data: fin.data && typeof fin.data === 'object' ? fin.data : data,
+        overall: fin.overall,
+        scores: fin.scores,
+        conversionSource: fin.conversion_source,
+      });
+    }
+    res.json({ ok: true, finalized: false, data: data });
+  } catch (e) {
+    console.error('[kpi-data GET calc]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/kpi-data/monthly?user=&month=
+router.get('/monthly', async function (req, res) {
+  try {
+    const month = req.query.month;
+    let sql = 'SELECT * FROM sales_kpi_monthly WHERE 1=1';
+    const params = [];
+    if (!isManagerRole(req.user.role)) {
+      params.push(req.user.username);
+      sql += ' AND username = $' + params.length;
+    } else if (req.query.user || req.query.username) {
+      params.push(req.query.user || req.query.username);
+      sql += ' AND username = $' + params.length;
+    }
+    if (month) {
+      params.push(month);
+      sql += ' AND month = $' + params.length;
+    }
+    sql += ' ORDER BY month DESC LIMIT 200';
+    const r = await query(sql, params);
+    res.json({ ok: true, rows: r.rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/kpi-data/finalize — manager or self; cron uses internal lib
+router.post('/finalize', async function (req, res) {
+  try {
+    const month = (req.body && req.body.month) || salesKpi.prevJMonth(salesKpi.currentJMonth());
+    const force = !!(req.body && req.body.force);
+    if (req.body && req.body.all && isManagerRole(req.user.role)) {
+      const out = await salesKpi.finalizeAllActiveExperts(month, { by: req.user.username, force: force });
+      return res.json({ ok: true, ...out });
+    }
+    const username = isManagerRole(req.user.role)
+      ? ((req.body && (req.body.username || req.body.userId)) || req.user.username)
+      : req.user.username;
+    const data = await salesKpi.finalizeMonth(username, month, { by: req.user.username, force: force });
+    res.json({ ok: true, data: data });
+  } catch (e) {
+    console.error('[kpi-data finalize]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/kpi-data/weights
+router.get('/weights', async function (req, res) {
+  try {
+    const month = req.query.month || salesKpi.currentJMonth();
+    const info = await salesKpi.getActiveWeights(month);
+    const hist = await query(
+      `SELECT id, weights, effective_from, created_at, created_by
+       FROM kpi_weight_versions ORDER BY effective_from DESC, id DESC LIMIT 24`
+    );
+    res.json({ ok: true, active: info, versions: hist.rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/kpi-data/weights — new effective-dated version
+router.post('/weights', requireManager, async function (req, res) {
+  try {
+    const { weights, effectiveFrom } = req.body || {};
+    if (!weights || typeof weights !== 'object') {
+      return res.status(400).json({ error: 'weights الزامی است' });
+    }
+    const sum = ['conversion', 'retention', 'visits', 'calls', 'sales', 'mission', 'cash']
+      .reduce(function (s, k) { return s + (parseInt(weights[k], 10) || 0); }, 0);
+    if (sum !== 100) {
+      return res.status(400).json({ error: 'جمع وزن‌ها باید ۱۰۰ باشد (الان ' + sum + ')' });
+    }
+    const row = await salesKpi.upsertWeightVersion(weights, effectiveFrom, req.user.username);
+    res.json({ ok: true, id: row.id });
+  } catch (e) {
+    console.error('[kpi-data weights]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET/POST region retention targets
+router.get('/regions', requireManager, async function (req, res) {
+  try {
+    const r = await query('SELECT * FROM kpi_region_targets ORDER BY region_key');
+    res.json({ ok: true, regions: r.rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/regions', requireManager, async function (req, res) {
+  try {
+    const { regionKey, label, retentionTarget } = req.body || {};
+    if (!regionKey) return res.status(400).json({ error: 'regionKey الزامی است' });
+    const prev = await query('SELECT * FROM kpi_region_targets WHERE region_key = $1', [regionKey]);
+    await query(
+      `INSERT INTO kpi_region_targets (region_key, label, retention_target, updated_at, updated_by)
+       VALUES ($1, $2, $3, NOW(), $4)
+       ON CONFLICT (region_key) DO UPDATE SET
+         label = EXCLUDED.label,
+         retention_target = EXCLUDED.retention_target,
+         updated_at = NOW(),
+         updated_by = EXCLUDED.updated_by`,
+      [regionKey, label || regionKey, retentionTarget != null ? retentionTarget : 90, req.user.username]
+    );
+    await salesKpi.logKpiConfigAudit(
+      req.user.username,
+      'region_retention',
+      prev.rows[0] || null,
+      { regionKey, label, retentionTarget },
+      null
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/audit', requireManager, async function (req, res) {
+  try {
+    const r = await query(
+      `SELECT * FROM kpi_config_audit ORDER BY at DESC LIMIT 200`
+    );
+    res.json({ ok: true, rows: r.rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // GET /api/kpi-data/actuals?user=&month=1404/04
 router.get('/actuals', async function (req, res) {
@@ -108,6 +270,8 @@ router.get('/targets', async function (req, res) {
         salesCount: row.sales_count,
         salesAmount: Number(row.sales_amount) || 0,
         cashPct: row.cash_pct,
+        retentionTarget: row.retention_target != null ? row.retention_target : 90,
+        regionKey: row.region_key || null,
       };
     });
     res.json({ ok: true, targets: map, rows: r.rows });
@@ -159,26 +323,50 @@ router.get('/province-targets', async function (req, res) {
 // POST /api/kpi-data/user-target
 router.post('/user-target', requireManager, async function (req, res) {
   try {
-    const { username, month, callsPerDay, visitsPerWeek, salesCount, salesAmount, cashPct } = req.body || {};
+    const {
+      username, month, callsPerDay, visitsPerWeek, salesCount, salesAmount, cashPct,
+      retentionTarget, regionKey,
+    } = req.body || {};
     if (!username || !month) return res.status(400).json({ error: 'username و month الزامی هستند' });
+
+    const prev = await query(
+      'SELECT * FROM kpi_user_targets WHERE username = $1 AND month = $2',
+      [username, month]
+    );
+
     await query(
-      `INSERT INTO kpi_user_targets (username, month, calls_per_day, visits_per_week, sales_count, sales_amount, cash_pct, updated_at, updated_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)
+      `INSERT INTO kpi_user_targets (
+         username, month, calls_per_day, visits_per_week, sales_count, sales_amount, cash_pct,
+         retention_target, region_key, updated_at, updated_by
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10)
        ON CONFLICT (username, month) DO UPDATE SET
          calls_per_day = EXCLUDED.calls_per_day,
          visits_per_week = EXCLUDED.visits_per_week,
          sales_count = EXCLUDED.sales_count,
          sales_amount = EXCLUDED.sales_amount,
          cash_pct = EXCLUDED.cash_pct,
+         retention_target = EXCLUDED.retention_target,
+         region_key = EXCLUDED.region_key,
          updated_at = NOW(),
          updated_by = EXCLUDED.updated_by`,
       [
         username, month,
         callsPerDay || 10, visitsPerWeek || 5, salesCount || 5,
-        salesAmount || 0, cashPct || 50,
+        salesAmount || 0, cashPct != null ? cashPct : 50,
+        retentionTarget != null ? retentionTarget : 90,
+        regionKey || null,
         req.user.username,
       ]
     );
+
+    await salesKpi.logKpiConfigAudit(
+      req.user.username,
+      'user_target',
+      prev.rows[0] || null,
+      { username, month, callsPerDay, visitsPerWeek, salesCount, salesAmount, cashPct, retentionTarget, regionKey },
+      null
+    );
+
     res.json({ ok: true, username, month });
   } catch (e) {
     console.error('[kpi-data user-target]', e.message);
@@ -186,7 +374,7 @@ router.post('/user-target', requireManager, async function (req, res) {
   }
 });
 
-// POST /api/kpi-data/history
+// POST /api/kpi-data/history — override snapshot (prefer /finalize)
 router.post('/history', async function (req, res) {
   try {
     const snap = req.body || {};
@@ -194,13 +382,12 @@ router.post('/history', async function (req, res) {
     if (!isManagerRole(req.user.role) && snap.userId !== req.user.username) {
       return res.status(403).json({ error: 'ثبت KPI برای کاربر دیگر مجاز نیست' });
     }
-    await query(
-      `INSERT INTO kpi_history (username, month, data, updated_at)
-       VALUES ($1, $2, $3, NOW())
-       ON CONFLICT (username, month) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
-      [snap.userId, snap.month, JSON.stringify(snap)]
-    );
-    res.json({ ok: true });
+    // Prefer server finalize so overall is not client-supplied
+    const data = await salesKpi.finalizeMonth(snap.userId, snap.month, {
+      by: req.user.username,
+      force: true,
+    });
+    res.json({ ok: true, overall: data.overall, server: true });
   } catch (e) {
     console.error('[kpi-data history]', e.message);
     res.status(500).json({ error: 'خطای داخلی سرور' });

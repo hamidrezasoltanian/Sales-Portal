@@ -391,7 +391,7 @@ function _renderExpertUserPanel(el){
       var owner=_getOwnerForRecKey(rk)||we.addedBy||'';
       if(owner!==currentUser)return;
       var pts=rk.split('_');
-      todayItems.push({name:we.centerName||getRecLabel(rk)||'',done:we.done,actionType:we.actionType||'call',rtype:pts[0],id:pts.slice(1).join('_')});
+      todayItems.push({name:(typeof resolveWeekEntryDisplayName==='function'?resolveWeekEntryDisplayName(we):(we.centerName||getRecLabel(rk)||'')),done:we.done,actionType:we.actionType||'call',rtype:pts[0],id:pts.slice(1).join('_')});
     });
   }
 
@@ -587,7 +587,7 @@ function _renderExpertDash(el){
     var rt=we.rtype||'';var ri=we.rid||'';if(!rt||!ri)return;
     if((getE(rt,ri).owner||'')!==currentUser)return;
     var parsed=wpParseEntryKey(k);
-    myWeekNoDate.push({rtype:rt,id:ri,name:we.centerName||getRecLabel(rt+'_'+ri)||ri,weekId:parsed.weekId||'',eKey:k});
+    myWeekNoDate.push({rtype:rt,id:ri,name:(typeof resolveWeekEntryDisplayName==='function'?resolveWeekEntryDisplayName(we):(we.centerName||getRecLabel(rt+'_'+ri)||ri)),weekId:parsed.weekId||'',eKey:k});
   });
   myWeekNoDate.sort(function(a,b){return a.weekId>b.weekId?-1:1;});
 
@@ -598,7 +598,7 @@ function _renderExpertDash(el){
     var ownr=typeof _wpGetOwner==='function'?_wpGetOwner(we):(getE(rt,ri).owner||'');
     if(ownr!==currentUser)return;
     if(we.scheduledDate!==today)return;
-    myTodayEntries.push({rtype:rt,id:ri,name:we.centerName||ri,actType:we.actionType||'call',eKey:k});
+    myTodayEntries.push({rtype:rt,id:ri,name:(typeof resolveWeekEntryDisplayName==='function'?resolveWeekEntryDisplayName(we):(we.centerName||ri)),actType:we.actionType||'call',eKey:k});
   });
 
   // مطالبات

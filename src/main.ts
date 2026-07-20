@@ -16,7 +16,7 @@ function mountVuePanels(user: VueUser) {
   const isManager = userRole === 'مدیر' || userRole === 'سوپر ادمین';
 
   const notifEl = document.getElementById('vue-notifications');
-  if (notifEl && !notifEl.__vue_app__) {
+  if (notifEl && !(notifEl as any).__vue_app__) {
     const ni = createApp(NotificationsPanel, {
       username,
       onOpenCenter: (key: string) => {

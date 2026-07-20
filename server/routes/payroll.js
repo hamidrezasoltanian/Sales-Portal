@@ -131,6 +131,12 @@ router.post('/recalc/:employee/:month', requirePayrollEdit, async (req, res) => 
   }
 });
 
+function normalizePayrollMonth(raw) {
+  if (!raw) return '';
+  const s = String(raw).trim().replace(/-/g, '/');
+  return s;
+}
+
 // POST /api/payroll/workflow/:employee/:month — role-based transitions
 router.post('/workflow/:employee/:month', async (req, res, next) => {
   const { status } = req.body || {};
@@ -146,9 +152,43 @@ router.post('/workflow/:employee/:month', async (req, res, next) => {
   }
   return requirePayrollEdit(req, res, next);
 }, async (req, res) => {
-  const { employee, month } = req.params;
+  const employee = req.params.employee;
+  const month = normalizePayrollMonth((req.body && req.body.month) || req.params.month);
   const { status, note, force } = req.body || {};
   if (!status) return res.status(400).json({ error: 'status الزامی است' });
+  if (!/^\d{4}\/\d{2}$/.test(month)) return res.status(400).json({ error: 'فرمت ماه نادرست است (YYYY/MM)' });
+  try {
+    const result = await payrollEngine.transitionStatus(
+      employee, month, status, req.user.username, note, { user: req.user, force: !!force }
+    );
+    if (result.error) return res.status(result.status || 400).json({ error: result.error });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Fallback when proxies decode %2F → /workflow/:employee/1405/04
+router.post('/workflow/:employee/:year/:mon', async (req, res, next) => {
+  req.params.month = `${req.params.year}/${req.params.mon}`;
+  const { status } = req.body || {};
+  const to = status;
+  if (to === payrollEngine.WORKFLOW.DRAFT || to === payrollEngine.WORKFLOW.MANAGER_REVIEW || to === payrollEngine.WORKFLOW.FINANCIAL) {
+    return requirePayrollEdit(req, res, next);
+  }
+  if (to === payrollEngine.WORKFLOW.LOCKED) {
+    return requirePayrollApprove(req, res, next);
+  }
+  if (to === payrollEngine.WORKFLOW.PUBLISHED) {
+    return requirePayrollEdit(req, res, next);
+  }
+  return requirePayrollEdit(req, res, next);
+}, async (req, res) => {
+  const employee = req.params.employee;
+  const month = normalizePayrollMonth((req.body && req.body.month) || req.params.month);
+  const { status, note, force } = req.body || {};
+  if (!status) return res.status(400).json({ error: 'status الزامی است' });
+  if (!/^\d{4}\/\d{2}$/.test(month)) return res.status(400).json({ error: 'فرمت ماه نادرست است (YYYY/MM)' });
   try {
     const result = await payrollEngine.transitionStatus(
       employee, month, status, req.user.username, note, { user: req.user, force: !!force }
@@ -422,6 +462,101 @@ router.get('/records', requirePayrollView, async (req, res) => {
   } catch (e) {
     console.error('[payroll/records]', e.message);
     res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+// GET /api/payroll/my/:month — published payslip for self
+router.get('/my/:month', requireAuth, async (req, res) => {
+  try {
+    const month = req.params.month;
+    if (!/^\d{4}\/\d{2}$/.test(month)) return res.status(400).json({ error: 'ماه نامعتبر' });
+    const r = await query(
+      `SELECT * FROM payroll_records WHERE employee = $1 AND month = $2 AND status = 'published'`,
+      [req.user.username, month]
+    );
+    if (!r.rows.length) {
+      return res.status(404).json({ error: 'فیش منتشرشده‌ای برای این ماه نیست' });
+    }
+    res.json({ ok: true, record: r.rows[0] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Off-cycle corrections (do not rewrite published snapshot)
+router.get('/corrections', requirePayrollView, async (req, res) => {
+  try {
+    await query(`CREATE TABLE IF NOT EXISTS payroll_corrections (
+      id TEXT PRIMARY KEY, employee TEXT NOT NULL, original_month TEXT NOT NULL,
+      apply_month TEXT NOT NULL, amount DECIMAL(15,2) NOT NULL, reason TEXT,
+      status TEXT NOT NULL DEFAULT 'pending', created_by TEXT, approved_by TEXT,
+      approved_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW()
+    )`).catch(function () {});
+    const params = [];
+    let sql = 'SELECT * FROM payroll_corrections WHERE 1=1';
+    if (req.query.month) { params.push(req.query.month); sql += ' AND apply_month = $' + params.length; }
+    if (req.query.employee) { params.push(req.query.employee); sql += ' AND employee = $' + params.length; }
+    sql += ' ORDER BY created_at DESC LIMIT 200';
+    const r = await query(sql, params);
+    res.json(r.rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/corrections', requirePayrollEdit, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.employee || !b.original_month || b.amount == null) {
+      return res.status(400).json({ error: 'کارمند، ماه اصلی و مبلغ الزامی است' });
+    }
+    const pub = await query(
+      `SELECT status FROM payroll_records WHERE employee = $1 AND month = $2`,
+      [b.employee, b.original_month]
+    );
+    if (!pub.rows.length || pub.rows[0].status !== 'published') {
+      return res.status(400).json({ error: 'اصلاح فقط برای ماه منتشرشده مجاز است — در غیر این صورت ویرایش/محاسبه مجدد کنید' });
+    }
+    // Default apply to next Jalali month
+    let applyMonth = b.apply_month;
+    if (!applyMonth) {
+      const salesKpi = require('../lib/sales-kpi');
+      const pts = b.original_month.split('/');
+      let jy = parseInt(pts[0], 10);
+      let jm = parseInt(pts[1], 10) + 1;
+      if (jm > 12) { jm = 1; jy += 1; }
+      applyMonth = jy + '/' + String(jm).padStart(2, '0');
+    }
+    await query(`CREATE TABLE IF NOT EXISTS payroll_corrections (
+      id TEXT PRIMARY KEY, employee TEXT NOT NULL, original_month TEXT NOT NULL,
+      apply_month TEXT NOT NULL, amount DECIMAL(15,2) NOT NULL, reason TEXT,
+      status TEXT NOT NULL DEFAULT 'pending', created_by TEXT, approved_by TEXT,
+      approved_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW()
+    )`).catch(function () {});
+    const id = 'pcorr_' + uid();
+    const r = await query(
+      `INSERT INTO payroll_corrections (id, employee, original_month, apply_month, amount, reason, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [id, b.employee, b.original_month, applyMonth, parseFloat(b.amount) || 0, b.reason || null, req.user.username]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/corrections/:id/approve', requirePayrollApprove, async (req, res) => {
+  try {
+    const approve = req.body && req.body.approve !== false;
+    const r = await query(
+      `UPDATE payroll_corrections SET status = $2, approved_by = $3, approved_at = NOW()
+       WHERE id = $1 RETURNING *`,
+      [req.params.id, approve ? 'approved' : 'rejected', req.user.username]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'یافت نشد' });
+    res.json(r.rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

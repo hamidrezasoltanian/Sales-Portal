@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var _hrView = 'employees'; // employees | leave | delegation | disciplinary | documents | attendance | payroll
+  var _hrView = 'employees'; // users | employees | leave | onboarding | delegation | disciplinary | documents | attendance | payroll
   var _hrLeaveFilter = 'all'; // all | pending | approved | rejected | mine
   var _hrUsersCache = null;
 
@@ -32,20 +32,24 @@
       return;
     }
     if (!canHr && canPayroll && _hrView !== 'payroll') _hrView = 'payroll';
+    if (canHr && !isManager && _hrView === 'users') _hrView = 'employees';
 
+    var wideViews = { payroll: 1, users: 1 };
     root.innerHTML =
-      '<div style="max-width:' + (_hrView === 'payroll' ? '100%' : '1100px') + ';margin:0 auto">' +
+      '<div style="max-width:' + (wideViews[_hrView] ? '100%' : '1100px') + ';margin:0 auto">' +
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">' +
           '<h2 style="margin:0;font-size:1.25rem;font-weight:700">👥 منابع انسانی</h2>' +
           '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+            (isManager && canHr ? '<button onclick="window._hrSetView(\'users\')" class="btn-pill' + (_hrView === 'users' ? ' active' : '') + '" id="hrVUsers">👥 کاربران</button>' : '') +
             (canHr ? '<button onclick="window._hrSetView(\'employees\')" class="btn-pill' + (_hrView === 'employees' ? ' active' : '') + '" id="hrVEmployees">👤 کارمندان</button>' : '') +
             (canHr ? '<button onclick="window._hrSetView(\'leave\')" class="btn-pill' + (_hrView === 'leave' ? ' active' : '') + '" id="hrVLeave">📅 مرخصی</button>' : '') +
+            (canHr ? '<button onclick="window._hrSetView(\'onboarding\')" class="btn-pill' + (_hrView === 'onboarding' ? ' active' : '') + '" id="hrVOnboarding">🎓 انبوردینگ</button>' : '') +
             (canPayroll ? '<button onclick="window._hrSetView(\'payroll\')" class="btn-pill' + (_hrView === 'payroll' ? ' active' : '') + '" id="hrVPayroll">💵 حقوق و پورسانت</button>' : '') +
             (isManager && canHr ? '<button onclick="window._hrSetView(\'delegation\')" class="btn-pill' + (_hrView === 'delegation' ? ' active' : '') + '">🔀 جانشینی</button>' : '') +
             (isManager && canHr ? '<button onclick="window._hrSetView(\'disciplinary\')" class="btn-pill' + (_hrView === 'disciplinary' ? ' active' : '') + '">⚠️ انضباطی</button>' : '') +
             (isManager && canHr ? '<button onclick="window._hrSetView(\'documents\')" class="btn-pill' + (_hrView === 'documents' ? ' active' : '') + '">📎 مدارک</button>' : '') +
             (isManager && canHr ? '<button onclick="window._hrSetView(\'attendance\')" class="btn-pill' + (_hrView === 'attendance' ? ' active' : '') + '">🕐 حضور</button>' : '') +
-            (isManager && canHr ? '<button onclick="window._hrOpenNewEmployee()" style="background:#6366f1;color:#fff;border:none;padding:7px 16px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:.9rem">+ کارمند جدید</button>' : '') +
+            (isManager && canHr && _hrView === 'employees' ? '<button onclick="window._hrOpenNewEmployee()" style="background:#6366f1;color:#fff;border:none;padding:7px 16px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:.9rem">+ کارمند جدید</button>' : '') +
           '</div>' +
         '</div>' +
         '<div id="hrContent"></div>' +
@@ -76,22 +80,56 @@
     var root = document.getElementById('hrRoot');
     if (root) {
       var inner = root.firstElementChild;
-      if (inner) inner.style.maxWidth = (v === 'payroll' ? '100%' : '1100px');
+      var wideViews = { payroll: 1, users: 1 };
+      if (inner) inner.style.maxWidth = (wideViews[v] ? '100%' : '1100px');
       root.querySelectorAll('.btn-pill').forEach(function (b) { b.classList.remove('active'); });
     }
-    var btn = document.getElementById('hrV' + v.charAt(0).toUpperCase() + v.slice(1));
+    var btnIdMap = {
+      users: 'hrVUsers',
+      employees: 'hrVEmployees',
+      leave: 'hrVLeave',
+      onboarding: 'hrVOnboarding',
+      payroll: 'hrVPayroll',
+    };
+    var btn = document.getElementById(btnIdMap[v] || ('hrV' + v.charAt(0).toUpperCase() + v.slice(1)));
     if (btn) btn.classList.add('active');
     _hrRenderContent();
   };
 
   function _hrRenderContent() {
-    if (_hrView === 'employees') _hrLoadEmployees();
+    if (_hrView === 'users') _hrLoadUsers();
+    else if (_hrView === 'employees') _hrLoadEmployees();
     else if (_hrView === 'leave') _hrLoadLeave();
+    else if (_hrView === 'onboarding') {
+      if (typeof window._hrLoadOnboarding === 'function') window._hrLoadOnboarding();
+      else {
+        var cont = document.getElementById('hrContent');
+        if (cont) cont.innerHTML = '<p style="color:#dc2626;text-align:center;padding:24px">ماژول انبوردینگ لود نشده — صفحه را رفرش کنید.</p>';
+      }
+    }
     else if (_hrView === 'payroll') _hrLoadPayroll();
     else if (_hrView === 'delegation') _hrLoadDelegations();
     else if (_hrView === 'disciplinary') _hrLoadDisciplinary();
     else if (_hrView === 'documents') _hrLoadDocuments();
     else if (_hrView === 'attendance') _hrLoadAttendance();
+  }
+
+  function _hrLoadUsers() {
+    var cont = document.getElementById('hrContent');
+    if (!cont) return;
+    if (typeof _umBody !== 'function') {
+      cont.innerHTML = '<p style="color:#dc2626;text-align:center;padding:24px">ماژول مدیریت کاربران لود نشده — صفحه را رفرش کنید.</p>';
+      return;
+    }
+    if (typeof _UM_TAB === 'undefined' || !_UM_TAB) window._UM_TAB = 'users';
+    if (typeof _UM_SEARCH === 'undefined') window._UM_SEARCH = '';
+    if (typeof _UM_STATUS_FILTER === 'undefined') window._UM_STATUS_FILTER = 'all';
+    cont.innerHTML =
+      '<div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#3730a3;line-height:1.6">' +
+        'منبع اصلی پروفایل کاربران همینجاست (<b>app_users</b>). نام، تلفن، دپارتمان و مدیر مستقیم از اینجا به پرونده کارمندی همگام می‌شود. ' +
+        'فیلدهای HR-only (کد ملی، قرارداد، حقوق) در تب «کارمندان» ویرایش می‌شوند.' +
+      '</div>' +
+      '<div id="umWrap" class="um-panel" style="max-width:100%">' + _umBody() + '</div>';
   }
 
   function _hrLoadPayroll() {
@@ -161,7 +199,8 @@
     var placeholder = options.placeholder || 'انتخاب کنید…';
     var filterFn = options.filter || function () { return true; };
     var users = (_hrUsersCache || []).filter(filterFn);
-    var html = '<select id="' + esc(id) + '" class="hr-input">' +
+    var html = '<select id="' + esc(id) + '" class="hr-input"' +
+      (options.onchange ? ' onchange="' + options.onchange + '"' : '') + '>' +
       '<option value="">' + esc(placeholder) + '</option>';
     users.forEach(function (u) {
       var label = (u.display_name || u.username) + ' (@' + u.username + ')';
@@ -207,7 +246,7 @@
       return;
     }
 
-    // Group by department
+    // Group by department (SoT department already overlaid from app_users)
     var depts = {};
     employees.forEach(function (e) {
       var d = e.department || 'سایر';
@@ -218,21 +257,24 @@
     var empTypeLabels = { full_time: 'تمام وقت', part_time: 'پاره وقت', contractor: 'پیمانکار' };
     var salaryLabels = ['', '۱', '۲', '۳', '۴', '۵'];
 
-    var html = '';
+    var html = '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#166534;line-height:1.55">' +
+      'نام، تلفن، دپارتمان و مدیر مستقیم از پروفایل <b>کاربران</b> می‌آید. اینجا فیلدهای پرسنلی و قرارداد را تکمیل کنید.' +
+      '</div>';
     Object.keys(depts).forEach(function (dept) {
       html += '<div style="margin-bottom:24px">' +
         '<h3 style="font-size:1rem;font-weight:600;color:#374151;margin:0 0 12px;padding-bottom:6px;border-bottom:2px solid #e5e7eb">🏢 ' + esc(dept) + ' <span style="font-size:.8rem;color:#6b7280;font-weight:400">(' + depts[dept].length + ' نفر)</span></h3>' +
         '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">';
 
       depts[dept].forEach(function (e) {
-        var initials = (e.full_name || '').split(' ').map(function (w) { return w[0] || ''; }).join('').slice(0, 2);
+        var name = e.full_name || e.user_display_name || '';
+        var initials = name.split(' ').map(function (w) { return w[0] || ''; }).join('').slice(0, 2);
         var color = e.user_color || '#6366f1';
         html +=
           '<div class="hr-emp-card" onclick="window._hrOpenEmployee(\'' + esc(e.id) + '\')">' +
             '<div style="display:flex;align-items:center;gap:12px">' +
               '<div style="width:48px;height:48px;border-radius:50%;background:' + color + ';display:flex;align-items:center;justify-content:center;color:#fff;font-size:1.1rem;font-weight:700;flex-shrink:0">' + esc(initials) + '</div>' +
               '<div style="flex:1;min-width:0">' +
-                '<div style="font-weight:600;font-size:.95rem;color:#111827">' + esc(e.full_name || '') + '</div>' +
+                '<div style="font-weight:600;font-size:.95rem;color:#111827">' + esc(name) + '</div>' +
                 '<div style="font-size:.8rem;color:#6b7280;margin-top:2px">' + esc(e.position || '') + '</div>' +
                 (e.username ? '<div style="font-size:.75rem;color:#9ca3af;margin-top:2px">@' + esc(e.username) + '</div>' : '') +
               '</div>' +
@@ -392,7 +434,16 @@
           '</div>';
       }
 
+      var linkedHint = (e && e.username)
+        ? '<div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:#3730a3;line-height:1.5">' +
+            'این کارمند به کاربر <b>@' + esc(e.username) + '</b> وصل است. نام / تلفن / دپارتمان / مدیر مستقیم روی پروفایل کاربر ذخیره و همگام می‌شود.' +
+          '</div>'
+        : '<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:#9a3412;line-height:1.5">' +
+            'برای همگام‌سازی با لاگین CRM، یک <b>نام کاربری</b> انتخاب کنید. پروفایل اصلی در تب «کاربران» است.' +
+          '</div>';
+
       var body =
+        linkedHint +
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
           '<div><label style="font-size:.8rem;color:#6b7280;display:block;margin-bottom:4px">نام کامل *</label><input id="hrEF_fullname" class="hr-input" value="' + esc(e ? e.full_name || '' : '') + '" placeholder="نام و نام خانوادگی"></div>' +
           _hrUserSelectField('نام کاربری', 'hrEF_username', e ? e.username || '' : '', { placeholder: 'کاربر سیستم را انتخاب کنید', showRole: true }) +
@@ -706,46 +757,245 @@
       .catch(function (e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
   };
 
+  var _hrDiscCache = { items: [], summary: [], ladder: [] };
+
+  var _HR_DISC_STEP_COLORS = {
+    1: { bg: '#fef9c3', bd: '#fde047', fg: '#854d0e' },
+    2: { bg: '#ffedd5', bd: '#fdba74', fg: '#9a3412' },
+    3: { bg: '#fee2e2', bd: '#fca5a5', fg: '#991b1b' },
+    4: { bg: '#ffe4e6', bd: '#fb7185', fg: '#9f1239' },
+    5: { bg: '#7f1d1d', bd: '#7f1d1d', fg: '#fff' },
+  };
+
+  function _hrDiscStepBadge(step) {
+    var s = parseInt(step, 10) || 0;
+    var c = _HR_DISC_STEP_COLORS[s] || { bg: '#f1f5f9', bd: '#cbd5e1', fg: '#475569' };
+    return '<span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;background:' +
+      c.bg + ';color:' + c.fg + ';border:1px solid ' + c.bd + '">مرحله ' + s + '</span>';
+  }
+
+  function _hrDiscUserLabel(username) {
+    var name = username;
+    (_hrUsersCache || []).forEach(function (u) {
+      if (u.username === username) name = u.display_name || u.username;
+    });
+    return name;
+  }
+
   function _hrLoadDisciplinary() {
     var cont = document.getElementById('hrContent');
     if (!cont) return;
+    cont.innerHTML = '<div style="text-align:center;color:#94a3b8;padding:24px">در حال بارگذاری…</div>';
     Promise.all([
       _hrFetchUsers(),
-      fetch('/api/hr/disciplinary').then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error); return d; }); }),
+      fetch('/api/hr/disciplinary').then(function (r) {
+        return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || 'خطا'); return d; });
+      }),
     ])
       .then(function (results) {
-        var rows = results[1];
-        var form = '<div style="background:#fef2f2;padding:12px;border-radius:10px;margin-bottom:12px">' +
-          '<div style="margin-bottom:6px"><label style="font-size:.75rem;color:#6b7280;display:block;margin-bottom:4px">کارمند</label>' +
-            _hrUserSelectHtml('hrPip_emp', '', { placeholder: 'کارمند را انتخاب کنید', showRole: true }) + '</div>' +
-          '<input id="hrPip_title" class="hr-input" placeholder="عنوان (مثلاً تذکر کتبی)" style="margin-bottom:6px">' +
-          '<textarea id="hrPip_desc" class="hr-input" rows="2" placeholder="شرح"></textarea>' +
-          '<button onclick="window._hrSaveDisciplinary()" style="margin-top:8px;background:#dc2626;color:#fff;border:none;padding:7px 14px;border-radius:8px;cursor:pointer">ثبت</button></div>';
-        var list = (rows || []).map(function (d) {
-          return '<div style="padding:10px;border:1px solid #fecaca;border-radius:8px;margin-bottom:8px;font-size:13px"><b>' + esc(d.employee) + '</b> — ' + esc(d.title) + '<div style="color:#6b7280;margin-top:4px">' + esc(d.description || '') + '</div></div>';
-        }).join('');
-        cont.innerHTML = form + (list || '<p>موردی ثبت نشده</p>');
+        var data = results[1] || {};
+        var items = Array.isArray(data) ? data : (data.items || []);
+        var ladder = data.ladder || [];
+        var summary = data.summary || [];
+        _hrDiscCache = { items: items, summary: summary, ladder: ladder };
+
+        var ladderHtml =
+          '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;margin-bottom:14px">' +
+            '<div style="padding:12px 14px;background:linear-gradient(135deg,#7f1d1d,#b91c1c);color:#fff">' +
+              '<div style="font-weight:800;font-size:15px">ماده ۵ — نظام پلکانی برخورد</div>' +
+              '<div style="font-size:12px;opacity:.9;margin-top:2px">اقدامات انضباطی باید طبق این نردبان ثبت و در پرونده پرسنلی نگه داشته شوند.</div>' +
+            '</div>' +
+            '<div style="overflow-x:auto">' +
+              '<table style="width:100%;border-collapse:collapse;font-size:13px">' +
+                '<thead><tr style="background:#f8fafc;text-align:right">' +
+                  '<th style="padding:10px 12px;border-bottom:1px solid #e2e8f0;width:70px">مرحله</th>' +
+                  '<th style="padding:10px 12px;border-bottom:1px solid #e2e8f0">اقدام</th>' +
+                  '<th style="padding:10px 12px;border-bottom:1px solid #e2e8f0">مورد کاربرد</th>' +
+                '</tr></thead><tbody>' +
+                ladder.map(function (s) {
+                  var c = _HR_DISC_STEP_COLORS[s.step] || {};
+                  return '<tr>' +
+                    '<td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;vertical-align:top">' +
+                      '<span style="display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:50%;font-weight:800;background:' +
+                      (c.bg || '#eee') + ';color:' + (c.fg || '#333') + ';border:1px solid ' + (c.bd || '#ddd') + '">' + s.step + '</span></td>' +
+                    '<td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;line-height:1.6">' + esc(s.title) +
+                      (s.bonus_cut ? ' <span style="font-size:10px;background:#fee2e2;color:#991b1b;padding:1px 6px;border-radius:999px">قطع پاداش</span>' : '') +
+                      (s.score_deduction ? ' <span style="font-size:10px;background:#ffedd5;color:#9a3412;padding:1px 6px;border-radius:999px">کسر امتیاز</span>' : '') +
+                    '</td>' +
+                    '<td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;color:#64748b">' + esc(s.applies_to) + '</td>' +
+                  '</tr>';
+                }).join('') +
+              '</tbody></table></div></div>';
+
+        var form =
+          '<div style="background:#fef2f2;border:1px solid #fecaca;padding:14px;border-radius:12px;margin-bottom:14px">' +
+            '<div style="font-weight:700;margin-bottom:10px;color:#991b1b">ثبت اقدام انضباطی</div>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
+              '<div><label style="font-size:.75rem;color:#6b7280;display:block;margin-bottom:4px">کارمند *</label>' +
+                _hrUserSelectHtml('hrPip_emp', '', {
+                  placeholder: 'کارمند را انتخاب کنید',
+                  showRole: true,
+                  onchange: 'window._hrDiscOnEmployeeChange()',
+                }) + '</div>' +
+              '<div><label style="font-size:.75rem;color:#6b7280;display:block;margin-bottom:4px">مرحله ماده ۵ *</label>' +
+                '<select id="hrPip_step" class="hr-input" onchange="window._hrDiscOnStepChange()">' +
+                  ladder.map(function (s) {
+                    return '<option value="' + s.step + '">مرحله ' + s.step + ' — ' + esc(s.title) + '</option>';
+                  }).join('') +
+                '</select></div>' +
+            '</div>' +
+            '<div id="hrPip_suggest" style="display:none;margin-top:10px;padding:8px 10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;font-size:12px;color:#9a3412"></div>' +
+            '<div id="hrPip_stepHint" style="margin-top:8px;font-size:12px;color:#64748b;line-height:1.6"></div>' +
+            '<div style="margin-top:10px"><label style="font-size:.75rem;color:#6b7280;display:block;margin-bottom:4px">عنوان (قابل ویرایش)</label>' +
+              '<input id="hrPip_title" class="hr-input" placeholder="عنوان اقدام"></div>' +
+            '<div style="margin-top:8px"><label style="font-size:.75rem;color:#6b7280;display:block;margin-bottom:4px">شرح تخلف / توضیحات *</label>' +
+              '<textarea id="hrPip_desc" class="hr-input" rows="3" placeholder="شرح رویداد، تاریخ، شواهد…"></textarea></div>' +
+            '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+              '<button onclick="window._hrSaveDisciplinary()" style="background:#dc2626;color:#fff;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-family:inherit">ثبت در پرونده</button>' +
+              '<span style="font-size:11px;color:#94a3b8">پس از ثبت، اعلان برای کارمند ارسال می‌شود.</span>' +
+            '</div>' +
+          '</div>';
+
+        var summaryHtml = '';
+        if (summary.length) {
+          summaryHtml =
+            '<div style="margin-bottom:14px">' +
+              '<div style="font-weight:700;margin-bottom:8px">وضعیت فعلی پرسنل</div>' +
+              '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px">' +
+              summary.map(function (s) {
+                return '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px">' +
+                  '<div style="font-weight:700;font-size:13px">' + esc(_hrDiscUserLabel(s.employee)) + '</div>' +
+                  '<div style="margin-top:6px">' + _hrDiscStepBadge(s.max_step) + '</div>' +
+                  '<div style="font-size:11px;color:#64748b;margin-top:6px">' + esc(s.last_title || '') + '</div>' +
+                '</div>';
+              }).join('') +
+              '</div></div>';
+        }
+
+        var listHtml =
+          '<div style="font-weight:700;margin-bottom:8px">سوابق ثبت‌شده</div>' +
+          (items.length
+            ? '<div style="display:flex;flex-direction:column;gap:8px">' +
+              items.map(function (d) {
+                var resolved = d.resolved_at
+                  ? '<span style="font-size:10px;background:#dcfce7;color:#166534;padding:2px 6px;border-radius:999px">بایگانی‌شده</span>'
+                  : '';
+                return '<div style="padding:12px;border:1px solid #fecaca;border-radius:10px;background:#fff">' +
+                  '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:flex-start">' +
+                    '<div>' +
+                      '<div style="font-weight:700">' + esc(_hrDiscUserLabel(d.employee)) +
+                        ' <span style="font-weight:400;color:#94a3b8;font-size:12px">(' + esc(d.employee) + ')</span></div>' +
+                      '<div style="margin-top:4px">' + _hrDiscStepBadge(d.step || 1) + ' ' + resolved +
+                        (d.bonus_cut ? ' <span style="font-size:10px;background:#fee2e2;color:#991b1b;padding:1px 6px;border-radius:999px">قطع پاداش</span>' : '') +
+                      '</div>' +
+                    '</div>' +
+                    '<div style="font-size:11px;color:#94a3b8">' + esc((d.issued_at || '').toString().slice(0, 10)) +
+                      (d.issued_by ? ' · ' + esc(d.issued_by) : '') + '</div>' +
+                  '</div>' +
+                  '<div style="margin-top:8px;font-size:13px;font-weight:600">' + esc(d.title) + '</div>' +
+                  (d.description ? '<div style="margin-top:4px;font-size:12px;color:#64748b;line-height:1.6">' + esc(d.description) + '</div>' : '') +
+                  (!d.resolved_at
+                    ? '<div style="margin-top:8px"><button onclick="window._hrResolveDisciplinary(\'' + esc(d.id) + '\')" style="font-size:11px;border:1px solid #cbd5e1;background:#f8fafc;border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit">بایگانی / رفع اثر</button></div>'
+                    : '') +
+                '</div>';
+              }).join('') + '</div>'
+            : '<p style="color:#64748b;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;padding:20px;text-align:center">هنوز اقدام انضباطی ثبت نشده است.</p>');
+
+        cont.innerHTML = ladderHtml + form + summaryHtml + listHtml;
+        window._hrDiscOnStepChange();
       })
       .catch(function (e) {
         if (cont) cont.innerHTML = '<p style="color:#dc2626;padding:12px">خطا: ' + esc(e.message) + '</p>';
       });
   }
 
+  window._hrDiscOnStepChange = function () {
+    var stepEl = document.getElementById('hrPip_step');
+    var titleEl = document.getElementById('hrPip_title');
+    var hintEl = document.getElementById('hrPip_stepHint');
+    if (!stepEl) return;
+    var step = parseInt(stepEl.value, 10);
+    var def = null;
+    (_hrDiscCache.ladder || []).forEach(function (s) { if (s.step === step) def = s; });
+    if (!def) return;
+    if (titleEl && (!titleEl.value || titleEl.dataset.auto === '1')) {
+      titleEl.value = def.title;
+      titleEl.dataset.auto = '1';
+    }
+    if (hintEl) {
+      hintEl.innerHTML = 'مورد کاربرد: <b>' + esc(def.applies_to) + '</b>' +
+        (def.bonus_cut ? ' · <span style="color:#b91c1c">قطع پاداش دوره</span>' : '') +
+        (def.score_deduction ? ' · <span style="color:#c2410c">کسر امتیاز عملکرد</span>' : '') +
+        (step === 5 ? ' · <span style="color:#7f1d1d;font-weight:700">نیاز به تأیید تشریفات قانونی</span>' : '');
+    }
+  };
+
+  // اگر کاربر عنوان را دستی عوض کرد، auto را خاموش کن
+  document.addEventListener('input', function (e) {
+    if (e.target && e.target.id === 'hrPip_title') e.target.dataset.auto = '0';
+  });
+
+  window._hrDiscOnEmployeeChange = function () {
+    var emp = (document.getElementById('hrPip_emp') || {}).value;
+    var box = document.getElementById('hrPip_suggest');
+    var stepEl = document.getElementById('hrPip_step');
+    if (!box) return;
+    if (!emp) { box.style.display = 'none'; return; }
+    var maxStep = 0;
+    (_hrDiscCache.summary || []).forEach(function (s) {
+      if (s.employee === emp) maxStep = s.max_step || 0;
+    });
+    var next = Math.min(5, (maxStep || 0) + 1);
+    if (!maxStep) {
+      box.style.display = '';
+      box.innerHTML = 'برای این کارمند سابقه انضباطی فعالی نیست. پیشنهاد: <b>مرحله ۱ — تذکر شفاهی</b>';
+      if (stepEl) { stepEl.value = '1'; window._hrDiscOnStepChange(); }
+    } else {
+      box.style.display = '';
+      box.innerHTML = 'بالاترین مرحله فعلی: <b>' + maxStep + '</b>. پیشنهاد مرحله بعدی: <b>' + next + '</b>' +
+        (maxStep >= 5 ? ' (قبلاً به مرحله خاتمه رسیده)' : '');
+      if (stepEl && maxStep < 5) { stepEl.value = String(next); window._hrDiscOnStepChange(); }
+    }
+  };
+
   window._hrSaveDisciplinary = function () {
     var emp = (document.getElementById('hrPip_emp') || {}).value;
     if (!emp) { if (typeof showToast === 'function') showToast('کارمند را انتخاب کنید'); return; }
+    var step = parseInt((document.getElementById('hrPip_step') || {}).value, 10);
+    var desc = ((document.getElementById('hrPip_desc') || {}).value || '').trim();
+    if (!desc) { if (typeof showToast === 'function') showToast('شرح تخلف الزامی است'); return; }
+    var title = ((document.getElementById('hrPip_title') || {}).value || '').trim();
+    var payload = {
+      employee: emp,
+      step: step,
+      title: title,
+      description: desc,
+      confirm_termination: false,
+    };
+    if (step === 5) {
+      if (!confirm('مرحله ۵ = خاتمه قرارداد.\nآیا تشریفات قانونی و تأیید مرجع انجام شده است؟')) return;
+      payload.confirm_termination = true;
+    }
     fetch('/api/hr/disciplinary', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        employee: (document.getElementById('hrPip_emp') || {}).value,
-        title: (document.getElementById('hrPip_title') || {}).value,
-        description: (document.getElementById('hrPip_desc') || {}).value,
-        action_type: 'pip',
-        severity: 'warning',
-      }),
+      body: JSON.stringify(payload),
     }).then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error); return d; }); })
-      .then(function () { if (typeof showToast === 'function') showToast('ثبت شد'); _hrLoadDisciplinary(); })
+      .then(function () {
+        if (typeof showToast === 'function') showToast('اقدام انضباطی در پرونده ثبت شد');
+        _hrLoadDisciplinary();
+      })
+      .catch(function (e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  window._hrResolveDisciplinary = function (id) {
+    if (!confirm('این اقدام بایگانی / رفع اثر شود؟')) return;
+    fetch('/api/hr/disciplinary/' + encodeURIComponent(id) + '/resolve', { method: 'PUT', credentials: 'include' })
+      .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error); return d; }); })
+      .then(function () {
+        if (typeof showToast === 'function') showToast('بایگانی شد');
+        _hrLoadDisciplinary();
+      })
       .catch(function (e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
   };
 
@@ -805,10 +1055,14 @@
           '<div><label style="font-size:.75rem;color:#6b7280;display:block;margin-bottom:4px">نوع</label><input id="hrDoc_type" class="hr-input" placeholder="گواهی/قرارداد"></div>' +
           '<div><label style="font-size:.75rem;color:#6b7280;display:block;margin-bottom:4px">عنوان</label><input id="hrDoc_title" class="hr-input" placeholder="عنوان مدرک"></div>' +
           '</div><input id="hrDoc_exp" class="hr-input" placeholder="انقضا (۱۴۰۵/۰۱/۰۱)" style="margin-top:8px">' +
+          '<input id="hrDoc_file" type="file" style="margin-top:8px;display:block;font-size:12px">' +
           '<button onclick="window._hrSaveDocument()" style="margin-top:8px;background:#059669;color:#fff;border:none;padding:7px 14px;border-radius:8px;cursor:pointer">ثبت مدرک</button></div>';
         var list = (rows || []).map(function (d) {
+          var dl = d.has_file || d.file_size
+            ? ' <a href="/api/hr/documents/' + encodeURIComponent(d.id) + '/download" style="color:#2563eb;font-size:12px">دانلود</a>'
+            : '';
           return '<div style="padding:8px;border-bottom:1px solid #eee;font-size:13px"><b>' + esc(d.employee) + '</b> · ' + esc(d.doc_type) + ' — ' + esc(d.title) +
-            (d.expires_at ? ' <span style="color:#b45309">تا ' + esc(d.expires_at) + '</span>' : '') + '</div>';
+            (d.expires_at ? ' <span style="color:#b45309">تا ' + esc(d.expires_at) + '</span>' : '') + dl + '</div>';
         }).join('');
         cont.innerHTML = form + (list || '<p style="color:#6b7280">مدرکی ثبت نشده</p>');
       })
@@ -820,11 +1074,26 @@
   window._hrSaveDocument = function () {
     var emp = (document.getElementById('hrDoc_emp') || {}).value;
     if (!emp) { if (typeof showToast === 'function') showToast('کارمند را انتخاب کنید'); return; }
+    var fileInp = document.getElementById('hrDoc_file');
+    var file = fileInp && fileInp.files && fileInp.files[0];
+    if (file) {
+      var fd = new FormData();
+      fd.append('file', file);
+      fd.append('employee', emp);
+      fd.append('doc_type', (document.getElementById('hrDoc_type') || {}).value || 'other');
+      fd.append('title', (document.getElementById('hrDoc_title') || {}).value || file.name);
+      fd.append('expires_at', (document.getElementById('hrDoc_exp') || {}).value || '');
+      fetch('/api/hr/documents/upload', { method: 'POST', body: fd })
+        .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error); return d; }); })
+        .then(function () { if (typeof showToast === 'function') showToast('مدرک با فایل ثبت شد'); _hrLoadDocuments(); })
+        .catch(function (e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+      return;
+    }
     fetch('/api/hr/documents', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        employee: (document.getElementById('hrDoc_emp') || {}).value,
+        employee: emp,
         doc_type: (document.getElementById('hrDoc_type') || {}).value,
         title: (document.getElementById('hrDoc_title') || {}).value,
         expires_at: (document.getElementById('hrDoc_exp') || {}).value,

@@ -202,6 +202,15 @@ function _wpGetOwner(we) {
   return owner || we.addedBy || '';
 }
 
+/** Owner from edit/week recKey like "center_c_12" or "pc_tehran||3" */
+function _getOwnerForRecKey(recKey) {
+  if (!recKey) return '';
+  var pts = String(recKey).split('_');
+  var rtype = pts[0];
+  var rid = pts.slice(1).join('_');
+  return _wpGetOwner({ rtype: rtype, rid: rid });
+}
+
 function clearPCCache(){_PC_CACHE=null;_pcCacheSrcLen=-1;}
 function isStalled(type,id){
   var e=getE(type,id);var st=e.status||'بدون تماس';

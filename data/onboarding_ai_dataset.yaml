@@ -1,0 +1,306 @@
+# Onboarding Knowledge Base and Checklist Dataset
+# Format: YAML (Optimized for AI Agents, RAG pipelines, and LLM processing)
+
+metadata:
+  company_context:
+    sector: "Medical Devices (تجهیزات پزشکی)"
+    business_model: "Import, Distribution, and transitioning to local Manufacturing"
+    compliance_standards:
+      - "ISO 13485:2016 (Quality Management Systems for Medical Devices)"
+      - "IMED (Iranian Medical Device Directorate) regulations"
+      - "Setad Portal (سامانه تدارکات الکترونیکی دولت) procurement rules"
+    mission: "ما با تأمین، توزیع و توسعه تجهیزات پزشکی باکیفیت، به پزشکان و مراکز درمانی کمک می‌کنیم تا خدمات درمانی ایمن‌تر، دقیق‌تر و مؤثرتری به بیماران ارائه دهند. ما با تکیه بر کیفیت، دانش فنی، پاسخگویی و نوآوری، شریک قابل اعتماد نظام سلامت هستیم."
+    vision: "تبدیل شدن به یکی از معتبرترین تولیدکنندگان و تأمین‌کنندگان تجهیزات پزشکی ایران و منطقه تا سال ۱۴۱۰."
+
+values_system:
+  - value_name: "مشتری‌مداری"
+    definition: "تمرکز بر رفع نیازهای کادر درمانی و بیماران با بالاترین سرعت و احترام."
+    behavioral_dos:
+      - "پاسخ به تماس مشتری حداکثر تا ۲ ساعت."
+      - "پیگیری وضعیت رضایت مشتری پس از فروش کالا."
+    behavioral_donts:
+      - "بی‌خبر گذاشتن مشتری در صورت مشخص نبودن پاسخ فوری."
+  - value_name: "کیفیت و دقت"
+    definition: "پایبندی به استانداردهای سلامت و مستندسازی دقیق فرآیندها."
+    behavioral_dos:
+      - "ثبت دقیق کدهای اصالت، بچ‌کدها (Batch Codes) و شماره لات (Lot Numbers) در تمام سیستم‌ها."
+      - "رعایت کامل دستورالعمل‌های ISO 13485."
+    behavioral_donts:
+      - "چشم‌پوشی از خطاهای کوچک در رهگیری کالا (Traceability)."
+  - value_name: "مسئولیت‌پذیری"
+    definition: "پذیرش پیامد رفتارها و پیگیری امور تا به سرانجام رسیدن."
+    behavioral_dos:
+      - "اعلام سریع و شفاف خطاها به مدیر مستقیم در صورت بروز اشتباه."
+      - "دنبال کردن تسک‌ها تا رسیدن به نتیجه قطعی."
+    behavioral_donts:
+      - "انداختن تقصیر به گردن سایر همکاران یا عوامل خارجی."
+      - "انتظار برای پیگیری مداوم توسط مدیر."
+  - value_name: "صداقت و شفافیت"
+    definition: "ارائه اطلاعات دقیق و واقعی به کادر درمان و سازمان‌های نظارتی."
+    behavioral_dos:
+      - "ارائه کاتالوگ و مشخصات فنی واقعی محصول به پزشکان."
+      - "شفافیت در اعلام قیمت‌های مصوب اداره تجهیزات پزشکی."
+    behavioral_donts:
+      - "پنهان‌کاری یا ارائه اطلاعات غلوآمیز درباره کارایی محصولات."
+  - value_name: "یادگیری و بهبود مستمر"
+    definition: "تلاش مداوم برای ارتقای دانش بالینی و مهارت‌های فردی."
+    behavioral_dos:
+      - "یادگیری و مطالعه حداقل یک موضوع علمی یا فنی جدید در هر هفته."
+      - "استقبال فعالانه از بازخوردهای دوره ارزیابی عملکرد."
+    behavioral_donts:
+      - "مقاومت در برابر تغییر فرآیندها با توجیه 'من همیشه اینگونه کار می‌کردم'."
+  - value_name: "کار تیمی و احترام متقابل"
+    definition: "همکاری هماهنگ با بخش‌های بازرگانی، لجستیک، رگولاتوری و مالی."
+    behavioral_dos:
+      - "هماهنگی پیش‌دستانه با انبار و لجستیک قبل از تعهد زمان تحویل به مشتری."
+      - "احترام به مرزهای کاری و شرح وظایف همکاران."
+    behavioral_donts:
+      - "تصمیم‌گیری‌های یک‌جانبه بدون هماهنگی با واحدهای ذی‌ربط."
+  - value_name: "نتیجه‌گرایی قانون‌مند"
+    definition: "تحقق اهداف فروش و سهم بازار هم‌راستا با قوانین رسمی کشور."
+    behavioral_dos:
+      - "تلاش برای بستن قراردادها در چارچوب قانون برگزاری مناقصات عمومی."
+    behavioral_donts:
+      - "استفاده از روش‌های غیرقانونی یا غیراخلاقی برای برنده شدن در مناقصات."
+
+onboarding_timeline_checklists:
+  - phase: "PHASE_00_PREBOARDING"
+    title: "پیش از ورود (Pre-boarding)"
+    timeline: "Days -7 to -1"
+    owner: "HR & IT & Operations"
+    description: "آماده‌سازی سخت‌افزار، دسترسی‌ها و مدارک برای شروع بدون دغدغه نیرو."
+    tasks:
+      - id: "PRE_001"
+        category: "Physical Setup"
+        task_name: "آماده‌سازی میز کار، صندلی و ملزومات اداری"
+        assigned_to: "HR / پشتیبانی"
+        is_required: true
+      - id: "PRE_002"
+        category: "Hardware Setup"
+        task_name: "تخصیص و تست فنی سیستم لپ‌تاپ یا دسکتاپ به همراه موس و لوازم جانبی"
+        assigned_to: "IT"
+        is_required: true
+      - id: "PRE_003"
+        category: "Welcome Pack"
+        task_name: "آماده‌سازی پکیج خوش‌آمدگویی شامل لوازم تحریر اولیه"
+        assigned_to: "HR"
+        is_required: false
+      - id: "PRE_004"
+        category: "Identity Access"
+        task_name: "ایجاد اکانت اکتیو دایرکتوری و ایمیل سازمانی پرسنل جدید"
+        assigned_to: "IT"
+        is_required: true
+      - id: "PRE_005"
+        category: "Identity Access"
+        task_name: "تنظیم اتصال VPN اختصاصی سازمان روی سیستم کارمند جدید"
+        assigned_to: "IT"
+        is_required: true
+      - id: "PRE_006"
+        category: "Software Accounts"
+        task_name: "ایجاد اکانت در سیستم مدیریت پروژه و گفتگوی تیمی میزیتو (Mizito)"
+        assigned_to: "IT / HR"
+        is_required: true
+      - id: "PRE_007"
+        category: "Software Accounts"
+        task_name: "ایجاد اکانت کاربری با سطوح دسترسی مشخص در CRM فرادیس و پورتال فروش"
+        assigned_to: "IT / Sales Manager"
+        is_required: true
+      - id: "PRE_008"
+        category: "HR Portal"
+        task_name: "ثبت اثر انگشت/کارت پرسنلی در سامانه تردد و تعریف در پرتال مرخصی دانا"
+        assigned_to: "HR"
+        is_required: true
+      - id: "PRE_009"
+        category: "Legal Documents"
+        task_name: "آماده‌سازی مدارک استخدام، فرم قرارداد و اخذ تضامین قانونی (سفته/ضمانت‌نامه)"
+        assigned_to: "HR"
+        is_required: true
+
+  - phase: "PHASE_01_DAY_1"
+    title: "روز اول: آشنایی و فرهنگ سازمانی"
+    timeline: "Day 1"
+    owner: "HR & Mentor"
+    tasks:
+      - id: "D1_001"
+        category: "Asset Handover"
+        task_name: "تحویل فیزیکی لپ‌تاپ و اموال شرکت و اخذ رسید امضاشده"
+        assigned_to: "IT / پشتیبانی"
+        is_required: true
+      - id: "D1_002"
+        category: "Orientation"
+        task_name: "برگزاری جلسه معرفی مأموریت، چشم‌انداز و ارزش‌های سازمانی"
+        assigned_to: "HR / Line Manager"
+        is_required: true
+      - id: "D1_003"
+        category: "Policies Agreement"
+        task_name: "تحویل کتابچه راهنمای پرسنلی (شامل قوانین مرخصی دانا، محرمانگی و پوشش) و اخذ امضا"
+        assigned_to: "HR"
+        is_required: true
+      - id: "D1_004"
+        category: "Materials Handover"
+        task_name: "تحویل کاتالوگ محصولات، فایل‌های معرفی و واژه‌نامه تخصصی اصطلاحات پزشکی"
+        assigned_to: "Line Manager"
+        is_required: true
+
+  - phase: "PHASE_02_DAYS_2_3"
+    title: "روز دوم و سوم: یادگیری انفرادی هدایت‌شده"
+    timeline: "Days 2-3"
+    owner: "New Hire (Self-Study)"
+    tasks:
+      - id: "D2_001"
+        category: "Product Knowledge"
+        task_name: "مطالعه کاتالوگ‌های فنی محصولات و تماشای ویدئوهای آموزشی در کانال اختصاصی"
+        assigned_to: "New Hire"
+        is_required: true
+      - id: "D2_002"
+        category: "Regulatory & Quality"
+        task_name: "آشنایی با الزامات ISO 13485 و پروتکل‌های رهگیری کالا (کدهای اصالت و لات نامبر)"
+        assigned_to: "QA Unit / New Hire"
+        is_required: true
+      - id: "D3_001"
+        category: "Market & Pricing"
+        task_name: "مطالعه ساختار قیمت‌گذاری مصوب IMED، فرمول قیمت تمام شده و شناخت رقبای بازار"
+        assigned_to: "New Hire"
+        is_required: true
+      - id: "D3_002"
+        category: "Procurement Portal"
+        task_name: "مطالعه فایل‌های آموزشی اولیه سامانه تدارکات الکترونیکی دولت (ستاد)"
+        assigned_to: "New Hire"
+        is_required: true
+      - id: "D3_003"
+        category: "Evaluation"
+        task_name: "شرکت در آزمون‌های خودآموزی پایان روزهای دوم و سوم و کسب حداقل نمره ۸۰٪"
+        assigned_to: "New Hire"
+        is_required: true
+
+  - phase: "PHASE_03_DAY_4"
+    title: "روز چهارم: رفع اشکال و تمرین سناریوها"
+    timeline: "Day 4"
+    owner: "Mentor / Manager"
+    tasks:
+      - id: "D4_001"
+        category: "Feedback"
+        task_name: "جلسه رفع ابهامات کالا، بازار و ساختار رقبا با حضور مدیر مستقیم"
+        assigned_to: "Line Manager"
+        is_required: true
+      - id: "D4_002"
+        category: "System Training"
+        task_name: "آموزش کاربری پیشرفته و ثبت عملی داده‌ها در CRM فرادیس و سیستم میزیتو"
+        assigned_to: "Line Manager"
+        is_required: true
+      - id: "D4_003"
+        category: "Role-Play"
+        task_name: "برگزاری کارگاه شبیه‌سازی مذاکره و متقاعدسازی (غلبه بر مخالفت‌ها)"
+        assigned_to: "Line Manager / New Hire"
+        is_required: true
+
+  - phase: "PHASE_04_WEEK_2"
+    title: "هفته دوم: شبیه‌سازی و همراهی میدانی"
+    timeline: "Week 2"
+    owner: "Senior Representative / Mentor"
+    tasks:
+      - id: "W2_001"
+        category: "CRM Data Entry"
+        task_name: "ثبت اطلاعات کامل حداقل ۱۰ مشتری/مرکز درمانی فرضی در CRM فرادیس بدون خطا"
+        assigned_to: "New Hire"
+        is_required: true
+      - id: "W2_002"
+        category: "Sales Operations"
+        task_name: "صدور حداقل ۵ پیش‌فاکتور فرضی بر اساس سناریوهای مختلف قیمت و تخفیف مصوب"
+        assigned_to: "New Hire"
+        is_required: true
+      - id: "W2_003"
+        category: "Role-Play"
+        task_name: "برگزاری ۳ جلسه تماس تلفنی شبیه‌سازی‌شده و تکمیل موفق چک‌لیست ویزیت"
+        assigned_to: "New Hire / Senior Staff"
+        is_required: true
+      - id: "W2_004"
+        category: "Field Observation"
+        task_name: "همراهی میدانی (Shadowing) با کارشناس ارشد در حداقل ۳ ویزیت حضوری در بیمارستان‌ها"
+        assigned_to: "New Hire / Mentor"
+        is_required: true
+
+  - phase: "PHASE_05_WEEK_3"
+    title: "هفته سوم: کار عملی میدانی و سامانه ستاد"
+    timeline: "Week 3"
+    owner: "New Hire (Under Supervision)"
+    tasks:
+      - id: "W3_001"
+        category: "Active Prospecting"
+        task_name: "برقراری حداقل ۱۵ تماس تلفنی واقعی با سرنخ‌های فروش جدید/راکد و ثبت نتایج در CRM"
+        assigned_to: "New Hire"
+        is_required: true
+      - id: "W3_002"
+        category: "Field Sales"
+        task_name: "انجام حداقل ۵ ویزیت مستقل حضوری در مراکز درمانی سطح متوسط بر اساس الگوهای ورود"
+        assigned_to: "New Hire"
+        is_required: true
+      - id: "W3_003"
+        category: "Setad Portal"
+        task_name: "جستجو و شناسایی روزانه حداقل ۳ نیاز یا استعلام فعال در سامانه ستاد ایران"
+        assigned_to: "New Hire"
+        is_required: true
+      - id: "W3_004"
+        category: "Tender Documentation"
+        task_name: "آماده‌سازی مدارک فنی (پاکت ب) شامل کاتالوگ و IRC کالا جهت بارگذاری در ستاد"
+        assigned_to: "New Hire / Tender Officer"
+        is_required: true
+      - id: "W3_005"
+        category: "Finance Operations"
+        task_name: "پیگیری وضعیت تسویه حساب حداقل ۲ پرونده مالی معوق از کارپردازی و حسابداری بیمارستان هدف"
+        assigned_to: "New Hire"
+        is_required: true
+
+  - phase: "PHASE_06_WEEK_4"
+    title: "هفته چهارم: استقلال کاری و ارزیابی نهایی"
+    timeline: "Week 4"
+    owner: "Line Manager & HR"
+    tasks:
+      - id: "W4_001"
+        category: "Independent Sales"
+        task_name: "مدیریت مستقل کامل حداقل یک پرونده فروش واقعی از اولین ارتباط تا مرحله پیش‌فاکتور"
+        assigned_to: "New Hire"
+        is_required: true
+      - id: "W4_002"
+        category: "Post-Market Surveillance"
+        task_name: "ثبت واقعی/شبیه‌سازی‌شده شکایت بالینی مشتری در کارتابل تضمین کیفیت بر اساس ISO 13485"
+        assigned_to: "New Hire / QA Unit"
+        is_required: true
+      - id: "W4_003"
+        category: "Final Examination"
+        task_name: "قبولی در آزمون جامع کتبی و شفاهی نهایی انبردینگ پرسنل جدید"
+        assigned_to: "New Hire"
+        is_required: true
+      - id: "W4_004"
+        category: "Evaluation Meeting"
+        task_name: "برگزاری جلسه فیدبک دوطرفه، تکمیل چک‌لیست ارزیابی مهارت‌ها و امضای تایید نهایی انبردینگ"
+        assigned_to: "Line Manager / HR"
+        is_required: true
+
+objection_handling_scripts:
+  - objection_id: "OBJ_PRICE"
+    objection_text: "کالای شما گرون است."
+    standard_response_fa: "فرمايش شما رو درک می‌کنم که بحث قیمت در خرید بیمارستان چقدر کليدیه. اما اجازه بدید بگم که چرا مراکز درمانی بزرگ با ما همکاری می‌کنن؛ کدهای IRC ما اصالت کالا رو تایید می‌کنه و نرخ عوارض گمرکی و سود ما دقیقاً بر اساس ضوابط سازمان غذا و دارو (IMED) تنظیم شده. همچنین، به دلیل طول عمر بیشتر و نرخ خرابی بسیار پایین کالا، در نهایت هزینه‌های جانبی مرکز شما رو به شدت کاهش می‌ده. تمایل دارید یک نمونه برای تست کیفیت در اختیار بخش قرار بدیم؟"
+  - objection_id: "OBJ_LOYALTY"
+    objection_text: "دارم با یه برند سال‌ها کار می‌کنم."
+    standard_response_fa: "وفاداری شما به یک برند نشان‌دهنده تعهد شما به کیفیت در این بخش هست و این بسیار ارزشمنده. هدف ما جایگزینی کامل نیست؛ بلکه می‌خوایم به عنوان یک تامین‌کننده مکمل در کنار شما باشیم تا ریسک مرکز در زمان‌های کمبود کالا کاهش پیدا کنه. پیشنهاد می‌کنم تاییدیه بالینی (CER) و نتایج تست محصول ما رو با برند فعلی مقایسه کنید. می‌تونم هفته آینده برای ارائه نمونه تست حضورتون برسم؟"
+  - objection_id: "OBJ_DOMESTIC"
+    objection_text: "باید برند ایرانی بخرم."
+    standard_response_fa: "سیاست حمایت از تولید ملی کاملاً درسته و ما هم به آن احترام می‌گذاریم. اما برای بعضی از بیماران با شرایط خاص یا در موارد خاص جراحی، نیاز به ویژگی‌های فنی متمایزی هست که در حال حاضر در کدهای تامین خارجی ما وجود داره تا ریسک درمان به حداقل برسه. همچنین کالای ما در سامانه IMED دارای کدهای مجاز استعلام بوده و مغایرتی با قوانین خرید ندارد."
+
+evaluation_schema:
+  max_score: 30
+  rating_scale: "1 to 5 (1: Poor, 2: Needs Improvement, 3: Average, 4: Good, 5: Excellent)"
+  criteria:
+    - code: "CRIT_01"
+      metric: "تسلط بر اطلاعات فنی و بالینی محصولات"
+    - code: "CRIT_02"
+      metric: "رعایت کدهای اخلاقی و ارزش‌های سازمانی"
+    - code: "CRIT_03"
+      metric: "توانایی کار با سیستم‌های داخلی (فرادیس، میزیتو)"
+    - code: "CRIT_04"
+      metric: "تسلط بر نحوه ثبت شکایت مشتری (PMS) و الزامات کیفی"
+    - code: "CRIT_05"
+      metric: "مهارت در غلبه بر مخالفت‌ها و سناریوهای فروش"
+    - code: "CRIT_06"
+      metric: "انضباط اداری و تعهد به قوانین و فرآیندها"

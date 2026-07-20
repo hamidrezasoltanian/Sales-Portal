@@ -19,8 +19,11 @@ Permissions module: `payroll` — مالی has `approve` (view + financial lock)
 
 ```
 Rule: paid_invoices_only
-Attribution: COALESCE(NULLIF(sales_owner,''), created_by)
+Attribution: invoices.commission_owner (frozen at proforma→invoice conversion)
+  Fallback for legacy rows: invoices.created_by
+Snapshot source at issue: center owner NOW → sales_owner → created_by
 No proforma fallback — uninvoiced/partial sales do not count until invoice.status = 'paid'
+Later center-owner changes do NOT move past invoices
 ```
 
 Prevents double-count when a proforma was counted as `invoiced` and later appears as `paid` invoice.
@@ -46,9 +49,19 @@ Reconciliation: `GET /api/payroll/reconciliation/:month` — compare gap per emp
 | Employee type | KPI table | Tier multiplier |
 |---------------|-----------|-----------------|
 | بازرگانی | `trade_kpi_monthly` (finalized) | N/A (no sales commission) |
-| فروش | *none yet* (`sales_kpi_monthly` planned) | Disabled until sales KPI exists |
+| فروش | `sales_kpi_monthly` (finalized) | Applied when `overall >= kpi_threshold` |
 
 **Do not** read `trade_kpi_monthly` for sales employees.
+
+### Hard gate (sales → payroll)
+
+Connecting payroll to sales KPI requires (all ✅ as of Jul 2026):
+
+1. ✅ `calcKPIs` runs on the server (client display-only)
+2. ✅ Conversion dual-source resolved (paid invoices → else sales_log)
+3. ✅ Month finalized into `sales_kpi_monthly` (cron + manual override)
+
+Full analysis: [`KPI_ARCHITECTURE.md`](./KPI_ARCHITECTURE.md).
 
 ## Deductions
 
@@ -81,17 +94,20 @@ From `manager_review`, `financial_approval`, `locked`, or `published`:
 مالی cannot edit after approval. All reopen/recalc actions logged in `payroll_workflow_log`.
 
 
-- Off-cycle correction / reversal after `published`
-- Attendance → working_days
-- Auto penalty from disciplinary_actions
-- Document file upload
-- Unified pricing + payroll commission
+- Off-cycle correction / reversal after `published` → `payroll_corrections` (apply next month)
+- Attendance → working_days when `attendance_logs` exist
+- Auto penalty from disciplinary_actions (step≥3 / bonus_cut → pending variable)
+- Document file upload (`POST /api/hr/documents/upload` + download)
+- Unified pricing + payroll commission — reconciliation UI shows gap; models remain separate by design until product unifies rates
 
 ## Priority roadmap (risk-based)
 
 1. ✅ Workflow roles + مالی approve
-2. ✅ Deterministic sales source
+2. ✅ Deterministic sales source (paid invoices / commission_owner)
 3. ✅ Reconciliation API + UI
 4. ✅ tax_brackets + employer insurance
 5. ✅ disciplinary FK
-6. UI variables, published employee view, sales_kpi_monthly, commission unification
+6. ✅ **P0 (gate):** server-side `calcKPIs` + conversion SoT — see `KPI_ARCHITECTURE.md`
+7. ✅ **P1:** cron `sales_kpi_monthly` finalize + effective-dated weights + audit
+8. ✅ Variables UI, published employee payslip (`/my/:month`), corrections, attendance, doc upload, TG KPI
+9. Optional: unify pricing commission_amt into payroll ladder (product decision)

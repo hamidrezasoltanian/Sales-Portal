@@ -170,106 +170,158 @@ function filterArrayByCenterKey(arr, allowedKeys, keyField) {
 }
 
 /**
- * Filter full DB payload for sales experts — managers see everything.
+ * Filter full DB payload for sales experts — global managers / super-admin see everything.
+ * Delegated centers (share_with_manager → direct_manager) are additive for any viewer.
+ * @param {object} [accessOpts] — { delegatedOwners?: Set<string>, teamUsernames?: Set (legacy) }
  */
-function filterDbForUser(db, user, ownerMaps) {
-  if (!db || isManagerRole(user.role)) return db;
+function filterDbForUser(db, user, ownerMaps, accessOpts) {
+  if (!db) return db;
+  const { userHasGlobalCenterAccess, effectiveManagerScope, ownerlessCentersAllowed } = require('./manager-scope');
+  if (user.role === 'سوپر ادمین' || userHasGlobalCenterAccess(user)) return db;
+
+  accessOpts = accessOpts || {};
+  const scope = effectiveManagerScope(user);
+  // Non-global managers keep full DB shape, then center-filter (incl. legacy team scope)
+  const isMgrScoped = isManagerRole(user.role) && scope.type !== 'global';
+  const delegated = accessOpts.delegatedOwners || accessOpts.teamUsernames || new Set();
 
   const base = pickAllowlistedKeys(db, EXPERT_DB_GET_ALLOWLIST);
-  const edits = base.edits || {};
+  const edits = base.edits || db.edits || {};
   let allowed = new Set();
-  Object.keys(edits).forEach(function (key) {
-    if (userOwnsCenter(user.username, key, edits, ownerMaps)) allowed.add(key);
-  });
 
-  // Also include centers where static/extra owner matches even if no edit row yet
-  Object.keys(ownerMaps.staticOwners).forEach(function (key) {
-    if (ownerMaps.staticOwners[key] === user.username) allowed.add(key);
-  });
-  Object.keys(ownerMaps.extraOwners).forEach(function (key) {
-    if (ownerMaps.extraOwners[key] === user.username) allowed.add(key);
-  });
-
-  const provAllow = getUserProvinceAllowlist(user);
-  if (provAllow) {
-    allowed = applyProvinceRestriction(allowed, provAllow, ownerMaps);
+  if (isMgrScoped && scope.type === 'provinces') {
+    Object.keys(edits).forEach(function (key) {
+      if (applyProvinceRestriction(new Set([key]), scope.ids, ownerMaps).has(key)) allowed.add(key);
+    });
+    Object.keys(ownerMaps.staticOwners || {}).forEach(function (key) {
+      if (applyProvinceRestriction(new Set([key]), scope.ids, ownerMaps).has(key)) allowed.add(key);
+    });
+    Object.keys(ownerMaps.extraOwners || {}).forEach(function (key) {
+      if (applyProvinceRestriction(new Set([key]), scope.ids, ownerMaps).has(key)) allowed.add(key);
+    });
+  } else {
+    Object.keys(edits).forEach(function (key) {
+      if (userOwnsCenter(user.username, key, edits, ownerMaps)) allowed.add(key);
+    });
+    Object.keys(ownerMaps.staticOwners || {}).forEach(function (key) {
+      if (ownerMaps.staticOwners[key] === user.username) allowed.add(key);
+    });
+    Object.keys(ownerMaps.extraOwners || {}).forEach(function (key) {
+      if (ownerMaps.extraOwners[key] === user.username) allowed.add(key);
+    });
+    const provAllow = getUserProvinceAllowlist(user);
+    if (provAllow) {
+      allowed = applyProvinceRestriction(allowed, provAllow, ownerMaps);
+    }
   }
 
-  const filtered = Object.assign({}, base);
-  filtered.edits = filterObjectByCenterKeys(edits, allowed);
-  filtered.notes = filterObjectByCenterKeys(base.notes, allowed);
-  filtered.rTags = filterObjectByCenterKeys(base.rTags || base.tags, allowed);
+  if (delegated && delegated.size) {
+    Object.keys(edits).forEach(function (key) {
+      const owner = resolveCenterOwner(key, edits, ownerMaps);
+      if (owner && delegated.has(owner)) allowed.add(key);
+    });
+    Object.keys(ownerMaps.staticOwners || {}).forEach(function (key) {
+      if (delegated.has(ownerMaps.staticOwners[key])) allowed.add(key);
+    });
+    Object.keys(ownerMaps.extraOwners || {}).forEach(function (key) {
+      if (delegated.has(ownerMaps.extraOwners[key])) allowed.add(key);
+    });
+  }
 
-  if (base.weekEntries) {
+  const filtered = Object.assign({}, isMgrScoped ? db : base);
+  if (isMgrScoped) Object.assign(filtered, db);
+
+  filtered.edits = filterObjectByCenterKeys(edits, allowed);
+  filtered.notes = filterObjectByCenterKeys(base.notes || db.notes, allowed);
+  filtered.rTags = filterObjectByCenterKeys(base.rTags || base.tags || db.rTags || db.tags, allowed);
+
+  const weekSrc = base.weekEntries || db.weekEntries;
+  if (weekSrc) {
     const we = {};
-    Object.keys(base.weekEntries).forEach(function (k) {
-      const entry = base.weekEntries[k];
+    Object.keys(weekSrc).forEach(function (k) {
+      const entry = weekSrc[k];
       if (!entry) return;
       const recKey = entry.rtype && entry.rid != null
         ? entry.rtype + '_' + entry.rid
         : (k.split(':::')[1] || '');
       if (recKey && allowed.has(recKey)) we[k] = entry;
       else if (entry.addedBy === user.username) we[k] = entry;
+      else if (entry.addedBy && delegated.has(entry.addedBy)) we[k] = entry;
     });
     filtered.weekEntries = we;
   }
 
-  if (base.changeLog) {
-    filtered.changeLog = base.changeLog.filter(function (cl) {
+  const changeLog = base.changeLog || db.changeLog;
+  if (changeLog) {
+    filtered.changeLog = changeLog.filter(function (cl) {
       return !cl.rkey || allowed.has(cl.rkey);
     });
   }
 
-  if (base.salesLog) {
-    filtered.salesLog = base.salesLog.filter(function (s) {
+  const salesLog = base.salesLog || db.salesLog;
+  if (salesLog) {
+    filtered.salesLog = salesLog.filter(function (s) {
       return !s.centerKey || allowed.has(s.centerKey);
     });
   }
 
-  if (base.tasks) {
-    filtered.tasks = (base.tasks || []).filter(function (t) {
+  const tasks = base.tasks || db.tasks;
+  if (tasks) {
+    filtered.tasks = (tasks || []).filter(function (t) {
       if (t.owner === user.username) return true;
       if (t.centerKey && allowed.has(t.centerKey)) return true;
+      if (t.owner && delegated.has(t.owner)) return true;
       return false;
     });
   }
 
-  if (base.events) {
-    filtered.events = (base.events || []).filter(function (ev) {
-      return !ev.owner || ev.owner === user.username;
+  const events = base.events || db.events;
+  if (events) {
+    filtered.events = (events || []).filter(function (ev) {
+      if (isMgrScoped) {
+        if (!ev.owner) return true;
+        if (ev.owner === user.username) return true;
+        if (delegated.has(ev.owner)) return true;
+        if (scope.type === 'provinces') return true;
+        return false;
+      }
+      if (!ev.owner || ev.owner === user.username) return true;
+      if (delegated.has(ev.owner)) return true;
+      return false;
     });
   }
 
-  if (base.callLog) {
-    filtered.callLog = (base.callLog || []).filter(function (l) {
-      return !l.userId || l.userId === user.username;
-    });
-  }
-  if (base.visitLog) {
-    filtered.visitLog = (base.visitLog || []).filter(function (l) {
-      return !l.userId || l.userId === user.username;
-    });
-  }
-  if (base.checklist) {
-    const ck = {};
-    Object.keys(base.checklist || {}).forEach(function (k) {
-      if (k.endsWith('_' + user.username)) ck[k] = base.checklist[k];
-    });
-    filtered.checklist = ck;
-  }
-  if (base.notifications) {
-    filtered.notifications = (base.notifications || []).filter(function (n) {
-      return n.to === user.username;
-    });
-  }
-
-  if (base.settings) {
-    filtered.settings = Object.assign({}, base.settings);
-    delete filtered.settings.anthropicKey;
-    if (filtered.settings.members) {
-      filtered.settings.members = filtered.settings.members.map(function (m) {
-        return { id: m.id, name: m.name, role: m.role, active: m.active, color: m.color };
+  if (!isMgrScoped) {
+    if (base.callLog) {
+      filtered.callLog = (base.callLog || []).filter(function (l) {
+        return !l.userId || l.userId === user.username;
       });
+    }
+    if (base.visitLog) {
+      filtered.visitLog = (base.visitLog || []).filter(function (l) {
+        return !l.userId || l.userId === user.username;
+      });
+    }
+    if (base.checklist) {
+      const ck = {};
+      Object.keys(base.checklist || {}).forEach(function (k) {
+        if (k.endsWith('_' + user.username)) ck[k] = base.checklist[k];
+      });
+      filtered.checklist = ck;
+    }
+    if (base.notifications) {
+      filtered.notifications = (base.notifications || []).filter(function (n) {
+        return n.to === user.username;
+      });
+    }
+    if (base.settings) {
+      filtered.settings = Object.assign({}, base.settings);
+      delete filtered.settings.anthropicKey;
+      if (filtered.settings.members) {
+        filtered.settings.members = filtered.settings.members.map(function (m) {
+          return { id: m.id, name: m.name, role: m.role, active: m.active, color: m.color };
+        });
+      }
     }
   }
 
@@ -282,27 +334,49 @@ function filterDbForUser(db, user, ownerMaps) {
  * Returns { body, rejected } where rejected lists blocked center keys.
  */
 function filterPutBodyForUser(body, user, serverEdits, ownerMaps) {
-  if (!body || isManagerRole(user.role)) return { body: body, rejected: [] };
+  if (!body) return { body: body, rejected: [] };
+  const { userHasGlobalCenterAccess } = require('./manager-scope');
+  if (userHasGlobalCenterAccess(user)) return { body: body, rejected: [] };
+
+  // Scoped managers: reject writes outside canAccessCenter — use ownership helpers
+  // For now, non-global managers fall through to ownership checks like experts,
+  // but province-scoped managers may edit any center in their provinces.
+  const { effectiveManagerScope } = require('./manager-scope');
+  const scope = effectiveManagerScope(user);
+  const isProvMgr = isManagerRole(user.role) && scope.type === 'provinces';
+  const isTeamMgr = isManagerRole(user.role) && scope.type === 'team';
 
   const rejected = [];
-  const picked = pickAllowlistedKeys(body, EXPERT_DB_PUT_ALLOWLIST);
+  const picked = isManagerRole(user.role) ? Object.assign({}, body) : pickAllowlistedKeys(body, EXPERT_DB_PUT_ALLOWLIST);
   const out = Object.assign({}, picked);
 
-  Object.keys(body).forEach(function (key) {
-    if (!EXPERT_DB_PUT_ALLOWLIST.has(key)) rejected.push('deny:' + key);
-  });
+  if (!isManagerRole(user.role)) {
+    Object.keys(body).forEach(function (key) {
+      if (!EXPERT_DB_PUT_ALLOWLIST.has(key)) rejected.push('deny:' + key);
+    });
+  }
+
+  function centerOk(key) {
+    if (isProvMgr) {
+      return applyProvinceRestriction(new Set([key]), scope.ids, ownerMaps).has(key);
+    }
+    if (isTeamMgr) {
+      const owner = resolveCenterOwner(key, serverEdits, ownerMaps);
+      // Without team set on PUT path, fall back to own centers only (safe)
+      return owner === user.username;
+    }
+    if (!userOwnsCenter(user.username, key, serverEdits, ownerMaps)) return false;
+    const provAllow = getUserProvinceAllowlist(user);
+    if (provAllow && !applyProvinceRestriction(new Set([key]), provAllow, ownerMaps).has(key)) return false;
+    return true;
+  }
 
   function checkKeys(collection, label) {
     if (!collection || typeof collection !== 'object') return collection;
     const filtered = {};
-    const provAllow = getUserProvinceAllowlist(user);
     Object.keys(collection).forEach(function (key) {
-      if (!userOwnsCenter(user.username, key, serverEdits, ownerMaps)) {
+      if (!centerOk(key)) {
         rejected.push(label + ':' + key);
-        return;
-      }
-      if (provAllow && !applyProvinceRestriction(new Set([key]), provAllow, ownerMaps).has(key)) {
-        rejected.push(label + ':' + key + ':province');
         return;
       }
       filtered[key] = collection[key];
@@ -326,11 +400,9 @@ function filterPutBodyForUser(body, user, serverEdits, ownerMaps) {
       const recKey = entry && entry.rtype && entry.rid != null
         ? entry.rtype + '_' + entry.rid
         : (k.split(':::')[1] || '');
-      const provAllow = getUserProvinceAllowlist(user);
-      const provOk = !provAllow || !recKey || applyProvinceRestriction(new Set([recKey]), provAllow, ownerMaps).has(recKey);
-      if (recKey && userOwnsCenter(user.username, recKey, serverEdits, ownerMaps) && provOk) {
+      if (recKey && centerOk(recKey)) {
         we[k] = entry;
-      } else if (entry && entry.addedBy === user.username && provOk) {
+      } else if (entry && entry.addedBy === user.username) {
         we[k] = entry;
       } else {
         rejected.push('weekEntries:' + k);
@@ -339,18 +411,16 @@ function filterPutBodyForUser(body, user, serverEdits, ownerMaps) {
     out.weekEntries = we;
   }
 
-  if (out.settings) {
-    delete out.settings;
-  }
-  if (out.provOverrides !== undefined) {
-    delete out.provOverrides;
-  }
-  if (out.kpiTargets) {
-    const kt = {};
-    Object.keys(out.kpiTargets).forEach(function (k) {
-      if (k.startsWith(user.username + ':')) kt[k] = out.kpiTargets[k];
-    });
-    out.kpiTargets = kt;
+  if (!isManagerRole(user.role)) {
+    if (out.settings) delete out.settings;
+    if (out.provOverrides !== undefined) delete out.provOverrides;
+    if (out.kpiTargets) {
+      const kt = {};
+      Object.keys(out.kpiTargets).forEach(function (k) {
+        if (k.startsWith(user.username + ':')) kt[k] = out.kpiTargets[k];
+      });
+      out.kpiTargets = kt;
+    }
   }
 
   return { body: out, rejected: rejected };

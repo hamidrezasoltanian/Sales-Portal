@@ -2,6 +2,12 @@
 (function () {
   var V = (typeof window !== 'undefined' && window.__APP_BUILD) ? window.__APP_BUILD : '20260715x';
   var _loaded = {};
+  var _loadedBuild = '';
+
+  function _resetIfBuildChanged() {
+    if (_loadedBuild && _loadedBuild !== V) _loaded = {};
+    _loadedBuild = V;
+  }
 
   var TAB_SCRIPTS = {
     calendar: ['calendar.js'],
@@ -14,7 +20,7 @@
     proforma: ['proforma.js', 'proforma-analytics.js', 'proforma-phase2.js'],
     hcp: ['hcp.js'],
     support: ['support.js'],
-    hr: ['hr.js', 'payroll.js'],
+    hr: ['hr.js', 'hr-onboarding.js', 'payroll.js'],
     'trade-kpi': ['trade-kpi.js', 'trade-cases-ui.js', 'tasks.js'],
     reports: ['reports.js'],
     'week-planner': ['expert-targets.js', 'week-planner.js'],
@@ -30,17 +36,25 @@
   };
 
   function _loadOne(file) {
+    _resetIfBuildChanged();
     var src = '/js/' + file;
-    if (_loaded[src]) return Promise.resolve();
+    var cacheKey = src + '?v=' + V;
+    if (_loaded[cacheKey]) return Promise.resolve();
     return new Promise(function (resolve, reject) {
       var s = document.createElement('script');
       s.src = src + '?v=' + V;
       s.async = false;
-      s.onload = function () { _loaded[src] = true; resolve(); };
+      s.onload = function () { _loaded[cacheKey] = true; resolve(); };
       s.onerror = function () { reject(new Error('Failed to load ' + src)); };
       document.body.appendChild(s);
     });
   }
+
+  /** Force reload tab scripts (e.g. after deploy while tab was open) */
+  window.reloadTabScripts = function (tab) {
+    _loaded = {};
+    return ensureTabScripts(tab);
+  };
 
   window.ensureTabScripts = function (tab) {
     var files = TAB_SCRIPTS[tab];

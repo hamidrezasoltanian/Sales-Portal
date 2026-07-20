@@ -440,4 +440,24 @@ router.delete('/:key/notes/:index', async function (req, res) {
   }
 });
 
+/** نام‌های نمایشی مراکز از کش سرور (برای orphan / کد خام در week_entries) */
+router.get('/name-cache', requireAuth, async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT center_key, center_name FROM crm_centers_cache
+       WHERE center_name IS NOT NULL AND btrim(center_name) <> ''
+       ORDER BY center_key`
+    );
+    const map = {};
+    r.rows.forEach(function (row) {
+      if (!row.center_key || !row.center_name) return;
+      map[row.center_key] = row.center_name;
+    });
+    res.json({ ok: true, names: map, count: Object.keys(map).length });
+  } catch (e) {
+    console.error('[centers GET /name-cache]', e.message);
+    res.status(500).json({ error: 'خطای داخلی سرور' });
+  }
+});
+
 module.exports = router;

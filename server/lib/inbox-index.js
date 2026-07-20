@@ -456,17 +456,22 @@ async function syncProforma(pfId) {
   }
   const row = r.rows[0];
   const total = Number(row.total) || 0;
-  if (row.status === 'draft' || row.status === 'rejected') {
+  if (row.status === 'draft' || row.status === 'rejected' || row.status === 'awaiting_customer') {
+    const sub =
+      row.status === 'rejected' ? 'رد شده' :
+      row.status === 'awaiting_customer' ? 'در انتظار تایید مشتری' :
+      'پیش‌نویس';
     await upsertInboxItem({
       id: 'proforma:' + row.id,
       sourceType: 'proforma',
       sourceId: row.id,
       owner: row.created_by,
       title: 'پیش‌فاکتور ' + (row.no || row.id),
-      subtitle: (row.center_name || '') + ' · ' + (row.status === 'rejected' ? 'رد شده' : 'پیش‌نویس'),
+      subtitle: (row.center_name || '') + ' · ' + sub,
       dueAt: row.jalali_date,
       monetaryValue: total,
       action: 'proforma',
+      priority: row.status === 'awaiting_customer' ? 2 : 3,
       meta: { pfId: row.id, status: row.status },
     });
     await deactivateInboxItem('proforma_approve:' + row.id);
@@ -604,7 +609,7 @@ async function rebuildAll() {
      WHERE source_type = 'notification' AND active = TRUE`
   ).catch(function () {});
 
-  const pfs = await query(`SELECT id FROM proformas WHERE status IN ('draft','rejected','sent','negotiating','pending_disc')`);
+  const pfs = await query(`SELECT id FROM proformas WHERE status IN ('draft','rejected','awaiting_customer','sent','negotiating','pending_disc')`);
   for (const row of pfs.rows) {
     await syncProforma(row.id);
     activeIds.add('proforma:' + row.id);

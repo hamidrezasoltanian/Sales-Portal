@@ -13,6 +13,14 @@ const LOSS_REASONS = {
   other: 'سایر',
 };
 
+const PF_LOSS_TO_CENTER = {
+  price_high: 'قیمت بالا',
+  competitor: 'رقیب برد',
+  need_change: 'نیاز نداشتن',
+  no_response: 'عدم دسترسی به تصمیم‌گیر',
+  other: 'سایر',
+};
+
 const PF_ACTION_LABELS = {
   send: 'ارسال',
   approve: 'تأیید',
@@ -23,6 +31,9 @@ const PF_ACTION_LABELS = {
   expire: 'انقضا',
   approve_disc: 'تأیید تخفیف',
   reject_disc: 'رد تخفیف',
+  customer_confirm: 'تأیید مشتری',
+  customer_revise: 'نیاز به اصلاح',
+  customer_decline: 'عدم خرید',
 };
 
 const PF_EVENT_LABELS = {
@@ -159,7 +170,7 @@ async function runAutoExpire() {
   const r = await query(
     `SELECT id, no, expiry_date, sales_owner, created_by, center_name
      FROM proformas
-     WHERE status IN ('sent','negotiating')
+     WHERE status IN ('sent','negotiating','awaiting_customer')
        AND expiry_date IS NOT NULL AND expiry_date != ''
        AND expiry_date < $1`,
     [today]
@@ -189,6 +200,7 @@ function enrichRow(r) {
 module.exports = {
   PF_STATUSES,
   LOSS_REASONS,
+  PF_LOSS_TO_CENTER,
   PF_ACTION_LABELS,
   PF_EVENT_LABELS,
   parseAuditLog,

@@ -39,14 +39,21 @@
             <span class="search-icon">🔍</span>
           </div>
           <div class="lt-toolbar-actions">
-            <button v-if="isManager" class="lt-pin-btn" title="ویرایش قالب چاپ نامه" @click="openPrintTplModal">🖨 قالب چاپ</button>
+            <button class="lt-new-btn" @click="openNewModal" title="ثبت نامه جدید">
+              <span class="lt-btn-icon">➕</span>
+              <span class="lt-btn-text">ثبت نامه جدید</span>
+            </button>
+            <button v-if="isManager" class="lt-pin-btn" title="ویرایش قالب چاپ نامه" @click="openPrintTplModal">
+              <span class="lt-btn-icon">🖨</span>
+              <span class="lt-btn-text">قالب چاپ</span>
+            </button>
+            <button v-if="isSuperAdmin" class="lt-pin-btn" title="تنظیم شماره شروع نامه" @click="openIndicatorModal">
+              <span class="lt-btn-icon">🔢</span>
+              <span class="lt-btn-text">شماره نامه</span>
+            </button>
             <button class="lt-pin-btn" title="تغییر پین‌کد امضا" @click="showPinModal = true">
               <span class="lt-btn-icon">⚙️</span>
               <span class="lt-btn-text">پین امضا</span>
-            </button>
-            <button class="lt-new-btn" @click="openNewModal">
-              <span class="lt-btn-icon">➕</span>
-              <span class="lt-btn-text">ثبت نامه جدید</span>
             </button>
           </div>
         </div>
@@ -150,13 +157,13 @@
                 🖨 چاپ نامه
               </button>
 
-              <!-- Edit Draft -->
+              <!-- Edit Draft / Super Admin -->
               <button
                 v-if="canEditLetter(selectedLetter)"
                 class="lt-btn-approve"
                 @click="openEditDraft(selectedLetter)"
               >
-                ✏️ ویرایش پیش‌نویس
+                ✏️ {{ isSuperAdmin && selectedLetter.status !== 'draft' ? 'ویرایش نامه (مدیریت)' : 'ویرایش پیش‌نویس' }}
               </button>
 
               <!-- Register internal/incoming -->
@@ -411,8 +418,17 @@
               <div class="sub-title">🖋️ وضعیت امضاکنندگان:</div>
               <div class="signers-list">
                 <div v-for="s in selectedLetter.signers" :key="s.username" class="signer-status-badge" :class="s.status">
-                  <span class="signer-name">{{ s.display_name }}</span>
+                  <span class="signer-name">{{ s.display_name || s.username }}</span>
                   <span class="signer-val">{{ s.status === 'signed' ? '✅ امضا شده' : '⏳ در انتظار امضا' }}</span>
+                  <button
+                    v-if="isSuperAdmin && s.status === 'signed'"
+                    type="button"
+                    class="lt-btn-admin-unsign"
+                    title="حذف امضا (سوپر ادمین)"
+                    @click="adminUnsignSigner(s.username, s.display_name || s.username)"
+                  >
+                    🚫 حذف امضا
+                  </button>
                 </div>
               </div>
             </div>
@@ -556,7 +572,7 @@
     <div v-if="showNewModal" class="lt-modal-overlay lt-modal-overlay--compose" @click.self="closeNewModal">
       <div class="lt-modal modal-compose" dir="rtl">
         <div class="lt-modal-header">
-          <span>{{ editingLetterId ? 'ویرایش پیش‌نویس نامه' : 'ثبت نامه اداری جدید' }}</span>
+          <span>{{ composeModalTitle }}</span>
           <button @click="closeNewModal">✕</button>
         </div>
         <div class="compose-modal-layout">
@@ -702,12 +718,19 @@
         </div>
         <div class="lt-modal-footer">
           <button class="lt-btn-cancel" @click="closeNewModal">انصراف</button>
-          <button class="lt-btn-save-draft" :disabled="!newForm.subject.trim() || newFormLoading" @click="saveLetter('draft')">
-            💾 {{ editingLetterId ? 'ذخیره تغییرات پیش‌نویس' : 'ذخیره به عنوان پیش‌نویس' }}
-          </button>
-          <button class="lt-btn-save" :disabled="!newForm.subject.trim() || newFormLoading" @click="saveLetter('pending')">
-            🚀 {{ editingLetterId ? 'ثبت نهایی تغییرات' : 'ثبت نهایی / ارسال جهت اقدام' }}
-          </button>
+          <template v-if="isSuperAdminEditingNonDraft">
+            <button class="lt-btn-save" :disabled="!newForm.subject.trim() || newFormLoading" @click="saveLetter('draft', { preserveStatus: true })">
+              💾 ذخیره تغییرات (مدیریت)
+            </button>
+          </template>
+          <template v-else>
+            <button class="lt-btn-save-draft" :disabled="!newForm.subject.trim() || newFormLoading" @click="saveLetter('draft')">
+              💾 {{ editingLetterId ? 'ذخیره تغییرات پیش‌نویس' : 'ذخیره به عنوان پیش‌نویس' }}
+            </button>
+            <button class="lt-btn-save" :disabled="!newForm.subject.trim() || newFormLoading" @click="saveLetter('pending')">
+              🚀 {{ editingLetterId ? 'ثبت نهایی تغییرات' : 'ثبت نهایی / ارسال جهت اقدام' }}
+            </button>
+          </template>
         </div>
       </div>
     </div>
@@ -842,6 +865,62 @@
           <button class="lt-btn-cancel" @click="showPinModal = false">انصراف</button>
           <button class="lt-btn-save" :disabled="!pinForm.currentPin || !pinForm.newPin || pinFormLoading" @click="updatePinCode">
             ثبت پین‌کد جدید
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- INDICATOR START NUMBER (SUPER ADMIN) -->
+    <div v-if="showIndicatorModal" class="lt-modal-overlay" @click.self="showIndicatorModal = false">
+      <div class="lt-modal modal-small" dir="rtl">
+        <div class="lt-modal-header">
+          <span>🔢 شماره شروع نامه (سال {{ indicatorForm.jalaliYear || '—' }})</span>
+          <button @click="showIndicatorModal = false">✕</button>
+        </div>
+        <div class="lt-modal-body">
+          <p class="modal-alert-info">
+            شمارنده در ابتدای هر سال شمسی از این عدد شروع می‌شود و الگوی شماره برای سال بعد تکرار می‌گردد.
+            بخش تاریخ در شماره (مثلاً ۴۰۵۰۱) خودکار با سال/ماه جدید به‌روز می‌شود.
+          </p>
+          <div class="modal-form-row">
+            <label>شماره شروع سالانه *</label>
+            <input
+              type="number"
+              min="1"
+              max="999999"
+              v-model.number="indicatorForm.startNumber"
+              class="lt-input"
+              :disabled="!indicatorForm.canEdit"
+            />
+          </div>
+          <div class="modal-form-row" v-if="indicatorForm.example">
+            <label>نمونه شماره بعدی</label>
+            <div class="lt-indicator" style="display:block;padding:8px 10px;background:#f8fafc;border-radius:8px">{{ indicatorForm.example }}</div>
+          </div>
+          <label class="lt-check-row" style="display:flex;gap:8px;align-items:center;font-size:13px;margin-top:8px">
+            <input type="checkbox" v-model="indicatorForm.applyCurrentYear" :disabled="!indicatorForm.canEdit" />
+            اعمال روی شمارنده سال جاری (نامه بعدی از این عدد؛ بدون عقب‌گرد روی شماره‌های صادرشده)
+          </label>
+          <div v-if="indicatorForm.counters.length" style="margin-top:14px">
+            <div style="font-weight:700;font-size:13px;margin-bottom:6px">شمارنده‌های سال جاری</div>
+            <div
+              v-for="c in indicatorForm.counters"
+              :key="c.department_prefix + '-' + c.letter_type"
+              style="font-size:12px;color:#64748b;padding:4px 0;border-bottom:1px solid #f1f5f9"
+            >
+              {{ c.department_prefix }} / {{ letterTypeLabel(c.letter_type) }} → آخرین: {{ c.last_sequence }}
+            </div>
+          </div>
+        </div>
+        <div class="lt-modal-footer">
+          <button class="lt-btn-cancel" @click="showIndicatorModal = false">بستن</button>
+          <button
+            v-if="indicatorForm.canEdit"
+            class="lt-btn-save"
+            :disabled="indicatorLoading || !indicatorForm.startNumber || indicatorForm.startNumber < 1"
+            @click="saveIndicatorSettings"
+          >
+            💾 ذخیره
           </button>
         </div>
       </div>
@@ -981,6 +1060,7 @@ const completingReferralId = ref<number | null>(null);
 // Forms & Modals toggle
 const showNewModal = ref(false);
 const editingLetterId = ref<number | null>(null);
+const editingLetterStatus = ref<string>('draft');
 const newFormLoading = ref(false);
 const newForm = reactive({
   type: 'internal' as 'incoming' | 'outgoing' | 'internal',
@@ -1024,13 +1104,91 @@ const unsignForm = reactive({
 
 // Update PIN Form
 const showPinModal = ref(false);
+const showPrintTplModal = ref(false);
+const showIndicatorModal = ref(false);
+const indicatorLoading = ref(false);
+const indicatorForm = reactive({
+  jalaliYear: 0,
+  startNumber: 1,
+  example: '',
+  canEdit: false,
+  applyCurrentYear: true,
+  counters: [] as Array<{ department_prefix: string; letter_type: string; last_sequence: number }>,
+});
+
+const isSuperAdmin = computed(() => props.userRole === 'سوپر ادمین');
+
+const isSuperAdminEditingNonDraft = computed(() =>
+  isSuperAdmin.value && editingLetterId.value != null && editingLetterStatus.value !== 'draft'
+);
+
+const composeModalTitle = computed(() => {
+  if (!editingLetterId.value) return 'ثبت نامه اداری جدید';
+  if (isSuperAdminEditingNonDraft.value) return 'ویرایش نامه (سوپر ادمین)';
+  return 'ویرایش پیش‌نویس نامه';
+});
+
+function letterTypeLabel(t: string) {
+  if (t === 'outgoing') return 'صادره';
+  if (t === 'incoming') return 'وارده';
+  if (t === 'internal') return 'داخلی';
+  return t || '—';
+}
+
+async function openIndicatorModal() {
+  showIndicatorModal.value = true;
+  indicatorLoading.value = true;
+  try {
+    const r = await fetch('/api/letters/indicator-settings', { credentials: 'include' });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'خطا');
+    indicatorForm.jalaliYear = data.jalali_year || 0;
+    indicatorForm.startNumber = data.start_number || 1;
+    indicatorForm.example = data.example || '';
+    indicatorForm.canEdit = !!data.can_edit;
+    indicatorForm.counters = Array.isArray(data.counters) ? data.counters : [];
+  } catch (e: any) {
+    alert(e.message || 'خطا در بارگذاری تنظیمات شماره');
+    showIndicatorModal.value = false;
+  } finally {
+    indicatorLoading.value = false;
+  }
+}
+
+async function saveIndicatorSettings() {
+  if (!indicatorForm.canEdit) return;
+  const n = Number(indicatorForm.startNumber);
+  if (!Number.isFinite(n) || n < 1) {
+    alert('شماره شروع نامعتبر است');
+    return;
+  }
+  indicatorLoading.value = true;
+  try {
+    const r = await fetch('/api/letters/indicator-settings', {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        start_number: n,
+        apply_to_current_year: !!indicatorForm.applyCurrentYear,
+      }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'خطا در ذخیره');
+    alert('شماره شروع ذخیره شد. از سال بعد شمارنده از همین عدد ریست می‌شود.');
+    showIndicatorModal.value = false;
+  } catch (e: any) {
+    alert(e.message || 'خطا');
+  } finally {
+    indicatorLoading.value = false;
+  }
+}
 const pinFormLoading = ref(false);
 const pinForm = reactive({
   currentPin: '',
   newPin: '',
 });
 
-const showPrintTplModal = ref(false);
 const printTplLoading = ref(false);
 const printTplPlaceholders = ref<string[]>([
   'letterhead', 'indicator_number', 'type', 'date', 'creator',
@@ -1499,6 +1657,32 @@ function openUnsignModal() {
   showUnsignModal.value = true;
 }
 
+async function adminUnsignSigner(username: string, displayName: string) {
+  if (!selectedLetter.value) return;
+  const note = prompt(`حذف امضای «${displayName}» — توضیح (اختیاری):`);
+  if (note === null) return;
+  if (!confirm(`آیا از حذف امضای «${displayName}» مطمئن هستید؟`)) return;
+  try {
+    const r = await fetch(`/api/letters/${selectedLetter.value.id}/admin-unsign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, note: String(note).trim() }),
+    });
+    if (r.ok) {
+      alert('امضا با موفقیت حذف شد.');
+      const prevId = selectedLetter.value.id;
+      await load();
+      const found = letters.value.find(l => l.id === prevId);
+      if (found) await selectLetter(found);
+    } else {
+      const err = await r.json();
+      alert(err.error || 'خطا در حذف امضا');
+    }
+  } catch {
+    alert('خطا در برقراری ارتباط');
+  }
+}
+
 async function submitUnsign() {
   if (!selectedLetter.value) return;
   unsignFormLoading.value = true;
@@ -1776,8 +1960,9 @@ function openNewModal() {
 }
 
 async function openEditDraft(letter: Letter) {
-  if (letter.status !== 'draft') return;
+  if (!canEditLetter(letter)) return;
   editingLetterId.value = letter.id;
+  editingLetterStatus.value = letter.status;
   newForm.type = letter.type;
   newForm.departmentPrefix = letter.department_prefix || 'الف';
   newForm.priority = letter.priority;
@@ -1826,6 +2011,7 @@ async function openEditDraft(letter: Letter) {
 function closeNewModal() {
   showNewModal.value = false;
   editingLetterId.value = null;
+  editingLetterStatus.value = 'draft';
   resetCenterPicker();
 }
 
@@ -1970,7 +2156,7 @@ async function onLetterSSE(data: { letter_id?: number; by?: string }) {
   }
 }
 
-async function saveLetter(actionStatus: 'draft' | 'pending') {
+async function saveLetter(actionStatus: 'draft' | 'pending', opts?: { preserveStatus?: boolean }) {
   if (!newForm.subject.trim()) {
     alert('موضوع نامه الزامی است.');
     return;
@@ -1983,7 +2169,7 @@ async function saveLetter(actionStatus: 'draft' | 'pending') {
     alert('انتخاب گیرنده از لیست مراکز CRM الزامی است.');
     return;
   }
-  if (newForm.type === 'outgoing' && newForm.signers.length === 0 && actionStatus === 'pending') {
+  if (newForm.type === 'outgoing' && newForm.signers.length === 0 && actionStatus === 'pending' && !opts?.preserveStatus) {
     alert('انتخاب حداقل یک امضاکننده برای نامه‌های صادره الزامی است.');
     return;
   }
@@ -2004,7 +2190,7 @@ async function saveLetter(actionStatus: 'draft' | 'pending') {
     receiver_external: selectedReceiverCenter.value?.name || '',
     receivers: newForm.receivers,
     signers: newForm.signers,
-    status: actionStatus,
+    status: opts?.preserveStatus && editingLetterStatus.value ? editingLetterStatus.value : actionStatus,
   };
 
   const isEdit = editingLetterId.value != null;
@@ -2020,7 +2206,9 @@ async function saveLetter(actionStatus: 'draft' | 'pending') {
     });
     if (r.ok) {
       const res = await r.json();
-      if (actionStatus === 'draft') {
+      if (opts?.preserveStatus) {
+        alert('تغییرات نامه با موفقیت ذخیره شد.');
+      } else if (actionStatus === 'draft') {
         alert(isEdit ? 'پیش‌نویس با موفقیت به‌روزرسانی شد.' : 'نامه با موفقیت به عنوان پیش‌نویس ذخیره گردید.');
       } else {
         alert(isEdit ? 'نامه با موفقیت به‌روزرسانی و ثبت شد.' : 'نامه با موفقیت ثبت نهایی شد.');
@@ -2053,6 +2241,8 @@ function isLetterOwner(l: Letter): boolean {
 }
 
 function canEditLetter(l: Letter): boolean {
+  if (l.is_deleted) return false;
+  if (isSuperAdmin.value) return true;
   return l.status === 'draft' && isLetterOwner(l);
 }
 
@@ -2342,13 +2532,12 @@ defineExpose({ load });
 
 .lt-toolbar {
   display: flex;
+  flex-direction: column;
   gap: 10px;
   align-items: stretch;
-  flex-wrap: wrap;
 }
 .lt-search-wrap {
-  flex: 1;
-  min-width: 200px;
+  width: 100%;
   position: relative;
   display: flex;
   align-items: center;
@@ -2357,6 +2546,7 @@ defineExpose({ load });
   padding-left: 38px;
   border-radius: 10px;
   height: 42px;
+  width: 100%;
 }
 .search-icon {
   position: absolute;
@@ -2368,20 +2558,21 @@ defineExpose({ load });
   background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
   color: #fff;
   border: none;
-  height: 42px;
+  height: 38px;
   border-radius: 10px;
   font-weight: 700;
   cursor: pointer;
   font-family: inherit;
-  font-size: 14px;
+  font-size: 13px;
   transition: all 0.2s;
   box-shadow: 0 4px 10px rgba(79, 70, 229, 0.2);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 0 18px;
-  min-width: 148px;
+  gap: 5px;
+  padding: 0 12px;
+  flex: 1 1 auto;
+  min-width: 0;
   white-space: nowrap;
   text-align: center;
 }
@@ -2392,27 +2583,37 @@ defineExpose({ load });
 
 .lt-toolbar-actions {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
   align-items: stretch;
-  flex-shrink: 0;
+}
+.lt-toolbar-actions > .lt-new-btn {
+  flex: 1 1 100%;
+}
+.lt-toolbar-actions > .lt-pin-btn {
+  flex: 1 1 calc(33.333% - 6px);
+  min-width: 88px;
 }
 .lt-pin-btn {
   background: #fff;
   border: 1px solid #e2e8f0;
   color: #64748b;
-  height: 42px;
-  padding: 0 14px;
+  height: 38px;
+  padding: 0 8px;
   border-radius: 10px;
   font-weight: 600;
   cursor: pointer;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 12px;
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 4px;
   text-align: center;
+  min-width: 0;
+  overflow: hidden;
 }
 .lt-btn-icon {
   line-height: 1;
@@ -2420,6 +2621,8 @@ defineExpose({ load });
 }
 .lt-btn-text {
   line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .lt-pin-btn:hover {
   border-color: #6366f1;
@@ -3200,6 +3403,19 @@ defineExpose({ load });
 }
 .signer-status-badge.signed { background: #ecfdf5; border-color: #a7f3d0; color: #047857; }
 .signer-status-badge.pending { background: #fffbeb; border-color: #fde68a; color: #b45309; }
+.lt-btn-admin-unsign {
+  margin-right: auto;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid #fca5a5;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+.lt-btn-admin-unsign:hover { background: #fecaca; }
 
 .receivers-wrap {
   display: flex;

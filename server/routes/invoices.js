@@ -3,6 +3,8 @@
 const express = require('express');
 const { query } = require('../db');
 const { requireAuth } = require('../auth');
+const { loadCenterAccessContext } = require('../lib/center-access');
+const { resolveCenterOwner } = require('../lib/center-ownership');
 
 const router = express.Router();
 
@@ -11,6 +13,14 @@ function payUid() { return 'pmt_' + Date.now().toString(36) + Math.random().toSt
 
 function isManager(role) {
   return ['مدیر', 'سوپر ادمین'].includes(role);
+}
+function canIssueInvoice(role) {
+  return isManager(role) || role === 'مالی';
+}
+
+function attributionSql(alias) {
+  const a = alias || 'i';
+  return `COALESCE(NULLIF(TRIM(${a}.commission_owner), ''), ${a}.created_by)`;
 }
 
 async function nextInvoiceNo(jalaliDate) {
@@ -27,6 +37,34 @@ async function nextInvoiceNo(jalaliDate) {
   return `INV-${year}-${String(nextSeq).padStart(4, '0')}`;
 }
 
+/**
+ * Freeze sales beneficiary at invoice issue time:
+ * center owner NOW → else proforma sales_owner → else proforma created_by.
+ */
+async function resolveCommissionOwnerSnapshot(pf) {
+  let owner = null;
+  if (pf.center_key) {
+    try {
+      const ctx = await loadCenterAccessContext({});
+      owner = resolveCenterOwner(pf.center_key, ctx.edits, ctx.ownerMaps);
+    } catch (e) {
+      console.warn('[invoices] center owner resolve:', e.message);
+    }
+  }
+  if (!owner) {
+    owner = (pf.sales_owner && String(pf.sales_owner).trim()) || pf.created_by || null;
+  }
+  let name = owner || '';
+  if (owner) {
+    const ur = await query(
+      'SELECT display_name FROM app_users WHERE username = $1 LIMIT 1',
+      [owner]
+    ).catch(function () { return { rows: [] }; });
+    if (ur.rows.length && ur.rows[0].display_name) name = ur.rows[0].display_name;
+  }
+  return { owner: owner || null, name: name || null };
+}
+
 // GET /api/invoices
 router.get('/', requireAuth, async (req, res) => {
   try {
@@ -38,9 +76,9 @@ router.get('/', requireAuth, async (req, res) => {
     if (from)   { conds.push(`i.jalali_date >= $${params.length + 1}`); params.push(from); }
     if (to)     { conds.push(`i.jalali_date <= $${params.length + 1}`); params.push(to); }
     if (employee && isManager(req.user.role)) {
-      conds.push(`i.created_by = $${params.length + 1}`); params.push(employee);
+      conds.push(`${attributionSql('i')} = $${params.length + 1}`); params.push(employee);
     } else if (!isManager(req.user.role)) {
-      conds.push(`i.created_by = $${params.length + 1}`); params.push(req.user.username);
+      conds.push(`${attributionSql('i')} = $${params.length + 1}`); params.push(req.user.username);
     }
 
     const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
@@ -66,12 +104,15 @@ router.get('/', requireAuth, async (req, res) => {
 // POST /api/invoices/from-proforma/:id — convert approved proforma to invoice
 router.post('/from-proforma/:id', requireAuth, async (req, res) => {
   try {
-    if (!isManager(req.user.role)) {
-      return res.status(403).json({ error: 'فقط مدیر می‌تواند فاکتور صادر کند' });
+    if (!canIssueInvoice(req.user.role)) {
+      return res.status(403).json({ error: 'فقط واحد مالی یا مدیر می‌تواند فاکتور صادر کند' });
     }
 
     // Check if invoice already exists for this proforma
-    const existing = await query('SELECT id, invoice_no FROM invoices WHERE proforma_id = $1', [req.params.id]);
+    const existing = await query(
+      'SELECT id, invoice_no, commission_owner, commission_owner_name FROM invoices WHERE proforma_id = $1',
+      [req.params.id]
+    );
     if (existing.rows.length) {
       await query(
         `UPDATE proformas SET status = 'invoiced', updated_at = NOW()
@@ -99,11 +140,18 @@ router.post('/from-proforma/:id', requireAuth, async (req, res) => {
     const taxAmt   = parseFloat(pf.tax_amt) || Math.round((subtotal - discAmt) * taxPct / 100);
     const total    = parseFloat(pf.total) || (subtotal - discAmt + taxAmt);
 
+    const snap = await resolveCommissionOwnerSnapshot(pf);
+
     const r = await query(
-      `INSERT INTO invoices (id, invoice_no, proforma_id, jalali_date, center_key, center_name, items, subtotal, tax_pct, tax_amt, total, status, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'issued',$12) RETURNING *`,
+      `INSERT INTO invoices (
+         id, invoice_no, proforma_id, jalali_date, center_key, center_name,
+         items, subtotal, tax_pct, tax_amt, total, status, created_by,
+         commission_owner, commission_owner_name
+       )
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'issued',$12,$13,$14) RETURNING *`,
       [id, invoiceNo, pf.id, jalaliDate, pf.center_key, pf.center_name,
-       JSON.stringify(items), subtotal, taxPct, taxAmt, total, req.user.username]
+       JSON.stringify(items), subtotal, taxPct, taxAmt, total, req.user.username,
+       snap.owner, snap.name]
     );
     await query(
       `UPDATE proformas SET status = 'invoiced', updated_at = NOW() WHERE id = $1`,
@@ -124,7 +172,8 @@ router.get('/:id', requireAuth, async (req, res) => {
     if (!r.rows.length) return res.status(404).json({ error: 'فاکتور یافت نشد' });
     const inv = r.rows[0];
 
-    if (!isManager(req.user.role) && inv.created_by !== req.user.username) {
+    const attributed = (inv.commission_owner && String(inv.commission_owner).trim()) || inv.created_by;
+    if (!isManager(req.user.role) && attributed !== req.user.username) {
       return res.status(403).json({ error: 'دسترسی ندارید' });
     }
 

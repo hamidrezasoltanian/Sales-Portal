@@ -45,7 +45,7 @@ router.post('/proforma-reminders', async (req, res) => {
         `SELECT id, no, center_name, expiry_date, status,
                 COALESCE(NULLIF(sales_owner,''), created_by) AS owner
          FROM proformas
-         WHERE status IN ('sent','negotiating')
+         WHERE status IN ('sent','negotiating','awaiting_customer')
            AND expiry_date >= $1 AND expiry_date <= $2
          ORDER BY expiry_date`,
         [today, in3]

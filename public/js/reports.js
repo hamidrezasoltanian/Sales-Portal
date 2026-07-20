@@ -5,15 +5,59 @@
   var _rTab = 'sales'; // sales | pipeline | activity | competitor | coverage | targets | payroll | invoices | expert | support | mission | faradis
 
   var STATUS_LABELS = {
-    draft: 'پیش‌نویس', sent: 'ارسال‌شده', negotiating: 'در حال مذاکره',
-    approved: 'تأیید شده', invoiced: 'فاکتور شده',
-    rejected: 'رد', cancelled: 'لغو', expired: 'منقضی', pending_disc: 'تأیید تخفیف'
+    draft: 'پیش‌نویس',
+    awaiting_customer: 'در انتظار تایید مشتری',
+    pending_disc: 'تأیید تخفیف',
+    sent: 'انتظار تأیید مدیر',
+    negotiating: 'در مذاکره',
+    approved: 'تأیید شده',
+    invoiced: 'فاکتور شده',
+    rejected: 'رد شده',
+    cancelled: 'لغو شده',
+    expired: 'منقضی شده'
   };
   var STATUS_COLORS = {
-    draft: '#94a3b8', sent: '#60a5fa', negotiating: '#f59e0b',
-    approved: '#34d399', invoiced: '#0ea5e9',
-    rejected: '#f87171', cancelled: '#d1d5db', expired: '#c084fc', pending_disc: '#fb923c'
+    draft: '#94a3b8',
+    awaiting_customer: '#ca8a04',
+    pending_disc: '#fb923c',
+    sent: '#60a5fa',
+    negotiating: '#f59e0b',
+    approved: '#34d399',
+    invoiced: '#0ea5e9',
+    rejected: '#f87171',
+    cancelled: '#d1d5db',
+    expired: '#c084fc'
   };
+  var FLOW_ORDER = ['draft', 'awaiting_customer', 'sent', 'approved', 'invoiced'];
+
+  function _pipelineFlowHtml(byStatus) {
+    var map = {};
+    (byStatus || []).forEach(function (r) { map[r.status] = r; });
+    function cnt(k) { return (map[k] && map[k].count) || 0; }
+    function val(k) { return (map[k] && map[k].total_value) || 0; }
+    var stages = [
+      { key: 'draft', label: 'پیش‌نویس', count: cnt('draft') + cnt('pending_disc'), value: val('draft') + val('pending_disc') },
+      { key: 'awaiting_customer', label: 'تایید مشتری', count: cnt('awaiting_customer'), value: val('awaiting_customer') },
+      { key: 'sent', label: 'تأیید مدیر', count: cnt('sent') + cnt('negotiating'), value: val('sent') + val('negotiating') },
+      { key: 'approved', label: 'تأیید شده', count: cnt('approved'), value: val('approved') },
+      { key: 'invoiced', label: 'فاکتور', count: cnt('invoiced'), value: val('invoiced') }
+    ];
+    var max = Math.max.apply(null, stages.map(function (s) { return s.count; }).concat([1]));
+    return '<div class="pf-flow-report">' +
+      '<div class="pf-flow-report-title">مسیر پیشفاکتور → فاکتور</div>' +
+      '<div class="pf-flow-report-track">' +
+      stages.map(function (s, i) {
+        var pct = Math.max(14, Math.round((s.count / max) * 100));
+        return '<div class="pf-flow-report-stage" title="' + (STATUS_LABELS[s.key] || s.label) + '">' +
+          '<div class="pf-flow-report-bar" style="height:' + pct + '%;background:' + (STATUS_COLORS[s.key] || '#6366f1') + '"></div>' +
+          '<div class="pf-flow-report-count">' + s.count + '</div>' +
+          '<div class="pf-flow-report-lbl">' + s.label + '</div>' +
+          '<div style="font-size:10px;color:#94a3b8">' + _fmtMoney(s.value) + '</div>' +
+          '</div>' +
+          (i < stages.length - 1 ? '<div class="pf-flow-report-arrow">←</div>' : '');
+      }).join('') +
+      '</div></div>';
+  }
   var CAT_LABELS = {
     complaint: 'شکایت', service: 'خدمات پس از فروش', training: 'آموزش', other: 'سایر'
   };
@@ -263,10 +307,16 @@
           _card('میانگین چرخه', (data.avgCycleDays||0).toFixed(0) + ' روز', 'از ایجاد تا تأیید', '#8b5cf6') +
           '</div>';
 
-        // Funnel by status
+        // Funnel by status — مسیر اصلی + جزئیات
+        var ordered = FLOW_ORDER.slice();
+        byStatus.forEach(function (r) {
+          if (ordered.indexOf(r.status) < 0) ordered.push(r.status);
+        });
         var maxCount = Math.max.apply(null, byStatus.map(function(r){ return r.count; }).concat([1]));
-        html += _section('قیف به تفکیک وضعیت',
-          byStatus.map(function (r) {
+        html += _section('مسیر کار (پیشفاکتور → فاکتور)', _pipelineFlowHtml(byStatus));
+        html += _section('جزئیات وضعیت‌ها',
+          ordered.map(function (st) {
+            var r = byStatus.find(function (x) { return x.status === st; }) || { status: st, count: 0, total_value: 0 };
             var pct = Math.round((r.count / maxCount) * 100);
             return _barRow(STATUS_LABELS[r.status] || r.status, pct, STATUS_COLORS[r.status] || '#6366f1',
               r.count + ' — ' + _fmtMoney(r.total_value));

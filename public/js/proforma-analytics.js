@@ -143,7 +143,7 @@ function _pfApplyAdvancedFilters(list) {
       })() : exp)) return false;
     } else if (_pfQuickF === 'no_followup') {
       if (pf.lastFollowupAt) return false;
-      if (!['sent','negotiating'].includes(pf.status)) return false;
+      if (!['sent','negotiating','awaiting_customer'].includes(pf.status)) return false;
     } else if (_pfQuickF === 'high_disc') {
       if ((pf.discountPct || 0) < 15) return false;
     }
@@ -240,19 +240,28 @@ function _pfBuildReportsPanel(list) {
       '<thead><tr style="background:#f8fafc;position:sticky;top:0"><th style="padding:6px;text-align:right">مسئول</th><th>مرکز</th><th>دسته</th><th>کالا</th><th>مبلغ</th><th>وضعیت</th><th>عمل</th></tr></thead><tbody>' +
       rows.slice(0, 100).map(function(r) {
         return '<tr style="border-top:1px solid #f1f5f9"><td>' + esc(r.expert) + '</td><td>' + esc(r.centerName) + '</td><td>' + esc(r.category) +
-          '</td><td>' + esc(r.product) + '</td><td style="font-family:monospace">' + fmtNum(r.amount) + '</td><td>' + esc(r.status) +
+          '</td><td>' + esc(r.product) + '</td><td style="font-family:monospace">' + fmtNum(r.amount) + '</td><td>' +
+          (typeof _pfStatusChipHtml === 'function' ? _pfStatusChipHtml(r.rawStatus, r.pfId) : esc(r.status)) +
           '</td><td>' + (r.pfId && r.rawStatus !== 'invoiced' ? '<button onclick="pfAddToToday(\'' + r.pfId + '\')" style="font-size:10px;padding:2px 6px;border:1px solid #86efac;border-radius:4px;background:#dcfce7;cursor:pointer">➕</button>' : '') + '</td></tr>';
       }).join('') +
       '</tbody></table></div>';
   } else if (_pfReportTab === 'funnel') {
-    var stages = ['sent', 'negotiating', 'approved', 'invoiced', 'rejected', 'expired'];
-    body = '<div style="display:flex;gap:8px;flex-wrap:wrap">' + stages.map(function(st) {
-      var cnt = list.filter(function(p) { return p.status === st; }).length;
-      var val = list.filter(function(p) { return p.status === st; }).reduce(function(s, p) { return s + _pfPfAmount(p); }, 0);
-      return '<div style="flex:1;min-width:90px;text-align:center;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">' +
+    var counts = {};
+    var values = {};
+    list.forEach(function(p) {
+      counts[p.status] = (counts[p.status] || 0) + 1;
+      values[p.status] = (values[p.status] || 0) + _pfPfAmount(p);
+    });
+    var flowHtml = typeof _pfFlowReportHtml === 'function' ? _pfFlowReportHtml(counts, values) : '';
+    var stages = ['draft','awaiting_customer','pending_disc','sent','negotiating','approved','invoiced','rejected','expired','cancelled'];
+    body = flowHtml +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">' + stages.map(function(st) {
+      var cnt = counts[st] || 0;
+      var val = values[st] || 0;
+      return '<button type="button" onclick="pfOpenFlowModal(\'' + st + '\')" style="flex:1;min-width:90px;text-align:center;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-family:inherit">' +
         '<div style="font-size:18px;font-weight:800;color:var(--brand)">' + cnt + '</div>' +
         '<div style="font-size:10px;color:#64748b">' + _pfStatusLabel(st) + '</div>' +
-        '<div style="font-size:10px;color:#94a3b8;margin-top:4px">' + fmtNum(val) + ' ﷼</div></div>';
+        '<div style="font-size:10px;color:#94a3b8;margin-top:4px">' + fmtNum(val) + ' ﷼</div></button>';
     }).join('') + '</div>';
   } else {
     var agg = _pfBuildAggReport(list, _pfReportTab);
@@ -408,9 +417,9 @@ function _pfWrapProformaCore() {
       }
       if (_pfShowReports && !document.getElementById('pfReportsPanel')) {
         var filtered = _pfGetFilteredList();
-        var tableDiv = document.getElementById('pfListTbody');
-        if (tableDiv && tableDiv.closest('div')) {
-          tableDiv.closest('div').insertAdjacentHTML('beforebegin',
+        var listWrap = document.querySelector('.pf-list-wrap');
+        if (listWrap) {
+          listWrap.insertAdjacentHTML('beforebegin',
             _pfBuildReportsPanel(filtered).replace('<div style=', '<div id="pfReportsPanel" style='));
         }
       }

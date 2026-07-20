@@ -32,6 +32,13 @@
     return _TK_JMONTHS[month - 1] + ' ' + year;
   }
 
+  function _tkMonthLabelFromKey(key) {
+    var parts = String(key || '').split('/');
+    var year = parseInt(parts[0], 10);
+    var month = parseInt(parts[1], 10);
+    return year && month >= 1 && month <= 12 ? _tkMonthLabel(year, month) : String(key || '');
+  }
+
   function _tkBuildMonthOptions() {
     var curYear = _tkJYear();
     var out = [];
@@ -201,12 +208,24 @@
     var root = document.getElementById('tradeKPIRoot');
     if (!root) return;
 
-    // Month selector — all 12 months per year (current + 2 previous years)
-    var monthOpts = _tkBuildMonthOptions();
-    var monthSel = '<select onchange="window._tkSetMonth(this.value)" style="' + _tkInputStyle() + 'min-width:140px">' +
-      monthOpts.map(function(o) {
-        return '<option value="' + o.value + '"' + (o.value === _tkMonth ? ' selected' : '') + '>' + o.label + '</option>';
-      }).join('') + '</select>';
+    // Period selection stays in the header while only the panel body refreshes.
+    var periodParts = String(_tkMonth).split('/');
+    var selectedYear = parseInt(periodParts[0], 10) || _tkJYear();
+    var selectedMonth = parseInt(periodParts[1], 10) || 1;
+    var yearOptions = [];
+    for (var yi = _tkJYear() + 1; yi >= _tkJYear() - 4; yi--) {
+      yearOptions.push('<option value="' + yi + '"' + (yi === selectedYear ? ' selected' : '') + '>' + yi + '</option>');
+    }
+    var monthOptions = _TK_JMONTHS.map(function(name, index) {
+      var value = index + 1;
+      return '<option value="' + value + '"' + (value === selectedMonth ? ' selected' : '') + '>' + name + '</option>';
+    }).join('');
+    var periodNav = '<div style="display:flex;align-items:center;gap:6px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:6px 8px">' +
+      '<span style="font-size:.72rem;color:#64748b">دوره ارزیابی</span>' +
+      '<select id="tkPeriodMonth" onchange="window._tkSetPeriodFromControls()" style="' + _tkInputStyle(96) + '">' + monthOptions + '</select>' +
+      '<select id="tkPeriodYear" onchange="window._tkSetPeriodFromControls()" style="' + _tkInputStyle(76) + '">' + yearOptions.join('') + '</select>' +
+      '<button type="button" onclick="window._tkUseCurrentMonth()" style="padding:5px 8px;border:0;background:transparent;color:#4f46e5;cursor:pointer;font-family:inherit;font-size:.76rem">ماه جاری</button>' +
+      '</div>';
 
     var empSel = _tkBuildEmpSelect();
     _tkRefreshTradeEmployees();
@@ -242,14 +261,14 @@
     var empLabel = '';
     if (_tkEmployee) {
       var empName = (typeof USERS !== 'undefined' && USERS[_tkEmployee]) ? USERS[_tkEmployee] : _tkEmployee;
-      empLabel = '<span style="font-size:.82rem;color:#6b7280">کارشناس: <b>' + esc(empName) + '</b></span>';
+      empLabel = '<span id="tkEmployeeContext" style="font-size:.82rem;color:#6b7280">کارشناس: <b>' + esc(empName) + '</b></span>';
     }
 
     root.innerHTML =
       '<div style="max-width:900px;margin:0 auto">' +
         '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px">' +
           '<h2 style="margin:0;font-size:1.1rem;font-weight:700">🏭 بازرگانی — KPI</h2>' +
-          monthSel + empSel + empLabel +
+          periodNav + empSel + empLabel +
         '</div>' +
         '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">' + tabBtns + '</div>' +
         '<div id="tkContent"><div style="text-align:center;padding:40px;color:#9ca3af">در حال بارگذاری...</div></div>' +
@@ -271,11 +290,120 @@
     _tkTab = id;
     window.renderTradeKPIPanel();
   };
-  window._tkSetMonth = function(m) { _tkMonth = m; _tkScore = null; window.renderTradeKPIPanel(); };
+  function _tkSyncPeriodControls() {
+    var parts = String(_tkMonth || '').split('/');
+    var monthEl = document.getElementById('tkPeriodMonth');
+    var yearEl = document.getElementById('tkPeriodYear');
+    if (monthEl) monthEl.value = String(parseInt(parts[1], 10) || 1);
+    if (yearEl) yearEl.value = String(parseInt(parts[0], 10) || _tkJYear());
+  }
+
+  window._tkSetMonth = function(m) {
+    _tkMonth = m;
+    _tkScore = null;
+    _tkSyncPeriodControls();
+    _tkLoadAndRender();
+  };
+  window._tkSetPeriodFromControls = function() {
+    var month = parseInt((document.getElementById('tkPeriodMonth') || {}).value, 10);
+    var year = parseInt((document.getElementById('tkPeriodYear') || {}).value, 10);
+    if (!month || !year) return;
+    window._tkSetMonth(_tkMonthKey(year, month));
+  };
+  window._tkShiftMonth = function(delta) {
+    var parts = String(_tkMonth || _tkCurrentMonth()).split('/');
+    var year = parseInt(parts[0], 10) || _tkJYear();
+    var month = (parseInt(parts[1], 10) || 1) + Number(delta || 0);
+    while (month < 1) { month += 12; year--; }
+    while (month > 12) { month -= 12; year++; }
+    window._tkSetMonth(_tkMonthKey(year, month));
+  };
+  window._tkUseCurrentMonth = function() { window._tkSetMonth(_tkCurrentMonth()); };
   window._tkSetEmployee = function(e) {
     _tkEmployee = e || '';
     _tkScore = null;
-    window.renderTradeKPIPanel();
+    var context = document.getElementById('tkEmployeeContext');
+    if (context) {
+      var name = (typeof USERS !== 'undefined' && USERS[_tkEmployee]) ? USERS[_tkEmployee] : _tkEmployee;
+      context.innerHTML = 'کارشناس: <b>' + esc(name || '') + '</b>';
+    }
+    _tkLoadAndRender();
+  };
+
+  function _tkFilesAPI(method, path, body) {
+    var opts = { method: method, credentials: 'same-origin' };
+    if (body) opts.body = body;
+    return fetch('/api/trade-files' + path, opts).then(function(r) {
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.error || r.status); });
+      return r.json();
+    });
+  }
+
+  function _tkFileIcon(file) {
+    if ((file.mime_type || '').indexOf('image/') === 0) return '🖼️';
+    if (file.mime_type === 'application/pdf') return '📕';
+    return '📄';
+  }
+
+  function _tkRenderFiles(type, id) {
+    var list = document.getElementById('tkFilesList');
+    if (!list) return;
+    list.innerHTML = '<div style="color:#94a3b8;padding:10px">در حال دریافت مدارک…</div>';
+    _tkFilesAPI('GET', '/list/' + encodeURIComponent(type) + '/' + encodeURIComponent(id)).then(function(data) {
+      var files = data.files || [];
+      if (!files.length) {
+        list.innerHTML = '<div style="padding:12px;background:#fffbeb;border-radius:8px;color:#92400e;font-size:.82rem">هنوز مدرکی ثبت نشده است.</div>';
+        return;
+      }
+      list.innerHTML = files.map(function(file) {
+        var url = '/api/trade-files/' + encodeURIComponent(file.id);
+        var preview = (file.mime_type || '').indexOf('image/') === 0
+          ? '<img src="' + url + '" alt="" style="width:42px;height:42px;object-fit:cover;border-radius:7px;border:1px solid #e2e8f0">'
+          : '<span style="font-size:1.35rem">' + _tkFileIcon(file) + '</span>';
+        return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f1f5f9">' +
+          preview + '<div style="min-width:0;flex:1"><div style="font-size:.83rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(file.filename) + '</div>' +
+          '<div style="font-size:.72rem;color:#94a3b8">' + Math.ceil((file.file_size || 0) / 1024) + ' KB</div></div>' +
+          '<button type="button" onclick="window._tkPreviewTradeFile(\'' + file.id + '\',\'' + esc(file.mime_type || '') + '\')" style="border:0;background:#eef2ff;color:#4f46e5;padding:5px 8px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:.76rem">پیش‌نمایش</button>' +
+          '<a href="' + url + '?dl=1" style="font-size:.76rem;color:#475569">دانلود</a>' +
+          '<button type="button" onclick="window._tkDeleteTradeFile(\'' + file.id + '\',\'' + type + '\',\'' + id + '\')" style="border:0;background:none;color:#ef4444;cursor:pointer;font-family:inherit;font-size:.76rem">حذف</button>' +
+          '</div>';
+      }).join('');
+    }).catch(function(e) { list.innerHTML = '<div style="color:#ef4444;padding:10px">خطا: ' + esc(e.message) + '</div>'; });
+  }
+
+  window._tkOpenTradeFiles = function(type, id, title, required) {
+    var hint = required ? '<div style="background:#fef2f2;color:#991b1b;padding:9px;border-radius:8px;font-size:.8rem;margin-bottom:10px">برای تأیید بهبود مالی، دست‌کم یک مدرک هزینه یا درآمد الزامی است.</div>' :
+      '<div style="background:#f8fafc;color:#475569;padding:9px;border-radius:8px;font-size:.8rem;margin-bottom:10px">تصویر، PDF یا فایل Word/Excel را بارگذاری کنید. تصویر و PDF قابل پیش‌نمایش هستند.</div>';
+    openModal('tk_files', '📎 مدارک — ' + esc(title || ''), hint +
+      '<input id="tkFilesInput" type="file" multiple accept="image/jpeg,image/png,image/webp,application/pdf,.doc,.docx,.xls,.xlsx" style="width:100%;font-family:inherit">' +
+      '<div id="tkFilesList" style="margin-top:12px"></div>',
+      '<button type="button" onclick="window._tkUploadTradeFiles(\'' + type + '\',\'' + id + '\')" style="' + _tkBtnStyle() + '">بارگذاری مدارک</button>', { lg: true, rawTitle: true, rawBody: true, rawFoot: true });
+    _tkRenderFiles(type, id);
+  };
+
+  window._tkUploadTradeFiles = function(type, id) {
+    var input = document.getElementById('tkFilesInput');
+    if (!input || !input.files || !input.files.length) { if (typeof showToast === 'function') showToast('ابتدا فایل را انتخاب کنید'); return; }
+    var form = new FormData();
+    Array.prototype.forEach.call(input.files, function(file) { form.append('files', file); });
+    _tkFilesAPI('POST', '/upload/' + encodeURIComponent(type) + '/' + encodeURIComponent(id), form)
+      .then(function() { input.value = ''; _tkRenderFiles(type, id); if (typeof showToast === 'function') showToast('✅ مدارک ذخیره شد'); })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
+  };
+
+  window._tkPreviewTradeFile = function(id, mime) {
+    var url = '/api/trade-files/' + encodeURIComponent(id);
+    var body = String(mime || '').indexOf('image/') === 0
+      ? '<img src="' + url + '" alt="پیش‌نمایش مدرک" style="max-width:100%;max-height:70vh;display:block;margin:auto">'
+      : (mime === 'application/pdf' ? '<iframe src="' + url + '" title="پیش‌نمایش PDF" style="width:100%;height:70vh;border:0"></iframe>' :
+        '<div style="padding:18px;text-align:center;color:#64748b">برای این نوع فایل پیش‌نمایش درون‌برنامه‌ای وجود ندارد.</div>');
+    openModal('tk_file_preview', 'پیش‌نمایش مدرک', body, '<a href="' + url + '?dl=1" style="color:#4f46e5">دانلود فایل</a>', { lg: true, rawBody: true, rawFoot: true });
+  };
+
+  window._tkDeleteTradeFile = function(id, type, entityId) {
+    if (!confirm('این مدرک حذف شود؟')) return;
+    _tkFilesAPI('DELETE', '/' + encodeURIComponent(id)).then(function() { _tkRenderFiles(type, entityId); })
+      .catch(function(e) { if (typeof showToast === 'function') showToast('خطا: ' + e.message); });
   };
 
   function _tkLoadAndRender() {
@@ -708,6 +836,7 @@
               (st === 'in_progress'
                 ? '<button onclick="window._tkCompleteClearance(\'' + item.id + '\')" style="padding:4px 10px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;font-size:.78rem">تکمیل</button>'
                 : '') +
+              '<button onclick="window._tkOpenTradeFiles(\'clearance\',\'' + item.id + '\',\'' + esc(item.title) + '\',false)" style="padding:4px 10px;background:#eef2ff;color:#4f46e5;border:none;border-radius:6px;cursor:pointer;font-family:inherit;font-size:.78rem">📎 مدارک</button>' +
               '<button onclick="window._tkDelClearance(\'' + item.id + '\')" style="border:none;background:none;cursor:pointer;color:#ef4444;font-size:.8rem;padding:4px">حذف</button>' +
             '</div>' +
           '</div></div>';
@@ -823,6 +952,7 @@
               (approved
                 ? '<span style="font-size:.78rem;color:#10b981;background:#d1fae5;padding:3px 10px;border-radius:99px">✅ تأیید شده</span>'
                 : '<span style="font-size:.78rem;color:#f59e0b;background:#fef3c7;padding:3px 10px;border-radius:99px">⏳ در انتظار تأیید</span>') +
+              '<button onclick="window._tkOpenTradeFiles(\'supplier\',\'' + s.id + '\',\'' + esc(s.company_name) + '\',false)" style="padding:4px 10px;background:#eef2ff;color:#4f46e5;border:none;border-radius:6px;cursor:pointer;font-family:inherit;font-size:.78rem">📎 کاتالوگ/گواهی</button>' +
               (_tkIsManager() && !approved ? '<button onclick="window._tkApproveSupplier(\'' + s.id + '\')" style="padding:4px 10px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;font-size:.78rem">تأیید</button>' : '') +
               '<button onclick="window._tkDelSupplier(\'' + s.id + '\')" style="border:none;background:none;cursor:pointer;color:#ef4444;font-size:.8rem;padding:4px">حذف</button>' +
             '</div>' +
@@ -896,6 +1026,7 @@
               (verified
                 ? '<span style="font-size:.78rem;color:#10b981;background:#d1fae5;padding:3px 10px;border-radius:99px">✅ تأیید</span>'
                 : '<span style="font-size:.78rem;color:#f59e0b;background:#fef3c7;padding:3px 10px;border-radius:99px">⏳ انتظار</span>') +
+              '<button onclick="window._tkOpenTradeFiles(\'finance\',\'' + f.id + '\',\'' + esc(f.title) + '\',true)" style="padding:4px 10px;background:#eef2ff;color:#4f46e5;border:none;border-radius:6px;cursor:pointer;font-family:inherit;font-size:.78rem">📎 مدرک الزامی</button>' +
               (_tkIsManager() && !verified ? '<button onclick="window._tkVerifyFinance(\'' + f.id + '\')" style="padding:4px 10px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;font-size:.78rem">تأیید</button>' : '') +
               '<button onclick="window._tkDelFinance(\'' + f.id + '\')" style="border:none;background:none;cursor:pointer;color:#ef4444;font-size:.8rem;padding:4px">حذف</button>' +
             '</div>' +

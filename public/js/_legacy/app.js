@@ -6053,8 +6053,8 @@ function sendNotif(toUser,message,centerKey,centerKeys){
 }
 
 function updateNotifBadge(){
-  var badge=document.getElementById(\'notifBadge\');if(badge)badge.style.display=\'none\';
-  var bell=document.getElementById(\'notifBell\');if(bell)bell.style.display=\'none\';
+  var badge=document.getElementById('notifBadge');if(badge)badge.style.display='none';
+  var bell=document.getElementById('notifBell');if(bell)bell.style.display='none';
 }
 
 var _notifPanelOpen=false;

@@ -4,6 +4,8 @@ const MANAGER_ROLES = ['مدیر', 'سوپر ادمین'];
 const ALL_ROLES = ['مدیر', 'کارشناس فروش', 'سوپر ادمین', 'بازرگانی', 'مالی', 'IT', 'مهمان'];
 const DEFAULT_COMPANY_NAME = 'آتنا زیست درمان';
 const DEPARTMENTS = ['فروش', 'بازرگانی', 'مالی', 'مدیریت', 'فنی', 'اداری', 'عمومی'];
+// DEPARTMENTS is an organizational LABEL only — not an ACL boundary.
+// Center access uses role + manager_scope + ownership, not department.
 
 /** Legacy alias — normalize old role strings to canonical ALL_ROLES values */
 const ROLE_ALIASES = {
@@ -18,7 +20,17 @@ function normalizeRole(role) {
 }
 
 function isValidRole(role) {
-  return ALL_ROLES.includes(normalizeRole(role));
+  const n = normalizeRole(role);
+  if (!n || String(n).length > 48) return false;
+  if (ALL_ROLES.includes(n)) return true;
+  // Custom org roles (managed via settings.roleList) — allow readable names
+  return /^[\u0600-\u06FFa-zA-Z0-9][\u0600-\u06FFa-zA-Z0-9 _.\-/]*$/.test(n);
+}
+
+function getRoleModuleDefaults(role) {
+  const n = normalizeRole(role);
+  if (ROLE_DEFAULTS[n] && ROLE_DEFAULTS[n].modules) return ROLE_DEFAULTS[n].modules;
+  return (ROLE_DEFAULTS['کارشناس فروش'] && ROLE_DEFAULTS['کارشناس فروش'].modules) || {};
 }
 
 const ROLE_DEFAULTS = {
@@ -101,4 +113,5 @@ module.exports = {
   isManagerRole,
   normalizeRole,
   isValidRole,
+  getRoleModuleDefaults,
 };

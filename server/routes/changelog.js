@@ -20,7 +20,7 @@ function rowToObj(r) {
 }
 
 // ── GET /api/changelog ─────────────────────────────────────────────────────
-// Query params: ?rkey=, ?by=, ?limit=50
+// Query params: ?rkey=, ?by=, ?from=ISO, ?to=ISO, ?limit=50 (max 2000)
 router.get('/', requireAuth, requireManager, async function (req, res) {
   try {
     const conditions = [];
@@ -34,8 +34,22 @@ router.get('/', requireAuth, requireManager, async function (req, res) {
       params.push(req.query.by);
       conditions.push(`"by" = $${params.length}`);
     }
+    if (req.query.from) {
+      const from = new Date(String(req.query.from));
+      if (!isNaN(from.getTime())) {
+        params.push(from);
+        conditions.push(`at >= $${params.length}`);
+      }
+    }
+    if (req.query.to) {
+      const to = new Date(String(req.query.to));
+      if (!isNaN(to.getTime())) {
+        params.push(to);
+        conditions.push(`at < $${params.length}`);
+      }
+    }
 
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 500);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 2000);
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
 
     const result = await query(

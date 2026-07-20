@@ -7,15 +7,24 @@ function saveKPISnapshot(userId, month){
   ensureKPIDB();
   if(!DB.kpiHistory)DB.kpiHistory=[];
   month=month||currentJMonth();
-  var data=calcKPIs(userId,month);
-  var snap={userId:userId,month:month,overall:data.overall,savedAt:new Date().toISOString(),
-    scores:{}};
-  data.kpis.forEach(function(k){snap.scores[k.id]=Math.round(k.score);});
-  DB.kpiHistory=DB.kpiHistory.filter(function(s){return !(s.userId===userId&&s.month===month);});
-  DB.kpiHistory.push(snap);
-  DB.kpiHistory=DB.kpiHistory.slice(-100);
-  postKpiSnapshot(snap);
-  return snap;
+  return fetchKPIs(userId,month).then(function(data){
+    var snap={userId:userId,month:month,overall:data.overall,savedAt:new Date().toISOString(),
+      scores:{},server:true};
+    data.kpis.forEach(function(k){snap.scores[k.id]=Math.round(k.score);});
+    DB.kpiHistory=DB.kpiHistory.filter(function(s){return !(s.userId===userId&&s.month===month);});
+    DB.kpiHistory.push(snap);
+    DB.kpiHistory=DB.kpiHistory.slice(-100);
+    return fetch('/api/kpi-data/finalize',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username:userId,month:month,force:true})
+    }).then(function(){
+      if(typeof showToast==='function')showToast('✅ KPI ماه ثبت شد (سرور)',2000);
+      return snap;
+    });
+  }).catch(function(e){
+    if(typeof showToast==='function')showToast('❌ '+((e&&e.message)||'خطا'),3000);
+  });
 }
 function getKPIHistory(userId,nMonths){
   var months=prevJMonths(nMonths||6);
@@ -44,7 +53,7 @@ function renderKPIHistoryChart(userId){
   return'<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:14px">'
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
     +'<div style="font-size:13px;font-weight:700;color:var(--text-primary)">📈 روند ۶ ماهه</div>'
-    +'<button onclick="saveKPISnapshot(\''+userId+'\',\''+currentJMonth()+'\');renderKPIPanel()" style="font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:6px;padding:4px 10px;cursor:pointer;font-weight:600">📸 ثبت ماه جاری</button>'
+    +'<button onclick="saveKPISnapshot(\''+userId+'\',\''+currentJMonth()+'\').then(function(){renderKPIPanel();})" style="font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:6px;padding:4px 10px;cursor:pointer;font-weight:600">📸 ثبت ماه جاری</button>'
     +'</div>'
     +'<div style="height:100px;display:flex;gap:6px;align-items:flex-end">'+bars+'</div>'
     +(hist.some(function(h){return h.overall!==null;})?''
@@ -92,118 +101,39 @@ function getRetentionData(userId){
   });
   return{cust:cust,total:total,pct:total>0?Math.round(cust/total*100):0};
 }
-function _getOwnerForRecKey(recKey){
-  if(!recKey)return'';
-  var pts=recKey.split('_');var rtype=pts[0];var rid=pts.slice(1).join('_');
-  return _wpGetOwner({rtype:rtype,rid:rid});
-}
-// ── محاسبه KPI ───────────────────────────────────────────────────
-function calcKPIs(userId,month){
-  ensureKPIDB();
-  var b=jMonthBounds(month);
-  // read weights from DB or use defaults
-  var _defW={conversion:20,retention:20,visits:15,calls:15,sales:15,mission:5,cash:10};
-  var _w=Object.assign({},_defW,(DB.kpiTargets&&DB.kpiTargets.weights)||{});
-  var t=getKPITarget(userId,month);
-  var calls=getCallsMonth(userId,month);
-  var visits=getVisitsMonth(userId,month);
-  var sales=getSalesMonth(userId,month);
-  var mission=getMissionMonth(userId,month);
-  var autoCnv=getAutoConversions(userId,month);
-  var retention=getRetentionData(userId);
-  var weekV=getWeekVisits(userId);
-  var wd=workingDaysInJMonth(month);
+// _getOwnerForRecKey → defined in data.js (always loaded)
+// ── محاسبه KPI (SoT = سرور) ───────────────────────────────────────────
+var _kpiCalcCache={};
 
-  // auto-count touchpoints from DB.edits
-  var touchedCenters={};
-  Object.keys(DB.edits||{}).forEach(function(key){
-    var e=DB.edits[key];
-    var owner=e.owner||_getOwnerForRecKey(key)||'';
-    if(owner!==userId)return;
-    var ts=e._lastActivity||e._ts||0;
-    if(ts>=b.startTs&&ts<=b.endTs)touchedCenters[key]=true;
-  });
-  var autoCalls=Object.keys(touchedCenters).length;
-  // use autoCalls if no manual call log entries for this user+month
-  var callsAutoMode=(calls.length===0&&autoCalls>0);
-
-  var totalCalls=callsAutoMode?autoCalls:calls.reduce(function(s,l){return s+(l.count||0);},0);
-  var avgCalls=wd>0?totalCalls/wd:0;
-  var totalVisits=visits.total;
-  var avgVisits=totalVisits/4.3;
-  var visitsTip='این ماه: '+totalVisits+' ویزیت (از activity-log)'+(visits.manual.length?' — '+visits.manual.length+' ردیف':'')+'  •  این هفته: '+weekV;
-  var totalSalesCnt=sales.length+autoCnv;
-  var totalSalesAmt=sales.reduce(function(s,l){return s+(l.amount||0);},0);
-  var cashCnt=sales.filter(function(l){return l.isCash;}).length;
-  var cashPct=sales.length>0?cashCnt/sales.length*100:0;
-
-  function sc(actual,target){return target>0?Math.min(actual/target,1)*100:0;}
-
-  var s1=sc(totalSalesCnt,t.salesCount);
-  var s2=Math.min(retention.pct/90*100,100); // هدف ۹۰٪ retention
-  var s3=sc(avgVisits,t.visitsPerWeek);
-  var s4=sc(avgCalls,t.callsPerDay);
-  var s5=t.salesAmount>0?sc(totalSalesAmt,t.salesAmount):sc(totalSalesCnt,t.salesCount);
-  var s6=mission&&mission.done?100:0;
-  var s7=sales.length>0?sc(cashPct,t.cashPct):0;
-
-  var kpis=[
-    {id:'conversion',name:'نرخ تبدیل لید',icon:'🔄',weight:_w.conversion,score:s1,
-     actual:totalSalesCnt,target:t.salesCount,unit:'قرارداد',
-     tip:'قراردادهای بسته‌شده در این ماه',auto:true},
-    {id:'retention',name:'نرخ حفظ مشتری',icon:'🤝',weight:_w.retention,score:s2,
-     actual:retention.pct,target:90,unit:'درصد',
-     tip:'📊 کل وقت‌ها — '+retention.cust+' مشتری فعال از '+retention.total+' مرکز با ویرایش',auto:true},
-    {id:'visits',name:'ویزیت حضوری هفتگی',icon:'🚗',weight:_w.visits,score:s3,
-     actual:Math.round(avgVisits*10)/10,target:t.visitsPerWeek,unit:'ویزیت/هفته',
-     tip:visitsTip,auto:true},
-    {id:'calls',name:'تماس روزانه',icon:'📞',weight:_w.calls,score:s4,
-     actual:Math.round(avgCalls*10)/10,target:t.callsPerDay,unit:'تماس/روز',
-     tip:'مجموع '+totalCalls+' تماس در '+wd+' روز کاری'+(callsAutoMode?' (برآورد از CRM)':''),auto:callsAutoMode},
-    {id:'sales',name:'تارگت فروش',icon:'💰',weight:_w.sales,score:s5,
-     actual:t.salesAmount>0?totalSalesAmt:totalSalesCnt,
-     target:t.salesAmount>0?t.salesAmount:t.salesCount,
-     unit:t.salesAmount>0?'ریال':'قرارداد',
-     tip:'فروش ثبت‌شده + قراردادهای CRM',auto:false},
-    {id:'mission',name:'ماموریت ماهانه',icon:'✈️',weight:_w.mission,score:s6,
-     actual:s6?1:0,target:1,unit:'',binary:true,
-     tip:mission?('وضعیت: '+(mission.done?'انجام شد':'برنامه‌ریزی')+(mission.note?' — '+mission.note:'')):'ثبت نشده',auto:false},
-    {id:'cash',name:'فروش نقدی',icon:'💵',weight:_w.cash,score:s7,
-     actual:Math.round(cashPct),target:t.cashPct,unit:'درصد',
-     tip:cashCnt+' فروش نقدی از '+sales.length+' فروش ثبت‌شده',auto:false},
-  ];
-
-  var overall=kpis.reduce(function(s,k){return s+k.score*(k.weight/100);},0);
-
-  // dayElapsed and dayTotal for forecast
-  var todayTs=new Date().getTime();
-  var dayTotal=wd;
-  var dayElapsed=0;
-  if(todayTs>=b.startTs&&todayTs<=b.endTs){
-    // count working days elapsed
-    var curD=new Date(b.startTs);
-    var now=new Date();
-    while(curD<=now&&curD<=new Date(b.endTs)){
-      var dow=curD.getDay(); // 0=Sun,5=Fri,6=Sat in JS (Iran: Fri+Sat off)
-      if(dow!==5&&dow!==6)dayElapsed++;
-      curD.setDate(curD.getDate()+1);
-    }
-  }else if(todayTs>b.endTs){
-    dayElapsed=dayTotal;
-  }
-
-  // forecast: project end-of-month values
-  var forecast={};
-  if(dayElapsed>0){
-    kpis.forEach(function(k){
-      forecast[k.id]=Math.min((k.score/dayElapsed)*dayTotal,150);
+/** Fetch authoritative KPI from server. Prefer this over sync calcKPIs. */
+function fetchKPIs(userId,month){
+  month=month||currentJMonth();
+  var key=userId+':'+month;
+  return fetch('/api/kpi-data/calc?user='+encodeURIComponent(userId)+'&month='+encodeURIComponent(month))
+    .then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||r.status);return j;});})
+    .then(function(j){
+      var data=j.data||j;
+      if(!data.kpis)throw new Error('پاسخ KPI نامعتبر');
+      data._finalized=!!j.finalized;
+      data.server=true;
+      _kpiCalcCache[key]=data;
+      return data;
     });
-    forecast.overall=Math.min((overall/dayElapsed)*dayTotal,150);
-  }
-
-  return{kpis:kpis,overall:Math.round(overall),userId:userId,month:month,targets:t,
-    dayElapsed:dayElapsed,dayTotal:dayTotal,forecast:forecast,callsAutoMode:callsAutoMode,autoCalls:autoCalls};
 }
+
+/**
+ * Sync accessor — returns cached server result only.
+ * Do NOT use for payroll. Call fetchKPIs first (renderKPIPanel does).
+ */
+function calcKPIs(userId,month){
+  month=month||currentJMonth();
+  var key=userId+':'+month;
+  if(_kpiCalcCache[key])return _kpiCalcCache[key];
+  throw new Error('KPI هنوز از سرور بارگذاری نشده — fetchKPIs را صدا بزنید');
+}
+
+/** @deprecated client formula removed — kept name for grep safety */
+function _legacyClientCalcKPIsRemoved(){return null;}
 
 // ── رندر پنل ─────────────────────────────────────────────────────
 var _kpiUser=null;
@@ -239,12 +169,14 @@ function openTeamKPITargets(){
       +'<td style="padding:7px 10px;text-align:center"><input type="number" id="tkt_visits_'+u+'" value="'+t.visitsPerWeek+'" min="1" style="width:55px;padding:4px 6px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary);text-align:center"></td>'
       +'<td style="padding:7px 10px;text-align:center"><input type="number" id="tkt_sales_'+u+'" value="'+t.salesCount+'" min="0" style="width:55px;padding:4px 6px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary);text-align:center"></td>'
       +'<td style="padding:7px 10px;text-align:center"><input type="number" id="tkt_cash_'+u+'" value="'+t.cashPct+'" min="0" max="100" style="width:55px;padding:4px 6px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary);text-align:center"></td>'
+      +'<td style="padding:7px 10px;text-align:center"><input type="number" id="tkt_ret_'+u+'" value="'+(t.retentionTarget!=null?t.retentionTarget:90)+'" min="0" max="100" style="width:55px;padding:4px 6px;border:1px solid var(--border-input);border-radius:5px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary);text-align:center" title="هدف حفظ مشتری %"></td>'
+      +'<td style="padding:7px 10px;text-align:center"><input type="text" id="tkt_region_'+u+'" value="'+esc(t.regionKey||'')+'" placeholder="مثلاً شمال" style="width:70px;padding:4px 6px;border:1px solid var(--border-input);border-radius:5px;font-size:11px;font-family:inherit;background:var(--bg-input);color:var(--text-primary);text-align:center"></td>'
       +'</tr>';
   }).join('');
 
   var body='<div style="background:var(--brand-bg);border:1px solid #bae6fd;border-radius:7px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:var(--text-secondary)">'
     +'📅 ماه: <strong style="color:var(--text-primary)">'+jMonthLabel(month)+'</strong>'
-    +' — اهداف برای هر کارشناس به صورت جداگانه ذخیره می‌شود.</div>'
+    +' — اهداف per-user. سقف امتیاز ۱۰۰٪ عمدی است (کیفیت بر کمیت). وزن‌ها نسخه‌دار با تاریخ اثر ذخیره می‌شوند.</div>'
     +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
     +'<thead><tr style="background:var(--bg-raised)">'
     +'<th style="padding:8px 10px;text-align:right;font-weight:700;color:var(--text-secondary);border-bottom:1.5px solid var(--border)">کارشناس</th>'
@@ -252,6 +184,8 @@ function openTeamKPITargets(){
     +'<th style="padding:8px 10px;text-align:center;font-weight:700;color:var(--text-secondary);border-bottom:1.5px solid var(--border)">🚗 ویزیت/هفته</th>'
     +'<th style="padding:8px 10px;text-align:center;font-weight:700;color:var(--text-secondary);border-bottom:1.5px solid var(--border)">🔄 قرارداد</th>'
     +'<th style="padding:8px 10px;text-align:center;font-weight:700;color:var(--text-secondary);border-bottom:1.5px solid var(--border)">💵 نقدی٪</th>'
+    +'<th style="padding:8px 10px;text-align:center;font-weight:700;color:var(--text-secondary);border-bottom:1.5px solid var(--border)">🤝 حفظ٪</th>'
+    +'<th style="padding:8px 10px;text-align:center;font-weight:700;color:var(--text-secondary);border-bottom:1.5px solid var(--border)">منطقه</th>'
     +'</tr></thead><tbody>'+rows+'</tbody></table></div>';
 
   // weights section (manager only)
@@ -280,11 +214,20 @@ function saveTeamKPITargets(month){
     var visits=parseInt((document.getElementById('tkt_visits_'+u)||{}).value||4);
     var sales=parseInt((document.getElementById('tkt_sales_'+u)||{}).value||2);
     var cash=parseInt((document.getElementById('tkt_cash_'+u)||{}).value||60);
+    var ret=parseInt((document.getElementById('tkt_ret_'+u)||{}).value||90);
+    var region=((document.getElementById('tkt_region_'+u)||{}).value||'').trim()||null;
     if(!DB.kpiTargets)DB.kpiTargets={};
     var existing=DB.kpiTargets[u+':'+month]||{};
-    DB.kpiTargets[u+':'+month]=Object.assign({},existing,{callsPerDay:calls,visitsPerWeek:visits,salesCount:sales,cashPct:cash});
+    DB.kpiTargets[u+':'+month]=Object.assign({},existing,{
+      callsPerDay:calls,visitsPerWeek:visits,salesCount:sales,cashPct:cash,
+      retentionTarget:ret,regionKey:region
+    });
     // salesAmount preserved from existing via Object.assign
     saved++;
+  });
+  // Persist each user target (incl. retention/region) + effective-dated weights
+  userKeys.forEach(function(u){
+    postKpiUserTargetApi(u, month, DB.kpiTargets[u+':'+month]);
   });
   // save weights if present
   var wKeys=['conversion','retention','visits','calls','sales','mission','cash'];
@@ -297,10 +240,7 @@ function saveTeamKPITargets(month){
     });
     DB.kpiTargets.weights=weights;
   }
-  if(DB.kpiTargets.weights)postKpiWeightsApi(DB.kpiTargets.weights);
-  userKeys.forEach(function(u){
-    postKpiUserTargetApi(u, month, DB.kpiTargets[u+':'+month]);
-  });
+  if(DB.kpiTargets.weights)postKpiWeightsApi(DB.kpiTargets.weights, _kpiMonth||currentJMonth());
   closeModal('teamKpiModal');
   showToast('✅ اهداف '+saved+' کارشناس ذخیره شد',2500);
   if(typeof renderKPIPanel==='function')renderKPIPanel();
@@ -388,9 +328,7 @@ function openProvTargetsModal() {
 }
 
 function exportKPIReport() {
-  // builds a printable HTML string with KPI data for current user+month
-  // opens in a new window with print dialog
-  var data = calcKPIs(_kpiUser, _kpiMonth);
+  fetchKPIs(_kpiUser, _kpiMonth).then(function(data){
   var html = '<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8"><title>گزارش KPI</title>' +
     '<style>body{font-family:Vazirmatn,Tahoma,sans-serif;padding:20px;direction:rtl;background:#fff;color:#1e293b}' +
     'table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #e2e8f0;padding:10px 14px;text-align:right}' +
@@ -398,6 +336,7 @@ function exportKPIReport() {
     '.green{color:#16a34a}.red{color:#dc2626}.orange{color:#f59e0b}h1{font-size:20px;border-bottom:2px solid #e2e8f0;padding-bottom:10px}' +
     '</style></head><body>';
   html += '<h1>📊 گزارش عملکرد KPI — ' + (USERS[_kpiUser]||_kpiUser) + ' — ' + jMonthLabel(_kpiMonth) + '</h1>';
+  if(data.conversionSource) html += '<p style="font-size:12px;color:#64748b">منبع تبدیل: ' + data.conversionSource + (data._finalized?' · نهایی‌شده':' · زنده') + '</p>';
   var ov = data.overall;
   var oc = ov>=80?'green':ov>=50?'orange':'red';
   html += '<div class="score-big ' + oc + '">' + Math.round(ov) + ' / 100</div>';
@@ -410,32 +349,9 @@ function exportKPIReport() {
   html += '</table></body></html>';
   var w = window.open('','_blank');
   if(w){w.document.write(html);w.document.close();setTimeout(function(){w.print();},400);}
+  }).catch(function(e){ if(typeof showToast==='function')showToast('❌ '+(e.message||e),3000); });
 }
 
-function exportKPIReport() {
-  // builds a printable HTML string with KPI data for current user+month
-  // opens in a new window with print dialog
-  var data = calcKPIs(_kpiUser, _kpiMonth);
-  var html = '<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8"><title>گزارش KPI</title>' +
-    '<style>body{font-family:Vazirmatn,Tahoma,sans-serif;padding:20px;direction:rtl;background:#fff;color:#1e293b}' +
-    'table{width:100%;border-collapse:collapse;margin:16px 0}th,td{border:1px solid #e2e8f0;padding:10px 14px;text-align:right}' +
-    'th{background:#f1f5f9;font-weight:700}.score-big{font-size:48px;font-weight:900;text-align:center;padding:20px}' +
-    '.green{color:#16a34a}.red{color:#dc2626}.orange{color:#f59e0b}h1{font-size:20px;border-bottom:2px solid #e2e8f0;padding-bottom:10px}' +
-    '</style></head><body>';
-  html += '<h1>📊 گزارش عملکرد KPI — ' + (USERS[_kpiUser]||_kpiUser) + ' — ' + jMonthLabel(_kpiMonth) + '</h1>';
-  var ov = data.overall;
-  var oc = ov>=80?'green':ov>=50?'orange':'red';
-  html += '<div class="score-big ' + oc + '">' + Math.round(ov) + ' / 100</div>';
-  html += '<table><tr><th>شاخص</th><th>امتیاز</th><th>واقعی</th><th>هدف</th><th>وزن</th></tr>';
-  data.kpis.forEach(function(k) {
-    var sc = Math.round(k.score);
-    var sc_cls = sc>=80?'green':sc>=50?'orange':'red';
-    html += '<tr><td>' + k.icon + ' ' + k.name + '</td><td class="' + sc_cls + '"><b>' + sc + '</b></td><td>' + (k.actualStr||k.actual) + '</td><td>' + (k.targetStr||k.target) + '</td><td>' + k.weight + '%</td></tr>';
-  });
-  html += '</table></body></html>';
-  var w = window.open('','_blank');
-  if(w){w.document.write(html);w.document.close();setTimeout(function(){w.print();},400);}
-}
 
 
 // ── Center discovery (online biopsy potential) ─────────────────────────

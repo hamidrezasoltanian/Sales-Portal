@@ -656,11 +656,12 @@ async function initSchema() {
   await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS sales_owner VARCHAR(100)`).catch(() => {});
   await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS audit_log JSONB DEFAULT '[]'`).catch(() => {});
   await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS last_followup_at TIMESTAMPTZ`).catch(() => {});
+  await query(`ALTER TABLE proformas ADD COLUMN IF NOT EXISTS reject_source VARCHAR(30)`).catch(() => {});
   await query(`CREATE INDEX IF NOT EXISTS idx_pf_expiry ON proformas(expiry_date)`).catch(() => {});
   await query(`CREATE INDEX IF NOT EXISTS idx_pf_sales_owner ON proformas(sales_owner)`).catch(() => {});
   await query(`ALTER TABLE proformas DROP CONSTRAINT IF EXISTS proformas_status_check`).catch(() => {});
   await query(`ALTER TABLE proformas ADD CONSTRAINT proformas_status_check
-    CHECK(status IN ('draft','sent','negotiating','approved','rejected','cancelled','invoiced','expired','pending_disc'))`).catch(() => {});
+    CHECK(status IN ('draft','sent','negotiating','approved','rejected','cancelled','invoiced','expired','pending_disc','awaiting_customer'))`).catch(() => {});
 
   await query(`
     CREATE TABLE IF NOT EXISTS proforma_events (
@@ -818,9 +819,13 @@ async function initSchema() {
         IF NEW.done_date IS DISTINCT FROM OLD.done_date THEN
           NEW.value := jsonb_set(NEW.value, '{doneDate}', COALESCE(to_jsonb(NEW.done_date), 'null'::jsonb));
         END IF;
-        -- Update primary key if week_id changed
-        IF NEW.week_id IS DISTINCT FROM OLD.week_id THEN
-          NEW.key := NEW.week_id || ':::' || COALESCE(NEW.value->>'recKey', split_part(NEW.key, ':::', 2) || '_' || split_part(NEW.key, ':::', 3));
+        -- Canonical key = weekId:::rtype:::rid (never the legacy weekId:::recKey form)
+        IF NEW.week_id IS DISTINCT FROM OLD.week_id
+           OR NEW.rtype IS DISTINCT FROM OLD.rtype
+           OR NEW.rid IS DISTINCT FROM OLD.rid THEN
+          IF NEW.week_id IS NOT NULL AND NEW.rtype IS NOT NULL AND NEW.rid IS NOT NULL AND NEW.rid <> '' THEN
+            NEW.key := NEW.week_id || ':::' || NEW.rtype || ':::' || NEW.rid;
+          END IF;
         END IF;
       END IF;
 
@@ -849,6 +854,33 @@ async function initSchema() {
     FOR EACH ROW
     EXECUTE FUNCTION sync_week_entries_columns();
   `).catch(e => console.error('[DB] create trigger failed:', e.message));
+
+  // Normalize legacy keys "{weekId}:::{recKey}" → "{weekId}:::{rtype}:::{rid}"
+  // Free the canonical key first (usually a done duplicate), then rename.
+  try {
+    const legacy = await query(`
+      SELECT id, key, week_id, rtype, rid, done,
+             (week_id || ':::' || rtype || ':::' || rid) AS canon
+      FROM week_entries
+      WHERE week_id IS NOT NULL AND rtype IS NOT NULL AND rid IS NOT NULL AND rid <> ''
+        AND key <> (week_id || ':::' || rtype || ':::' || rid)
+    `);
+    let normalized = 0;
+    for (const row of legacy.rows) {
+      await query(
+        `DELETE FROM week_entries WHERE key = $1 AND id IS DISTINCT FROM $2`,
+        [row.canon, row.id]
+      );
+      const upd = await query(
+        `UPDATE week_entries SET key = $1, updated_at = NOW() WHERE id = $2 AND key IS DISTINCT FROM $1 RETURNING id`,
+        [row.canon, row.id]
+      );
+      if (upd.rows.length) normalized++;
+    }
+    if (normalized) console.log(`[DB] Normalized ${normalized} week_entries legacy keys → canonical`);
+  } catch (e) {
+    console.error('[DB] week_entries key normalize failed:', e.message);
+  }
 
   // Data recovery: Restore missing columnar values for existing entries using a dummy self-update
   await query(`
@@ -1561,6 +1593,75 @@ async function initSchema() {
   await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS permissions JSONB DEFAULT '{}'`).catch(()=>{});
   await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS token_version INTEGER DEFAULT 0`).catch(()=>{});
   await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS salary_amount DECIMAL(15,2) DEFAULT 0`).catch(()=>{});
+  // Manager data scope (global | provinces | team). Null/missing = global for managers (safe default).
+  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS manager_scope JSONB DEFAULT NULL`).catch(()=>{});
+  // Expert opt-in: share center access with their direct_manager
+  await query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS share_with_manager BOOLEAN DEFAULT FALSE`).catch(()=>{});
+  await query(`
+    UPDATE app_users SET manager_scope = '{"type":"global"}'::jsonb
+    WHERE role IN ('مدیر', 'سوپر ادمین')
+      AND (manager_scope IS NULL OR manager_scope = 'null'::jsonb OR manager_scope = '{}'::jsonb)
+  `).catch(()=>{});
+  await query(`
+    UPDATE app_users SET manager_scope = '{"type":"none"}'::jsonb
+    WHERE role NOT IN ('مدیر', 'سوپر ادمین')
+      AND (manager_scope IS NULL OR manager_scope = 'null'::jsonb)
+  `).catch(()=>{});
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS access_audit (
+      id BIGSERIAL PRIMARY KEY,
+      at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      actor TEXT NOT NULL DEFAULT '',
+      target_user TEXT NOT NULL,
+      field TEXT NOT NULL,
+      old_value JSONB,
+      new_value JSONB,
+      note TEXT
+    )
+  `).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_access_audit_target ON access_audit(target_user, at DESC)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_access_audit_at ON access_audit(at DESC)`).catch(()=>{});
+
+  // DB-level cycle guard for direct_manager (in addition to API check)
+  await query(`
+    CREATE OR REPLACE FUNCTION check_direct_manager_cycle() RETURNS trigger AS $fn$
+    DECLARE
+      cur TEXT;
+      depth INT := 0;
+    BEGIN
+      IF NEW.direct_manager IS NULL OR BTRIM(NEW.direct_manager) = '' THEN
+        RETURN NEW;
+      END IF;
+      IF NEW.direct_manager = NEW.username THEN
+        RAISE EXCEPTION 'کاربر نمی‌تواند مدیر مستقیم خودش باشد';
+      END IF;
+      cur := NEW.direct_manager;
+      WHILE cur IS NOT NULL AND BTRIM(cur) <> '' AND depth < 50 LOOP
+        IF cur = NEW.username THEN
+          RAISE EXCEPTION 'چرخه در زنجیره مدیر مستقیم — این انتساب مجاز نیست';
+        END IF;
+        SELECT direct_manager INTO cur FROM app_users WHERE username = cur;
+        depth := depth + 1;
+      END LOOP;
+      RETURN NEW;
+    END;
+    $fn$ LANGUAGE plpgsql
+  `).catch((e) => console.warn('[DB] check_direct_manager_cycle fn:', e.message));
+  await query(`DROP TRIGGER IF EXISTS trg_direct_manager_cycle ON app_users`).catch(()=>{});
+  await query(`
+    CREATE TRIGGER trg_direct_manager_cycle
+    BEFORE INSERT OR UPDATE OF direct_manager ON app_users
+    FOR EACH ROW EXECUTE FUNCTION check_direct_manager_cycle()
+  `).catch((e) => {
+    // PG 13 uses EXECUTE PROCEDURE
+    query(`
+      CREATE TRIGGER trg_direct_manager_cycle
+      BEFORE INSERT OR UPDATE OF direct_manager ON app_users
+      FOR EACH ROW EXECUTE PROCEDURE check_direct_manager_cycle()
+    `).catch((e2) => console.warn('[DB] trg_direct_manager_cycle:', e2.message));
+  });
+
   await query(`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS department VARCHAR(100) DEFAULT ''`).catch(()=>{});
 
   // Faradis customers cache — add extended contact fields (safe migration)
@@ -1694,6 +1795,22 @@ async function initSchema() {
     )
   `);
 
+  // Evidence for trade KPI records. Files are intentionally stored with the
+  // audit record so a financial approval can always be traced back to its proof.
+  await query(`
+    CREATE TABLE IF NOT EXISTS trade_attachments (
+      id TEXT PRIMARY KEY,
+      entity_type TEXT NOT NULL CHECK (entity_type IN ('finance', 'clearance', 'supplier')),
+      entity_id TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      mime_type TEXT,
+      file_size INT NOT NULL,
+      data BYTEA NOT NULL,
+      uploaded_by TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
   await query(`
     CREATE TABLE IF NOT EXISTS trade_warehouse_rec (
       id TEXT PRIMARY KEY,
@@ -1718,6 +1835,7 @@ async function initSchema() {
   await query(`CREATE INDEX IF NOT EXISTS idx_tkpi_clearances_emp_month ON trade_clearances(employee,jalali_month)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_tkpi_suppliers_emp_month ON trade_suppliers_new(employee,jalali_month)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_tkpi_finance_emp_month ON trade_finance_items(employee,jalali_month)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_trade_attachments_entity ON trade_attachments(entity_type,entity_id,created_at DESC)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_tkpi_warehec_emp_month ON trade_warehouse_rec(employee,jalali_month)`).catch(()=>{});
 
   // ════════════════════════════════════════
@@ -1816,6 +1934,21 @@ async function initSchema() {
   `);
   await query(`CREATE INDEX IF NOT EXISTS idx_invoices_proforma ON invoices(proforma_id)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_invoice_payments_inv ON invoice_payments(invoice_id)`).catch(()=>{});
+  // Frozen sales attribution at invoice issue time (center owner snapshot)
+  await query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS commission_owner TEXT`).catch(()=>{});
+  await query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS commission_owner_name TEXT`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_invoices_commission_owner ON invoices(commission_owner)`).catch(()=>{});
+  await query(`
+    UPDATE invoices i
+    SET commission_owner = COALESCE(NULLIF(TRIM(p.sales_owner), ''), p.created_by),
+        commission_owner_name = COALESCE(
+          (SELECT display_name FROM app_users u WHERE u.username = COALESCE(NULLIF(TRIM(p.sales_owner), ''), p.created_by) LIMIT 1),
+          COALESCE(NULLIF(TRIM(p.sales_owner), ''), p.created_by)
+        )
+    FROM proformas p
+    WHERE p.id = i.proforma_id
+      AND (i.commission_owner IS NULL OR TRIM(i.commission_owner) = '')
+  `).catch(function (e) { console.warn('[DB] invoice commission_owner backfill:', e.message); });
 
   // ════════════════════════════════════════
   // SALES TARGETS — monthly per employee
@@ -2375,6 +2508,79 @@ async function initSchema() {
       PRIMARY KEY (username, month)
     )
   `);
+
+  // 6b. Sales KPI monthly (finalized — payroll SoT)
+  await query(`
+    CREATE TABLE IF NOT EXISTS sales_kpi_monthly (
+      username            TEXT NOT NULL,
+      month               TEXT NOT NULL,
+      overall             INT NOT NULL DEFAULT 0,
+      scores              JSONB NOT NULL DEFAULT '{}'::jsonb,
+      targets             JSONB NOT NULL DEFAULT '{}'::jsonb,
+      weights_version_id  INT,
+      conversion_source   TEXT,
+      finalized           BOOLEAN NOT NULL DEFAULT FALSE,
+      finalized_at        TIMESTAMPTZ,
+      finalized_by        TEXT,
+      data                JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at          TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (username, month)
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_sales_kpi_month ON sales_kpi_monthly(month)`).catch(()=>{});
+
+  // 6c. Effective-dated KPI weights
+  await query(`
+    CREATE TABLE IF NOT EXISTS kpi_weight_versions (
+      id             SERIAL PRIMARY KEY,
+      weights        JSONB NOT NULL,
+      effective_from TEXT NOT NULL,
+      created_at     TIMESTAMPTZ DEFAULT NOW(),
+      created_by     TEXT
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_kpi_weights_eff ON kpi_weight_versions(effective_from DESC)`).catch(()=>{});
+
+  // 6d. Region / segment retention targets
+  await query(`
+    CREATE TABLE IF NOT EXISTS kpi_region_targets (
+      region_key        TEXT PRIMARY KEY,
+      label             TEXT,
+      retention_target  INT NOT NULL DEFAULT 90,
+      updated_at        TIMESTAMPTZ DEFAULT NOW(),
+      updated_by        TEXT
+    )
+  `);
+
+  // 6e. Audit trail for weight/target changes
+  await query(`
+    CREATE TABLE IF NOT EXISTS kpi_config_audit (
+      id         BIGSERIAL PRIMARY KEY,
+      at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      actor      TEXT NOT NULL,
+      field      TEXT NOT NULL,
+      old_value  JSONB,
+      new_value  JSONB,
+      note       TEXT
+    )
+  `);
+
+  await query(`ALTER TABLE kpi_user_targets ADD COLUMN IF NOT EXISTS retention_target INT`).catch(()=>{});
+  await query(`ALTER TABLE kpi_user_targets ADD COLUMN IF NOT EXISTS region_key TEXT`).catch(()=>{});
+
+  // Seed baseline weights if empty
+  try {
+    const wv = await query('SELECT id FROM kpi_weight_versions LIMIT 1');
+    if (!wv.rows.length) {
+      await query(
+        `INSERT INTO kpi_weight_versions (weights, effective_from, created_by)
+         VALUES ($1::jsonb, '1400/01', 'system')`,
+        [JSON.stringify({
+          conversion: 20, retention: 20, visits: 15, calls: 15, sales: 15, mission: 5, cash: 10,
+        })]
+      );
+    }
+  } catch (_) {}
 
   // 7. Logs Tables (call_log, visit_log, sales_log, mission_log)
   await query(`

@@ -363,7 +363,7 @@ router.get('/center-enrichment/:crm_key', requireAuth, requireManager, async fun
 router.get('/users', requireAuth, requireManager, async function(req, res) {
   try {
     const rows = await query(
-      "SELECT username, name FROM app_users WHERE active = true ORDER BY name"
+      "SELECT username, display_name AS name FROM app_users WHERE active = true ORDER BY display_name"
     );
     res.json(rows.rows);
   } catch (e) {
@@ -498,7 +498,7 @@ router.get('/commissions', requireAuth, requireManager, async function(req, res)
         f.marketer_num,
         f.visitor_num,
         mm.crm_username,
-        au.name             AS crm_name,
+        au.display_name AS crm_name,
         COALESCE(au.commission_pct, 1.0) AS commission_pct,
         ROUND(f.total_amount * COALESCE(au.commission_pct, 1.0) / 100.0, 0) AS commission_amount,
         cfl.crm_center_key,
@@ -534,7 +534,7 @@ router.get('/commission-summary', requireAuth, requireManager, async function(re
     const r = await query(`
       SELECT
         mm.crm_username,
-        au.name         AS crm_name,
+        au.display_name AS crm_name,
         COALESCE(au.commission_pct, 1.0) AS flat_pct,
         f.jalali_month,
         COUNT(f.factor_num)  AS invoice_count,
@@ -544,7 +544,7 @@ router.get('/commission-summary', requireAuth, requireManager, async function(re
         ON mm.marketer_num = f.marketer_num AND mm.visitor_num = COALESCE(f.visitor_num,'')
       LEFT JOIN app_users au ON au.username = mm.crm_username
       WHERE ${where}
-      GROUP BY mm.crm_username, au.name, au.commission_pct, f.jalali_month
+      GROUP BY mm.crm_username, au.display_name, au.commission_pct, f.jalali_month
       ORDER BY f.jalali_month DESC, total_sales DESC
     `, params);
 
@@ -592,7 +592,10 @@ router.put('/commission-settings', requireAuth, async function(req, res) {
 // GET /user-commission-pct  — list all users with their pct
 router.get('/user-commission-pct', requireAuth, requireManager, async function(req, res) {
   try {
-    const r = await query(`SELECT username, name, role, COALESCE(commission_pct,1.0) AS commission_pct FROM app_users ORDER BY name`);
+    const r = await query(
+      `SELECT username, display_name AS name, role, COALESCE(commission_pct, 1.0) AS commission_pct
+       FROM app_users ORDER BY display_name`
+    );
     res.json({ ok: true, users: r.rows });
   } catch(e) { res.json({ ok: false, error: e.message }); }
 });

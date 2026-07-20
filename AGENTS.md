@@ -332,8 +332,10 @@ The receivables AI tab calls `https://api.anthropic.com/v1/messages` directly fr
 | WMS warehouse module: served at /wms, backed by PostgreSQL (9 tables), REST API at /api/wms | public/wms.html + server/routes/wms.js | ✅ |
 | WMS REST endpoints: /api/wms/inventory (aggregate), /api/wms/lots/scan/:code (QR), /api/wms/transactions (paginated) | server/routes/wms.js | ✅ |
 | WMS auto-migration: blob data migrated to SQL tables on first startup | server/db.js _migrateWMSFromBlob() | ✅ |
-| Proforma invoice module: draft→sent→approved/rejected→reopen workflow, auto-number PF-YYYY-NNNN | proforma tab + /api/proforma | ✅ |
-| Proforma SQL: zod validation, rowToObj mapper, manager-only approve/reject | server/routes/proforma.js | ✅ |
+| Trade KPI evidence: finance approvals require an uploaded document; clearance and supplier records accept documents with image/PDF preview | trade-kpi.js + /api/trade-files + trade_attachments | ✅ |
+| Proforma invoice module: draft→customer response→manager approval→warehouse + finance, auto-number PF-YYYY-NNNN | proforma tab + /api/proforma | ✅ |
+| Proforma customer response: revise → draft; final no-buy → mandatory loss reason, center profile + reports | proforma-action + center reports | ✅ |
+| Proforma fulfillment: manager approval creates pending WMS dispatch; finance/manager can issue the linked invoice | proforma + invoices + WMS | ✅ |
 | Proforma auto-migration: blob migrated to SQL on first startup | server/db.js _migrateProformasFromBlob() | ✅ |
 | Telegram bot: long-polling, CRM auth, proforma approve/reject inline keyboard, inventory check, QR scan | server/bot/telegram.js | ✅ |
 | Security middleware: helmet (CSP off) + compression (graceful fallback) | server/index.js | ✅ |

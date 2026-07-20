@@ -7,6 +7,7 @@ const { requirePermission } = require('../permissions');
 const { isManagerRole } = require('../lib/roles');
 const { loadCenterAccessContext, canAccessCenter } = require('../lib/center-access');
 const { softDeleteTask } = require('../lib/soft-delete');
+const { userHasGlobalCenterAccess } = require('../lib/manager-scope');
 
 const router = express.Router();
 
@@ -34,11 +35,15 @@ function rowToObj(r) {
 }
 
 async function canAccessTask(user, task, context) {
-  if (isManagerRole(user.role)) return true;
+  if (userHasGlobalCenterAccess(user)) return true;
   if (task.owner === user.username || task.created_by === user.username) return true;
   if (task.center_key) {
-    const ctx = context || await loadCenterAccessContext();
+    const ctx = context || await loadCenterAccessContext({ forUser: user });
     return canAccessCenter(user, task.center_key, ctx);
+  }
+  // Scoped managers without center: allow team-owned tasks via owner match in context
+  if (isManagerRole(user.role) && context && context.teamUsernames) {
+    return context.teamUsernames.has(task.owner);
   }
   return false;
 }
@@ -75,11 +80,12 @@ router.get('/', requireAuth, requirePermission('tasks', 'view'), async function 
       params
     );
     let rows = result.rows;
-    if (!isManagerRole(req.user.role)) {
-      const context = await loadCenterAccessContext();
+    if (!userHasGlobalCenterAccess(req.user)) {
+      const context = await loadCenterAccessContext({ forUser: req.user });
       rows = rows.filter(function (task) {
         return task.owner === req.user.username || task.created_by === req.user.username
-          || (task.center_key && canAccessCenter(req.user, task.center_key, context));
+          || (task.center_key && canAccessCenter(req.user, task.center_key, context))
+          || (context.teamUsernames && context.teamUsernames.has(task.owner));
       });
     }
     res.json(rows.map(rowToObj));
@@ -99,8 +105,8 @@ router.post('/', requireAuth, requirePermission('tasks', 'edit'), async function
     if (!isManagerRole(req.user.role) && owner && owner !== req.user.username) {
       return res.status(403).json({ error: 'کارشناس فقط می‌تواند برای خودش وظیفه بسازد' });
     }
-    if (centerKey && !isManagerRole(req.user.role)) {
-      const context = await loadCenterAccessContext();
+    if (centerKey && !userHasGlobalCenterAccess(req.user)) {
+      const context = await loadCenterAccessContext({ forUser: req.user });
       if (!canAccessCenter(req.user, centerKey, context)) {
         return res.status(403).json({ error: 'دسترسی به این مرکز مجاز نیست' });
       }
@@ -163,8 +169,8 @@ router.put('/:id', requireAuth, requirePermission('tasks', 'edit'), async functi
     if (!isManagerRole(req.user.role) && owner !== undefined && owner !== req.user.username) {
       return res.status(403).json({ error: 'تغییر مسئول به کاربر دیگر مجاز نیست' });
     }
-    if (!isManagerRole(req.user.role) && centerKey) {
-      const context = await loadCenterAccessContext();
+    if (centerKey && !userHasGlobalCenterAccess(req.user)) {
+      const context = await loadCenterAccessContext({ forUser: req.user });
       if (!canAccessCenter(req.user, centerKey, context)) {
         return res.status(403).json({ error: 'دسترسی به این مرکز مجاز نیست' });
       }

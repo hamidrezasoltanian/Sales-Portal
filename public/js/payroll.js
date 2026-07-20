@@ -94,8 +94,13 @@ function renderPayrollPanel(container){
     if(_payrollCanEdit()){
       toolbar+='<button type="button" onclick="openPayrollSettings()" style="background:#f5f3ff;color:#7c3aed;border:1px solid #c4b5fd;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:12px;font-family:inherit">⚙️ تنظیمات پورسانت</button>';
     }
-    if(_payrollCanView()){
+  if(_payrollCanView()){
       toolbar+='<button type="button" onclick="_payrollReconciliation()" style="background:#ecfdf5;color:#047857;border:1px solid #86efac;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:12px;font-family:inherit">⚖️ تطبیق پورسانت</button>';
+      toolbar+='<button type="button" onclick="_payrollOpenVariables()" style="background:#fff7ed;color:#c2410c;border:1px solid #fdba74;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:12px;font-family:inherit">➕ متغیر ماهانه</button>';
+      toolbar+='<button type="button" onclick="_payrollOpenMyPayslip()" style="background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:12px;font-family:inherit">🧾 فیش من</button>';
+      if(_payrollCanEdit()){
+        toolbar+='<button type="button" onclick="_payrollOpenCorrection()" style="background:#fef2f2;color:#b91c1c;border:1px solid #fca5a5;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:12px;font-family:inherit">🔧 اصلاح بعد انتشار</button>';
+      }
     }
     toolbar+='</div>';
   }
@@ -257,10 +262,11 @@ function _payrollRecalc(employee,month){
 function _payrollWorkflow(employee,month,status){
   var msg=status==='draft'?'بازگشت به پیش‌نویس برای ویرایش؟ مسیر تأیید از نو شروع می‌شود.':'تغییر وضعیت؟';
   if(status==='draft'&&!confirm(msg))return;
-  fetch('/api/payroll/workflow/'+encodeURIComponent(employee)+'/'+encodeURIComponent(month),{
+  var mon=String(month||_payrollMonth||'').trim();
+  fetch('/api/payroll/workflow/'+encodeURIComponent(employee)+'/'+encodeURIComponent(mon),{
     method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({status:status})
-  }).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||r.status);return d;});})
+    body:JSON.stringify({status:status,month:mon})
+  }).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||('خطا '+r.status));return d;});})
     .then(function(){showToast('✅ وضعیت به‌روز شد');_payrollCalc();})
     .catch(function(e){showToast('❌ '+e.message);});
 }
@@ -380,10 +386,143 @@ function savePayrollSettings(){
     .catch(function(e){showToast('❌ خطا: '+e.message);});
 }
 
+function _payrollOpenVariables(){
+  var month=_payrollMonth||'';
+  var body='<div style="font-size:12px;color:#64748b;margin-bottom:10px">مساعده / پاداش / جریمه / اضافه‌کار — پس از تأیید مالی در محاسبه لحاظ می‌شود.</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+    +'<div><label style="font-size:11px">کارمند (username)</label><input id="pv_emp" class="ed-inp" style="width:100%" placeholder="Sarah.hosseini"></div>'
+    +'<div><label style="font-size:11px">ماه</label><input id="pv_month" class="ed-inp" style="width:100%" value="'+esc(month)+'" dir="ltr"></div>'
+    +'<div><label style="font-size:11px">نوع</label><select id="pv_type" class="ed-inp" style="width:100%"><option value="advance">مساعده</option><option value="bonus">پاداش</option><option value="penalty">جریمه</option><option value="overtime">اضافه‌کار</option></select></div>'
+    +'<div><label style="font-size:11px">مبلغ (ریال)</label><input id="pv_amt" type="number" class="ed-inp" style="width:100%" dir="ltr"></div>'
+    +'<div style="grid-column:1/-1"><label style="font-size:11px">عنوان</label><input id="pv_title" class="ed-inp" style="width:100%"></div>'
+    +'</div><div id="pv_list" style="margin-top:14px;max-height:240px;overflow:auto;font-size:12px">در حال بارگذاری…</div>';
+  openModal('payrollVarsModal','➕ متغیر ماهانه',body,'',{lg:true});
+  var foot=document.querySelector('#mo_payrollVarsModal .m-foot')||document.querySelector('.m-foot');
+  // use footer from openModal return if available
+  setTimeout(function(){
+    var box=document.getElementById('mo_payrollVarsModal');
+    var f=box&&box.querySelector('.m-foot');
+    if(f){
+      f.innerHTML='';
+      var save=document.createElement('button');
+      save.className='btn-primary';
+      save.textContent='ثبت';
+      save.onclick=function(){_payrollSaveVariable();};
+      f.appendChild(save);
+    }
+  },50);
+  _payrollLoadVariables();
+}
+
+function _payrollLoadVariables(){
+  var el=document.getElementById('pv_list');
+  if(!el)return;
+  fetch('/api/payroll/variables?month='+encodeURIComponent(_payrollMonth||''))
+    .then(function(r){return r.json();})
+    .then(function(rows){
+      if(!Array.isArray(rows)||!rows.length){el.innerHTML='<div style="color:#94a3b8">متغیری ثبت نشده</div>';return;}
+      el.innerHTML=rows.map(function(v){
+        var st=v.status||'pending';
+        var btn=_payrollCanApprove()&&st==='pending'
+          ?'<button onclick="_payrollApproveVar(\''+esc(v.id)+'\',true)" style="font-size:10px;margin:2px">✓ تأیید</button>'
+            +'<button onclick="_payrollApproveVar(\''+esc(v.id)+'\',false)" style="font-size:10px;margin:2px">✗ رد</button>'
+          :'';
+        return '<div style="padding:8px;border-bottom:1px solid #eee">'
+          +esc(v.employee)+' · '+esc(v.var_type)+' · '+_payrollFmt(v.amount)
+          +' <span style="color:#64748b">'+esc(st)+'</span> '+btn+'</div>';
+      }).join('');
+    })
+    .catch(function(e){el.innerHTML='خطا: '+esc(e.message||e);});
+}
+
+function _payrollSaveVariable(){
+  var body={
+    employee:(document.getElementById('pv_emp')||{}).value,
+    month:(document.getElementById('pv_month')||{}).value||_payrollMonth,
+    var_type:(document.getElementById('pv_type')||{}).value,
+    amount:parseFloat((document.getElementById('pv_amt')||{}).value)||0,
+    title:(document.getElementById('pv_title')||{}).value||'',
+  };
+  if(!body.employee||!body.month){showToast('کارمند و ماه الزامی');return;}
+  fetch('/api/payroll/variables',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error);return d;});})
+    .then(function(){showToast('✅ ثبت شد');_payrollLoadVariables();})
+    .catch(function(e){showToast('❌ '+e.message);});
+}
+
+function _payrollApproveVar(id,approve){
+  fetch('/api/payroll/variables/'+encodeURIComponent(id)+'/approve',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({approve:!!approve})
+  }).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error);return d;});})
+    .then(function(){showToast(approve?'✅ تأیید شد':'رد شد');_payrollLoadVariables();_payrollCalc();})
+    .catch(function(e){showToast('❌ '+e.message);});
+}
+
+function _payrollOpenMyPayslip(){
+  var month=_payrollMonth;
+  fetch('/api/payroll/my/'+encodeURIComponent(month))
+    .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||r.status);return d;});})
+    .then(function(d){
+      var rec=d.record||{};
+      var body='<div style="font-size:13px;line-height:1.8">'
+        +'<div><b>ماه:</b> '+esc(rec.month||month)+'</div>'
+        +'<div><b>ناخالص:</b> '+_payrollFmt(rec.gross_pay)+'</div>'
+        +'<div><b>پورسانت:</b> '+_payrollFmt(rec.commission_amount)+'</div>'
+        +'<div><b>بیمه:</b> '+_payrollFmt(rec.insurance)+'</div>'
+        +'<div><b>مالیات:</b> '+_payrollFmt(rec.tax)+'</div>'
+        +'<div style="font-size:18px;font-weight:800;color:#6366f1;margin-top:8px">خالص: '+_payrollFmt(rec.net_pay)+'</div>'
+        +'</div>';
+      openModal('payrollMySlip','🧾 فیش منتشرشده',body,'',{});
+    })
+    .catch(function(e){showToast('❌ '+(e.message||'فیش منتشر نشده'));});
+}
+
+function _payrollOpenCorrection(){
+  var body='<div style="font-size:12px;color:#64748b;margin-bottom:10px">اصلاح ماه منتشرشده بدون بازنویسی فیش — مبلغ در ماه اعمال لحاظ می‌شود.</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+    +'<div><label style="font-size:11px">کارمند</label><input id="pc_emp" class="ed-inp" style="width:100%"></div>'
+    +'<div><label style="font-size:11px">ماه اصلی (منتشرشده)</label><input id="pc_orig" class="ed-inp" style="width:100%" value="'+esc(_payrollMonth)+'" dir="ltr"></div>'
+    +'<div><label style="font-size:11px">ماه اعمال (اختیاری)</label><input id="pc_apply" class="ed-inp" style="width:100%" placeholder="خودکار ماه بعد" dir="ltr"></div>'
+    +'<div><label style="font-size:11px">مبلغ (+پاداش / −جریمه)</label><input id="pc_amt" type="number" class="ed-inp" style="width:100%" dir="ltr"></div>'
+    +'<div style="grid-column:1/-1"><label style="font-size:11px">دلیل</label><input id="pc_reason" class="ed-inp" style="width:100%"></div>'
+    +'</div>';
+  openModal('payrollCorrModal','🔧 اصلاح بعد انتشار',body,'',{});
+  setTimeout(function(){
+    var box=document.getElementById('mo_payrollCorrModal');
+    var f=box&&box.querySelector('.m-foot');
+    if(f){
+      f.innerHTML='';
+      var btn=document.createElement('button');
+      btn.className='btn-primary';
+      btn.textContent='ثبت اصلاح';
+      btn.onclick=function(){
+        var payload={
+          employee:(document.getElementById('pc_emp')||{}).value,
+          original_month:(document.getElementById('pc_orig')||{}).value,
+          apply_month:(document.getElementById('pc_apply')||{}).value||undefined,
+          amount:parseFloat((document.getElementById('pc_amt')||{}).value)||0,
+          reason:(document.getElementById('pc_reason')||{}).value||'',
+        };
+        fetch('/api/payroll/corrections',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+          .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error);return d;});})
+          .then(function(){showToast('✅ اصلاح ثبت شد (در انتظار تأیید مالی)');closeModal('payrollCorrModal');})
+          .catch(function(e){showToast('❌ '+e.message);});
+      };
+      f.appendChild(btn);
+    }
+  },50);
+}
+
 window._payrollRecalc=_payrollRecalc;
 window._payrollWorkflow=_payrollWorkflow;
 window._payrollWorkflowAll=_payrollWorkflowAll;
 window._payrollReconciliation=_payrollReconciliation;
+window._payrollOpenVariables=_payrollOpenVariables;
+window._payrollSaveVariable=_payrollSaveVariable;
+window._payrollApproveVar=_payrollApproveVar;
+window._payrollOpenMyPayslip=_payrollOpenMyPayslip;
+window._payrollOpenCorrection=_payrollOpenCorrection;
 window.renderPayrollPanel=renderPayrollPanel;
 window.openPayrollPanel=openPayrollPanel;
 window.openPayrollSettings=openPayrollSettings;

@@ -90,6 +90,41 @@ function crmIsSuperAdminRole(role) {
   return role === 'سوپر ادمین';
 }
 
+/** لیست نقش‌های قابل انتخاب (سفارشی از تنظیمات + نقش‌های سیستمی محافظت‌شده) */
+function getOrgRoles() {
+  var custom = (typeof DB !== 'undefined' && DB.settings && Array.isArray(DB.settings.roleList))
+    ? DB.settings.roleList.filter(function (r) { return !!(r && String(r).trim()); }).map(function (r) { return String(r).trim(); })
+    : null;
+  var base = (custom && custom.length) ? custom.slice() : ALL_ROLES.slice();
+  ['مدیر', 'سوپر ادمین'].forEach(function (r) {
+    if (base.indexOf(r) < 0) base.unshift(r);
+  });
+  return base;
+}
+
+/** لیست دپارتمان‌های قابل انتخاب */
+function getOrgDepartments() {
+  var custom = (typeof DB !== 'undefined' && DB.settings && Array.isArray(DB.settings.departmentList))
+    ? DB.settings.departmentList.filter(function (d) { return !!(d && String(d).trim()); }).map(function (d) { return String(d).trim(); })
+    : null;
+  if (custom && custom.length) return custom;
+  return DEPARTMENTS.slice();
+}
+
+/** اعمال کاتالوگ نقش/دپارتمان روی متغیرهای سراسری */
+function applyOrgCatalog() {
+  try {
+    var roles = getOrgRoles();
+    if (roles && roles.length) ALL_ROLES = roles;
+    var depts = getOrgDepartments();
+    if (depts && depts.length) DEPARTMENTS = depts;
+  } catch (e) {}
+}
+
+window.getOrgRoles = getOrgRoles;
+window.getOrgDepartments = getOrgDepartments;
+window.applyOrgCatalog = applyOrgCatalog;
+
 /** نقش فعلی: اول members، بعد JWT/session */
 function crmResolveCurrentRole() {
   if (typeof currentUser !== 'undefined' && currentUser) {

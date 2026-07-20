@@ -511,9 +511,14 @@ function _hcpLoadCenterAffiliations(rtype, rid, domId) {
           + phonesHtml
           + '</div>'
 
-          + (a.working_hours || a.notes ? '<div style="font-size:10px;color:var(--text-secondary);background:var(--bg-raised);padding:4px 6px;border-radius:4px;margin-top:6px">'
-            + (a.working_hours ? '🕒 حضور: ' + esc(a.working_hours) : '')
-            + (a.notes ? ' | یادداشت: ' + esc(a.notes) : '')
+          + (a.hcp_notes ? '<div style="font-size:11px;color:#334155;background:#fffbeb;border:1px solid #fde68a;padding:6px 8px;border-radius:6px;margin-top:8px;line-height:1.55">'
+            + '<div style="font-size:10px;font-weight:700;color:#b45309;margin-bottom:3px">📝 یادداشت مخاطب</div>'
+            + esc(a.hcp_notes)
+            + '</div>' : '')
+
+          + (a.working_hours || a.notes ? '<div style="font-size:11px;color:var(--text-secondary);background:var(--bg-raised);padding:6px 8px;border-radius:6px;margin-top:6px;line-height:1.5">'
+            + (a.working_hours ? '<div style="margin-bottom:'+(a.notes?'4px':'0')+'">🕒 حضور: ' + esc(a.working_hours) + '</div>' : '')
+            + (a.notes ? '<div><span style="font-weight:700;color:var(--text-muted);font-size:10px">یادداشت ارتباط با مرکز: </span>' + esc(a.notes) + '</div>' : '')
             + '</div>' : '')
 
           + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">'

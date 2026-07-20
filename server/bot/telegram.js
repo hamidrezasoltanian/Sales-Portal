@@ -71,6 +71,97 @@ function sendMsg(chatId, text, opts) {
   return tgCall('sendMessage', Object.assign({ chat_id: chatId, text: text, parse_mode: 'HTML' }, opts || {}));
 }
 
+/** Escape HTML for Telegram messages. */
+function tgEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function notifTypeFa(t) {
+  var map = {
+    followup: 'پیگیری',
+    digest: 'خلاصه',
+    morning_brief: 'صبح',
+    task: 'وظیفه',
+    proforma: 'پیش‌فاکتور',
+    manager_request: 'درخواست مدیر',
+    owner_change: 'مالکیت',
+    ack: 'تأیید',
+    general: 'عمومی',
+    hr: 'منابع انسانی',
+    letters: 'نامه',
+  };
+  return map[t] || t || 'عمومی';
+}
+
+function tgTimeAgo(at) {
+  if (!at) return '';
+  var ms = Date.now() - new Date(at).getTime();
+  if (isNaN(ms) || ms < 0) return toJalali(new Date(at));
+  var m = Math.floor(ms / 60000);
+  if (m < 1) return 'الان';
+  if (m < 60) return m + ' دقیقه پیش';
+  var h = Math.floor(m / 60);
+  if (h < 24) return h + ' ساعت پیش';
+  var d = Math.floor(h / 24);
+  if (d < 7) return d + ' روز پیش';
+  return toJalali(new Date(at));
+}
+
+/** Split long HTML messages for mobile (Telegram 4096 limit). */
+async function sendLongMsg(chatId, text, opts) {
+  var max = 3500;
+  if (!text || text.length <= max) return sendMsg(chatId, text, opts);
+  var parts = [];
+  var rest = text;
+  while (rest.length > max) {
+    var cut = rest.lastIndexOf('\n', max);
+    if (cut < max * 0.5) cut = max;
+    parts.push(rest.slice(0, cut));
+    rest = rest.slice(cut).replace(/^\n+/, '');
+  }
+  if (rest) parts.push(rest);
+  for (var i = 0; i < parts.length; i++) {
+    var o = (i === parts.length - 1) ? opts : undefined;
+    await sendMsg(chatId, parts[i], o);
+  }
+}
+
+var _centersNameCache = null;
+var _centersNameCacheTs = 0;
+async function resolveCenterLabel(centerKey) {
+  if (!centerKey) return '';
+  try {
+    var e = await query("SELECT data->>'nameOverride' AS no FROM center_edits WHERE center_key = $1", [centerKey]);
+    if (e.rows[0] && e.rows[0].no) return e.rows[0].no;
+  } catch (_) {}
+  var id = String(centerKey).indexOf('_') >= 0
+    ? String(centerKey).slice(String(centerKey).indexOf('_') + 1)
+    : String(centerKey);
+  if (!_centersNameCache || (Date.now() - _centersNameCacheTs) > 300000) {
+    try {
+      var m = await query("SELECT data FROM centers_master WHERE key = 'CENTERS' LIMIT 1");
+      var arr = (m.rows[0] && m.rows[0].data) || [];
+      var map = {};
+      (Array.isArray(arr) ? arr : []).forEach(function (c) {
+        if (c && c.id != null) map[String(c.id)] = c.name || '';
+      });
+      _centersNameCache = map;
+      _centersNameCacheTs = Date.now();
+    } catch (_) {
+      _centersNameCache = _centersNameCache || {};
+    }
+  }
+  if (_centersNameCache[id]) return _centersNameCache[id];
+  try {
+    var ex = await query('SELECT name FROM center_extras WHERE id = $1', [id]);
+    if (ex.rows[0] && ex.rows[0].name) return ex.rows[0].name;
+  } catch (_) {}
+  return id;
+}
+
 function editMsg(chatId, msgId, text, opts) {
   return tgCall('editMessageText', Object.assign({ chat_id: chatId, message_id: msgId, text: text, parse_mode: 'HTML' }, opts || {}));
 }
@@ -165,35 +256,39 @@ function jalaliDaysDiff(jy1,jm1,jd1, jy2,jm2,jd2) {
   return Math.floor((jalaliToMs(jy1,jm1,jd1) - jalaliToMs(jy2,jm2,jd2)) / 86400000);
 }
 
-// ── Keyboards ─────────────────────────────────────────────────────────────
+// ── Keyboards (mobile-first: 2 buttons/row, short labels) ─────────────────
 const MENU_KB = {
   keyboard: [
-    [{ text: '☀️ برنامه امروز' },    { text: '📅 برنامه هفته' }],
-    [{ text: '🏥 مراکز من' },         { text: '🎯 پیشنهادی' }],
-    [{ text: '📋 وظایف من' },         { text: '🔔 اعلان‌ها' }],
-    [{ text: '➕ ثبت در برنامه' },    { text: '📝 یادداشت مرکز' }],
-    [{ text: '➕ وظیفه جدید' },       { text: '📅 تغییر فالوآپ' }],
-    [{ text: '📊 آمار من' },          { text: '🔍 جستجوی مرکز' }],
-    [{ text: '📄 پیشفاکتورها' },      { text: '🔍 اسکن QR' }],
+    [{ text: '☀️ برنامه امروز' }, { text: '📅 برنامه هفته' }],
+    [{ text: '🏥 مراکز من' }, { text: '🎯 پیشنهادی' }],
+    [{ text: '📋 وظایف من' }, { text: '🔔 اعلان‌ها' }],
+    [{ text: '⚙️ تنظیمات اعلان' }, { text: '📊 خلاصه امروز' }],
+    [{ text: '➕ ثبت در برنامه' }, { text: '📝 یادداشت مرکز' }],
+    [{ text: '➕ وظیفه جدید' }, { text: '📅 تغییر فالوآپ' }],
+    [{ text: '📊 آمار من' }, { text: '🔍 جستجوی مرکز' }],
+    [{ text: '📄 پیشفاکتورها' }, { text: '🔍 اسکن QR' }],
     [{ text: '❓ راهنما' }],
   ],
   resize_keyboard: true,
+  is_persistent: true,
 };
 
 const MENU_KB_MANAGER = {
   keyboard: [
-    [{ text: '☀️ برنامه امروز' },    { text: '📅 برنامه هفته' }],
-    [{ text: '🗂 همه مراکز' },        { text: '📊 داشبورد مدیریت' }],
-    [{ text: '📋 وظایف من' },         { text: '🔔 اعلان‌ها' }],
-    [{ text: '📊 گزارش معوق' },       { text: '📈 KPI هفتگی' }],
-    [{ text: '👥 گزارش تیم' },        { text: '📨 ارسال پیام' }],
-    [{ text: '➕ ثبت در برنامه' },    { text: '📝 یادداشت مرکز' }],
-    [{ text: '➕ وظیفه جدید' },       { text: '📅 تغییر فالوآپ' }],
-    [{ text: '🔍 جستجوی مرکز' },     { text: '📄 پیشفاکتورها' }],
-    [{ text: '📦 موجودی انبار' },     { text: '🔍 اسکن QR' }],
+    [{ text: '☀️ برنامه امروز' }, { text: '📅 برنامه هفته' }],
+    [{ text: '🗂 همه مراکز' }, { text: '📊 داشبورد مدیریت' }],
+    [{ text: '📋 وظایف من' }, { text: '🔔 اعلان‌ها' }],
+    [{ text: '⚙️ تنظیمات اعلان' }, { text: '📊 خلاصه امروز' }],
+    [{ text: '📊 گزارش معوق' }, { text: '📈 KPI هفتگی' }],
+    [{ text: '👥 گزارش تیم' }, { text: '📨 ارسال پیام' }],
+    [{ text: '➕ ثبت در برنامه' }, { text: '📝 یادداشت مرکز' }],
+    [{ text: '➕ وظیفه جدید' }, { text: '📅 تغییر فالوآپ' }],
+    [{ text: '🔍 جستجوی مرکز' }, { text: '📄 پیشفاکتورها' }],
+    [{ text: '📦 موجودی انبار' }, { text: '🔍 اسکن QR' }],
     [{ text: '❓ راهنما' }],
   ],
   resize_keyboard: true,
+  is_persistent: true,
 };
 
 function _hasModuleAccess(sess, module) {
@@ -214,20 +309,24 @@ function _hasModuleAccess(sess, module) {
 
 function menuFor(sess) {
   if (isManagerRole(sess.role)) return MENU_KB_MANAGER;
-  // Build dynamic keyboard based on permissions
   const rows = [];
   rows.push([{ text: '☀️ برنامه امروز' }, { text: '📅 برنامه هفته' }]);
   rows.push([{ text: '🏥 مراکز من' }, { text: '🎯 پیشنهادی' }]);
-  rows.push([{ text: '📋 وظایف من' }, { text: '🔍 جستجوی مرکز' }]);
+  rows.push([{ text: '📋 وظایف من' }, { text: '🔔 اعلان‌ها' }]);
+  rows.push([{ text: '⚙️ تنظیمات اعلان' }, { text: '📊 خلاصه امروز' }]);
   rows.push([{ text: '➕ ثبت در برنامه' }, { text: '📝 یادداشت مرکز' }]);
   rows.push([{ text: '➕ وظیفه جدید' }, { text: '📅 تغییر فالوآپ' }]);
-  rows.push([{ text: '📊 آمار من' }, { text: '🔍 اسکن QR' }]);
-  const extraRow = [];
-  if (_hasModuleAccess(sess, 'wms')) extraRow.push({ text: '📦 موجودی انبار' });
-  if (_hasModuleAccess(sess, 'proforma')) extraRow.push({ text: '📄 پیشفاکتورها' });
-  if (extraRow.length) rows.push(extraRow);
+  rows.push([{ text: '📊 آمار من' }, { text: '🔍 جستجوی مرکز' }]);
+  const extra = [];
+  if (_hasModuleAccess(sess, 'proforma')) extra.push({ text: '📄 پیشفاکتورها' });
+  if (_hasModuleAccess(sess, 'wms')) extra.push({ text: '📦 موجودی انبار' });
+  extra.push({ text: '🔍 اسکن QR' });
+  // pack extras 2-per-row for phone width
+  for (var i = 0; i < extra.length; i += 2) {
+    rows.push(extra.slice(i, i + 2));
+  }
   rows.push([{ text: '❓ راهنما' }]);
-  return { keyboard: rows, resize_keyboard: true };
+  return { keyboard: rows, resize_keyboard: true, is_persistent: true };
 }
 
 // ── Update handler ────────────────────────────────────────────────────────
@@ -258,28 +357,22 @@ async function handleUpdate(upd) {
         sess.state = ST.AWAIT_USERNAME;
         await sendMsg(chatId, '🔐 <b>ورود به سیستم</b>\n\nنام کاربری CRM خود را وارد کنید:\n<i>مثال: Hamidreza.soltanian</i>');
       } else {
-        await sendMsg(chatId,
-          '👋 سلام <b>' + sess.name + '</b> | ' + sess.role + (isManagerRole(sess.role) ? ' 👑' : '') + '\n\n' +
-          '📋 <b>دستورات:</b>\n' +
-          '☀️ برنامه امروز — مراکز برنامه‌ریزی‌شده\n' +
-          '📅 برنامه هفته — نمای ۷ روزه\n' +
-          '🏥 مراکز من — لیست مراکز با فیلتر و اقدام سریع\n' +
-          '🎯 پیشنهادی — مراکز P1/P2 نیاز به پیگیری\n' +
-          '📋 وظایف من — وظایف باز\n' +
-          '🔔 اعلان‌ها — اعلان‌های خوانده‌نشده\n' +
-          '➕ ثبت در برنامه — افزودن مرکز به برنامه هفته\n' +
-          '📝 یادداشت مرکز — ثبت یادداشت بعد از تماس/بازدید\n' +
-          '➕ وظیفه جدید — ایجاد وظیفه\n' +
-          '📅 تغییر فالوآپ — به‌روزرسانی تاریخ فالوآپ\n' +
-          '📊 آمار من — عملکرد شخصی\n' +
-          '🔍 جستجوی مرکز — وضعیت، یادداشت و تاریخچه\n' +
-          '📄 پیشفاکتورها — لیست و تأیید\n' +
-          '📦 موجودی انبار — وضعیت کالاها\n' +
-          '🔍 اسکن QR — اطلاعات لات/کالا\n' +
-          (isManagerRole(sess.role) ? '🗂 همه مراکز — همه مراکز با فیلتر کارشناس\n📊 داشبورد مدیریت — نمای یکپارچه امروز+هفته+بحرانی\n👥 گزارش تیم — نمای کلی همه کارشناسان\n' : '') +
-          '/logout — خروج',
-          { reply_markup: menuFor(sess) }
-        );
+        var help =
+          '👋 سلام <b>' + tgEsc(sess.name) + '</b>\n' +
+          '<i>' + tgEsc(sess.role) + (isManagerRole(sess.role) ? ' 👑' : '') + '</i>\n\n' +
+          '📱 از دکمه‌های پایین صفحه استفاده کنید:\n\n' +
+          '☀️ <b>برنامه امروز</b> — کارهای امروز\n' +
+          '📅 <b>برنامه هفته</b> — نمای ۷ روزه\n' +
+          '🔔 <b>اعلان‌ها</b> — اخبار و پیگیری‌ها\n' +
+          '⚙️ <b>تنظیمات اعلان</b> — کانال تلگرام\n' +
+          '📊 <b>خلاصه امروز</b> — آمار سریع\n' +
+          '🏥 <b>مراکز من</b> · 🎯 پیشنهادی · 📋 وظایف\n' +
+          '➕ ثبت برنامه · 📝 یادداشت · 📅 فالوآپ\n';
+        if (isManagerRole(sess.role)) {
+          help += '\n👑 <b>مدیر:</b> داشبورد · گزارش تیم · معوق · KPI\n';
+        }
+        help += '\n<code>/logout</code> خروج · <code>/link کد</code> اتصال بدون رمز';
+        await sendMsg(chatId, help, { reply_markup: menuFor(sess) });
       }
       return;
     }
@@ -355,8 +448,10 @@ async function handleUpdate(upd) {
       } catch(_) { sess.permissions = {}; }
       await persistSession(chatId);
       await sendMsg(chatId,
-        '✅ <b>خوش آمدید، ' + user.display_name + '!</b>\n' +
-        'نقش: ' + user.role + (isManagerRole(user.role) ? ' 👑' : ''),
+        '✅ <b>خوش آمدید، ' + tgEsc(user.display_name) + '!</b>\n' +
+        'نقش: ' + tgEsc(user.role) + (isManagerRole(user.role) ? ' 👑' : '') + '\n\n' +
+        '👇 منوی پایین صفحه را بزنید.\n' +
+        'شروع سریع: <b>☀️ برنامه امروز</b> یا <b>🔔 اعلان‌ها</b>',
         { reply_markup: menuFor(sess) }
       );
       return;
@@ -531,6 +626,8 @@ async function handleUpdate(upd) {
     if (text === '📊 داشبورد مدیریت'   || text === '/dashboard')  { await handleManagerDashboard(chatId, sess); return; }
     if (text === '📋 وظایف من'          || text === '/tasks')      { await handleTasks(chatId, sess); return; }
     if (text === '🔔 اعلان‌ها'           || text === '/notifs')     { await handleNotifications(chatId, sess); return; }
+    if (text === '⚙️ تنظیمات اعلان') { await handleNotifSettings(chatId, sess); return; }
+    if (text === '📊 خلاصه امروز') { await handleDigest(chatId, sess); return; }
     if (text === '➕ ثبت در برنامه'     || text === '/add')        { await handleAddToPlan(chatId, sess); return; }
     if (text === '📝 یادداشت مرکز'      || text === '/note')       { await handleAddNote(chatId, sess); return; }
     if (text === '➕ وظیفه جدید'        || text === '/task')       { await handleNewTask(chatId, sess); return; }
@@ -601,13 +698,15 @@ async function handleTodaySchedule(chatId, sess) {
   try {
     rows = await getWeekEntriesForRange(todayStr, todayStr, sess.username, isMgr);
   } catch(e) {
-    await sendMsg(chatId, '❌ خطا در دریافت برنامه:\n' + e.message, { reply_markup: menuFor(sess) });
+    await sendMsg(chatId, '❌ خطا در دریافت برنامه:\n' + tgEsc(e.message), { reply_markup: menuFor(sess) });
     return;
   }
 
   if (!rows.length) {
     await sendMsg(chatId,
-      '☀️ <b>برنامه امروز — ' + todayStr + '</b>\n\nهیچ مرکزی برای امروز برنامه‌ریزی نشده.',
+      '☀️ <b>برنامه امروز</b>\n' + todayStr + '\n\n' +
+      'هیچ مرکزی برای امروز نیست.\n' +
+      'از <b>➕ ثبت در برنامه</b> اضافه کنید.',
       { reply_markup: menuFor(sess) }
     );
     return;
@@ -619,30 +718,33 @@ async function handleTodaySchedule(chatId, sess) {
   const doneCount = rows.filter(function(r) { return r.value.done; }).length;
   const actionIcon = { call: '📞', visit: '🚗' };
 
-  let text = '☀️ <b>برنامه امروز — ' + todayStr + '</b>\n';
-  text += '✅ ' + doneCount + ' از ' + rows.length + ' انجام شده\n\n';
+  let text = '☀️ <b>برنامه امروز</b>\n';
+  text += '📅 ' + todayStr + '\n';
+  text += '✅ ' + doneCount + ' از ' + rows.length + ' انجام شده\n';
+  text += '──────────────\n';
 
   const inlineRows = [];
-  rows.forEach(function(r, idx) {
+  const maxShow = 12;
+  rows.slice(0, maxShow).forEach(function(r, idx) {
     const we   = r.value;
     const act  = actionIcon[we.actionType] || '📋';
-    const name = (we.centerName || we.rid || '—').slice(0, 25);
-    const ownerTag = isMgr && we.addedBy ? ' <i>(' + we.addedBy + ')</i>' : '';
-    text += (idx + 1) + '. ' + (we.done ? '✅' : '⬜') + ' ' + act + ' ' + name + ownerTag + '\n';
-    if (!we.done) {
+    const name = tgEsc((we.centerName || we.rid || '—').slice(0, 28));
+    const ownerTag = isMgr && we.addedBy ? ' <i>(' + tgEsc(we.addedBy) + ')</i>' : '';
+    text += (we.done ? '✅' : '⬜') + ' ' + act + ' <b>' + name + '</b>' + ownerTag + '\n';
+    if (!we.done && inlineRows.length < 8) {
       const rtype = we.rtype || 'center';
       const rid   = we.rid   || '';
-      inlineRows.push([
-        { text: '✅ ثبت نتیجه: ' + name.slice(0, 16), callback_data: 'we_done:' + idx },
-        { text: '📋 خلاصه', callback_data: 'center_brief:' + rtype + ':' + rid + ':' + idx },
-      ]);
+      const short = (we.centerName || we.rid || 'مرکز').slice(0, 14);
+      inlineRows.push([{ text: '✅ ' + short, callback_data: 'we_done:' + idx }]);
+      inlineRows.push([{ text: '📋 خلاصه ' + short, callback_data: 'center_brief:' + rtype + ':' + rid + ':' + idx }]);
     }
   });
+  if (rows.length > maxShow) text += '\n<i>… و ' + (rows.length - maxShow) + ' مورد دیگر</i>';
 
   const opts = inlineRows.length
     ? { reply_markup: { inline_keyboard: inlineRows } }
     : { reply_markup: menuFor(sess) };
-  await sendMsg(chatId, text, opts);
+  await sendLongMsg(chatId, text, opts);
 }
 
 // ── Complete entry with full outcome flow ────────────────────────────────────
@@ -1146,7 +1248,29 @@ async function handleCallback(cb) {
       await query(`UPDATE notifications SET read = true WHERE to_user = $1 AND read = false`, [sess.username]);
       await sendMsg(chatId, '✅ همه اعلان‌ها خوانده شد.', { reply_markup: menuFor(sess) });
     } catch(e) {
-      await sendMsg(chatId, '❌ خطا: ' + e.message);
+      await sendMsg(chatId, '❌ خطا: ' + tgEsc(e.message));
+    }
+    return;
+  }
+
+  if (data === 'prefs_open' || data === 'quick_digest') {
+    if (data === 'prefs_open') await handleNotifSettings(chatId, sess);
+    else await handleDigest(chatId, sess);
+    return;
+  }
+  if (data === 'quick_today') { await handleTodaySchedule(chatId, sess); return; }
+  if (data === 'quick_notifs') { await handleNotifications(chatId, sess); return; }
+
+  if (data === 'prefs_tg_toggle') {
+    try {
+      const hub = require('../lib/notification-hub');
+      const prefs = await hub.getUserPrefs(sess.username);
+      const ch = Object.assign({}, prefs.channels || {});
+      ch.telegram = !(ch.telegram !== false); // toggle (default was on)
+      await hub.saveUserPrefs(sess.username, Object.assign({}, prefs, { channels: ch }));
+      await handleNotifSettings(chatId, sess);
+    } catch (e) {
+      await sendMsg(chatId, '❌ ' + tgEsc(e.message));
     }
     return;
   }
@@ -1167,10 +1291,15 @@ async function handleCallback(cb) {
       if (!r.rows.length) { await sendMsg(chatId, '❌ اعلان یافت نشد.'); return; }
       const hub = require('../lib/notification-hub');
       const notif = hub.rowToObj(r.rows[0]);
+      const cName = notif.centerKey ? await resolveCenterLabel(notif.centerKey) : '';
+      let body = '🔔 <b>' + tgEsc(notifTypeFa(notif.type)) + '</b>\n';
+      body += '<i>' + tgEsc(tgTimeAgo(notif.at)) + '</i>\n──────────────\n';
+      body += tgEsc(notif.msg || '') + '\n';
+      if (cName) body += '\n📍 <b>' + tgEsc(cName) + '</b>';
       const kb = hub.buildTelegramKeyboard(notif);
-      await sendMsg(chatId, '🔔 ' + notif.msg, kb ? { reply_markup: kb } : { reply_markup: menuFor(sess) });
+      await sendMsg(chatId, body, kb ? { reply_markup: kb } : { reply_markup: menuFor(sess) });
     } catch (e) {
-      await sendMsg(chatId, '❌ خطا: ' + e.message);
+      await sendMsg(chatId, '❌ خطا: ' + tgEsc(e.message));
     }
     return;
   }
@@ -1777,35 +1906,35 @@ async function handleWeekSchedule(chatId, sess) {
   });
 
   const persianDays = ['یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه'];
-  let text = '📅 <b>برنامه ۷ روزه</b>\n\n';
+  let text = '📅 <b>برنامه ۷ روزه</b>\n──────────────\n';
   let totalEntries = 0;
 
   days.forEach(function(dayStr, i) {
     const entries = byDate[dayStr] || [];
     totalEntries += entries.length;
-    if (!entries.length && i > 0) return; // فقط روزهایی که برنامه دارند نمایش بده (امروز همیشه نمایش)
+    if (!entries.length && i > 0) return;
 
     const dow = new Date(Date.now() + i * 86400000).getDay();
     const dayLabel = i === 0 ? '⭐ امروز' : i === 1 ? 'فردا' : persianDays[dow];
     const done = entries.filter(function(e){ return e.done; }).length;
 
-    text += '<b>' + dayLabel + ' — ' + dayStr + '</b>';
-    if (entries.length) text += ' (' + entries.length + (done ? ' | ✅' + done : '') + ')';
+    text += '\n<b>' + dayLabel + '</b> · ' + dayStr;
+    if (entries.length) text += ' · ' + entries.length + (done ? ' ✅' + done : '');
     text += '\n';
 
-    entries.slice(0, 5).forEach(function(we) {
+    entries.slice(0, 4).forEach(function(we) {
       const act = we.actionType === 'call' ? '📞' : '🚗';
-      const name = (we.centerName || we.rid || '—').slice(0, 20);
-      const ownerTag = isMgr && we.addedBy ? ' <i>(' + we.addedBy + ')</i>' : '';
-      text += (we.done ? '  ✅' : '  ⬜') + ' ' + act + ' ' + name + ownerTag + '\n';
+      const name = tgEsc((we.centerName || we.rid || '—').slice(0, 22));
+      text += (we.done ? '  ✅' : '  ⬜') + ' ' + act + ' ' + name + '\n';
     });
-    if (entries.length > 5) text += '  و ' + (entries.length - 5) + ' مورد دیگر...\n';
-    text += '\n';
+    if (entries.length > 4) text += '  <i>… +' + (entries.length - 4) + '</i>\n';
   });
 
-  if (!totalEntries) text += 'هیچ برنامه‌ای برای ۷ روز آینده تنظیم نشده.\n\nاز ➕ افزودن به برنامه استفاده کنید.';
+  if (!totalEntries) {
+    text += '\nخالی است.\nاز <b>➕ ثبت در برنامه</b> استفاده کنید.';
+  }
 
-  await sendMsg(chatId, text, { reply_markup: menuFor(sess) });
+  await sendLongMsg(chatId, text, { reply_markup: menuFor(sess) });
 }
 
 // ── 🔔 Notifications ──────────────────────────────────────────────────────
@@ -1813,49 +1942,53 @@ async function handleNotifications(chatId, sess) {
   try {
     const r = await query(
       `SELECT id, msg, center_key, at, read, type, meta, from_user FROM notifications
-       WHERE to_user = $1 ORDER BY at DESC LIMIT 15`,
+       WHERE to_user = $1 ORDER BY at DESC LIMIT 12`,
       [sess.username]
     );
     const notifs = r.rows;
     const unread = notifs.filter(function(n){ return !n.read; });
 
     if (!notifs.length) {
-      await sendMsg(chatId, '🔔 <b>اعلان‌ها</b>\n\nهیچ اعلانی وجود ندارد.', { reply_markup: menuFor(sess) });
+      await sendMsg(chatId,
+        '🔔 <b>اعلان‌ها</b>\n\nخالی است.\nوقتی خبر جدیدی باشد اینجا می‌آید.',
+        { reply_markup: menuFor(sess) }
+      );
       return;
     }
 
-    let text = '🔔 <b>اعلان‌ها</b> — ' + notifs.length + ' مورد';
-    if (unread.length) text += ' | <b>' + unread.length + ' خوانده‌نشده</b>';
-    text += '\n\n';
+    let text = '🔔 <b>اعلان‌ها</b>\n';
+    text += unread.length
+      ? '🔵 ' + unread.length + ' خوانده‌نشده از ' + notifs.length + '\n'
+      : 'همه خوانده شده (' + notifs.length + ')\n';
+    text += '──────────────\n';
 
-    notifs.slice(0, 8).forEach(function(n) {
-      const icon = n.read ? '·' : '🔵';
-      const time = n.at ? toJalali(new Date(n.at)) : '';
-      const typeTag = n.type && n.type !== 'general' ? ' [' + n.type + ']' : '';
-      text += icon + ' ' + (n.msg || '') + typeTag + '\n';
-      if (time) text += '   <i>' + time + '</i>\n';
-    });
-    if (notifs.length > 8) text += '\n<i>و ' + (notifs.length - 8) + ' مورد دیگر...</i>';
+    for (var i = 0; i < Math.min(notifs.length, 6); i++) {
+      var n = notifs[i];
+      var icon = n.read ? '▫️' : '🔵';
+      var msg = String(n.msg || '').replace(/\s+/g, ' ').trim().slice(0, 90);
+      var cLabel = n.center_key ? await resolveCenterLabel(n.center_key) : '';
+      text += '\n' + icon + ' <b>' + tgEsc(notifTypeFa(n.type)) + '</b>';
+      text += ' · <i>' + tgEsc(tgTimeAgo(n.at)) + '</i>\n';
+      text += tgEsc(msg) + (String(n.msg || '').length > 90 ? '…' : '') + '\n';
+      if (cLabel) text += '📍 ' + tgEsc(cLabel) + '\n';
+    }
+    if (notifs.length > 6) text += '\n<i>… و ' + (notifs.length - 6) + ' مورد دیگر</i>';
 
     const hub = require('../lib/notification-hub');
     const inlineKb = { inline_keyboard: [] };
-    const unreadList = notifs.filter(function (n) { return !n.read; }).slice(0, 3);
-    unreadList.forEach(function (n, i) {
-      const kb = hub.buildTelegramKeyboard(hub.rowToObj(n));
-      if (kb && kb.inline_keyboard && kb.inline_keyboard[0]) {
-        inlineKb.inline_keyboard.push([{ text: '▸ ' + (n.msg || '').slice(0, 28), callback_data: 'notif_show:' + n.id }]);
-      }
+    unread.slice(0, 4).forEach(function (n) {
+      var label = (n.msg || 'اعلان').replace(/\s+/g, ' ').trim().slice(0, 26);
+      inlineKb.inline_keyboard.push([{ text: '▸ ' + label, callback_data: 'notif_show:' + n.id }]);
     });
     if (unread.length) {
       inlineKb.inline_keyboard.push([{ text: '✅ همه خوانده شد', callback_data: 'notif_readall' }]);
     }
+    inlineKb.inline_keyboard.push([{ text: '⚙️ تنظیمات', callback_data: 'prefs_open' }]);
 
-    const opts = inlineKb.inline_keyboard.length
-      ? { reply_markup: inlineKb }
-      : { reply_markup: menuFor(sess) };
-    await sendMsg(chatId, text, opts);
+    const opts = { reply_markup: inlineKb.inline_keyboard.length ? inlineKb : menuFor(sess) };
+    await sendLongMsg(chatId, text, opts);
   } catch(e) {
-    await sendMsg(chatId, '❌ خطا: ' + e.message, { reply_markup: menuFor(sess) });
+    await sendMsg(chatId, '❌ خطا: ' + tgEsc(e.message), { reply_markup: menuFor(sess) });
   }
 }
 
@@ -2552,91 +2685,47 @@ async function handleOverdueReport(chatId, sess) {
   await sendMsg(chatId, text, { reply_markup: menuFor(sess) });
 }
 
-// ── 📈 Weekly KPI (manager) ───────────────────────────────────────────────
+// ── 📈 Monthly sales KPI (server SoT) ─────────────────────────────────────
 async function handleWeeklyKPI(chatId, sess) {
   if (!isManagerRole(sess.role)) {
     await sendMsg(chatId, '❌ این قابلیت فقط برای مدیران است.', { reply_markup: menuFor(sess) });
     return;
   }
 
-  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const todayStr = toJalali(new Date());
-
-  // Collect stats per expert from app_data log keys
-  const stats = {};
-  function inc(by, field) {
-    if (!by) return;
-    if (!stats[by]) stats[by] = { calls: 0, visits: 0, sales: 0 };
-    stats[by][field]++;
-  }
+  const salesKpi = require('../lib/sales-kpi');
+  const month = salesKpi.currentJMonth();
+  let text = '📈 <b>KPI فروش — ' + month + '</b>\n'
+    + '<i>منبع: سرور (calcKPIs) · سقف ۱۰۰٪</i>\n\n';
 
   try {
-    const [callRes, visitRes, salesRes] = await Promise.all([
-      query(`SELECT username, COUNT(*)::int AS cnt FROM call_log WHERE updated_at >= NOW() - INTERVAL '7 days' GROUP BY username`),
-      query(`SELECT username, COUNT(*)::int AS cnt FROM visit_log WHERE updated_at >= NOW() - INTERVAL '7 days' GROUP BY username`),
-      query(`SELECT username, COUNT(*)::int AS cnt FROM sales_log WHERE updated_at >= NOW() - INTERVAL '7 days' GROUP BY username`),
-    ]);
-    callRes.rows.forEach(r => {
-      const u = r.username;
-      if (u) {
-        if (!stats[u]) stats[u] = { calls: 0, visits: 0, sales: 0 };
-        stats[u].calls = r.cnt;
-      }
-    });
-    visitRes.rows.forEach(r => {
-      const u = r.username;
-      if (u) {
-        if (!stats[u]) stats[u] = { calls: 0, visits: 0, sales: 0 };
-        stats[u].visits = r.cnt;
-      }
-    });
-    salesRes.rows.forEach(r => {
-      const u = r.username;
-      if (u) {
-        if (!stats[u]) stats[u] = { calls: 0, visits: 0, sales: 0 };
-        stats[u].sales = r.cnt;
-      }
-    });
-  } catch(e) {}
-
-  // Week entries done this week — handles both legacy JSONB value column and direct columns
-  let weDone = {};
-  try {
-    const r = await query(
-      `SELECT COALESCE(added_by, value->>'addedBy') AS expert, COUNT(*)::int AS cnt
-       FROM week_entries
-       WHERE (done = true OR (value->>'done')::boolean = true) AND updated_at >= NOW() - INTERVAL '7 days'
-       GROUP BY COALESCE(added_by, value->>'addedBy')`
+    const users = await query(
+      `SELECT username, display_name FROM app_users
+       WHERE active = true AND role IN ('کارشناس فروش','مدیر') AND username <> 'guest'
+       ORDER BY display_name`
     );
-    r.rows.forEach(function(row){ if (row.expert) weDone[row.expert] = row.cnt; });
-  } catch(e) {}
-
-  // Load display names for all active experts
-  const kpiDisplayName = {};
-  try {
-    const r = await query(`SELECT username, display_name FROM app_users WHERE active = true ORDER BY display_name`);
-    r.rows.forEach(function(u){ kpiDisplayName[u.username] = u.display_name || u.username; });
-  } catch(e) {}
-
-  if (!Object.keys(stats).length && !Object.keys(weDone).length) {
-    await sendMsg(chatId, '📈 <b>KPI هفتگی</b>\n\nهیچ فعالیتی در ۷ روز گذشته ثبت نشده.', { reply_markup: menuFor(sess) });
-    return;
+    if (!users.rows.length) {
+      await sendMsg(chatId, text + 'کارشناسی یافت نشد.', { reply_markup: menuFor(sess) });
+      return;
+    }
+    for (const u of users.rows) {
+      try {
+        const fin = await salesKpi.getFinalizedRow(u.username, month);
+        const data = fin && fin.data && fin.data.kpis
+          ? fin.data
+          : await salesKpi.calcKPIs(u.username, month);
+        const overall = fin ? fin.overall : data.overall;
+        const src = (fin && fin.conversion_source) || data.conversionSource || '—';
+        const flag = overall >= 80 ? '🟢' : overall >= 50 ? '🟡' : '🔴';
+        text += flag + ' <b>' + (u.display_name || u.username) + '</b>: <b>' + overall + '</b>/100'
+          + (fin ? ' ✅نهایی' : ' ·زنده')
+          + ' · ' + src + '\n';
+      } catch (e) {
+        text += '⚪ ' + (u.display_name || u.username) + ': خطا\n';
+      }
+    }
+  } catch (e) {
+    text += 'خطا: ' + e.message;
   }
-
-  // Merge all experts
-  const allExperts = new Set([...Object.keys(stats), ...Object.keys(weDone)]);
-  let text = '📈 <b>KPI هفتگی — ۷ روز گذشته</b>\n\n';
-
-  Array.from(allExperts).sort().forEach(function(expert) {
-    const s = stats[expert] || { calls: 0, visits: 0, sales: 0 };
-    const done = weDone[expert] || 0;
-    const name = kpiDisplayName[expert] || expert;
-    text += '👤 <b>' + name + '</b>\n';
-    text += '  📞 تماس: ' + s.calls + ' | 🚗 بازدید: ' + s.visits;
-    if (s.sales)  text += ' | 💰 فروش: ' + s.sales;
-    if (done)     text += ' | ✅ انجام: ' + done;
-    text += '\n';
-  });
 
   await sendMsg(chatId, text, { reply_markup: menuFor(sess) });
 }
@@ -3392,7 +3481,7 @@ async function doNotifAction(chatId, sess, notifId, action) {
 
 async function handleDigest(chatId, sess) {
   const todayStr = toJalali(new Date());
-  let text = '📊 <b>خلاصه عملکرد — ' + todayStr + '</b>\n\n';
+  let text = '📊 <b>خلاصه امروز</b>\n📅 ' + todayStr + '\n──────────────\n';
   try {
     const r = await query(
       `SELECT COUNT(*)::int AS total,
@@ -3403,7 +3492,7 @@ async function handleDigest(chatId, sess) {
       [sess.username, todayStr]
     );
     const row = r.rows[0] || { total: 0, done: 0 };
-    text += '📋 برنامه امروز: ' + row.total + ' | ✅ انجام: ' + row.done + '\n';
+    text += '☀️ برنامه: <b>' + row.done + '</b> از ' + row.total + ' انجام\n';
 
     const od = await query(
       `SELECT COUNT(*)::int AS cnt FROM center_edits
@@ -3412,29 +3501,44 @@ async function handleDigest(chatId, sess) {
       [sess.username, todayStr]
     );
     const overdue = od.rows[0] ? od.rows[0].cnt : 0;
-    if (overdue) text += '⚠️ معوق: ' + overdue + ' مرکز\n';
+    text += overdue ? '⚠️ معوق: <b>' + overdue + '</b> مرکز\n' : '✅ معوق: ندارد\n';
 
     const tk = await query(
       `SELECT COUNT(*)::int AS cnt FROM tasks WHERE owner = $1 AND status <> 'done' AND done IS NOT TRUE`,
       [sess.username]
     );
-    text += '📌 وظایف باز: ' + ((tk.rows[0] && tk.rows[0].cnt) || 0);
+    text += '📌 وظایف باز: <b>' + ((tk.rows[0] && tk.rows[0].cnt) || 0) + '</b>';
   } catch (e) {
     text += 'خطا در بارگذاری آمار.';
   }
-  await sendMsg(chatId, text, { reply_markup: menuFor(sess) });
+  await sendMsg(chatId, text, {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '☀️ برنامه امروز', callback_data: 'quick_today' }, { text: '🔔 اعلان‌ها', callback_data: 'quick_notifs' }],
+      ],
+    },
+  });
 }
 
 async function handleNotifSettings(chatId, sess) {
   const hub = require('../lib/notification-hub');
   const prefs = await hub.getUserPrefs(sess.username);
   const ch = prefs.channels || {};
-  let text = '⚙️ <b>تنظیمات اعلان</b>\n\n';
-  text += 'تلگرام: ' + (ch.telegram !== false ? '✅' : '❌') + '\n';
-  text += 'مرورگر: ' + (ch.browser !== false ? '✅' : '❌') + '\n';
-  text += 'حالت: ' + (prefs.digest_mode || 'instant') + '\n\n';
-  text += 'برای تغییر دقیق‌تر از تنظیمات CRM استفاده کنید.';
-  await sendMsg(chatId, text, { reply_markup: menuFor(sess) });
+  const tgOn = ch.telegram !== false;
+  const brOn = ch.browser !== false;
+  let text = '⚙️ <b>تنظیمات اعلان</b>\n──────────────\n';
+  text += 'تلگرام: ' + (tgOn ? '✅ روشن' : '❌ خاموش') + '\n';
+  text += 'مرورگر: ' + (brOn ? '✅ روشن' : '❌ خاموش') + '\n';
+  text += 'حالت: <code>' + tgEsc(prefs.digest_mode || 'instant') + '</code>\n\n';
+  text += '<i>تغییر دقیق‌تر از تنظیمات CRM هم ممکن است.</i>';
+  await sendMsg(chatId, text, {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: tgOn ? '🔕 قطع اعلان تلگرام' : '🔔 فعال اعلان تلگرام', callback_data: 'prefs_tg_toggle' }],
+        [{ text: '📊 خلاصه امروز', callback_data: 'quick_digest' }, { text: '🔔 اعلان‌ها', callback_data: 'quick_notifs' }],
+      ],
+    },
+  });
 }
 
 // ── 🌅 Daily morning report ───────────────────────────────────────────────

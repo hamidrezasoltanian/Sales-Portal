@@ -5,7 +5,7 @@
   var WP_ALL_EXPERTS = '__all__';
 
   var _wpState = {
-    expertId: '',
+    expertId: WP_ALL_EXPERTS,
     expertList: [],
     filterExpert: '',
     weekId: '',
@@ -173,9 +173,14 @@
           var alreadyScheduled = _wpScheduledSet.has(rtype + '_' + c.id);
           var ownerName = (typeof USERS !== 'undefined' && USERS[owner]) ? USERS[owner] : owner;
 
+          var displayName = (typeof resolveCenterDisplayName === 'function'
+            ? resolveCenterDisplayName(rtype, c.id, e.nameOverride || c.name)
+            : null)
+            || (typeof _getCenterName === 'function' ? _getCenterName(rtype, c.id) : null)
+            || e.nameOverride || c.name || c.id;
           centers.push({
             id: c.id, rtype: rtype, rkey: rtype+'_'+c.id,
-            name: e.nameOverride || c.name || c.id,
+            name: displayName,
             potential: potential,
             status: e.status || '',
             lead: e.lead || c.lead || 'سرنخ',
@@ -462,18 +467,18 @@
       _wpState.expertList = users || [];
       var sel = document.getElementById('wpExpertSel');
       if (!sel) return;
+      if (!_wpState.expertId) _wpState.expertId = WP_ALL_EXPERTS;
+      sel.innerHTML = '<option value="' + WP_ALL_EXPERTS + '"' + ((_wpState.expertId === WP_ALL_EXPERTS) ? ' selected' : '') + '>👥 همه کارشناسان</option>' +
+        users.map(function (u) {
+          var label = esc(u.name) + (u.role ? ' — ' + esc(u.role) : '');
+          return '<option value="' + esc(u.id) + '"' + ((_wpState.expertId === u.id) ? ' selected' : '') + '>' + label + '</option>';
+        }).join('');
       var hint = document.getElementById('wpExpertHint');
       if (hint) {
         hint.textContent = _wpState.expertId === WP_ALL_EXPERTS
           ? '(همه — ' + users.length + ' نفر)'
           : '(' + users.length + ' نفر)';
       }
-      sel.innerHTML = '<option value="">— انتخاب کنید —</option>' +
-        '<option value="' + WP_ALL_EXPERTS + '"' + ((_wpState.expertId === WP_ALL_EXPERTS) ? ' selected' : '') + '>👥 همه کارشناسان</option>' +
-        users.map(function (u) {
-          var label = esc(u.name) + (u.role ? ' — ' + esc(u.role) : '');
-          return '<option value="' + esc(u.id) + '"' + ((_wpState.expertId === u.id) ? ' selected' : '') + '>' + label + '</option>';
-        }).join('');
     }
     if (typeof window._etLoadUsersForPlanner === 'function') {
       window._etLoadUsersForPlanner(fillExperts);
@@ -613,12 +618,18 @@
       var typeCell = '';
       if (_wpState.actionType === 'all') {
         var rowType = (_wpState.rowTypes && _wpState.rowTypes[c.rkey]) || 'call';
-        typeCell = '<td style="padding:8px 10px;width:150px">' +
+        typeCell = '<td style="padding:8px 10px;width:160px">' +
           '<select onchange="window._wpSetRowType(\''+esc(c.rkey)+'\',this.value)" ' +
             (checked ? '' : 'disabled ') +
             'style="width:100%;padding:5px 8px;border:1px solid #e2e8f0;border-radius:6px;font-family:inherit;font-size:.75rem;opacity:'+(checked?'1':'.55')+'">' +
             _wpActOptionsHtml(rowType, false) +
           '</select></td>';
+      } else {
+        var fixedType = _wpState.actionType || 'call';
+        var fixedLabel = _wpActLabels()[fixedType] || fixedType;
+        typeCell = '<td style="padding:8px 10px;width:160px">' +
+          '<span style="display:inline-block;font-size:.75rem;font-weight:700;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:6px;padding:4px 8px;white-space:nowrap">' +
+          esc(fixedLabel) + '</span></td>';
       }
 
       return '<tr style="border-bottom:1px solid #f1f5f9'+(c.isOverdue?';background:#fff8f8':'')+(c.alreadyScheduled?';opacity:.5':'') + '">' +
@@ -647,10 +658,8 @@
     var actLabel = _wpState.actionType === 'all'
       ? 'نوع per مرکز'
       : (_wpActLabels()[_wpState.actionType] || _wpState.actionType);
-    var colSpan = _wpState.actionType === 'all' ? 6 : 5;
-    var typeHead = _wpState.actionType === 'all'
-      ? '<th style="padding:8px 10px;font-size:.75rem;font-weight:600;color:#6b7280;text-align:right">نوع اقدام</th>'
-      : '';
+    var colSpan = 6;
+    var typeHead = '<th style="padding:8px 10px;font-size:.75rem;font-weight:600;color:#6b7280;text-align:right">نوع پیگیری</th>';
 
     function _wpSelectedExpertCount(keys) {
       var s = {};

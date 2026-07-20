@@ -7,6 +7,7 @@ const { requirePermission } = require('../permissions');
 const { isManagerRole } = require('../lib/roles');
 const { loadCenterAccessContext, canAccessCenter } = require('../lib/center-access');
 const { resolveCenterOwner } = require('../lib/center-ownership');
+const { userHasGlobalCenterAccess } = require('../lib/manager-scope');
 
 const router = express.Router();
 
@@ -33,16 +34,20 @@ async function resolveEntryIds(ids, keys) {
 }
 
 async function assertEntryIdsAllowed(req, idList) {
-  if (isManagerRole(req.user.role)) return idList;
   const rows = await query(
     'SELECT id, rec_key, added_by FROM week_entries WHERE id = ANY($1::text[])',
     [idList]
   );
-  const context = await loadCenterAccessContext();
-  const allowed = rows.rows.filter(function (row) {
+  // شناسه‌های حذف‌شده/کهنه را نادیده بگیر — کلاینت با key/POST جبران می‌کند
+  const existing = rows.rows;
+  if (userHasGlobalCenterAccess(req.user)) {
+    return existing.map(function (row) { return String(row.id); });
+  }
+  const context = await loadCenterAccessContext({ forUser: req.user });
+  const allowed = existing.filter(function (row) {
     return row.added_by === req.user.username || canAccessCenter(req.user, row.rec_key, context);
   }).map(function (row) { return String(row.id); });
-  if (allowed.length !== idList.length) {
+  if (allowed.length !== existing.length) {
     const err = new Error('دسترسی به بعضی برنامه‌ها مجاز نیست');
     err.status = 403;
     throw err;
@@ -58,6 +63,20 @@ async function purgeOtherActiveForRecKey(recKey, keepId) {
      WHERE rec_key = $1 AND done = false AND id <> $2
      RETURNING id`,
     [recKey, String(keepId)]
+  );
+  return r.rows.length;
+}
+
+function canonicalWeekEntryKey(weekId, rtype, rid) {
+  return String(weekId) + ':::' + String(rtype) + ':::' + String(rid);
+}
+
+/** قبل از تغییر key: ردیف‌هایی که کلید هدف را گرفته‌اند (غالباً فرمت قدیمی/done) حذف شوند */
+async function clearWeekEntryKeyConflict(newKey, keepId) {
+  if (!newKey || !keepId) return 0;
+  const r = await query(
+    `DELETE FROM week_entries WHERE key = $1 AND id IS DISTINCT FROM $2 RETURNING id`,
+    [String(newKey), String(keepId)]
   );
   return r.rows.length;
 }
@@ -91,11 +110,12 @@ function rowToObj(r) {
 // ── GET /api/week-entries ──────────────────────────────────────────────────
 // Query params:
 //   ?week_id=   week start (Jalali)
-//   ?week_end=  week end — also include rows whose scheduled_date falls in [week_id, week_end]
-//               even if week_id column is stale (prevents "vanishing" day cards)
+//   ?week_end=  week end — also include rows whose scheduled_date OR done_date
+//               falls in [week_id, week_end] (done cards for daily report)
 //   ?owner=     center owner (NOT added_by)
 //   ?added_by=  creator username
 //   ?done=false|true
+//   ?done_date= Jalali YYYY/MM/DD — entries completed that day
 router.get('/', requireAuth, async function (req, res) {
   try {
     const conditions = [];
@@ -106,7 +126,9 @@ router.get('/', requireAuth, async function (req, res) {
     if (weekId && weekEnd) {
       params.push(weekId, weekEnd);
       conditions.push(
-        `(week_id = $1 OR (scheduled_date IS NOT NULL AND scheduled_date <> '' AND scheduled_date >= $1 AND scheduled_date <= $2))`
+        `(week_id = $1` +
+        ` OR (scheduled_date IS NOT NULL AND scheduled_date <> '' AND scheduled_date >= $1 AND scheduled_date <= $2)` +
+        ` OR (done_date IS NOT NULL AND done_date <> '' AND done_date >= $1 AND done_date <= $2))`
       );
     } else if (weekId) {
       params.push(weekId);
@@ -120,6 +142,10 @@ router.get('/', requireAuth, async function (req, res) {
       params.push(req.query.done === 'true');
       conditions.push(`done = $${params.length}`);
     }
+    if (req.query.done_date) {
+      params.push(String(req.query.done_date));
+      conditions.push(`done_date = $${params.length}`);
+    }
     if (req.query.rec_key) {
       params.push(req.query.rec_key);
       conditions.push(`rec_key = $${params.length}`);
@@ -131,11 +157,11 @@ router.get('/', requireAuth, async function (req, res) {
       params
     );
     let rows = result.rows;
-    const context = (!isManagerRole(req.user.role) || req.query.owner)
-      ? await loadCenterAccessContext()
+    const context = (!userHasGlobalCenterAccess(req.user) || req.query.owner)
+      ? await loadCenterAccessContext({ forUser: req.user })
       : null;
 
-    if (!isManagerRole(req.user.role)) {
+    if (!userHasGlobalCenterAccess(req.user)) {
       rows = rows.filter(function (row) {
         return row.added_by === req.user.username || canAccessCenter(req.user, row.rec_key, context);
       });
@@ -169,8 +195,8 @@ router.post('/', requireAuth, requirePermission('weekplan', 'edit'), async funct
     }
     const cleanRecKey = (recKey && recKey !== rtype && recKey.includes('_')) ? recKey : `${rtype}_${rid}`;
     const isMgr = isManagerRole(req.user.role);
-    if (!isMgr) {
-      const context = await loadCenterAccessContext();
+    if (!userHasGlobalCenterAccess(req.user)) {
+      const context = await loadCenterAccessContext({ forUser: req.user });
       if (!canAccessCenter(req.user, cleanRecKey, context)) {
         return res.status(403).json({ error: 'دسترسی به این مرکز مجاز نیست' });
       }
@@ -197,6 +223,19 @@ router.post('/', requireAuth, requirePermission('weekplan', 'edit'), async funct
     }
 
     const dbKey = `${weekId}:::${rtype}:::${rid}`;
+    let resolvedName = centerName || null;
+    try {
+      const { resolveCenterDisplayName, isWeakDisplayName } = require('../lib/center-names');
+      const looksCode = !resolvedName || resolvedName === rid
+        || /^(p\d+\|\||c_|mz_t_|center_|pc_)/.test(String(resolvedName))
+        || /\bp\d+\|\|/.test(String(resolvedName));
+      if (looksCode || (typeof isWeakDisplayName === 'function' && isWeakDisplayName(resolvedName))) {
+        const nice = await resolveCenterDisplayName(cleanRecKey);
+        if (nice && nice !== rid && !/^(p\d+\|\||c_|mz_t_)/.test(nice) && nice !== 'پتانسیل') {
+          resolvedName = nice;
+        }
+      }
+    } catch (ne) { /* keep original */ }
     const dbValue = {
       id,
       weekId,
@@ -207,7 +246,7 @@ router.post('/', requireAuth, requirePermission('weekplan', 'edit'), async funct
       scheduledTime: scheduledTime || null,
       actionType: actionType || 'call',
       addedBy: ownerForQuota,
-      centerName: centerName || null,
+      centerName: resolvedName,
       weekTagId: weekTagId || null,
       assignmentSource: source,
       done: false,
@@ -242,7 +281,7 @@ router.post('/', requireAuth, requirePermission('weekplan', 'edit'), async funct
         scheduledDate || null,
         actionType || 'call',
         ownerForQuota,
-        centerName || null,
+        resolvedName || null,
         weekTagId || null,
         source,
         scheduledTime || null,
@@ -264,17 +303,21 @@ router.put('/:id', requireAuth, requirePermission('weekplan', 'edit'), async fun
   try {
     const { weekId, scheduledDate, done, doneDate, actionType, weekTagId, centerName,
             doneResult, doneNote, doneAmount } = req.body;
-    const rowRes = await query('SELECT key, value, rec_key, added_by FROM week_entries WHERE id = $1', [req.params.id]);
+    const rowRes = await query(
+      'SELECT id, key, value, rec_key, added_by, week_id, rtype, rid FROM week_entries WHERE id = $1',
+      [req.params.id]
+    );
     if (!rowRes.rows.length) {
       return res.status(404).json({ error: 'ورودی برنامه هفته یافت نشد' });
     }
-    if (!isManagerRole(req.user.role) && rowRes.rows[0].added_by !== req.user.username) {
-      const context = await loadCenterAccessContext();
-      if (!canAccessCenter(req.user, rowRes.rows[0].rec_key, context)) {
+    const existing = rowRes.rows[0];
+    if (!userHasGlobalCenterAccess(req.user) && existing.added_by !== req.user.username) {
+      const context = await loadCenterAccessContext({ forUser: req.user });
+      if (!canAccessCenter(req.user, existing.rec_key, context)) {
         return res.status(403).json({ error: 'دسترسی به این برنامه مجاز نیست' });
       }
     }
-    const currentVal = rowRes.rows[0].value || {};
+    const currentVal = existing.value || {};
     const updatedVal = {
       ...currentVal,
       ...(weekId !== undefined ? { weekId } : {}),
@@ -288,10 +331,19 @@ router.put('/:id', requireAuth, requirePermission('weekplan', 'edit'), async fun
       ...(doneNote !== undefined ? { doneNote } : {}),
       ...(doneAmount !== undefined ? { doneAmount } : {}),
     };
+    const targetWeekId = weekId !== undefined ? weekId : existing.week_id;
+    const canNormalize = !!(targetWeekId && existing.rtype && existing.rid != null && existing.rid !== '');
+    const newKey = canNormalize
+      ? canonicalWeekEntryKey(targetWeekId, existing.rtype, existing.rid)
+      : existing.key;
+    const rewriteKey = canNormalize && newKey !== existing.key;
+    if (rewriteKey) {
+      await clearWeekEntryKeyConflict(newKey, existing.id);
+    }
     const result = await query(
       `UPDATE week_entries
        SET week_id        = CASE WHEN $15::boolean THEN $1 ELSE week_id END,
-           key            = CASE WHEN $15::boolean THEN $1 || ':::' || rtype || ':::' || rid ELSE key END,
+           key            = CASE WHEN $17::boolean THEN $18 ELSE key END,
            scheduled_date = CASE WHEN $9::boolean THEN $2 ELSE scheduled_date END,
            done           = CASE WHEN $10::boolean THEN $3 ELSE done END,
            done_date      = CASE WHEN $11::boolean THEN $4 ELSE done_date END,
@@ -319,6 +371,8 @@ router.put('/:id', requireAuth, requirePermission('weekplan', 'edit'), async fun
         centerName !== undefined,
         weekId !== undefined,
         req.params.id,
+        rewriteKey,
+        newKey,
       ]
     );
     const saved = result.rows[0];
@@ -420,12 +474,25 @@ router.post('/bulk-delete', requireAuth, requirePermission('weekplan', 'edit'), 
 router.post('/bulk-move', requireAuth, requirePermission('weekplan', 'edit'), async function (req, res) {
   try {
     const { ids, keys, weekId, scheduledDate } = req.body || {};
-    const idList = await resolveEntryIds(ids, keys);
-    if (!idList.length || !weekId) {
+    const resolved = await resolveEntryIds(ids, keys);
+    if (!resolved.length || !weekId) {
       return res.status(400).json({ error: 'شناسه/کلید و weekId الزامی است' });
     }
-    await assertEntryIdsAllowed(req, idList);
+    const idList = await assertEntryIdsAllowed(req, resolved);
+    if (!idList.length) {
+      return res.json([]);
+    }
     const hasScheduledDate = scheduledDate !== undefined;
+    // آزاد کردن کلیدهای canonical مقصد (تداخل با کلید قدیمی weekId:::recKey یا ردیف done)
+    const meta = await query(
+      `SELECT id, rtype, rid FROM week_entries WHERE id = ANY($1::text[])`,
+      [idList]
+    );
+    for (let i = 0; i < meta.rows.length; i++) {
+      const row = meta.rows[i];
+      if (!row.rtype || row.rid == null || row.rid === '') continue;
+      await clearWeekEntryKeyConflict(canonicalWeekEntryKey(weekId, row.rtype, row.rid), row.id);
+    }
     const placeholders = idList.map(function (_, i) { return '$' + (i + 4); }).join(',');
     const result = await query(
       `UPDATE week_entries

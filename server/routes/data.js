@@ -5,6 +5,7 @@ const { query, pool } = require('../db');
 const { requireAuth, requireManager } = require('../auth');
 const { requirePermission } = require('../permissions');
 const { buildOwnerMaps, filterDbForUser, filterPutBodyForUser, isManagerRole } = require('../lib/center-ownership');
+const { loadCenterAccessContext } = require('../lib/center-access');
 const { mergeNoteArrays } = require('../lib/db-merge');
 const { applySlimCollectionUpserts } = require('../lib/blob-partial-save');
 const { filterActiveNotes } = require('../lib/soft-delete');
@@ -260,7 +261,10 @@ router.get('/db', async (req, res) => {
       db = await loadDBFromSQL(client, { preloadedEdits: expertEdits });
     }
     await client.query('COMMIT');
-    const filtered = filterDbForUser(db, req.user, ownerMaps);
+    let accessOpts = {};
+    const ctx = await loadCenterAccessContext({ forUser: req.user });
+    accessOpts.delegatedOwners = ctx.delegatedOwners;
+    const filtered = filterDbForUser(db, req.user, ownerMaps, accessOpts);
     return res.json(filtered);
   } catch (e) {
     await client.query('ROLLBACK').catch(function() {});
@@ -1962,19 +1966,39 @@ router.post('/centers/merge', requirePermission('provinces', 'edit'), async (req
     for (const row of weRows.rows) {
       const newKey = row.key.replace(sourceId, targetId);
       if (newKey !== row.key) {
-        // Merge into target key if it exists, otherwise rename
+        // Preserve the existing row (and its optional unique id).  Inserting
+        // only key/value can duplicate that id on installations that have the
+        // newer columnar week_entries schema.
         const newVal = Object.assign({}, row.value, {
           rid: targetId,
           recKey: (row.value.recKey || '').replace(sourceId, targetId),
           centerName: row.value.centerName, // keep original name until next save
         });
-        await client.query(
-          `INSERT INTO week_entries (key, value, updated_at, updated_by)
-           VALUES ($1, $2, NOW(), $3)
-           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
-          [newKey, JSON.stringify(newVal), req.user.username]
+        const existingTarget = await client.query(
+          `SELECT key, value FROM week_entries WHERE key = $1 FOR UPDATE`,
+          [newKey]
         );
-        await client.query(`DELETE FROM week_entries WHERE key = $1`, [row.key]);
+        if (existingTarget.rows.length) {
+          const mergedVal = Object.assign({}, existingTarget.rows[0].value || {}, newVal);
+          await client.query(
+            `UPDATE week_entries
+             SET value = $1, rec_key = $2, rtype = $3, rid = $4,
+                 updated_at = NOW(), updated_by = $5
+             WHERE key = $6`,
+            [JSON.stringify(mergedVal), mergedVal.recKey || null, targetType || null,
+              targetId, req.user.username, newKey]
+          );
+          await client.query(`DELETE FROM week_entries WHERE key = $1`, [row.key]);
+        } else {
+          await client.query(
+            `UPDATE week_entries
+             SET key = $1, value = $2, rec_key = $3, rtype = $4, rid = $5,
+                 updated_at = NOW(), updated_by = $6
+             WHERE key = $7`,
+            [newKey, JSON.stringify(newVal), newVal.recKey || null, targetType || null,
+              targetId, req.user.username, row.key]
+          );
+        }
       }
     }
 

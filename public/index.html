@@ -46,7 +46,7 @@ setTimeout(function(){
   if((tb&&tb.offsetHeight>=8)||(lo&&lo.style.display==='flex'))return;
   __showBootError('صفحه کامل بارگذاری نشد. Hard Refresh بزنید (Ctrl+Shift+R) یا کش مرورگر را پاک کنید.');
 },12000);
-window.__APP_BUILD='20260718g';
+window.__APP_BUILD='20260724f';
 if('serviceWorker' in navigator){
   navigator.serviceWorker.getRegistrations().then(function(regs){
     regs.forEach(function(r){r.unregister();});
@@ -54,8 +54,8 @@ if('serviceWorker' in navigator){
 }
 </script>
 <!-- Vazirmatn از jsDelivr — npm package، بدون Google dependency -->
-<link rel="stylesheet" href="/css/app.css?v=20260718g">
-<link rel="stylesheet" href="/dist/assets/main.css?v=20260718g">
+<link rel="stylesheet" href="/css/app.css?v=20260724f">
+<link rel="stylesheet" href="/dist/assets/main.css?v=20260724f">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" onerror="console.warn('XLSX CDN failed - only TSV format supported offline')"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
 </head>
@@ -89,9 +89,9 @@ if('serviceWorker' in navigator){
     <button class="top-btn" onclick="openGSearch()" title="جستجو سریع (Ctrl+K)" style="background:rgba(255,255,255,.15);font-size:13px">🔍 <span style="font-size:11px;opacity:.7">Ctrl+K</span></button>
     <button class="top-btn" onclick="doLogout()" style="background:rgba(220,38,38,.2);border-color:rgba(220,38,38,.4)">خروج</button>
     <button class="top-btn" id="themeTglBtn" onclick="toggleTheme()" title="تغییر تم" style="font-size:13px;min-width:72px">🌙 دارک</button>
-    <button class="top-btn sb-manager-wrap" onclick="openUserMgmt()" title="مدیریت کاربران" style="display:none;background:rgba(139,92,246,.2);border-color:rgba(139,92,246,.4)">👥 کاربران</button>
+    <button class="top-btn sb-manager-wrap" onclick="openUserMgmt()" title="مدیریت کاربران — تب HR" style="display:none;background:rgba(139,92,246,.2);border-color:rgba(139,92,246,.4)">👥 کاربران</button>
     <button class="top-btn" onclick="openSettings()" title="تنظیمات" style="background:rgba(255,255,255,.15);font-weight:700">⚙ تنظیمات</button>
-    <button class="top-btn" onclick="openDataHub()" title="Ctrl+B" style="background:rgba(14,165,233,.2);border-color:rgba(14,165,233,.4);font-weight:700">💾 داده</button>
+    <button class="top-btn" onclick="_openDataHubLazy()" title="Ctrl+B" style="background:rgba(14,165,233,.2);border-color:rgba(14,165,233,.4);font-weight:700">💾 داده</button>
     <input type="file" id="restoreInp" accept=".json" style="display:none" onchange="unifiedRestore(event)">
     <input type="file" id="importCentersInp" accept=".xlsx,.xls" style="display:none" onchange="importCentersFromExcel(event)">
     <input type="file" id="unifiedMergeInp" accept=".json" multiple style="display:none" onchange="unifiedHandleMergeFiles(event)">
@@ -282,6 +282,9 @@ if('serviceWorker' in navigator){
     <select id="wpOwnerFilter" class="wp-filter-select" onchange="_wpFclFilters.owner=this.value;renderWeekPlan()">
       <option value="">همه کارشناسان</option>
     </select>
+    <select id="wpDefaultActType" class="wp-filter-select" title="نوع پیش‌فرض هنگام افزودن مرکز به هفته" style="min-width:130px">
+      <option value="call">📞 تماس</option>
+    </select>
     <input id="wpSearch" class="wp-filter-search" type="search" placeholder="جستجوی نام مرکز..." oninput="renderWeekPlan()">
     <button type="button" class="wp-filter-clear" onclick="wpClearFilters()">✕ پاک</button>
   </div>
@@ -300,14 +303,13 @@ if('serviceWorker' in navigator){
       <button type="button" class="cal-nb cal-today-btn wp-tbtn" onclick="wpGoThisWeek()">این هفته</button>
       <button type="button" class="wp-tbtn wp-tbtn-indigo" onclick="wpOpenTodayPlanModal()" title="برنامه امروز با جزئیات بیشتر">📋 امروز</button>
       <button type="button" class="wp-tbtn wp-tbtn-green" onclick="wpExportExcel()" title="دانلود Excel برنامه هفته">⬇ Excel</button>
-      <button type="button" id="wpDailyMonBtn" class="wp-tbtn wp-tbtn-purple" onclick="openDailyMonitor()" style="display:none" title="گزارش فعالیت امروز">📊 گزارش</button>
+      <button type="button" id="wpDailyMonBtn" class="wp-tbtn wp-tbtn-purple" onclick="openDailyMonitor()" style="display:none" title="گزارش فعالیت روزانه هفته">📊 گزارش</button>
     </div>
   </div>
   <div id="wpBulkBar">
     <span id="wpBulkCount"></span>
-    <button onclick="wpBulkDone()" style="background:#22c55e;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">✓ انجام شد</button>
-    <button onclick="wpBulkMove()" style="background:#f59e0b;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">↪ انتقال هفته</button>
-    <button onclick="wpBulkRemove()" style="background:#ef4444;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">🗑 حذف</button>
+    <button onclick="wpBulkMoveDay()" style="background:#0ea5e9;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">📅 جابجایی روز</button>
+    <button onclick="wpBulkMove()" style="background:#f59e0b;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">↪ تعیین هفته</button>
     <button onclick="wpClearSelection()" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:5px;padding:4px 10px;cursor:pointer;font-family:inherit;font-size:11px">✕ انصراف</button>
   </div>
   <div class="wp-days" id="wpDays"></div>
@@ -736,7 +738,7 @@ if('serviceWorker' in navigator){
 </div><!-- /pricingPanel -->
 
 <!-- PROFORMA PANEL -->
-<div id="proformaPanel" style="display:none;padding:16px"><div id="vue-proforma" data-user-role="" style="display:none" aria-hidden="true"></div><div id="pfVanillaRoot"></div></div>
+<div id="proformaPanel" style="display:none;padding:12px 16px 16px"><div id="vue-proforma" data-user-role="" style="display:none" aria-hidden="true"></div><div id="pfVanillaRoot"></div></div>
 
 <!-- SUPPORT PANEL -->
 <div id="supportPanel" style="display:none;padding:16px">
@@ -792,26 +794,26 @@ if('serviceWorker' in navigator){
   <button class="mob-tab" onclick="switchTab('mtr')"><span class="mob-icon">💰</span>مطالبات</button>
 </nav>
 <!-- DATA — core modules; tab-specific scripts load on demand via tab-loader.js -->
-<script src="/js/safe-dom.js?v=20260718g"></script>
-<script src="/js/tab-loader.js?v=20260718g"></script>
-<script src="/js/roles.js?v=20260718g"></script>
-<script src="/js/core.js?v=20260718g"></script>
-<script src="/js/settings.js?v=20260718g"></script>
-<script src="/js/data.js?v=20260718g"></script>
-<script src="/js/ui-core.js?v=20260718g"></script>
-<script src="/js/dashboard.js?v=20260718g"></script>
-<script src="/js/center-interactions.js?v=20260718g"></script>
-<script src="/js/provinces.js?v=20260718g"></script>
-<script src="/js/center-modal.js?v=20260718g"></script>
-<script src="/js/global-search.js?v=20260718g"></script>
-<script src="/js/center-deals.js?v=20260718g"></script>
-<script src="/js/center-files.js?v=20260718g"></script>
-<script src="/js/pricing.js?v=20260718g"></script>
-<script src="/js/weekplan.js?v=20260718g"></script>
-<script src="/js/manager.js?v=20260718g"></script>
-<script src="/js/crm-complete.js?v=20260718g"></script>
-<script src="/js/onboarding.js?v=20260718g"></script>
-<script type="module" src="/dist/assets/main.js?v=20260718g"></script>
+<script src="/js/safe-dom.js?v=20260724f"></script>
+<script src="/js/tab-loader.js?v=20260724f"></script>
+<script src="/js/roles.js?v=20260724f"></script>
+<script src="/js/core.js?v=20260724f"></script>
+<script src="/js/settings.js?v=20260724f"></script>
+<script src="/js/data.js?v=20260724f"></script>
+<script src="/js/ui-core.js?v=20260724f"></script>
+<script src="/js/dashboard.js?v=20260724f"></script>
+<script src="/js/center-interactions.js?v=20260724f"></script>
+<script src="/js/provinces.js?v=20260724f"></script>
+<script src="/js/center-modal.js?v=20260724f"></script>
+<script src="/js/global-search.js?v=20260724f"></script>
+<script src="/js/center-deals.js?v=20260724f"></script>
+<script src="/js/center-files.js?v=20260724f"></script>
+<script src="/js/pricing.js?v=20260724f"></script>
+<script src="/js/weekplan.js?v=20260724f"></script>
+<script src="/js/manager.js?v=20260724f"></script>
+<script src="/js/crm-complete.js?v=20260724f"></script>
+<script src="/js/onboarding.js?v=20260724f"></script>
+<script type="module" src="/dist/assets/main.js?v=20260724f"></script>
 <script>
 (function(){
   if(!window.__APP_BUILD||sessionStorage.getItem('_build_ok_'+window.__APP_BUILD))return;

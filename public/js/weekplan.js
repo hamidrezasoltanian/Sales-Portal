@@ -8,6 +8,13 @@ function _wpSaveWeek(keys){
   if(DB._weDeletedKeys&&DB._weDeletedKeys.length)DB._weDeletedKeys=[];
 }
 
+/** نوع پیش‌فرض هنگام افزودن مرکز به هفته (از سلکتور نوار ابزار یا call) */
+function _wpDefaultActionType(){
+  var el = document.getElementById('wpDefaultActType');
+  if (el && el.value) return el.value;
+  return 'call';
+}
+
 
 function addNote(type,id,text,inp){
   if(!text||!text.trim())return;
@@ -85,40 +92,51 @@ function _saveCNC(key,name){
 
 function getRecLabel(recKey){
   _loadCNC();
-  if(_CNC&&_CNC[recKey])return _CNC[recKey];
   if(!recKey)return'?';
   var pts=recKey.split('_');var tp=pts[0];var id=pts.slice(1).join('_');
+  var cached=_CNC&&_CNC[recKey];
+  if(cached && typeof _looksLikeCenterCode==='function' && _looksLikeCenterCode(cached, id)){
+    try{delete _CNC[recKey];}catch(e){}
+    cached=null;
+  }
+  if(cached)return cached;
   if(tp==='mtr'){
     var mrow=typeof DATA!=='undefined'?DATA.find(function(r){return r.inv===id;}):null;
     if(mrow){var lbl='📄 '+mrow.customer+' ('+id+')';_saveCNC(recKey,lbl);return lbl;}
     return '📄 مطالبات: '+id;
   }
   if(tp==='center'){
-    var _no=(DB.edits[recKey]||{}).nameOverride;if(_no){_saveCNC(recKey,_no);return _no;}
-    var c=CENTERS.find(function(x){return x.id===id;});
-    if(c){_saveCNC(recKey,c.name);return c.name;}
-    var ex=(DB.extra||[]).find(function(x){return x.id===id;});
-    if(ex){_saveCNC(recKey,ex.name);return ex.name;}
+    var _no=(DB.edits[recKey]||{}).nameOverride;
+    if(_no && !(typeof _looksLikeCenterCode==='function' && _looksLikeCenterCode(_no, id))){_saveCNC(recKey,_no);return _no;}
+    var c=(CENTERS||[]).find(function(x){return String(x.id)===String(id);});
+    if(c&&c.name){_saveCNC(recKey,c.name);return c.name;}
+    var ex=(DB.extra||[]).find(function(x){return String(x.id)===String(id);});
+    if(ex&&ex.name){_saveCNC(recKey,ex.name);return ex.name;}
     // Fallback: search across all provinces cache
     if(_PC_CACHE){
       for(var _pv in _PC_CACHE){
-        var _found=_PC_CACHE[_pv].find(function(x){return x.id===id;});
-        if(_found)return _found.name;
+        var _found=(_PC_CACHE[_pv]||[]).find(function(x){return String(x.id)===String(id);});
+        if(_found&&_found.name){_saveCNC(recKey,_found.name);return _found.name;}
       }
     }
+    var _w1=typeof _lookupCenterNameFromWeek==='function'?_lookupCenterNameFromWeek(tp,id):'';
+    if(_w1){_saveCNC(recKey,_w1);return _w1;}
     return id;
   }
   if(tp==='pc'){
-    var _no2=(DB.edits[recKey]||{}).nameOverride;if(_no2){_saveCNC(recKey,_no2);return _no2;}
+    var _no2=(DB.edits[recKey]||{}).nameOverride;
+    if(_no2 && !(typeof _looksLikeCenterCode==='function' && _looksLikeCenterCode(_no2, id))){_saveCNC(recKey,_no2);return _no2;}
     _buildPCCache();
     var provId=id.split('||')[0];
     var arr=_PC_CACHE[provId]||[];
-    var found=arr.find(function(x){return x.id===id;});
-    if(found){_saveCNC(recKey,found.name);return found.name;}
-    var ex2=(DB.extra||[]).find(function(x){return x.id===id;});
-    if(ex2){_saveCNC(recKey,ex2.name);return ex2.name;}
+    var found=arr.find(function(x){return String(x.id)===String(id);});
+    if(found&&found.name){_saveCNC(recKey,found.name);return found.name;}
+    var ex2=(DB.extra||[]).find(function(x){return String(x.id)===String(id);});
+    if(ex2&&ex2.name){_saveCNC(recKey,ex2.name);return ex2.name;}
     // full fallback search
-    if(_PC_CACHE){for(var _pv2 in _PC_CACHE){var _f2=(_PC_CACHE[_pv2]||[]).find(function(x){return x.id===id;});if(_f2){_saveCNC(recKey,_f2.name);return _f2.name;}}}
+    if(_PC_CACHE){for(var _pv2 in _PC_CACHE){var _f2=(_PC_CACHE[_pv2]||[]).find(function(x){return String(x.id)===String(id);});if(_f2&&_f2.name){_saveCNC(recKey,_f2.name);return _f2.name;}}}
+    var _w2=typeof _lookupCenterNameFromWeek==='function'?_lookupCenterNameFromWeek(tp,id):'';
+    if(_w2){_saveCNC(recKey,_w2);return _w2;}
     var _pvn=PROVINCES&&PROVINCES.find(function(p){return p.id===id.split('||')[0];});
     var _fb=(_pvn?_pvn.name+' ':'')+id;
     return _fb;
@@ -128,6 +146,27 @@ function getRecLabel(recKey){
     return pv?pv.name:id;
   }
   return recKey;
+}
+
+/** Resolve center display name from recKey — always available (tasks.js is lazy). */
+function _clGetName(rkey){
+  if(!rkey)return '?';
+  if(typeof getRecLabel==='function'){
+    var n=getRecLabel(rkey);
+    if(n&&n!=='?')return n;
+  }
+  if(typeof _getCenterNameFromKey==='function'){
+    var n2=_getCenterNameFromKey(rkey);
+    if(n2)return n2;
+  }
+  var parts=String(rkey).split('_');
+  var tp=parts[0];
+  var id=parts.slice(1).join('_');
+  if(typeof _getCenterName==='function'){
+    var n3=_getCenterName(tp,id);
+    if(n3&&n3!==id)return n3;
+  }
+  return id||rkey;
 }
 // ═════════════════════════════════════════════
 // ════════════════════════ WEEK PLAN (auto-generated) ═══════════
@@ -258,7 +297,7 @@ function _getPermLevel(module){
     return typeof crmNormalizePermLevel==='function'?crmNormalizePermLevel(level):'none';
   }
   var r=window._authUserRole||'کارشناس فروش';
-  var def=_ROLE_DEFAULTS[r];
+  var def=_ROLE_DEFAULTS[r]||_ROLE_DEFAULTS['کارشناس فروش'];
   if(def&&def.modules&&def.modules[module]!==undefined){
     return typeof crmNormalizePermLevel==='function'?crmNormalizePermLevel(def.modules[module]):'none';
   }
@@ -339,6 +378,21 @@ function wpBuildOwnerFilter(){
     if(filterRow)filterRow.style.display='';
     if(_wpFclFilters.owner&&USERS[_wpFclFilters.owner])sel.value=_wpFclFilters.owner;
   }
+  if(typeof wpBuildDefaultActType==='function')wpBuildDefaultActType();
+}
+
+function wpBuildDefaultActType(){
+  var sel=document.getElementById('wpDefaultActType');
+  if(!sel)return;
+  var prev=sel.value||'call';
+  var labels=(typeof ACTION_TYPE_LABELS!=='undefined'&&ACTION_TYPE_LABELS)||(window.ACTION_TYPE_LABELS)||{call:'📞 تماس',visit:'🤝 ملاقات'};
+  var keys=Object.keys(labels);
+  if(!keys.length)keys=['call'];
+  sel.innerHTML=keys.map(function(k){
+    return '<option value="'+k+'"'+(k===prev?' selected':'')+'>'+esc(labels[k]||k)+'</option>';
+  }).join('');
+  if(labels[prev])sel.value=prev;
+  else sel.value=keys[0];
 }
 
 function _wpMergeApiRows(weekId, rows){
@@ -389,23 +443,83 @@ function _wpLoadWeekFromApi(cb){
   }).catch(function(){if(typeof cb==='function')cb();});
 }
 
-function renderWeekPlan(){
-  _buildPCCache();
-  wpBuildSelect();
-  wpBuildOwnerFilter();
-  // یک‌بار در هر باز کردن تب: followupDateهای بدون کارت هفته را بساز/جابه‌جا کن
-  try {
-    if (typeof wpReconcileFollowupDates === 'function' && !window._wpReconcileOnce) {
-      window._wpReconcileOnce = true;
-      var n = wpReconcileFollowupDates({ allowCreate: true, allowMove: true });
-      if (n > 0) console.info('[wp] reconciled', n, 'followup→week entries');
-      setTimeout(function () { window._wpReconcileOnce = false; }, 60000);
-    }
-  } catch (eRec) {}
-  _wpLoadWeekFromApi(_renderWeekPlanBody);
+function _wpCaptureScroll(){
+  var days=[];
+  document.querySelectorAll('#wpDays .wp-day-body').forEach(function(el,i){
+    days.push({i:i,top:el.scrollTop});
+  });
+  var fclScroll=0;
+  var fcl=document.querySelector('#wpFullCenterList .wp-fcl-body')
+    ||document.querySelector('#wpFullCenterList .table-wrap')
+    ||document.querySelector('#wpFullCenterList');
+  if(fcl)fclScroll=fcl.scrollTop||0;
+  return{
+    winY:window.scrollY||document.documentElement.scrollTop||0,
+    days:days,
+    fcl:fclScroll
+  };
 }
-function _renderWeekPlanBody(){
-  if(typeof _wpSelected!=='undefined'){_wpSelected.clear();var _bar=document.getElementById('wpBulkBar');if(_bar)_bar.classList.remove('active');}
+function _wpRestoreScroll(s){
+  if(!s)return;
+  function restore(){
+    window.scrollTo(0,s.winY);
+    var bodies=document.querySelectorAll('#wpDays .wp-day-body');
+    (s.days||[]).forEach(function(d){
+      if(bodies[d.i])bodies[d.i].scrollTop=d.top;
+    });
+    var fcl=document.querySelector('#wpFullCenterList .wp-fcl-body')
+      ||document.querySelector('#wpFullCenterList .table-wrap')
+      ||document.querySelector('#wpFullCenterList');
+    if(fcl&&s.fcl!=null)fcl.scrollTop=s.fcl;
+  }
+  // Restore once after DOM replacement and once after card heights settle.
+  requestAnimationFrame(function(){restore();requestAnimationFrame(restore);});
+}
+function _wpWithScroll(fn){
+  var s=_wpCaptureScroll();
+  try{fn();}finally{_wpRestoreScroll(s);}
+}
+
+function renderWeekPlan(opts){
+  opts=opts||{};
+  var soft=!!opts.soft;
+  _buildPCCache();
+  if(!soft){
+    wpBuildSelect();
+    wpBuildOwnerFilter();
+  }
+  if(soft){
+    _wpWithScroll(function(){ _renderWeekPlanBody({keepSelection:true}); });
+    return;
+  }
+  // سخت: از API بگیر، یک‌بار رندر کن؛ reconcile در پس‌زمینه و فقط در صورت تغییر دوباره (با حفظ اسکرول)
+  _wpLoadWeekFromApi(function(){
+    _wpWithScroll(function(){ _renderWeekPlanBody({keepSelection:true}); });
+    try{
+      if(typeof wpReconcileFollowupDates==='function'&&typeof _canEdit==='function'&&_canEdit('weekplan')&&!window._wpReconcileOnce){
+        window._wpReconcileOnce=true;
+        var p=wpReconcileFollowupDates({allowCreate:true,allowMove:true});
+        if(p&&typeof p.then==='function'){
+          p.then(function(n){
+            if(n>0){
+              console.info('[wp] reconciled',n,'followup→week entries');
+              _wpWithScroll(function(){ _renderWeekPlanBody({keepSelection:true}); });
+            }
+          }).catch(function(){});
+        }
+        setTimeout(function(){ window._wpReconcileOnce=false; },60000);
+      }
+    }catch(eRec){}
+  });
+}
+function _renderWeekPlanBody(opts){
+  opts=opts||{};
+  var keepSelection=!!opts.keepSelection;
+  if(!keepSelection&&typeof _wpSelected!=='undefined'){
+    _wpSelected.clear();
+    var _bar=document.getElementById('wpBulkBar');
+    if(_bar)_bar.classList.remove('active');
+  }
   var wpSearchQ=(document.getElementById('wpSearch')||{}).value||'';
   var wpOwnerF=(document.getElementById('wpOwnerFilter')||{}).value||'';
   _wpFclFilters.owner = wpOwnerF;
@@ -470,7 +584,9 @@ function _renderWeekPlanBody(){
     we._owner = owner;
     we._ownerName = owner ? (USERS[owner] || owner) : 'بدون مسئول';
     _loadCNC();
-    we._name = we.centerName || (_CNC&&_CNC[_rk]) || getRecLabel(_rk) || '?';
+    we._name = (typeof resolveWeekEntryDisplayName==='function'
+      ? resolveWeekEntryDisplayName(we)
+      : (we.centerName || (_CNC&&_CNC[_rk]) || getRecLabel(_rk) || '?'));
     if(wpOwnerF){
       var effOwner=owner||'';
       if(effOwner && effOwner !== wpOwnerF) return;
@@ -509,20 +625,32 @@ function _renderWeekPlanBody(){
       + '</div>';
   }).join('');
 
+  if(keepSelection&&typeof _wpSelected!=='undefined'&&_wpSelected.size&&typeof _wpUpdateBulkBar==='function'){
+    _wpUpdateBulkBar();
+  }
 
-  // نوار پیشرفت (Progress Bar)
-  var oldProg = daysEl.parentNode ? daysEl.parentNode.querySelector('.wp-progress') : null;
-  if(oldProg) oldProg.remove();
-  if(total > 0 && daysEl.parentNode){
-    var pEl = document.createElement('div'); pEl.className = 'wp-progress';
-    pEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--bg-raised);border-top:1px solid var(--border)">'
+  // نوار پیشرفت — به‌روزرسانی درجا تا پرش لایه‌آوت کمتر شود
+  var progParent = daysEl.parentNode;
+  var oldProg = progParent ? progParent.querySelector('.wp-progress') : null;
+  if(total > 0 && progParent){
+    var progHtml = '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--bg-raised);border-top:1px solid var(--border)">'
       + '<span style="font-size:12px;color:var(--text-secondary)">پیشرفت هفته:</span>'
       + '<div style="flex:1;height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden">'
       + '<div style="height:100%;background:#22c55e;width:'+Math.round(done/total*100)+'%;transition:width .3s"></div></div>'
       + '<span style="font-size:11px;font-weight:700;color:#16a34a">'+done+' / '+total+'</span>'
       + (!_isManager() ? '<span style="font-size:10px;color:var(--text-muted)">— مراکز شما</span>' : '')
       + '</div>';
-    daysEl.parentNode.appendChild(pEl);
+    if(oldProg){
+      oldProg.innerHTML = progHtml;
+    } else {
+      var pEl = document.createElement('div'); pEl.className = 'wp-progress';
+      pEl.innerHTML = progHtml;
+      // بعد از شبکه روزها، قبل از صف انتظار
+      if(daysEl.nextSibling) progParent.insertBefore(pEl, daysEl.nextSibling);
+      else progParent.appendChild(pEl);
+    }
+  } else if(oldProg){
+    oldProg.remove();
   }
   renderWpFullCenterList();
 }
@@ -565,7 +693,7 @@ function renderWpFullCenterList() {
       var prov = getPI(rtype, rid);
       unschedEntries.push({
         _key:k, rtype:rtype, rid:rid, recKey:rk,
-        name: we.centerName||getRecLabel(rk)||'?',
+        name: (typeof resolveWeekEntryDisplayName==='function'?resolveWeekEntryDisplayName(we):(we.centerName||getRecLabel(rk)||'?')),
         owner:owner, ownerName:owner?(USERS[owner]||owner):'—',
         provId:prov.id, provName:prov.name,
         actionType:we.actionType||'call'
@@ -634,8 +762,9 @@ function renderWpFullCenterList() {
     var ekAttr = esc(c._key);
     var ri = String(c.rid).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     var aIcon = (typeof wpActLabel==='function'?wpActLabel(c.actionType||'call'):(c.actionType==='visit'?'🤝 ویزیت':'📞 تماس'));
-    var aBg = (c.actionType==='visit' ? '#ede9fe' : ((c.actionType||'call')==='call' ? '#e0f2fe' : '#fef3c7'));
-    var aCol = (c.actionType==='visit' ? '#5b21b6' : ((c.actionType||'call')==='call' ? '#0369a1' : '#92400e'));
+    var _aHex = (typeof wpActBg==='function'?wpActBg(c.actionType||'call'):'#0ea5e9');
+    var aBg = _aHex;
+    var aCol = '#fff';
     return '<tr style="background:#fffbeb">'
       +'<td style="color:var(--text-muted);font-size:10px;text-align:center;border-right:3px solid #f59e0b">'+n+'</td>'
       +'<td style="cursor:pointer" onclick="openCenterModal(\''+c.rtype+'\',\''+ri+'\')">'
@@ -852,13 +981,19 @@ function wpDeduplicateEntries(){
   return removed;
 }
 
+var _wpSseRefreshTimer=null;
 function _wpOnWeekEntryChanged(data){
-  if(currentTab!=='weekplan')return;
-  if(typeof _wpLoadWeekFromApi==='function'){
+  if(currentTab!=='weekplan'||window._sessionExpired)return;
+  // debounce — چند رویداد پشت‌سرهم یک رفرش نرم ایجاد کنند
+  clearTimeout(_wpSseRefreshTimer);
+  _wpSseRefreshTimer=setTimeout(function(){
+    if(typeof _wpLoadWeekFromApi!=='function')return;
     _wpLoadWeekFromApi(function(){
-      if(typeof _renderWeekPlanBody==='function')_renderWeekPlanBody();
+      _wpWithScroll(function(){
+        if(typeof _renderWeekPlanBody==='function')_renderWeekPlanBody({keepSelection:true});
+      });
     });
-  }
+  },350);
 }
 window._wpOnWeekEntryChanged=_wpOnWeekEntryChanged;
 
@@ -881,7 +1016,7 @@ function wpPickSelect(row){
       scheduledDate:dayStr, done:false, doneDate:null,
       rtype:c.rtype, rid:c.id, recKey:c.rtype+'_'+c.id,
       centerName:c.name||getRecLabel(c.rtype+'_'+c.id),
-      actionType:'call', addedBy:currentUser
+      actionType:_wpDefaultActionType(), addedBy:currentUser
     };
     return saveWeekEntryApi(eKey, DB.weekEntries[eKey]);
   }).then(function(){
@@ -942,7 +1077,7 @@ function wpFclAddToWeek(weekId, rtype, rid) {
       scheduledDate: null, done: false, doneDate: null,
       rtype: rtype, rid: rid, recKey: rtype + '_' + rid,
       centerName: getRecLabel(rtype + '_' + rid),
-      actionType: 'call', addedBy: currentUser
+      actionType: _wpDefaultActionType(), addedBy: currentUser
     };
     return saveWeekEntryApi(eKey, DB.weekEntries[eKey]);
   }).then(function(){
@@ -953,12 +1088,22 @@ function wpFclAddToWeek(weekId, rtype, rid) {
 }
 
 function toggleWpActionType(eKey) {
-  if (!DB.weekEntries[eKey]) return;
-  var cur = DB.weekEntries[eKey].actionType || 'call';
-  DB.weekEntries[eKey].actionType = (cur === 'call') ? 'visit' : 'call';
-  (function(){var _wat=DB.weekEntries[eKey];if(_wat&&_wat.sqlId){fetch('/api/week-entries/'+encodeURIComponent(_wat.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({actionType:_wat.actionType})}).catch(function(){});}})();
-  _wpSaveWeek([eKey]);
-  renderWeekPlan();
+  if (!DB.weekEntries[eKey]) return;
+  var keys = (typeof wpActKeys === 'function' ? wpActKeys() : ['call', 'visit']);
+  if (!keys.length) keys = ['call', 'visit'];
+  var cur = DB.weekEntries[eKey].actionType || 'call';
+  var idx = keys.indexOf(cur);
+  var next = keys[(idx < 0 ? 0 : idx + 1) % keys.length];
+  DB.weekEntries[eKey].actionType = next;
+  var saveP = (typeof saveWeekEntryApi === 'function')
+    ? saveWeekEntryApi(eKey, DB.weekEntries[eKey])
+    : Promise.resolve();
+  saveP.then(function () {
+    if (typeof renderWeekPlan === 'function') renderWeekPlan({ soft: true });
+    else if (typeof _debouncedRenderWeekPlan === 'function') _debouncedRenderWeekPlan();
+  }).catch(function () {
+    if (typeof showToast === 'function') showToast('⚠ ذخیره نوع پیگیری ناموفق', 2500);
+  });
 }
 
 function renderWpItem(entry,weekId){
@@ -967,7 +1112,10 @@ function renderWpItem(entry,weekId){
   if((!rtype||!rid)&&entry.recKey){var _rp=entry.recKey.indexOf('_');if(_rp>0){rtype=entry.recKey.slice(0,_rp);rid=entry.recKey.slice(_rp+1);}}
   if(!rtype)rtype='center';if(!rid)rid='?';
   var recKey=entry.recKey||(rtype+'_'+rid);
-  var name=entry.centerName||entry._name||getRecLabel(recKey);var done=entry.done;
+  var name=(typeof resolveWeekEntryDisplayName==='function'
+    ? resolveWeekEntryDisplayName(entry)
+    : (entry.centerName||entry._name||getRecLabel(recKey)));
+  var done=entry.done;
   // نمایش ویژه پیگیری مطالبات
   if(rtype==='mtr'){
     var amtStr=entry.mtrAmount?Math.round(entry.mtrAmount).toLocaleString('fa')+' ت':'';
@@ -1135,6 +1283,62 @@ function wpBulkRemove(){
   });
 }
 
+function wpBulkMoveDay(){
+  var keys = Array.from(_wpSelected);
+  if(!keys.length) return;
+  var sel = document.getElementById('wpSel');
+  var weekId = sel ? sel.value : null;
+  var wk = weekId ? wpGetWeeks().find(function(w){ return w.id === weekId; }) : null;
+  if(!wk){ showToast('⚠ ابتدا هفته را انتخاب کنید'); return; }
+  var today = todayStr();
+  var days = [];
+  for(var i = 0; i < 7; i++){
+    var d = jAdd(wk.wsArr[0], wk.wsArr[1], wk.wsArr[2], i);
+    var str = d[0] + '/' + p2(d[1]) + '/' + p2(d[2]);
+    days.push({ str: str, name: (typeof J_DAYS !== 'undefined' ? J_DAYS[i] : ''), isToday: str === today });
+  }
+  var body = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">'+keys.length+' مورد انتخابی را به کدام روز منتقل کنید؟</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'
+    +days.map(function(day){
+      return '<button type="button" onclick="wpDoBulkMoveDay(\''+day.str+'\')" style="padding:12px 10px;border:1px solid '+(day.isToday?'#0ea5e9':'var(--border)')+';border-radius:8px;background:'+(day.isToday?'#eff6ff':'var(--card)')+';cursor:pointer;font-family:inherit;text-align:center">'
+        +'<div style="font-weight:700;color:var(--text-primary)">'+esc(day.name||'')+'</div>'
+        +'<div style="font-size:11px;color:var(--text-muted);margin-top:2px;direction:ltr">'+esc(day.str)+'</div>'
+        +'</button>';
+    }).join('')
+    +'</div>';
+  openModal('wpBulkDayModal','📅 جابجایی روز — '+keys.length+' مورد',body,'<button class="btn-secondary" onclick="closeModal(\'wpBulkDayModal\')">انصراف</button>');
+}
+
+function wpDoBulkMoveDay(targetDate){
+  var keys = Array.from(_wpSelected);
+  if(!keys.length || !targetDate) return;
+  var n = 0;
+  var puts = [];
+  keys.forEach(function(eKey){
+    var we = DB.weekEntries[eKey];
+    if(!we || we.done) return;
+    if(we.scheduledDate === targetDate) return;
+    we.scheduledDate = targetDate;
+    if(we.rtype && we.rid) setE(we.rtype, we.rid, 'followupDate', targetDate);
+    n++;
+    if(we.sqlId){
+      puts.push(fetch('/api/week-entries/'+encodeURIComponent(we.sqlId),{
+        method:'PUT',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({scheduledDate:targetDate})
+      }).catch(function(){}));
+    } else if(typeof saveWeekEntryApi === 'function'){
+      puts.push(saveWeekEntryApi(eKey, we));
+    }
+  });
+  Promise.all(puts).then(function(){
+    if(typeof _wpSaveWeek === 'function') _wpSaveWeek(keys);
+    wpClearSelection();
+    closeModal('wpBulkDayModal');
+    renderWeekPlan();
+    showToast(n ? ('📅 '+n+' مورد به '+targetDate+' منتقل شد') : 'تغییری لازم نبود', 2500);
+  });
+}
+
 function wpBulkMove(){
   var keys = Array.from(_wpSelected);
   if(!keys.length) return;
@@ -1152,7 +1356,7 @@ function wpBulkMove(){
         +'<span style="font-size:11px;background:#0ea5e920;color:#0ea5e9;border:1px solid #0ea5e944;padding:2px 8px;border-radius:10px">انتقال</span>'
         +'</button>';
     }).join('')+'</div>';
-  openModal('wpBulkMoveModal','📦 انتقال گروهی — '+keys.length+' مورد به هفته دیگر',body,'<button class="btn-secondary" onclick="closeModal(\'wpBulkMoveModal\')">انصراف</button>');
+  openModal('wpBulkMoveModal','📦 تعیین هفته — '+keys.length+' مورد',body,'<button class="btn-secondary" onclick="closeModal(\'wpBulkMoveModal\')">انصراف</button>');
 }
 
 function wpDoBulkMove(targetWeekId){
@@ -1202,7 +1406,7 @@ function _wpFinishDone(eKey){
   var we=DB.weekEntries[eKey];
   var rtype=we.rtype||(we.recKey?we.recKey.split('_')[0]:'');
   var rid=we.rid||(we.recKey?we.recKey.split('_').slice(1).join('_'):'');
-  var cname=we.centerName||getRecLabel(rtype+'_'+rid)||'';
+  var cname=(typeof resolveWeekEntryDisplayName==='function'?resolveWeekEntryDisplayName(we):(we.centerName||getRecLabel(rtype+'_'+rid)||''));
   var actionType=we.actionType||'call';
   var outcomeEl=document.querySelector('[name="ci_outcome"]:checked')||document.querySelector('[name="_mdk_outcome"]:checked');
   var outcome=outcomeEl?outcomeEl.value:'followup';
@@ -1212,7 +1416,9 @@ function _wpFinishDone(eKey){
   var lostReason=(document.getElementById('ci_lost_reason')||document.getElementById('_mdk_lost_reason')||{}).value||'';
   var centerKey=typeof recK==='function'?recK(rtype,rid):(rtype+'_'+rid);
 
-  function _wpFinishDoneAfterProjections(skipCenterPatch){
+  function _wpFinishDoneAfterProjections(skipCenterPatch, opts){
+    opts=opts||{};
+    var interactionSaved=!!opts.interactionSaved;
     we.done=true;we.doneDate=todayStr();we.doneResult=outcome;we.doneNote=note;
     if(amount>0)we.doneAmount=amount;
 
@@ -1268,8 +1474,17 @@ function _wpFinishDone(eKey){
     }
     closeModal('centerInteractionModal');
     closeModal('wpDoneModal');
-    if(we.sqlId){
-      fetch('/api/week-entries/'+encodeURIComponent(we.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({done:we.done,doneDate:we.doneDate||null,scheduledDate:we.scheduledDate||null,doneResult:we.doneResult||null,doneNote:we.doneNote||null,doneAmount:we.doneAmount||null})}).catch(function(){});
+    // Interaction API already persists notes + week-entry done state on the server.
+    // Only sync week plan locally when needed (fallback path or followup reschedule).
+    if(typeof saveWeekEntryApi==='function'){
+      var needsWeekSync=!interactionSaved||(outcome==='followup'&&!!nextDate);
+      if(needsWeekSync){
+        saveWeekEntryApi(eKey,we).then(function(saved){
+          if(!saved&&!interactionSaved&&typeof showToast==='function'){
+            showToast('⚠ گزارش انجام ذخیره نشد؛ دوباره تلاش کنید',3500);
+          }
+        }).catch(function(){});
+      }
     }
     _debouncedRenderWeekPlan();renderDashboard();
     if(currentTab==='provinces'&&_currentProvId)setTimeout(renderTable,100);
@@ -1281,24 +1496,39 @@ function _wpFinishDone(eKey){
   }
 
   if(typeof postCenterInteraction==='function'&&rtype&&rid){
-    postCenterInteraction(centerKey,{
-      mode:'done',
-      actionType:actionType,
-      outcome:outcome,
-      note:note,
-      followupDate:nextDate||null,
-      weekEntryId:we.sqlId||null,
-      centerName:cname,
-      lostReason:lostReason,
-      amount:amount,
-      pfNo:we.pfNo||'',
-      occurredDate:todayStr(),
-      idempotencyKey:typeof _ciNewIdempotencyKey==='function'?_ciNewIdempotencyKey():('done_'+eKey+'_'+Date.now()),
+    function submitInteraction(){
+      return postCenterInteraction(centerKey,{
+        mode:'done',
+        actionType:actionType,
+        outcome:outcome,
+        note:note,
+        followupDate:nextDate||null,
+        weekEntryId:we.sqlId||null,
+        centerName:cname,
+        lostReason:lostReason,
+        amount:amount,
+        pfNo:we.pfNo||'',
+        occurredDate:todayStr(),
+        idempotencyKey:typeof _ciNewIdempotencyKey==='function'?_ciNewIdempotencyKey():('done_'+eKey+'_'+Date.now()),
+      });
+    }
+    // A completed report must have a persisted week-entry anchor. This covers
+    // cards created locally just before the user clicks «انجام شد».
+    var readyForReport=we.sqlId?Promise.resolve(we.sqlId):
+      (typeof saveWeekEntryApi==='function'?saveWeekEntryApi(eKey,we):Promise.resolve(null));
+    readyForReport.then(function(saved){
+      if(saved&&saved.id)we.sqlId=saved.id;
+      if(!we.sqlId)throw new Error('کارت برنامه هفته همگام‌سازی نشد');
+      return submitInteraction();
     }).then(function(res){
       if(typeof _ciApplyInteractionResult==='function')_ciApplyInteractionResult(centerKey,rtype,rid,res);
-      _wpFinishDoneAfterProjections(true);
+      _wpFinishDoneAfterProjections(true,{interactionSaved:true});
+      if(typeof window.markNotifsForCenterRead==='function'){
+        window.markNotifsForCenterRead(centerKey);
+      }
     }).catch(function(err){
-      showToast('⚠ '+((err&&err.error)||'خطا در ثبت نتیجه'),3500);
+      var errMsg=(err&&err.error)||(err&&err.message)||'خطا در ثبت نتیجه';
+      showToast('⚠ '+errMsg,3500);
     });
     return;
   }
@@ -1420,7 +1650,7 @@ function wpMoveEntry(eKey,currentWeekId){
 function _wpMoveEntryRender(eKey,currentWeekId){
   if(!DB.weekEntries[eKey])return;
   var we=DB.weekEntries[eKey];
-  var name=we.centerName||we._name||(we.recKey?getRecLabel(we.recKey):'?');
+  var name=(typeof resolveWeekEntryDisplayName==='function'?resolveWeekEntryDisplayName(we):(we.centerName||we._name||(we.recKey?getRecLabel(we.recKey):'?')));
   var recKey=we.recKey||(we.rtype+'_'+we.rid);
   var entryWeekId=eKey.split(':::')[0]||currentWeekId;
   var weeks=wpGetWeeks();
@@ -1587,9 +1817,20 @@ function saveScheduleFromModal(eKey) {
   var we = DB.weekEntries[eKey];
   var rtype = we.rtype; var rid = we.rid;
   if(rtype && rid){setE(rtype, rid, 'followupDate', dateVal);}
-  (function(){var _wes=DB.weekEntries[eKey];if(_wes&&_wes.sqlId){fetch('/api/week-entries/'+encodeURIComponent(_wes.sqlId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduledDate:dateVal,actionType:actVal})}).catch(function(){});}})();
-  _wpSaveWeek([eKey]);closeModal('schModal');_debouncedRenderWeekPlan();
-  showToast('📅 برنامه تنظیم شد', 2500);
+  var finish = function(){
+    closeModal('schModal');
+    if (typeof renderWeekPlan === 'function') renderWeekPlan({ soft: true });
+    else if (typeof _debouncedRenderWeekPlan === 'function') _debouncedRenderWeekPlan();
+    showToast('📅 برنامه تنظیم شد', 2500);
+  };
+  if (typeof saveWeekEntryApi === 'function') {
+    saveWeekEntryApi(eKey, DB.weekEntries[eKey]).then(finish).catch(function(){
+      showToast('⚠ ذخیره برنامه ناموفق', 2500);
+      finish();
+    });
+  } else {
+    finish();
+  }
 }
 function openAssignWeekForCenter(rtype,id,name){
   var recKey=rtype+'_'+id;
@@ -2438,231 +2679,910 @@ function _notifAction(nid, action) {
   }
 }
 
-function openDailyMonitor(){
-  if(!_isManager()){showToast('⚠ این بخش فقط برای مدیران است');return;}
-  _buildPCCache();
-  var today=todayStr();
-  var todayEntries=[];
-  Object.keys(DB.weekEntries||{}).forEach(function(k){
-    var we=DB.weekEntries[k];
-    if(we.rtype==='mtr')return;
-    if(we.scheduledDate!==today)return;
-    var rtype=we.rtype||'center',rid=we.rid||'';
-    var e=getE(rtype,rid);
-    var owner=_wpGetOwner(we);
-    var name=we.centerName||getRecLabel(rtype+'_'+rid)||'?';
-    var acts=_getTodayActivities(rtype,rid,today);
-    var isDone=we.done||acts.length>0;
-    todayEntries.push({key:k,rtype:rtype,rid:rid,name:name,owner:owner,actType:we.actionType||'call',status:e.status||'بدون تماس',activities:acts,done:isDone});
-  });
+var _dmReportDate = null; // روز انتخاب‌شده در مودال گزارش (جلالی)
+var _DM_DAY_NAMES = ['شنبه', 'یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه'];
 
-  // Collect overdue entries (past date, no activity)
-  var overdueByOwner={};
-  Object.keys(DB.weekEntries||{}).forEach(function(k){
-    var we=DB.weekEntries[k];
-    if(we.done||we.rtype==='mtr')return;
-    if(!we.scheduledDate||we.scheduledDate>=today)return;
-    var owner=_wpGetOwner(we);
-    if(!owner)return;
-    var acts=_getActivitiesOnDate(we.rtype||'center',we.rid||'',we.scheduledDate);
-    if(acts.length>0)return;
-    if(!overdueByOwner[owner])overdueByOwner[owner]=[];
-    overdueByOwner[owner].push({name:we.centerName||getRecLabel((we.rtype||'center')+'_'+(we.rid||'')),date:we.scheduledDate});
-  });
-
-  var byOwner={};
-  todayEntries.forEach(function(en){
-    var o=en.owner||'__none__';
-    if(!byOwner[o])byOwner[o]=[];
-    byOwner[o].push(en);
-  });
-  // Add all active non-manager experts so they appear even with 0 schedule
-  (typeof umGetActive==='function'?umGetActive():[]).forEach(function(m){
-    if(m.id==='guest')return;
-    if(m.role==='مدیر'||m.role==='سوپر ادمین')return;
-    if(!byOwner[m.id])byOwner[m.id]=[];
-  });
-
-  var totalScheduled=todayEntries.length;
-  var totalDone=todayEntries.filter(function(en){return en.done;}).length;
-  var totalNotDone=totalScheduled-totalDone;
-  var pct=totalScheduled>0?Math.round((totalDone/totalScheduled)*100):0;
-
-  var body='<div style="background:var(--bg-raised);border-radius:10px;padding:14px;margin-bottom:16px">'
-    +'<div style="font-weight:700;font-size:13px;margin-bottom:10px">📊 خلاصه امروز — '+today+'</div>'
-    +'<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">'
-    +'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px 16px;text-align:center"><div style="font-size:20px;font-weight:800;color:#16a34a">'+totalScheduled+'</div><div style="font-size:11px;color:#166534">برنامه‌ریزی امروز</div></div>'
-    +'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px 16px;text-align:center"><div style="font-size:20px;font-weight:800;color:#16a34a">'+totalDone+'</div><div style="font-size:11px;color:#166534">انجام شده ✔</div></div>'
-    +'<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:8px 16px;text-align:center"><div style="font-size:20px;font-weight:800;color:#dc2626">'+totalNotDone+'</div><div style="font-size:11px;color:#991b1b">انجام نشده ✖</div></div>'
-    +'<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 16px;text-align:center"><div style="font-size:20px;font-weight:800;color:#1d4ed8">'+pct+'%</div><div style="font-size:11px;color:#1e40af">درصد انجام</div></div>'
-    +'</div>'
-    +'<div style="background:#e2e8f0;border-radius:6px;height:10px;overflow:hidden">'
-    +'<div style="background:linear-gradient(90deg,#22c55e,#16a34a);height:100%;width:'+pct+'%;transition:width .4s"></div>'
-    +'</div>'
-    +'</div>';
-
-  if(Object.keys(byOwner).length>0){
-    // Per-expert breakdown table
-    body+='<div style="background:var(--bg-card);border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden;margin-bottom:16px">'
-      +'<div style="padding:10px 14px;font-weight:700;font-size:13px;border-bottom:1px solid var(--border)">👥 عملکرد کارشناسان</div>'
-      +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
-      +'<thead><tr style="background:var(--bg-raised)">'
-      +'<th style="padding:8px 10px;text-align:right">کارشناس</th>'
-      +'<th style="padding:8px 10px;text-align:center">گزارش</th>'
-      +'<th style="padding:8px 10px;text-align:center">برنامه امروز</th>'
-      +'<th style="padding:8px 10px;text-align:center;color:#16a34a">انجام شده</th>'
-      +'<th style="padding:8px 10px;text-align:center;color:#dc2626">انجام نشده</th>'
-      +'<th style="padding:8px 10px;text-align:center;color:#f59e0b">سررسید گذشته</th>'
-      +'<th style="padding:8px 10px;text-align:center">اقدام</th>'
-      +'</tr></thead><tbody>';
-    // Sort: experts with entries first, then by name
-    var _dmOwnerList=Object.keys(byOwner).filter(function(ow){return ow!=='__none__';}).sort(function(a,b){
-      var aHas=byOwner[a].length>0?1:0,bHas=byOwner[b].length>0?1:0;
-      if(aHas!==bHas)return bHas-aHas;
-      return (USERS[a]||a).localeCompare(USERS[b]||b,'fa');
-    });
-    if(byOwner['__none__']&&byOwner['__none__'].length>0)_dmOwnerList.push('__none__');
-    _dmOwnerList.forEach(function(ow,idx){
-      var entries=byOwner[ow];
-      var owName=ow==='__none__'?'بدون مسئول':(USERS[ow]||ow);
-      var owDone=entries.filter(function(en){return en.done;}).length;
-      var owNotDone=entries.length-owDone;
-      var owOverdue=(overdueByOwner[ow]||[]).length;
-      var owColor=(window.umGetColor?umGetColor(ow):'#94a3b8');
-      var bg=idx%2===0?'var(--bg-card)':'var(--bg-raised)';
-      var noSchedule=entries.length===0&&!owOverdue;
-      body+='<tr style="background:'+bg+';border-bottom:1px solid #f1f5f9;'+(noSchedule?'opacity:.65':'')+'">'
-        +'<td style="padding:8px 10px;font-weight:600"><span style="display:inline-flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:'+owColor+'"></span>'+esc(owName)+'</span></td>'
-        +'<td style="padding:8px 10px;text-align:center">'
-      +'<button onclick="event.stopPropagation();openExpertReport(\''+ow+'\')" style="font-size:10px;padding:2px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:5px;cursor:pointer;font-family:inherit">📊 گزارش</button>'
-      +'</td>'
-      +'<td style="text-align:center;padding:8px">'+(noSchedule?'<span style="color:var(--text-muted);font-size:11px">💤 بدون برنامه</span>':entries.length)+'</td>'
-        +'<td style="text-align:center;padding:8px"><span style="background:#dcfce7;color:#166534;border-radius:10px;padding:2px 8px;font-weight:700">'+owDone+'</span></td>'
-        +'<td style="text-align:center;padding:8px"><span style="background:#fee2e2;color:#991b1b;border-radius:10px;padding:2px 8px;font-weight:700">'+owNotDone+'</span></td>'
-        +'<td style="text-align:center;padding:8px"><span style="background:#fef3c7;color:#92400e;border-radius:10px;padding:2px 8px;font-weight:700">'+owOverdue+'</span></td>'
-        +'<td style="text-align:center;padding:8px">'
-        +(ow!=='__none__'&&owNotDone>0?'<button onclick="sendReminderToExpert(\''+ow+'\')" style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:5px;padding:3px 10px;cursor:pointer;font-size:10px;font-family:inherit">📩 یادآوری</button>':'<span style="color:var(--text-muted);font-size:11px">'+(noSchedule?'—':'✔ کامل')+'</span>')
-        +'</td>'
-        +'</tr>';
-    });
-    body+='</tbody></table></div></div>';
-
-    // Collapsible per-expert detail sections (ALL experts shown for consistency)
-    body+='<div style="font-weight:700;font-size:13px;margin-bottom:8px">📍 جزئیات مراکز</div>';
-    _dmOwnerList.forEach(function(ow){
-      var entries=byOwner[ow];
-      var owName=ow==='__none__'?'بدون مسئول':(USERS[ow]||ow);
-      var owColor=(window.umGetColor?umGetColor(ow):'#94a3b8');
-      var sectionId='dm_sec2_'+ow.replace(/[^a-z0-9]/gi,'_');
-      var hasEntries=entries&&entries.length>0;
-      var overdueCount=(overdueByOwner[ow]||[]).length;
-      var subtitle=hasEntries?(entries.length+' مرکز برنامه‌ریزی شده'):'بدون برنامه امروز';
-      body+='<div style="background:var(--bg-card);border-radius:8px;box-shadow:0 1px 2px rgba(0,0,0,.05);margin-bottom:8px;overflow:hidden;'+(hasEntries?'':'opacity:.6')+'">'
-        +'<div onclick="var el=document.getElementById(\''+sectionId+'\');el.style.display=el.style.display===\'none\'?\'block\':\'none\'" '
-        +'style="padding:10px 14px;cursor:pointer;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)">'
-        +'<span style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:'+owColor+'"></span>'
-        +'<span style="font-weight:700;font-size:13px">'+esc(owName)+'</span>'
-        +'<span style="font-size:11px;color:var(--text-muted);margin-right:auto">'+subtitle+' — کلیک برای باز/بسته</span>'
-        +(overdueCount>0?'<span style="font-size:10px;background:#fef3c7;color:#92400e;border-radius:10px;padding:2px 7px;font-weight:700">⚠ '+overdueCount+' معوق</span>':'')
-        +'</div>'
-        +'<div id="'+sectionId+'" style="display:none;padding:8px">';
-      if(hasEntries){
-        entries.forEach(function(en){
-          var icon=en.done?'✅':'🔴';
-          var actTypeLabel=typeof wpActLabel==='function'?wpActLabel(en.actType||'call'):(en.actType==='visit'?'🤝 ویزیت':'📞 تماس');
-          body+='<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-bottom:1px solid var(--border);font-size:12px">'
-            +'<span style="font-size:16px">'+icon+'</span>'
-            +'<span style="flex:1"><a href="#" onclick="closeModal(\'dmModal\');openCenterModal(\''+en.rtype+'\',\''+en.rid+'\');return false;" style="color:#2563eb;text-decoration:none;font-weight:600">'+esc(en.name)+'</a></span>'
-            +'<span style="font-size:10px;background:#e0f2fe;color:#0369a1;padding:2px 7px;border-radius:8px;border:1px solid #7dd3fc">'+actTypeLabel+'</span>'
-            +'<span style="font-size:10px;color:var(--text-muted)">'+esc(en.status)+'</span>'
-            +'</div>';
-        });
-        if((overdueByOwner[ow]||[]).length>0){
-          body+='<div style="padding:6px 8px;font-size:11px;color:#92400e;background:#fef3c7;border-radius:4px;margin-top:4px">⚠ معوق: '
-            +(overdueByOwner[ow]||[]).map(function(x){return esc(x.name)+' ('+x.date+')';}).join('، ')
-            +'</div>';
-        }
-      } else {
-        body+='<div style="text-align:center;padding:12px;color:var(--text-muted);font-size:12px">💤 برنامه‌ای برای امروز تعریف نشده</div>';
-      }
-      body+='</div></div>';
-    });
-
-  } else {
-    body+='<div style="text-align:center;padding:40px;color:var(--text-muted)"><div style="font-size:32px;margin-bottom:10px">📋</div><div>هیچ کارشناس فعالی یافت نشد</div></div>';
+function _dmWeekDays(anchorDate) {
+  var today = todayStr();
+  var base = anchorDate || today;
+  var weekId = (typeof getWeekId === 'function' ? getWeekId(base) : null) || base;
+  var days = [];
+  for (var i = 0; i < 7; i++) {
+    var d = typeof addDaysToJalali === 'function' ? addDaysToJalali(weekId, i) : weekId;
+    days.push({ date: d, name: _DM_DAY_NAMES[i], isToday: d === today });
   }
-
-  var foot='<button class="btn-secondary" onclick="closeModal(\'dmModal\')">بستن</button>'
-    +'<button class="btn-secondary" onclick="sendReminderToAll()" style="background:#fef3c7;color:#92400e;border-color:#fcd34d">📩 یادآوری به همه</button>'
-    +'<button class="btn-primary" onclick="openDailyMonitor()">🔄 بروزرسانی</button>';
-  openModal('dmModal','📊 گزارش فعالیت روزانه — '+today,body,foot,{xl:true});
+  return { weekId: weekId, days: days, today: today };
 }
 
-function sendReminderToAll(){
-  var today=todayStr();
+function _dmNoteDate(n) {
+  if (!n) return '';
+  if (n.date && String(n.date).indexOf('/') > 0) return String(n.date);
+  if (n.at) {
+    if (typeof msToJ === 'function') {
+      var ms = typeof n.at === 'number' ? n.at : Date.parse(n.at);
+      if (!isNaN(ms)) return msToJ(ms);
+    }
+  }
+  return '';
+}
+
+function _getNotesOnDate(rtype, rid, jDateStr) {
+  var rkey = rtype + '_' + rid;
+  return (DB.notes && DB.notes[rkey] || []).filter(function (n) {
+    return _dmNoteDate(n) === jDateStr;
+  });
+}
+
+/** کار واقعی ثبت‌شده در همان روز: changeLog + یادداشت */
+function _getWorkSignalsOnDate(rtype, rid, jDateStr) {
+  var acts = typeof _getActivitiesOnDate === 'function' ? _getActivitiesOnDate(rtype, rid, jDateStr) : [];
+  var notes = _getNotesOnDate(rtype, rid, jDateStr);
+  return { acts: acts, notes: notes, count: acts.length + notes.length };
+}
+
+/**
+ * آیا این برنامه در روز reportDay «انجام‌شده» محسوب می‌شود؟
+ * اولویت: doneDate همان روز → فعالیت/یادداشت همان روز → (قدیمی) done بدون doneDate فقط اگر برنامه همان روز باشد
+ */
+function _wpDoneOnReportDay(we, rtype, rid, reportDay) {
+  if (!we) return false;
+  if (we.doneDate && we.doneDate === reportDay) return true;
+  var sig = _getWorkSignalsOnDate(rtype, rid, reportDay);
+  if (sig.count > 0) return true;
+  if (we.done && !we.doneDate && we.scheduledDate === reportDay) return true;
+  return false;
+}
+
+function _dmJalaliDayBounds(jDateStr) {
+  var p = String(jDateStr || '').split('/').map(Number);
+  if (p.length !== 3 || !p[0] || !p[1] || !p[2]) {
+    var n = new Date();
+    return { from: new Date(n.getFullYear(), n.getMonth(), n.getDate()).toISOString(), to: new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1).toISOString() };
+  }
+  var g = j2g(p[0], p[1], p[2]);
+  var from = new Date(g[0], g[1] - 1, g[2], 0, 0, 0, 0);
+  var to = new Date(g[0], g[1] - 1, g[2] + 1, 0, 0, 0, 0);
+  return { from: from.toISOString(), to: to.toISOString() };
+}
+
+function _dmBuildWeekMap(apiRows) {
+  var map = {};
+  Object.keys(DB.weekEntries || {}).forEach(function (k) {
+    map[k] = DB.weekEntries[k];
+  });
+  (apiRows || []).forEach(function (row) {
+    if (!row) return;
+    var rtype = row.rtype || 'center';
+    var rid = row.rid != null ? String(row.rid) : '';
+    var weekId = row.weekId || '';
+    var key = (typeof wpEntryKey === 'function')
+      ? wpEntryKey(weekId, rtype, rid)
+      : (weekId + ':::' + rtype + ':::' + rid);
+    map[key] = {
+      rtype: rtype,
+      rid: rid,
+      recKey: row.recKey || (rtype + '_' + rid),
+      scheduledDate: row.scheduledDate || null,
+      actionType: row.actionType || 'call',
+      done: !!row.done,
+      doneDate: row.doneDate || null,
+      addedBy: row.addedBy || '',
+      centerName: row.centerName || '',
+      doneResult: row.doneResult || null,
+      doneNote: row.doneNote || null,
+      sqlId: row.id || null
+    };
+  });
+  return map;
+}
+
+function openDailyMonitor(dayStr) {
+  if (!_isManager()) { showToast('⚠ این بخش فقط برای مدیران است'); return; }
   _buildPCCache();
-  var experts={};
-  Object.keys(DB.weekEntries||{}).forEach(function(k){
-    var we=DB.weekEntries[k];
-    if(we.done||we.scheduledDate!==today||we.rtype==='mtr')return;
-    var rtype=we.rtype||'center',rid=we.rid||'';
-    var owner=_wpGetOwner(we);
-    if(!owner)return;
-    var acts=_getTodayActivities(rtype,rid,today);
-    if(acts.length>0)return;
-    if(!experts[owner])experts[owner]=[];
-    experts[owner].push(we.centerName||getRecLabel(rtype+'_'+rid)||'?');
+  var today = todayStr();
+  var reportDay = dayStr || _dmReportDate || today;
+  _dmReportDate = reportDay;
+  var weekMeta = _dmWeekDays(reportDay);
+  var weekEnd = (weekMeta.days && weekMeta.days[6]) ? weekMeta.days[6].date : reportDay;
+  if (window._dmLoadingDay === reportDay) return;
+  window._dmLoadingDay = reportDay;
+
+  var bounds = _dmJalaliDayBounds(reportDay);
+  var weUrl = '/api/week-entries?week_id=' + encodeURIComponent(weekMeta.weekId)
+    + '&week_end=' + encodeURIComponent(weekEnd);
+  var clUrl = '/api/changelog?from=' + encodeURIComponent(bounds.from)
+    + '&to=' + encodeURIComponent(bounds.to) + '&limit=2000';
+
+  Promise.all([
+    fetch(weUrl).then(function (r) { return r.ok ? r.json() : []; }).catch(function () { return []; }),
+    fetch(clUrl).then(function (r) { return r.ok ? r.json() : []; }).catch(function () { return []; })
+  ]).then(function (pair) {
+    window._dmLoadingDay = null;
+    _dmShowReport(reportDay, pair[0] || [], pair[1] || []);
+  }).catch(function () {
+    window._dmLoadingDay = null;
+    _dmShowReport(reportDay, [], []);
   });
-  var cnt=0;
-  Object.keys(experts).forEach(function(exp){
-    var names=experts[exp];
-    if(!names.length)return;
+}
+
+function _dmShowReport(reportDay, apiWeekRows, dayChangeLog) {
+  var today = todayStr();
+  var weekMeta = _dmWeekDays(reportDay);
+  var isToday = reportDay === today;
+  var isPast = reportDay < today;
+  var isFuture = reportDay > today;
+  var weekMap = _dmBuildWeekMap(apiWeekRows);
+
+  // changeLog همان روز را موقتاً ادغام کن (LIMIT 500 در loadDB کافی نیست)
+  var _prevCL = DB.changeLog;
+  if (dayChangeLog && dayChangeLog.length) {
+    var seenCl = {};
+    var mergedCl = [];
+    dayChangeLog.concat(DB.changeLog || []).forEach(function (l) {
+      if (!l) return;
+      var k = (l.id != null ? l.id : '') + '|' + (l.at || '') + '|' + (l.rkey || '') + '|' + (l.field || '');
+      if (seenCl[k]) return;
+      seenCl[k] = true;
+      mergedCl.push({
+        at: l.at instanceof Date ? l.at.toISOString() : l.at,
+        by: l.by,
+        rkey: l.rkey,
+        field: l.field,
+        val: l.val,
+        id: l.id
+      });
+    });
+    DB.changeLog = mergedCl;
+  }
+
+  var dayEntries = [];
+  var seen = {};
+
+  function _pushEntry(opts) {
+    var ck = opts.rtype + '_' + opts.rid;
+    if (seen[ck]) return;
+    seen[ck] = true;
+    var sig = _getWorkSignalsOnDate(opts.rtype, opts.rid, reportDay);
+    var doneOnDay = opts.doneOnDay != null ? opts.doneOnDay : (sig.count > 0 || !!opts.doneFlag);
+    dayEntries.push({
+      key: opts.key,
+      rtype: opts.rtype,
+      rid: opts.rid,
+      name: opts.name,
+      owner: opts.owner,
+      actType: opts.actType || 'call',
+      status: opts.status || 'بدون تماس',
+      activities: sig.acts,
+      notes: sig.notes,
+      workCount: sig.count,
+      done: doneOnDay,
+      source: opts.source || 'scheduled',
+      scheduledDate: opts.scheduledDate || null,
+      doneDate: opts.doneDate || null,
+      doneResult: opts.doneResult || null,
+      doneNote: opts.doneNote || null
+    });
+  }
+
+  // ۱) برنامه‌های زمان‌بندی‌شده برای همین روز
+  Object.keys(weekMap).forEach(function (k) {
+    var we = weekMap[k];
+    if (!we || we.rtype === 'mtr') return;
+    if (we.scheduledDate !== reportDay) return;
+    var rtype = we.rtype || 'center', rid = we.rid || '';
+    var e = getE(rtype, rid);
+    _pushEntry({
+      key: k,
+      rtype: rtype,
+      rid: rid,
+      name: (typeof resolveWeekEntryDisplayName==='function'?resolveWeekEntryDisplayName(we):(we.centerName||getRecLabel(rtype+'_'+rid)||'?')),
+      owner: _wpGetOwner(we),
+      actType: we.actionType || 'call',
+      status: e.status || 'بدون تماس',
+      doneOnDay: _wpDoneOnReportDay(we, rtype, rid, reportDay),
+      source: 'scheduled',
+      scheduledDate: we.scheduledDate,
+      doneDate: we.doneDate || null,
+      doneResult: we.doneResult || null,
+      doneNote: we.doneNote || null
+    });
+  });
+
+  // ۲) کارهایی که در همین روز انجام شده‌اند ولی برنامهٔ روز دیگری بوده‌اند
+  Object.keys(weekMap).forEach(function (k) {
+    var we = weekMap[k];
+    if (!we || we.rtype === 'mtr') return;
+    if (we.doneDate !== reportDay) return;
+    if (we.scheduledDate === reportDay) return; // already in (1)
+    var rtype = we.rtype || 'center', rid = we.rid || '';
+    var e = getE(rtype, rid);
+    _pushEntry({
+      key: k,
+      rtype: rtype,
+      rid: rid,
+      name: (typeof resolveWeekEntryDisplayName==='function'?resolveWeekEntryDisplayName(we):(we.centerName||getRecLabel(rtype+'_'+rid)||'?')),
+      owner: _wpGetOwner(we),
+      actType: we.actionType || 'call',
+      status: e.status || 'بدون تماس',
+      doneOnDay: true,
+      source: 'done_today',
+      scheduledDate: we.scheduledDate || null,
+      doneDate: we.doneDate,
+      doneResult: we.doneResult || null,
+      doneNote: we.doneNote || null
+    });
+  });
+
+  // ۳) پیگیری‌های سررسید همین روز (بدون کارت هفته)
+  if (typeof getAllProvinces === 'function' && typeof getProvCenters === 'function') {
+    getAllProvinces().forEach(function (p) {
+      getProvCenters(p.id).forEach(function (c) {
+        var e = getE(c.rtype, c.id);
+        if (!e || e.followupDate !== reportDay) return;
+        var owner = e.owner || c.owner || '';
+        if (!owner) return;
+        var ck = c.rtype + '_' + c.id;
+        if (seen[ck]) return;
+        var sig = _getWorkSignalsOnDate(c.rtype, c.id, reportDay);
+        _pushEntry({
+          key: 'followup_' + ck,
+          rtype: c.rtype,
+          rid: c.id,
+          name: e.nameOverride || c.name || '?',
+          owner: owner,
+          actType: 'followup',
+          status: e.status || 'بدون تماس',
+          doneOnDay: sig.count > 0 || e.status === 'قرارداد بسته شد' || e.status === 'غیرفعال',
+          source: 'followup',
+          scheduledDate: reportDay
+        });
+      });
+    });
+  }
+
+  // ۴) هر مرکزی که همان روز روی آن کار ثبت شده (changeLog / یادداشت)
+  //    حتی اگر برنامه هفته برای روز دیگری باشد یا کارت done از کلاینت لود نشده باشد
+  (function _dmCollectActivityCenters() {
+    var touched = {}; // rkey -> {rtype,rid,acts,notes,byHint}
+    function _touch(rkey, rtype, rid) {
+      if (!rkey || rtype === 'mtr') return null;
+      if (rtype !== 'center' && rtype !== 'pc') return null;
+      if (!touched[rkey]) touched[rkey] = { rtype: rtype, rid: rid, acts: [], notes: [], byHint: '' };
+      return touched[rkey];
+    }
+    (DB.changeLog || []).forEach(function (l) {
+      if (!l || !l.rkey || !l.at) return;
+      var dp = String(l.at).slice(0, 10).split('-').map(Number);
+      if (dp.length !== 3 || isNaN(dp[0])) return;
+      var jd = g2j(dp[0], dp[1], dp[2]);
+      var jdStr = jd[0] + '/' + p2(jd[1]) + '/' + p2(jd[2]);
+      if (jdStr !== reportDay) return;
+      var pts = String(l.rkey).split('_');
+      if (pts.length < 2) return;
+      var t = _touch(l.rkey, pts[0], pts.slice(1).join('_'));
+      if (!t) return;
+      t.acts.push(l);
+      if (!t.byHint && l.by) t.byHint = l.by;
+    });
+    Object.keys(DB.notes || {}).forEach(function (rkey) {
+      var pts = String(rkey).split('_');
+      if (pts.length < 2) return;
+      var rtype = pts[0], rid = pts.slice(1).join('_');
+      (DB.notes[rkey] || []).forEach(function (n) {
+        if (_dmNoteDate(n) !== reportDay) return;
+        var t = _touch(rkey, rtype, rid);
+        if (!t) return;
+        t.notes.push(n);
+        if (!t.byHint && (n.by || n.user)) t.byHint = n.by || n.user;
+      });
+    });
+    // weekEntries که برای این روز کار دارند ولی scheduledDate فرق دارد / در حافظه نیستند به‌عنوان scheduled
+    Object.keys(weekMap).forEach(function (k) {
+      var we = weekMap[k];
+      if (!we || we.rtype === 'mtr') return;
+      var rtype = we.rtype || 'center', rid = we.rid || '';
+      var rkey = we.recKey || (rtype + '_' + rid);
+      if (seen[rkey]) return;
+      if (we.doneDate === reportDay) {
+        _touch(rkey, rtype, rid);
+        return;
+      }
+      var sig = _getWorkSignalsOnDate(rtype, rid, reportDay);
+      if (sig.count > 0) _touch(rkey, rtype, rid);
+    });
+
+    Object.keys(touched).forEach(function (rkey) {
+      if (seen[rkey]) return;
+      var t = touched[rkey];
+      var e = getE(t.rtype, t.rid);
+      var owner = '';
+      if (typeof getCenterOwner === 'function') owner = getCenterOwner(t.rtype, t.rid) || '';
+      if (!owner && e) owner = e.owner || '';
+      if (!owner && t.byHint) {
+        // اگر byHint نام نمایشی است، به id کاربر نگاشت کن
+        var hint = String(t.byHint);
+        if (typeof USERS !== 'undefined' && USERS[hint]) owner = hint;
+        else if (typeof umGetActive === 'function') {
+          var mem = umGetActive().find(function (m) {
+            return m.id === hint || m.name === hint || (USERS[m.id] === hint);
+          });
+          if (mem) owner = mem.id;
+          else owner = hint;
+        } else owner = hint;
+      }
+      var name = (typeof resolveCenterDisplayName === 'function'
+        ? resolveCenterDisplayName(t.rtype, t.rid)
+        : null)
+        || (e && e.nameOverride)
+        || (typeof getRecLabel === 'function' ? getRecLabel(rkey) : '')
+        || rkey;
+      // اگر week entry با نام بهتر داریم
+      Object.keys(weekMap).some(function (wk) {
+        var we = weekMap[wk];
+        if (!we) return false;
+        var rk = we.recKey || (we.rtype + '_' + we.rid);
+        if (rk === rkey && we.centerName) { name = we.centerName; return true; }
+        return false;
+      });
+      _pushEntry({
+        key: 'act_' + rkey,
+        rtype: t.rtype,
+        rid: t.rid,
+        name: name,
+        owner: owner || '__none__',
+        actType: 'call',
+        status: (e && e.status) || 'بدون تماس',
+        doneOnDay: true,
+        source: 'activity',
+        scheduledDate: (e && e.followupDate) || null,
+        doneDate: reportDay,
+        doneNote: null
+      });
+      // سیگنال‌ها را از cache لمس‌شده روی entry بریز (تا جدول تغییرات کامل باشد)
+      var en = dayEntries[dayEntries.length - 1];
+      if (en && t.acts.length) en.activities = t.acts;
+      if (en && t.notes.length) en.notes = t.notes;
+      if (en) en.workCount = (en.activities || []).length + (en.notes || []).length;
+    });
+  })();
+
+  // معوق نسبت به روز گزارش: برنامه قبل از این روز که هنوز انجام نشده
+  var overdueByOwner = {};
+  Object.keys(weekMap).forEach(function (k) {
+    var we = weekMap[k];
+    if (!we || we.done || we.rtype === 'mtr') return;
+    if (!we.scheduledDate || we.scheduledDate >= reportDay) return;
+    var owner = _wpGetOwner(we);
+    if (!owner) return;
+    var rtype = we.rtype || 'center', rid = we.rid || '';
+    // اگر در روز سررسید کار ثبت شده، معوق حساب نکن
+    if (_wpDoneOnReportDay(we, rtype, rid, we.scheduledDate)) return;
+    if (!overdueByOwner[owner]) overdueByOwner[owner] = [];
+    overdueByOwner[owner].push({
+      name: (typeof resolveWeekEntryDisplayName==='function'?resolveWeekEntryDisplayName(we):(we.centerName||getRecLabel(rtype+'_'+rid)||'?')),
+      date: we.scheduledDate
+    });
+  });
+
+  var byOwner = {};
+  dayEntries.forEach(function (en) {
+    var o = en.owner || '__none__';
+    if (!byOwner[o]) byOwner[o] = [];
+    byOwner[o].push(en);
+  });
+  (typeof umGetActive === 'function' ? umGetActive() : []).forEach(function (m) {
+    if (m.id === 'guest') return;
+    if (m.role === 'مدیر' || m.role === 'سوپر ادمین') return;
+    if (!byOwner[m.id]) byOwner[m.id] = [];
+  });
+
+  var scheduledOnly = dayEntries.filter(function (en) { return en.source === 'scheduled' || en.source === 'followup'; });
+  var totalScheduled = scheduledOnly.length;
+  var totalDone = scheduledOnly.filter(function (en) { return en.done; }).length;
+  var totalNotDone = totalScheduled - totalDone;
+  var workExtra = dayEntries.filter(function (en) { return en.source === 'done_today' || en.source === 'activity'; }).length;
+  var pct = totalScheduled > 0 ? Math.round((totalDone / totalScheduled) * 100) : 0;
+
+  // تب‌های روز هفته
+  var tabsHtml = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;padding:8px;background:var(--bg-raised);border-radius:10px;border:1px solid var(--border)">'
+    + weekMeta.days.map(function (d) {
+      var active = d.date === reportDay;
+      var bg = active ? '#4f46e5' : (d.isToday ? '#eef2ff' : '#fff');
+      var fg = active ? '#fff' : (d.isToday ? '#4338ca' : '#334155');
+      var border = active ? '#4338ca' : (d.isToday ? '#a5b4fc' : '#e2e8f0');
+      return '<button type="button" onclick="openDailyMonitor(\'' + d.date + '\')" style="'
+        + 'padding:7px 10px;border-radius:8px;border:1px solid ' + border + ';background:' + bg + ';color:' + fg + ';'
+        + 'cursor:pointer;font-family:inherit;font-size:11px;font-weight:' + (active ? '700' : '600') + ';min-width:72px">'
+        + '<div>' + d.name + (d.isToday ? ' · امروز' : '') + '</div>'
+        + '<div style="font-size:10px;opacity:.85;margin-top:2px">' + d.date.slice(5) + '</div>'
+        + '</button>';
+    }).join('')
+    + '</div>';
+
+  var dayLabel = isToday ? 'امروز' : (isPast ? 'روز گذشته' : 'روز آینده');
+  var body = tabsHtml
+    + '<div style="background:var(--bg-raised);border-radius:10px;padding:14px;margin-bottom:16px">'
+    + '<div style="font-weight:700;font-size:13px;margin-bottom:10px">📊 خلاصه ' + dayLabel + ' — ' + reportDay + '</div>'
+    + '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">'
+    + '<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px 16px;text-align:center"><div style="font-size:20px;font-weight:800;color:#16a34a">' + totalScheduled + '</div><div style="font-size:11px;color:#166534">برنامه این روز</div></div>'
+    + '<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px 16px;text-align:center"><div style="font-size:20px;font-weight:800;color:#16a34a">' + totalDone + '</div><div style="font-size:11px;color:#166534">انجام‌شده در همین روز ✔</div></div>'
+    + '<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:8px 16px;text-align:center"><div style="font-size:20px;font-weight:800;color:#dc2626">' + totalNotDone + '</div><div style="font-size:11px;color:#991b1b">' + (isPast ? 'انجام‌نشده در آن روز' : 'انجام‌نشده') + ' ✖</div></div>'
+    + '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 16px;text-align:center"><div style="font-size:20px;font-weight:800;color:#1d4ed8">' + pct + '%</div><div style="font-size:11px;color:#1e40af">درصد انجام</div></div>'
+    + (workExtra ? '<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:8px 16px;text-align:center"><div style="font-size:20px;font-weight:800;color:#6d28d9">' + workExtra + '</div><div style="font-size:11px;color:#5b21b6">کار خارج از برنامهٔ روز</div></div>' : '')
+    + '</div>'
+    + '<div style="font-size:11px;color:#64748b;margin-bottom:8px">معیار انجام: تکمیل برنامه، تغییر فیلد، یا یادداشت پروفایل در <strong>همین روز</strong>. مراکزی که فقط امروز رویشان کار شده (حتی بدون برنامه امروز) هم در جدول می‌آیند.</div>'
+    + '<div style="background:#e2e8f0;border-radius:6px;height:10px;overflow:hidden">'
+    + '<div style="background:linear-gradient(90deg,#22c55e,#16a34a);height:100%;width:' + pct + '%;transition:width .4s"></div>'
+    + '</div></div>';
+
+  if (Object.keys(byOwner).length > 0) {
+    body += '<div style="background:var(--bg-card);border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden;margin-bottom:16px">'
+      + '<div style="padding:10px 14px;font-weight:700;font-size:13px;border-bottom:1px solid var(--border)">👥 عملکرد کارشناسان</div>'
+      + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+      + '<thead><tr style="background:var(--bg-raised)">'
+      + '<th style="padding:8px 10px;text-align:right">کارشناس</th>'
+      + '<th style="padding:8px 10px;text-align:center">گزارش</th>'
+      + '<th style="padding:8px 10px;text-align:center">برنامه روز</th>'
+      + '<th style="padding:8px 10px;text-align:center;color:#16a34a">انجام‌شده</th>'
+      + '<th style="padding:8px 10px;text-align:center;color:#dc2626">انجام‌نشده</th>'
+      + '<th style="padding:8px 10px;text-align:center;color:#f59e0b">سررسید گذشته</th>'
+      + '<th style="padding:8px 10px;text-align:center">اقدام</th>'
+      + '</tr></thead><tbody>';
+
+    var _dmOwnerList = Object.keys(byOwner).filter(function (ow) { return ow !== '__none__'; }).sort(function (a, b) {
+      var aHas = byOwner[a].length > 0 ? 1 : 0, bHas = byOwner[b].length > 0 ? 1 : 0;
+      if (aHas !== bHas) return bHas - aHas;
+      return (USERS[a] || a).localeCompare(USERS[b] || b, 'fa');
+    });
+    if (byOwner['__none__'] && byOwner['__none__'].length > 0) _dmOwnerList.push('__none__');
+
+    _dmOwnerList.forEach(function (ow, idx) {
+      var entries = byOwner[ow];
+      var sched = entries.filter(function (en) { return en.source !== 'done_today'; });
+      var owName = ow === '__none__' ? 'بدون مسئول' : (USERS[ow] || ow);
+      var owDone = sched.filter(function (en) { return en.done; }).length;
+      var owNotDone = sched.length - owDone;
+      var owOverdue = (overdueByOwner[ow] || []).length;
+      var owColor = (window.umGetColor ? umGetColor(ow) : '#94a3b8');
+      var bg = idx % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-raised)';
+      var noSchedule = sched.length === 0 && !owOverdue;
+      body += '<tr style="background:' + bg + ';border-bottom:1px solid #f1f5f9;' + (noSchedule ? 'opacity:.65' : '') + '">'
+        + '<td style="padding:8px 10px;font-weight:600"><span style="display:inline-flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:' + owColor + '"></span>' + esc(owName) + '</span></td>'
+        + '<td style="padding:8px 10px;text-align:center">'
+        + '<button onclick="event.stopPropagation();openExpertReport(\'' + ow + '\')" style="font-size:10px;padding:2px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:5px;cursor:pointer;font-family:inherit">📊 گزارش</button>'
+        + '</td>'
+        + '<td style="text-align:center;padding:8px">' + (noSchedule ? '<span style="color:var(--text-muted);font-size:11px">💤 بدون برنامه</span>' : sched.length) + '</td>'
+        + '<td style="text-align:center;padding:8px"><span style="background:#dcfce7;color:#166534;border-radius:10px;padding:2px 8px;font-weight:700">' + owDone + '</span></td>'
+        + '<td style="text-align:center;padding:8px"><span style="background:#fee2e2;color:#991b1b;border-radius:10px;padding:2px 8px;font-weight:700">' + owNotDone + '</span></td>'
+        + '<td style="text-align:center;padding:8px"><span style="background:#fef3c7;color:#92400e;border-radius:10px;padding:2px 8px;font-weight:700">' + owOverdue + '</span></td>'
+        + '<td style="text-align:center;padding:8px">'
+        + (ow !== '__none__' && owNotDone > 0 && isToday
+          ? '<button onclick="sendReminderToExpert(\'' + ow + '\')" style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:5px;padding:3px 10px;cursor:pointer;font-size:10px;font-family:inherit">📩 یادآوری</button>'
+          : '<span style="color:var(--text-muted);font-size:11px">' + (noSchedule ? '—' : (owNotDone === 0 ? '✔ کامل' : '—')) + '</span>')
+        + '</td></tr>';
+    });
+    body += '</tbody></table></div></div>';
+
+    // فیلتر + لیست فشرده مراکز (گروه‌بندی کارشناس)
+    window._dmCache = {
+      reportDay: reportDay,
+      dayEntries: dayEntries,
+      isToday: isToday,
+      isPast: isPast
+    };
+    if (!window._dmUi) window._dmUi = { search: '', status: 'all', owner: '' };
+
+    body += '<div style="background:var(--bg-card);border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden;margin-bottom:12px">'
+      + '<div style="padding:10px 14px;font-weight:700;font-size:13px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+      + '<span>📋 مراکز روز — نمای فشرده</span>'
+      + '<span style="font-weight:500;font-size:11px;color:#64748b;margin-right:auto">خلاصه پیش‌فرض؛ جزئیات با کلیک</span>'
+      + '</div>'
+      + _dmFilterBarHtml()
+      + '<div id="dmCentersList">' + _dmRenderCentersListHtml() + '</div>'
+      + '</div>';
+
+    // معوق‌ها (جمع‌بندی کوتاه)
+    var overdueFlat = [];
+    Object.keys(overdueByOwner).forEach(function (ow) {
+      (overdueByOwner[ow] || []).forEach(function (x) {
+        overdueFlat.push({ owner: ow, name: x.name, date: x.date });
+      });
+    });
+    if (overdueFlat.length) {
+      body += '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 14px;margin-bottom:8px">'
+        + '<div style="font-weight:700;font-size:12px;color:#92400e;margin-bottom:6px">⚠ سررسید گذشته هنوز باز (' + overdueFlat.length + ')</div>'
+        + '<div style="font-size:11px;color:#78350f;line-height:1.7">'
+        + overdueFlat.slice(0, 20).map(function (x) {
+          return esc(x.name) + ' <span style="color:#a16207">(' + x.date + ' · ' + esc(USERS[x.owner] || x.owner) + ')</span>';
+        }).join('، ')
+        + (overdueFlat.length > 20 ? ' …' : '')
+        + '</div></div>';
+    }
+  } else {
+    body += '<div style="text-align:center;padding:40px;color:var(--text-muted)"><div style="font-size:32px;margin-bottom:10px">📋</div><div>هیچ کارشناس فعالی یافت نشد</div></div>';
+  }
+
+  var foot = '<button class="btn-secondary" onclick="closeModal(\'dmModal\')">بستن</button>'
+    + (isToday ? '<button class="btn-secondary" onclick="sendReminderToAll()" style="background:#fef3c7;color:#92400e;border-color:#fcd34d">📩 یادآوری به همه</button>' : '')
+    + '<button class="btn-primary" onclick="openDailyMonitor(\'' + reportDay + '\')">🔄 بروزرسانی</button>';
+  openModal('dmModal', '📊 گزارش فعالیت روزانه — ' + reportDay, body, foot, { xl: true });
+  DB.changeLog = _prevCL;
+}
+
+
+function sendReminderToAll() {
+  var today = todayStr();
+  _buildPCCache();
+  var experts = {};
+  Object.keys(DB.weekEntries || {}).forEach(function (k) {
+    var we = DB.weekEntries[k];
+    if (!we || we.rtype === 'mtr') return;
+    if (we.scheduledDate !== today) return;
+    var rtype = we.rtype || 'center', rid = we.rid || '';
+    if (_wpDoneOnReportDay(we, rtype, rid, today)) return;
+    var owner = _wpGetOwner(we);
+    if (!owner) return;
+    if (!experts[owner]) experts[owner] = [];
+    experts[owner].push((typeof resolveWeekEntryDisplayName==='function'?resolveWeekEntryDisplayName(we):(we.centerName||getRecLabel(rtype+'_'+rid)||'?')));
+  });
+  var cnt = 0;
+  Object.keys(experts).forEach(function (exp) {
+    var names = experts[exp];
+    if (!names.length) return;
     cnt++;
-    var msg='📋 برنامه امروز: '+names.length+' مرکز برای بازدید دارید:\n• '
-      +names.slice(0,5).join('\n• ')
-      +(names.length>5?'\nو '+(names.length-5)+' مورد دیگر':'')
-      +'\nوارد برنامه هفته شوید.';
-    sendNotif(exp,msg,'',[],'followup',{forceBell:true,filter:'today',actionUrl:'/?tab=home&filter=today',bucket:'manual_today:'+today+':'+exp});
+    var msg = '📋 برنامه امروز: ' + names.length + ' مرکز برای بازدید دارید:\n• '
+      + names.slice(0, 5).join('\n• ')
+      + (names.length > 5 ? '\nو ' + (names.length - 5) + ' مورد دیگر' : '')
+      + '\nوارد برنامه هفته شوید.';
+    sendNotif(exp, msg, '', [], 'followup', { forceBell: true, filter: 'today', actionUrl: '/?tab=home&filter=today', bucket: 'manual_today:' + today + ':' + exp });
   });
-  if(cnt>0)showToast('🔔 یادآوری برای '+cnt+' کارشناس ارسال شد',3000);
+  if (cnt > 0) showToast('🔔 یادآوری برای ' + cnt + ' کارشناس ارسال شد', 3000);
   else showToast('✅ همه کارشناسان گزارش داده‌اند');
 }
 
-function _getTodayActivities(rtype,rid,today){
-  var rkey=rtype+'_'+rid;
-  var log=DB.changeLog||[];
-  return log.filter(function(l){
-    if(l.rkey!==rkey)return false;
-    if(!l.at)return false;
-    var d=l.at.slice(0,10);
-    var parts=d.split('-').map(Number);
-    if(parts.length!==3)return false;
-    var jd=g2j(parts[0],parts[1],parts[2]);
-    var jdStr=jd[0]+'/'+p2(jd[1])+'/'+p2(jd[2]);
-    return jdStr===today;
+function _getActivitiesOnDate(rtype, rid, jDateStr) {
+  var rkey = rtype + '_' + rid;
+  return (DB.changeLog || []).filter(function (l) {
+    if (l.rkey !== rkey || !l.at) return false;
+    var dp = l.at.slice(0, 10).split('-').map(Number);
+    if (dp.length !== 3) return false;
+    var jd = g2j(dp[0], dp[1], dp[2]);
+    return jd[0] + '/' + p2(jd[1]) + '/' + p2(jd[2]) === jDateStr;
   });
 }
 
-function _fieldLabel(field){
-  var map={status:'وضعیت',lead:'سرنخ',potential:'فرصت',followupDate:'تاریخ پیگیری',owner:'مسئول',tags:'برچسب',notes:'یادداشت',contacts:'تماس'};
-  return map[field]||field;
+function _getTodayActivities(rtype, rid, today) {
+  return _getActivitiesOnDate(rtype, rid, today);
 }
 
-function sendReminderToExpert(expertUser){
-  var today=todayStr();
-  var noActEntries=[];
-  Object.keys(DB.weekEntries||{}).forEach(function(k){
-    var we=DB.weekEntries[k];
-    if(we.done||we.scheduledDate!==today||we.rtype==='mtr')return;
-    var rtype=we.rtype||'center',rid=we.rid||'';
-    var owner = typeof getCenterOwner === 'function' ? getCenterOwner(rtype, rid) : '';
-    if(owner!==expertUser)return;
-    var acts=_getTodayActivities(rtype,rid,today);
-    if(acts.length===0)noActEntries.push(we.centerName||getRecLabel(rtype+'_'+rid)||'?');
+function _fieldLabel(field) {
+  var map = {
+    status: 'وضعیت', lead: 'سرنخ', potential: 'فرصت', followupDate: 'تاریخ پیگیری',
+    owner: 'مسئول', tags: 'برچسب', notes: 'یادداشت', contacts: 'تماس',
+    competitor: 'رقیب', address: 'آدرس', nameOverride: 'نام', type: 'نوع',
+    oppValue: 'ارزش فرصت', oppGrade: 'درجه فرصت', oppProbability: 'احتمال',
+    closeReason: 'دلیل بستن', customerStatus: 'وضعیت مشتری',
+    week_done: 'تکمیل برنامه هفته', doneResult: 'نتیجه اقدام', doneNote: 'یادداشت انجام'
+  };
+  return map[field] || field;
+}
+
+function _dmIsoTime(iso) {
+  if (!iso) return '';
+  try {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return p2(d.getHours()) + ':' + p2(d.getMinutes());
+  } catch (e) { return ''; }
+}
+
+/** لیست تغییرات یک مرکز در یک روز — بدون تکرار فیلد (فقط آخرین مقدار) */
+function _dmBuildChangeList(en, reportDay) {
+  var fieldLatest = {}; // field -> item
+  var fieldOrder = [];
+  var acts = (en.activities || []).slice().sort(function (a, b) {
+    return String(b.at || '').localeCompare(String(a.at || ''));
   });
-  if(!noActEntries.length){showToast('✅ این کارشناس برای همه مراکز گزارش داده است');return;}
-  var msg='لطفاً برای مراکز زیر که امروز برنامه دارید گزارش وارد کنید: '+noActEntries.slice(0,5).join('، ')+(noActEntries.length>5?' و '+(noActEntries.length-5)+' مرکز دیگر':'');
-  sendNotif(expertUser,msg,'',[],'followup',{forceBell:true,filter:'today',bucket:'manual_expert:'+today+':'+expertUser});
+  acts.forEach(function (l) {
+    var field = l.field || 'other';
+    if (fieldLatest[field]) return; // already have newer
+    fieldLatest[field] = {
+      kind: 'field',
+      field: field,
+      label: _fieldLabel(field),
+      val: l.val == null || l.val === '' ? '—' : String(l.val),
+      by: USERS[l.by] || l.by || '—',
+      time: _dmIsoTime(l.at),
+      at: l.at || ''
+    };
+    fieldOrder.push(field);
+  });
+  var items = fieldOrder.map(function (f) { return fieldLatest[f]; });
+
+  var notes = [];
+  (en.notes || []).forEach(function (n) {
+    var txt = String(n.text || n.note || '').trim();
+    if (!txt) return;
+    notes.push({
+      kind: 'note',
+      label: 'یادداشت پروفایل',
+      val: txt,
+      by: n.by || n.user || '—',
+      time: ''
+    });
+  });
+  // یک یادداشت کافی است در خلاصه؛ بقیه در جزئیات — همه را نگه دار ولی کوتاه نمایش بده
+  items = items.concat(notes);
+
+  if (en.doneDate === reportDay) {
+    var resMap = { won: 'قرارداد بسته شد', inactive: 'غیرفعال', followup: 'نیاز به پیگیری', bulk_done: 'تیک گروهی' };
+    items.push({
+      kind: 'done',
+      label: 'تکمیل برنامه هفته',
+      val: resMap[en.doneResult] || en.doneResult || 'انجام شد',
+      by: '—',
+      time: ''
+    });
+    if (en.doneNote) {
+      items.push({
+        kind: 'done_note',
+        label: 'یادداشت انجام',
+        val: String(en.doneNote),
+        by: '—',
+        time: ''
+      });
+    }
+  }
+  return items;
+}
+
+function _dmTruncate(text, maxLen) {
+  var s = String(text || '');
+  if (s.length <= maxLen) return { short: s, full: s, truncated: false };
+  return { short: s.slice(0, maxLen).trim() + '…', full: s, truncated: true };
+}
+
+function _dmChangeSummaryChips(items) {
+  if (!items || !items.length) {
+    return '<span style="color:#94a3b8;font-size:11px">بدون تغییر</span>';
+  }
+  var chips = [];
+  var noteCount = 0;
+  items.forEach(function (it) {
+    if (it.kind === 'note' || it.kind === 'done_note') { noteCount++; return; }
+    if (it.kind === 'done') {
+      chips.push('<span style="background:#dcfce7;color:#166534;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:600">✓ ' + esc(it.val) + '</span>');
+      return;
+    }
+    if (it.field === 'status' || it.label === 'وضعیت') {
+      chips.push('<span style="background:#f1f5f9;color:#334155;border-radius:4px;padding:1px 6px;font-size:10px">وضعیت: ' + esc(it.val) + '</span>');
+    } else if (it.field === 'followupDate' || it.label === 'تاریخ پیگیری') {
+      chips.push('<span style="background:#eff6ff;color:#1d4ed8;border-radius:4px;padding:1px 6px;font-size:10px">پیگیری: ' + esc(it.val) + '</span>');
+    } else if (it.field === 'owner' || it.label === 'مسئول') {
+      chips.push('<span style="background:#faf5ff;color:#6b21a8;border-radius:4px;padding:1px 6px;font-size:10px">مسئول: ' + esc(USERS[it.val] || it.val) + '</span>');
+    }
+  });
+  if (noteCount) {
+    chips.push('<span style="background:#fffbeb;color:#b45309;border-radius:4px;padding:1px 6px;font-size:10px">📝 ' + noteCount + ' یادداشت</span>');
+  }
+  if (!chips.length) {
+    chips.push('<span style="background:#f8fafc;color:#64748b;border-radius:4px;padding:1px 6px;font-size:10px">' + items.length + ' مورد</span>');
+  }
+  return '<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">' + chips.join('') + '</div>';
+}
+
+function _dmRenderChangesCell(items, rowId) {
+  if (!items || !items.length) {
+    return '<span style="color:#94a3b8;font-size:11px">هیچ تغییری ثبت نشده</span>';
+  }
+  var detId = 'dmDet_' + rowId;
+  var detailRows = items.map(function (it, i) {
+    var kindBg = it.kind === 'note' || it.kind === 'done_note' ? '#fffbeb'
+      : (it.kind === 'done' ? '#f0fdf4'
+        : (it.label === 'تاریخ پیگیری' ? '#eff6ff' : '#f8fafc'));
+    var kindFg = it.kind === 'note' || it.kind === 'done_note' ? '#b45309'
+      : (it.kind === 'done' ? '#15803d'
+        : (it.label === 'تاریخ پیگیری' ? '#1d4ed8' : '#334155'));
+    var shown = _dmTruncate(it.val, 100);
+    var valCell = '<span>' + esc(shown.short) + '</span>';
+    if (shown.truncated) {
+      var fid = detId + '_n' + i;
+      valCell = '<span id="' + fid + '_s">' + esc(shown.short) + '</span>'
+        + '<span id="' + fid + '_f" style="display:none">' + esc(shown.full) + '</span>'
+        + ' <button type="button" onclick="_dmToggleNote(\'' + fid + '\',this)" style="border:none;background:none;color:#2563eb;cursor:pointer;font-size:10px;padding:0;font-family:inherit">بیشتر</button>';
+    }
+    return '<tr style="background:' + (i % 2 ? '#fafafa' : 'transparent') + '">'
+      + '<td style="padding:3px 6px;white-space:nowrap;vertical-align:top">'
+      + '<span style="display:inline-block;background:' + kindBg + ';color:' + kindFg + ';border-radius:4px;padding:1px 6px;font-weight:700;font-size:10px">'
+      + esc(it.label) + '</span></td>'
+      + '<td style="padding:3px 6px;vertical-align:top;word-break:break-word">' + valCell + '</td>'
+      + '<td style="padding:3px 6px;white-space:nowrap;color:#64748b;vertical-align:top;font-size:10px">'
+      + esc(it.by) + (it.time ? ' · ' + it.time : '') + '</td>'
+      + '</tr>';
+  });
+
+  var btnLabel = '▾ جزئیات (' + items.length + ')';
+  return _dmChangeSummaryChips(items)
+    + ' <button type="button" data-label="' + esc(btnLabel) + '" onclick="_dmToggleDetail(\'' + detId + '\',this)" style="margin-top:4px;border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;padding:2px 8px;cursor:pointer;font-size:10px;font-family:inherit">' + btnLabel + '</button>'
+    + '<div id="' + detId + '" style="display:none;margin-top:6px">'
+    + '<table style="width:100%;border-collapse:collapse;font-size:11px">' + detailRows.join('') + '</table>'
+    + '</div>';
+}
+
+function _dmToggleDetail(id, btn) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  var open = el.style.display === 'none';
+  el.style.display = open ? 'block' : 'none';
+  if (btn) {
+    var label = btn.getAttribute('data-label') || '▾ جزئیات';
+    btn.textContent = open ? '▴ بستن جزئیات' : label;
+  }
+}
+
+function _dmToggleNote(fid, btn) {
+  var s = document.getElementById(fid + '_s');
+  var f = document.getElementById(fid + '_f');
+  if (!s || !f) return;
+  var showFull = f.style.display === 'none';
+  f.style.display = showFull ? 'inline' : 'none';
+  s.style.display = showFull ? 'none' : 'inline';
+  if (btn) btn.textContent = showFull ? 'کمتر' : 'بیشتر';
+}
+
+function _dmFilterBarHtml() {
+  var ui = window._dmUi || { search: '', status: 'all', owner: '' };
+  var owners = {};
+  ((window._dmCache && window._dmCache.dayEntries) || []).forEach(function (en) {
+    var o = en.owner || '__none__';
+    owners[o] = true;
+  });
+  var ownerOpts = '<option value="">همه کارشناسان</option>'
+    + Object.keys(owners).sort(function (a, b) {
+      return (USERS[a] || a).localeCompare(USERS[b] || b, 'fa');
+    }).map(function (o) {
+      var label = o === '__none__' ? 'بدون مسئول' : (USERS[o] || o);
+      return '<option value="' + esc(o) + '"' + (ui.owner === o ? ' selected' : '') + '>' + esc(label) + '</option>';
+    }).join('');
+  function chip(val, label) {
+    var on = ui.status === val;
+    return '<button type="button" onclick="_dmSetFilter(\'status\',\'' + val + '\')" style="padding:4px 10px;border-radius:999px;border:1px solid ' + (on ? '#4f46e5' : '#e2e8f0') + ';background:' + (on ? '#4f46e5' : '#fff') + ';color:' + (on ? '#fff' : '#334155') + ';cursor:pointer;font-size:11px;font-family:inherit;font-weight:' + (on ? '700' : '500') + '">' + label + '</button>';
+  }
+  return '<div id="dmFilterBar" style="padding:8px 12px;background:var(--bg-raised);border-bottom:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+    + '<input type="text" value="' + esc(ui.search || '') + '" placeholder="🔍 جستجوی مرکز…" oninput="_dmSetFilter(\'search\',this.value)" style="padding:5px 10px;border:1px solid var(--border-input);border-radius:6px;font-family:inherit;font-size:11px;min-width:160px">'
+    + chip('all', 'همه')
+    + chip('done', '✅ انجام‌شده')
+    + chip('notdone', '✖ انجام‌نشده')
+    + chip('note', '📝 دارای یادداشت')
+    + '<select onchange="_dmSetFilter(\'owner\',this.value)" style="padding:4px 8px;border:1px solid var(--border-input);border-radius:6px;font-family:inherit;font-size:11px">' + ownerOpts + '</select>'
+    + '</div>';
+}
+
+function _dmSetFilter(key, val) {
+  if (!window._dmUi) window._dmUi = { search: '', status: 'all', owner: '' };
+  window._dmUi[key] = val;
+  if (key !== 'search') {
+    var bar = document.getElementById('dmFilterBar');
+    if (bar) {
+      var tmp = document.createElement('div');
+      tmp.innerHTML = _dmFilterBarHtml();
+      bar.replaceWith(tmp.firstChild);
+    }
+  }
+  var wrap = document.getElementById('dmCentersList');
+  if (wrap) wrap.innerHTML = _dmRenderCentersListHtml();
+}
+
+function _dmFilteredEntries() {
+  var cache = window._dmCache;
+  if (!cache || !cache.dayEntries) return [];
+  var ui = window._dmUi || { search: '', status: 'all', owner: '' };
+  var q = fNorm(ui.search || '');
+  return cache.dayEntries.filter(function (en) {
+    if (ui.owner && (en.owner || '__none__') !== ui.owner) return false;
+    if (ui.status === 'done' && !en.done) return false;
+    if (ui.status === 'notdone' && en.done) return false;
+    if (ui.status === 'note') {
+      var ch = _dmBuildChangeList(en, cache.reportDay);
+      var hasNote = ch.some(function (it) { return it.kind === 'note' || it.kind === 'done_note'; });
+      if (!hasNote) return false;
+    }
+    if (q) {
+      var ow = en.owner === '__none__' ? '' : (USERS[en.owner] || en.owner || '');
+      if (fNorm(en.name || '').indexOf(q) < 0 && fNorm(ow).indexOf(q) < 0) return false;
+    }
+    return true;
+  });
+}
+
+function _dmRenderCentersListHtml() {
+  var cache = window._dmCache;
+  if (!cache) return '<div style="padding:20px;color:#94a3b8;text-align:center">داده‌ای نیست</div>';
+  var reportDay = cache.reportDay;
+  var rows = _dmFilteredEntries().slice().sort(function (a, b) {
+    if (!!a.done !== !!b.done) return a.done ? 1 : -1;
+    var an = (USERS[a.owner] || a.owner || '');
+    var bn = (USERS[b.owner] || b.owner || '');
+    if (an !== bn) return an.localeCompare(bn, 'fa');
+    return (a.name || '').localeCompare(b.name || '', 'fa');
+  });
+  if (!rows.length) {
+    return '<div style="padding:28px;text-align:center;color:#94a3b8">موردی با این فیلتر نیست</div>';
+  }
+
+  var byOwner = {};
+  rows.forEach(function (en) {
+    var o = en.owner || '__none__';
+    if (!byOwner[o]) byOwner[o] = [];
+    byOwner[o].push(en);
+  });
+  var ownerOrder = Object.keys(byOwner).sort(function (a, b) {
+    var aNot = byOwner[a].filter(function (e) { return !e.done; }).length;
+    var bNot = byOwner[b].filter(function (e) { return !e.done; }).length;
+    if (aNot !== bNot) return bNot - aNot;
+    return (USERS[a] || a).localeCompare(USERS[b] || b, 'fa');
+  });
+
+  var html = '';
+  var globalIdx = 0;
+  ownerOrder.forEach(function (ow) {
+    var list = byOwner[ow];
+    var owName = ow === '__none__' ? 'بدون مسئول' : (USERS[ow] || ow);
+    var doneN = list.filter(function (e) { return e.done; }).length;
+    var pct = list.length ? Math.round(100 * doneN / list.length) : 0;
+    var owColor = (window.umGetColor ? umGetColor(ow) : '#94a3b8');
+    html += '<div style="border-bottom:1px solid #e2e8f0">'
+      + '<div style="padding:8px 12px;background:#f8fafc;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+      + '<span style="width:10px;height:10px;border-radius:50%;background:' + owColor + ';flex-shrink:0"></span>'
+      + '<span style="font-weight:700;font-size:12px">' + esc(owName) + '</span>'
+      + '<span style="font-size:11px;color:#64748b">' + doneN + '/' + list.length + ' انجام‌شده</span>'
+      + '<div style="flex:1;min-width:80px;max-width:140px;background:#e2e8f0;border-radius:4px;height:6px;overflow:hidden"><div style="height:100%;width:' + pct + '%;background:#22c55e"></div></div>'
+      + '</div>';
+
+    list.forEach(function (en) {
+      globalIdx++;
+      var actTypeLabel = typeof wpActLabel === 'function' ? wpActLabel(en.actType || 'call') : (en.actType === 'visit' ? '🤝 ملاقات' : '📞 تماس');
+      var changes = _dmBuildChangeList(en, reportDay);
+      var statusHtml = en.done
+        ? '<span style="background:#dcfce7;color:#166534;border-radius:999px;padding:2px 8px;font-weight:700;font-size:10px">✅</span>'
+        : '<span style="background:#fee2e2;color:#991b1b;border-radius:999px;padding:2px 8px;font-weight:700;font-size:10px">✖</span>';
+      var ridSafe = String(en.rid).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      var rowId = 'r' + globalIdx;
+      var bg = en.done ? '#fff' : '#fffafa';
+      html += '<div style="padding:8px 12px;border-top:1px solid #f1f5f9;background:' + bg + ';display:grid;grid-template-columns:28px 1fr auto;gap:8px;align-items:start">'
+        + '<div style="color:#94a3b8;font-size:11px;padding-top:2px">' + globalIdx + '</div>'
+        + '<div>'
+        + '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">'
+        + '<a href="#" onclick="closeModal(\'dmModal\');openCenterModal(\'' + en.rtype + '\',\'' + ridSafe + '\');return false;" style="color:#1d4ed8;text-decoration:none;font-weight:700;font-size:12px">' + esc(en.name) + '</a>'
+        + statusHtml
+        + '<span style="font-size:10px;background:#e0f2fe;color:#0369a1;padding:1px 6px;border-radius:6px">' + actTypeLabel + '</span>'
+        + '<span style="font-size:10px;color:#94a3b8">' + esc(en.status || '') + '</span>'
+        + '</div>'
+        + '<div style="margin-top:4px">' + _dmRenderChangesCell(changes, rowId) + '</div>'
+        + '</div>'
+        + '</div>';
+    });
+    html += '</div>';
+  });
+  return html;
+}
+
+function sendReminderToExpert(expertUser) {
+  var today = todayStr();
+  var noActEntries = [];
+  Object.keys(DB.weekEntries || {}).forEach(function (k) {
+    var we = DB.weekEntries[k];
+    if (!we || we.rtype === 'mtr') return;
+    if (we.scheduledDate !== today) return;
+    var rtype = we.rtype || 'center', rid = we.rid || '';
+    var owner = typeof getCenterOwner === 'function' ? getCenterOwner(rtype, rid) : _wpGetOwner(we);
+    if (owner !== expertUser) return;
+    if (_wpDoneOnReportDay(we, rtype, rid, today)) return;
+    noActEntries.push((typeof resolveWeekEntryDisplayName==='function'?resolveWeekEntryDisplayName(we):(we.centerName||getRecLabel(rtype+'_'+rid)||'?')));
+  });
+  if (!noActEntries.length) { showToast('✅ این کارشناس برای همه مراکز گزارش داده است'); return; }
+  var msg = 'لطفاً برای مراکز زیر که امروز برنامه دارید گزارش وارد کنید: ' + noActEntries.slice(0, 5).join('، ') + (noActEntries.length > 5 ? ' و ' + (noActEntries.length - 5) + ' مرکز دیگر' : '');
+  sendNotif(expertUser, msg, '', [], 'followup', { forceBell: true, filter: 'today', bucket: 'manual_expert:' + today + ':' + expertUser });
 }
 
 
@@ -2831,7 +3751,7 @@ function wpOpenTodayPlanModal(dateStr) {
     if (_isManager() && window._wpTodayModalOwnerF && owner !== window._wpTodayModalOwnerF) return;
 
     var rk = we.recKey || (rtype + '_' + rid);
-    var name = we.centerName || getRecLabel(rk) || '?';
+    var name = (typeof resolveWeekEntryDisplayName==='function'?resolveWeekEntryDisplayName(we):(we.centerName||getRecLabel(rk)||'?'));
     
     var notesList = DB.notes[rk] || [];
     var lastNote = notesList[0] ? notesList[0].text : '—';
@@ -2940,5 +3860,3 @@ function wpRemoveTodayPlanItem(eKey, dateStr) {
     renderWeekPlan();
   }
 }
-
-

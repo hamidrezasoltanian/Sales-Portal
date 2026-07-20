@@ -1311,7 +1311,10 @@ function _apiEventToAudit(ev){
     var ts=dp&&dp.length===3?jMs(dp[0],dp[1],dp[2]):0;
     return{ts:ts,type:'done',icon:icon,color:'#22c55e',title:(ev.done?'انجام شد: ':'برنامه: ')+actionLabel,detail:(ev.doneResult?'['+ev.doneResult+'] ':'')+(ev.doneNote||''),by:ev.by||'',at:null,dateStr:String(ev.at||ev.scheduledDate||'')};
   }
-  if(type==='proforma')return{ts:0,type:'proforma',icon:'📄',color:'#7c3aed',title:'پیشفاکتور '+String(ev.no||''),detail:(ev.status||'')+' — '+Number(ev.total||0).toLocaleString('fa-IR')+' ریال',by:ev.by||'',at:null,dateStr:String(ev.at||'')};
+  if(type==='proforma'){
+    var loss=ev.lossReason ? (' · علت عدم خرید: '+ev.lossReason+(ev.lossCompetitor ? (' ('+ev.lossCompetitor+')') : '')) : '';
+    return{ts:0,type:'proforma',icon:'📄',color:'#7c3aed',title:'پیشفاکتور '+String(ev.no||''),detail:(ev.status||'')+' — '+Number(ev.total||0).toLocaleString('fa-IR')+' ریال'+loss,by:ev.by||'',at:null,dateStr:String(ev.at||'')};
+  }
   if(type==='sale')return{ts:0,type:'sale',icon:'💰',color:'#15803d',title:'فروش',detail:Number(ev.amount||0).toLocaleString('fa-IR')+' ریال'+(ev.isCash?' (نقد)':''),by:ev.by||'',at:null,dateStr:String(ev.at||'')};
   return null;
 }
@@ -1941,7 +1944,11 @@ function openCenterModal(rtype,id,centerKeyHint){
     var _ckOnly=centerKeyHint||(typeof recK==='function'?recK(rtype,id):(rtype+'_'+id));
     var _editOnly=(DB.edits||{})[_ckOnly];
     if(_editOnly){
-      r={id:id,name:_editOnly.nameOverride||_editOnly.name||id,lead:_editOnly.lead||'سرنخ',potential:_editOnly.potential,type:_editOnly.type||'مرکز',owner:_editOnly.owner||''};
+      var _nmOnly = _editOnly.nameOverride || _editOnly.name
+        || (typeof resolveCenterDisplayName === 'function' ? resolveCenterDisplayName(rtype, id) : '')
+        || (typeof getRecLabel === 'function' ? getRecLabel(_ckOnly) : '')
+        || id;
+      r={id:id,name:_nmOnly,lead:_editOnly.lead||'سرنخ',potential:_editOnly.potential,type:_editOnly.type||'مرکز',owner:_editOnly.owner||''};
     }
   }
   if(!r){
@@ -1967,7 +1974,18 @@ function openCenterModal(rtype,id,centerKeyHint){
   var notes=DB.notes[recK(rtype,id)]||DB.notes[recK(rtype,r.id)]||[];
   var tgs=rTags(rtype,r.id);
   var wkEntries=Object.values(DB.weekEntries||{}).filter(function(we){return we.recKey===rtype+'_'+id;});
-  var displayName=e.nameOverride||r.name;
+  var displayName = typeof resolveCenterDisplayName === 'function'
+    ? resolveCenterDisplayName(rtype, r.id, r.name)
+    : (e.nameOverride || r.name || _getCenterName(rtype, r.id) || id);
+  // اگر هنوز کد است ولی weekEntry نام دارد — همان را بگیر
+  if (typeof _looksLikeCenterCode === 'function' && _looksLikeCenterCode(displayName, r.id)) {
+    var _wn = typeof _lookupCenterNameFromWeek === 'function' ? _lookupCenterNameFromWeek(rtype, r.id) : '';
+    if (_wn) displayName = _wn;
+  }
+  // پر کردن name در آبجکت برای بقیهٔ UI
+  if (r && (!r.name || (typeof _looksLikeCenterCode === 'function' && _looksLikeCenterCode(r.name, r.id)))) {
+    r.name = displayName;
+  }
   var isExtra=!!(DB.extra&&DB.extra.find(function(x){return x.id===r.id;}));
   var provObj=getAllProvinces().find(function(p){return p.id===(prov||'tehran');});
   var provName=provObj?provObj.name:'تهران';
@@ -2721,9 +2739,9 @@ function removeCenterTag(ev,rtype,id,tagId){
 // ── Multi-contact helpers ─────────────────────────────────────────────────
 function _getContacts(rtype,id){
   var e=getE(rtype,id);
-  if(e.contacts&&e.contacts.length)return e.contacts.map(function(c){return{name:c.name||'',title:c.title||'',phones:(c.phones||[]).slice()};});
+  if(e.contacts&&e.contacts.length)return e.contacts.map(function(c){return{name:c.name||'',title:c.title||'',phones:(c.phones||[]).slice(),note:c.note||c.notes||''};});
   if(e.contactName||e.contactTitle||(e.phones&&e.phones.length))
-    return [{name:e.contactName||'',title:e.contactTitle||'',phones:(e.phones||[]).slice()}];
+    return [{name:e.contactName||'',title:e.contactTitle||'',phones:(e.phones||[]).slice(),note:e.contactNote||''}];
   return [];
 }
 function _saveContacts(rtype,id,contacts){
@@ -2772,6 +2790,9 @@ function _buildContactsHTML(rtype,rid,domId){
       +'<input type="text" value="'+esc(c.title)+'" placeholder="مثلاً: مدیر خرید..." style="'+inp+'" '
       +'onchange="updateContactField(\''+rtype+'\',\''+rid+'\','+ci+',\'title\',this.value)"></div>'
       +'</div>'
+      +'<div style="margin-bottom:6px"><label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:2px">یادداشت</label>'
+      +'<textarea rows="2" placeholder="یادداشت هنگام ثبت مخاطب..." style="'+inp+';resize:vertical;min-height:44px" '
+      +'onchange="updateContactField(\''+rtype+'\',\''+rid+'\','+ci+',\'note\',this.value)">'+esc(c.note||'')+'</textarea></div>'
       +'<label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:4px">شماره‌های تماس</label>'
       +phonesHtml
       +'<div style="display:flex;gap:5px;margin-top:3px">'
@@ -2784,7 +2805,7 @@ function _buildContactsHTML(rtype,rid,domId){
 }
 function addContact(rtype,id,domId){
   var contacts=_getContacts(rtype,id);
-  contacts.push({name:'',title:'',phones:[]});
+  contacts.push({name:'',title:'',phones:[],note:''});
   _saveContacts(rtype,id,contacts);
   _refreshContactsArea(rtype,id,domId||id);
 }
@@ -2827,4 +2848,3 @@ function updateContactPhone(rtype,id,ci,pi,val){
 }
 
 window.openCenterModal = openCenterModal;
-

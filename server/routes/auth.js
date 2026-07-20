@@ -140,13 +140,14 @@ router.post('/login', async (req, res) => {
 router.get('/me', requireAuth, async (req, res) => {
   try {
     const result = await query(
-      'SELECT username, display_name, role, color, phone, department, direct_manager, permissions FROM app_users WHERE username = $1 AND active = true',
+      'SELECT username, display_name, role, color, phone, department, direct_manager, permissions, manager_scope FROM app_users WHERE username = $1 AND active = true',
       [req.user.username]
     );
     if (result.rows.length === 0) {
       return res.status(401).json({ error: 'کاربر یافت نشد' });
     }
     const u = result.rows[0];
+    const { effectiveManagerScope } = require('../lib/manager-scope');
     return res.json({
       username: u.username,
       name: u.display_name,
@@ -156,6 +157,11 @@ router.get('/me', requireAuth, async (req, res) => {
       department: u.department || '',
       direct_manager: u.direct_manager || '',
       permissions: u.permissions || {},
+      manager_scope: u.manager_scope || null,
+      effective_scope: effectiveManagerScope({
+        role: u.role,
+        manager_scope: u.manager_scope,
+      }),
     });
   } catch (e) {
     console.error('[auth/me]', e.message);

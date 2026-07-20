@@ -365,7 +365,7 @@
   // ── rendering functions ───────────────────────────────────────────────────
 
   function _centerRow(we, today) {
-    var name = we.centerName || we.name || '—';
+    var name = (typeof resolveWeekEntryDisplayName==='function'?resolveWeekEntryDisplayName(we):(we.centerName||we.name||'—'));
     var d = we.scheduledDate || '';
     var isToday = d === today;
     var dayLbl = isToday ? '<span style="color:#6366f1;font-weight:700">امروز</span>' : (_dayName(d) + ' ' + (d.slice(8) || ''));
@@ -377,7 +377,11 @@
       '<div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1">' +
         '<span style="font-size:1.25rem">' + typeIcon + '</span>' +
         '<div style="min-width:0">' +
-          '<div style="font-weight:700;font-size:.88rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(name) + '</div>' +
+          '<div style="font-weight:700;font-size:.88rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
+            (typeof centerNameLinkHtml === 'function'
+              ? centerNameLinkHtml(we.rtype || 'center', we.rid || '', name)
+              : esc(name)) +
+          '</div>' +
           '<div style="font-size:.75rem;color:var(--text-muted);margin-top:2px">' + typeLabel + '</div>' +
         '</div>' +
       '</div>' +

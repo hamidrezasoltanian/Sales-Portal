@@ -7,7 +7,16 @@ function openUserMgmt(){
   _UM_TAB='users';
   _UM_SEARCH='';
   _UM_STATUS_FILTER='all';
-  var foot='<button class="btn-secondary" onclick="closeModal(\'userMgmtModal\')">بستن</button>';
+  try{if(typeof closeModal==='function')closeModal('settingsModal');}catch(_){}
+  window._hrPreferredView='users';
+  if(typeof switchTab==='function'){
+    switchTab('hr');
+    if(typeof window._hrSetView==='function'&&typeof currentTab!=='undefined'&&currentTab==='hr'){
+      window._hrSetView('users');
+    }
+    return;
+  }
+  var foot='<button type="button" class="btn-secondary" onclick="closeModal(\'userMgmtModal\')">بستن</button>';
   openModal('userMgmtModal','👥 مدیریت کاربران','<div id="umWrap" class="um-panel">'+_umBody()+'</div>',foot,{xl:true});
   var box=document.querySelector('#mo_userMgmtModal .m-box');
   if(box)box.classList.add('um-modal');
@@ -34,17 +43,18 @@ function umRefreshUsersList(){
   if(empty)empty.style.display=list.querySelector('tr')?'none':'block';
 }
 function _umTabs(){
-  var tabs=[['users','👤 کاربران'],['provinces','🗺 استان‌ها'],['bulk','🔀 جابجایی']];
+  var tabs=[['users','👤 کاربران'],['catalog','🏷 نقش و دپارتمان'],['provinces','🗺 استان‌ها'],['bulk','🔀 جابجایی']];
   return '<div class="um-tabs">'
     +tabs.map(function(t){
       return '<button type="button" class="um-tab'+(_UM_TAB===t[0]?' active':'')+'" onclick="umTab(\''+t[0]+'\')">'+t[1]+'</button>';
     }).join('')+'</div>';
 }
 function _umBody(){
-  return _umTabs()+(_UM_TAB==='users'?_umUsers():_UM_TAB==='provinces'?_umProvinces():_umBulk());
+  return _umTabs()+(_UM_TAB==='users'?_umUsers():_UM_TAB==='catalog'?_umCatalog():_UM_TAB==='provinces'?_umProvinces():_umBulk());
 }
 function _umUsersRows(){
-  var members=umGetMembers().filter(function(m){return m.id!=='guest';});
+  var all=umGetMembers().filter(function(m){return m.id!=='guest';});
+  var members=all.slice();
   if(_UM_SEARCH){
     members=members.filter(function(m){
       return (m.name||'').toLowerCase().indexOf(_UM_SEARCH)>=0
@@ -60,31 +70,44 @@ function _umUsersRows(){
     var active=m.active!==false;
     var centers=umCountCenters(m.id);
     var color=m.color||_UM_COLORS[i%_UM_COLORS.length];
-    var roles=ALL_ROLES;
+    var roles=typeof getOrgRoles==='function'?getOrgRoles():ALL_ROLES;
+    var depts=typeof getOrgDepartments==='function'?getOrgDepartments():DEPARTMENTS;
+    if(m.role && roles.indexOf(crmNormalizeRole(m.role))<0) roles=roles.concat([crmNormalizeRole(m.role)]);
+    if(m.department && depts.indexOf(m.department)<0) depts=depts.concat([m.department]);
+    var uid=String(m.id);
+    var safeId=uid.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     var idCell=_isSuperAdmin()
-      ?'<input id="um_id_'+m.id+'" class="um-inp mono md" value="'+esc(m.id)+'" placeholder="نام کاربری">'
+      ?'<input id="um_id_'+uid+'" class="um-inp mono md" value="'+esc(m.id)+'" placeholder="نام کاربری" oninput="umMarkDirty(this)">'
       :'<span class="um-id-readonly">'+esc(m.id)+'</span>';
-    return '<tr class="'+(active?'':'um-inactive')+'">'
-      +'<td data-label=""><div id="umdot_'+m.id+'" class="um-dot" style="background:'+color+'" onclick="umPickColor(\''+m.id+'\',this)" title="تغییر رنگ"></div></td>'
-      +'<td data-label="نام"><input id="um_name_'+m.id+'" class="um-inp lg" value="'+esc(m.name)+'"></td>'
+    return '<tr class="'+(active?'':'um-inactive')+'" data-uid="'+esc(uid)+'">'
+      +'<td data-label=""><div id="umdot_'+uid+'" class="um-dot" style="background:'+color+'" onclick="umPickColor(\''+safeId+'\',this);umMarkDirty(this)" title="تغییر رنگ"></div></td>'
+      +'<td data-label="نام"><input id="um_name_'+uid+'" class="um-inp lg" value="'+esc(m.name)+'" oninput="umMarkDirty(this)"></td>'
       +'<td data-label="کد ورود">'+idCell+'</td>'
-      +'<td data-label="نقش"><select id="um_role_'+m.id+'" class="um-inp" style="min-width:110px">'
-        +roles.map(function(r){return'<option'+(crmNormalizeRole(m.role)===r?' selected':'')+'>'+r+'</option>';}).join('')
+      +'<td data-label="نقش"><select id="um_role_'+uid+'" class="um-inp" onchange="umMarkDirty(this)">'
+        +roles.map(function(r){return'<option'+(crmNormalizeRole(m.role)===r?' selected':'')+'>'+esc(r)+'</option>';}).join('')
       +'</select></td>'
-      +'<td class="um-col-dept" data-label="دپارتمان"><select id="um_dept_'+m.id+'" class="um-inp sm">'
+      +'<td class="um-col-dept" data-label="دپارتمان"><select id="um_dept_'+uid+'" class="um-inp sm" title="برچسب سازمانی" onchange="umMarkDirty(this)">'
         +'<option value="">—</option>'
-        +DEPARTMENTS.map(function(d){return'<option value="'+d+'"'+(m.department===d?' selected':'')+'>'+d+'</option>';}).join('')
+        +depts.map(function(d){return'<option value="'+esc(d)+'"'+(m.department===d?' selected':'')+'>'+esc(d)+'</option>';}).join('')
       +'</select></td>'
-      +'<td class="um-col-phone" data-label="موبایل"><input id="um_phone_'+m.id+'" class="um-inp mono" value="'+esc(m.phone||'')+'" placeholder="09…"></td>'
-      +'<td data-label="مراکز"><span class="um-centers">🏥 '+centers+'</span></td>'
-      +'<td data-label="وضعیت">'
-        +'<span class="um-status '+(active?'on':'off')+'" onclick="umToggleActive(\''+m.id+'\')">'+(active?'● فعال':'○ غیرفعال')+'</span>'
+      +'<td class="um-col-mgr" data-label="مدیر مستقیم"><select id="um_dm_'+uid+'" class="um-inp sm" title="مدیر مستقیم" onchange="umMarkDirty(this)">'
+        +'<option value="">—</option>'
+        +all.filter(function(x){return x.id!==m.id&&x.active!==false;}).map(function(x){
+          return '<option value="'+esc(x.id)+'"'+(m.direct_manager===x.id?' selected':'')+'>'+esc(x.name)+'</option>';
+        }).join('')
+      +'</select></td>'
+      +'<td class="um-col-share" data-label="اشتراک با مدیر" style="text-align:center" title="همه دسترسی‌های این کاربر به مدیر مستقیم هم داده شود">'
+        +'<input type="checkbox" id="um_swm_'+uid+'"'+(m.share_with_manager?' checked':'')+' onchange="umMarkDirty(this)" style="width:16px;height:16px;cursor:pointer">'
       +'</td>'
-      +'<td class="um-td-actions" data-label="عملیات"><div class="um-actions">'
-        +'<button type="button" class="um-act um-act-save" onclick="umSaveUser(\''+m.id+'\')" title="ذخیره تغییرات">💾 ذخیره</button>'
-        +'<button type="button" class="um-act um-act-key" onclick="umResetPassword(\''+m.id+'\')" title="تغییر رمز">🔑</button>'
-        +'<button type="button" class="um-act um-act-perm" onclick="umOpenPermissionsModal(\''+m.id+'\')" title="دسترسی‌ها">🛡</button>'
-        +(centers>0?'<button type="button" class="um-act um-act-move" onclick="umReassignAll(\''+m.id+'\')" title="جابجایی مراکز">🔀</button>':'')
+      +'<td class="um-col-phone" data-label="موبایل"><input id="um_phone_'+uid+'" class="um-inp mono" value="'+esc(m.phone||'')+'" placeholder="09…" oninput="umMarkDirty(this)"></td>'
+      +'<td data-label="مراکز" style="text-align:center"><span class="um-centers">'+centers+'</span></td>'
+      +'<td data-label="وضعیت" style="text-align:center">'
+        +'<button type="button" class="um-status '+(active?'on':'off')+'" onclick="umToggleActive(\''+safeId+'\')">'+(active?'فعال':'غیرفعال')+'</button>'
+      +'</td>'
+      +'<td class="um-td-actions" data-label=""><div class="um-actions" role="group" aria-label="عملیات">'
+        +'<button type="button" class="um-act um-act-key" onclick="umResetPassword(\''+safeId+'\')" title="تغییر رمز">🔑</button>'
+        +'<button type="button" class="um-act um-act-perm" onclick="umOpenPermissionsModal(\''+safeId+'\')" title="دسترسی‌ها">🛡</button>'
+        +(centers>0?'<button type="button" class="um-act um-act-move" onclick="umReassignAll(\''+safeId+'\')" title="جابجایی مراکز">🔀</button>':'')
       +'</div></td>'
     +'</tr>';
   }).join('');
@@ -96,13 +119,13 @@ function _umUsers(){
   var totalCenters=all.reduce(function(s,m){return s+umCountCenters(m.id);},0);
   var noPhone=all.filter(function(m){return m.active!==false&&!((m.phone||'').trim());}).length;
   var rows=_umUsersRows();
-  return '<div class="um-hint">💡 غیرفعال‌کردن کاربر داده‌هایش را حذف نمی‌کند. برای انتقال مراکز از 🔀 یا تب «جابجایی» استفاده کنید.</div>'
-    +(noPhone?'<div class="um-hint" style="background:#fef9c7;border-color:#fde68a;color:#92400e">⚠ '+noPhone+' کاربر فعال شماره موبایل ندارند — برای SMS مطالبات ثبت کنید.</div>':'')
+  return '<div class="um-hint">تغییرات را با «ذخیره همه» اعمال کنید. تیک «اشتراک با مدیر» = همه دسترسی‌های کارشناس برای مدیر مستقیمش هم باز می‌شود. سوپر ادمین همیشه همه چیز را می‌بیند.</div>'
+    +(noPhone?'<div class="um-hint um-hint-warn">⚠ '+noPhone+' کاربر فعال شماره موبایل ندارند.</div>':'')
     +'<div class="um-stats">'
     +'<div class="um-stat"><div class="um-stat-n">'+all.length+'</div><div class="um-stat-l">کل کاربران</div></div>'
-    +'<div class="um-stat"><div class="um-stat-n" style="color:#15803d">'+activeCount+'</div><div class="um-stat-l">فعال</div></div>'
-    +'<div class="um-stat"><div class="um-stat-n" style="color:#94a3b8">'+inactiveCount+'</div><div class="um-stat-l">غیرفعال</div></div>'
-    +'<div class="um-stat"><div class="um-stat-n" style="color:#0284c7">'+totalCenters+'</div><div class="um-stat-l">مجموع مراکز</div></div>'
+    +'<div class="um-stat"><div class="um-stat-n um-stat-ok">'+activeCount+'</div><div class="um-stat-l">فعال</div></div>'
+    +'<div class="um-stat"><div class="um-stat-n um-stat-muted">'+inactiveCount+'</div><div class="um-stat-l">غیرفعال</div></div>'
+    +'<div class="um-stat"><div class="um-stat-n um-stat-info">'+totalCenters+'</div><div class="um-stat-l">مجموع مراکز</div></div>'
     +'</div>'
     +'<div class="um-toolbar">'
     +'<input type="search" id="umSearchInp" class="um-search" placeholder="جستجو: نام، کاربری، موبایل، نقش…" value="'+esc(_UM_SEARCH)+'" oninput="umUserSearch(this.value)">'
@@ -111,15 +134,84 @@ function _umUsers(){
       var labels={all:'همه',active:'فعال',inactive:'غیرفعال'};
       return '<button type="button" class="um-filter'+(_UM_STATUS_FILTER===f?' active':'')+'" data-filter="'+f+'" onclick="umUserFilter(\''+f+'\')">'+labels[f]+'</button>';
     }).join('')
-  +'</div>'
-    +'<button type="button" class="um-add-btn" onclick="umAddUser()">+ افزودن کاربر</button>'
+    +'</div>'
+    +'<button type="button" class="um-add-btn" onclick="umAddUser()">+ کاربر جدید</button>'
     +'</div>'
     +'<div class="um-table-wrap"><table class="um-table"><thead><tr>'
-    +'<th></th><th>نام</th><th>کد ورود</th><th>نقش</th><th class="um-col-dept">دپارتمان</th><th class="um-col-phone">موبایل</th>'
-    +'<th style="text-align:center">مراکز</th><th style="text-align:center">وضعیت</th><th style="text-align:left">عملیات</th>'
+    +'<th class="um-th-dot"></th><th>نام</th><th>کد ورود</th><th>نقش</th><th class="um-col-dept">دپارتمان</th><th class="um-col-mgr">مدیر مستقیم</th>'
+    +'<th class="um-col-share" style="text-align:center" title="اشتراک دسترسی با مدیر مستقیم">اشتراک با مدیر</th>'
+    +'<th class="um-col-phone">موبایل</th>'
+    +'<th style="text-align:center">مراکز</th><th style="text-align:center">وضعیت</th><th class="um-th-actions"></th>'
     +'</tr></thead><tbody id="umUsersList">'+rows+'</tbody></table></div>'
-    +'<div id="umUsersEmpty" class="um-empty"'+(rows?' style="display:none"':'')+'>کاربری با این فیلتر یافت نشد</div>';
+    +'<div id="umUsersEmpty" class="um-empty"'+(rows?' style="display:none"':'')+'>کاربری با این فیلتر یافت نشد</div>'
+    +'<div class="um-footer-bar">'
+    +'<span class="um-footer-hint" id="umDirtyHint">پس از ویرایش، یک‌بار ذخیره کنید</span>'
+    +'<button type="button" class="um-save-all" id="umSaveAllBtn" onclick="umSaveAllUsers()">💾 ذخیره همه</button>'
+    +'</div>';
 }
+
+function _umCatalog(){
+  var roles=(typeof getOrgRoles==='function'?getOrgRoles():ALL_ROLES).slice();
+  var depts=(typeof getOrgDepartments==='function'?getOrgDepartments():DEPARTMENTS).slice();
+  return '<div class="um-hint">هر آیتم در یک خط. نقش‌های <b>مدیر</b> و <b>سوپر ادمین</b> سیستمی‌اند و حذف نمی‌شوند. دپارتمان فقط برچسب سازمانی است (مرز دسترسی نیست).</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px">'
+    +'<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:10px;padding:12px">'
+    +'<div style="font-weight:700;font-size:13px;margin-bottom:6px">نقش‌ها</div>'
+    +'<textarea id="umRoleList" style="width:100%;height:220px;padding:8px;border:1px solid var(--border-input);border-radius:8px;font-size:12px;direction:rtl;font-family:inherit;resize:vertical;background:var(--bg-input);color:var(--text-primary);box-sizing:border-box">'+esc(roles.join('\n'))+'</textarea>'
+    +'</div>'
+    +'<div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:10px;padding:12px">'
+    +'<div style="font-weight:700;font-size:13px;margin-bottom:6px">دپارتمان‌ها</div>'
+    +'<textarea id="umDeptList" style="width:100%;height:220px;padding:8px;border:1px solid var(--border-input);border-radius:8px;font-size:12px;direction:rtl;font-family:inherit;resize:vertical;background:var(--bg-input);color:var(--text-primary);box-sizing:border-box">'+esc(depts.join('\n'))+'</textarea>'
+    +'</div>'
+    +'</div>'
+    +'<div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">'
+    +'<button type="button" class="btn-secondary" onclick="umResetOrgCatalog()">بازگشت به پیش‌فرض</button>'
+    +'<button type="button" class="um-add-btn" onclick="umSaveOrgCatalog()">💾 ذخیره نقش‌ها و دپارتمان‌ها</button>'
+    +'</div>';
+}
+
+function umSaveOrgCatalog(){
+  if(!_isManager()){showToast('⚠ فقط مدیران');return;}
+  var roleTa=document.getElementById('umRoleList');
+  var deptTa=document.getElementById('umDeptList');
+  if(!roleTa||!deptTa)return;
+  var roles=roleTa.value.split('\n').map(function(l){return l.trim();}).filter(Boolean);
+  var depts=deptTa.value.split('\n').map(function(l){return l.trim();}).filter(Boolean);
+  if(roles.length<1){showToast('⚠ حداقل یک نقش لازم است');return;}
+  if(depts.length<1){showToast('⚠ حداقل یک دپارتمان لازم است');return;}
+  ['مدیر','سوپر ادمین'].forEach(function(r){ if(roles.indexOf(r)<0) roles.unshift(r); });
+  // dedupe preserve order
+  function uniq(arr){ var s={},out=[]; arr.forEach(function(x){ if(!s[x]){s[x]=1;out.push(x);} }); return out; }
+  roles=uniq(roles); depts=uniq(depts);
+  if(!DB.settings)DB.settings={};
+  DB.settings.roleList=roles;
+  DB.settings.departmentList=depts;
+  if(typeof applyOrgCatalog==='function')applyOrgCatalog();
+  if(typeof patchCrmSetting==='function'){
+    patchCrmSetting('roleList', roles);
+    patchCrmSetting('departmentList', depts);
+  }
+  showToast('✅ نقش‌ها و دپارتمان‌ها ذخیره شد');
+  umTab('catalog');
+}
+
+function umResetOrgCatalog(){
+  if(!_isManager())return;
+  if(!confirm('بازگشت نقش‌ها و دپارتمان‌ها به لیست پیش‌فرض؟'))return;
+  if(!DB.settings)DB.settings={};
+  var defRoles=['مدیر','کارشناس فروش','سوپر ادمین','بازرگانی','مالی','IT','مهمان'];
+  var defDepts=['فروش','بازرگانی','مالی','مدیریت','فنی','اداری','عمومی'];
+  DB.settings.roleList=defRoles;
+  DB.settings.departmentList=defDepts;
+  if(typeof applyOrgCatalog==='function')applyOrgCatalog();
+  if(typeof patchCrmSetting==='function'){
+    patchCrmSetting('roleList', defRoles);
+    patchCrmSetting('departmentList', defDepts);
+  }
+  showToast('بازگشت به پیش‌فرض انجام شد');
+  umTab('catalog');
+}
+
 function _countCentersOf(userId){
   var n=0;
   getAllProvinces().forEach(function(p){
@@ -203,41 +295,127 @@ function umCountCenters(userId){
   return n;
 }
 
-function umSaveUser(userId){
+function umMarkDirty(el){
+  var row=el&&el.closest?el.closest('tr[data-uid]'):null;
+  if(row)row.classList.add('um-dirty');
+  var hint=document.getElementById('umDirtyHint');
+  if(hint){hint.textContent='تغییرات ذخیره‌نشده دارید';hint.classList.add('um-dirty-text');}
+  var btn=document.getElementById('umSaveAllBtn');
+  if(btn)btn.classList.add('um-save-pending');
+}
+
+function umClearDirtyState(){
+  document.querySelectorAll('#umUsersList tr.um-dirty').forEach(function(tr){tr.classList.remove('um-dirty');});
+  var hint=document.getElementById('umDirtyHint');
+  if(hint){hint.textContent='همه تغییرات ذخیره شد';hint.classList.remove('um-dirty-text');}
+  var btn=document.getElementById('umSaveAllBtn');
+  if(btn)btn.classList.remove('um-save-pending');
+}
+
+function umBuildUserPayload(userId){
   var nameEl=document.getElementById('um_name_'+userId);
   var roleEl=document.getElementById('um_role_'+userId);
   var deptEl=document.getElementById('um_dept_'+userId);
+  var dmEl=document.getElementById('um_dm_'+userId);
+  var swmEl=document.getElementById('um_swm_'+userId);
   var phoneEl=document.getElementById('um_phone_'+userId);
   var idEl=document.getElementById('um_id_'+userId);
   var dot=document.getElementById('umdot_'+userId);
-  if(!nameEl)return;
+  if(!nameEl)return {error:'فیلد نام یافت نشد: '+userId};
   var newName=nameEl.value.trim();
   var newRole=roleEl?roleEl.value:'کارشناس فروش';
   var newDept=deptEl?deptEl.value:'';
+  var newDm=dmEl?dmEl.value:'';
+  var newSwm=!!(swmEl&&swmEl.checked);
   var newPhone=phoneEl?phoneEl.value.trim():'';
   var newColor=dot?dot.style.background:'';
   var newId=idEl?idEl.value.trim():'';
-  if(!newName){showToast('⚠ نام اجباری است');return;}
-  if(newId&&newId!==userId&&!/^[a-zA-Z0-9._-]+$/.test(newId)){showToast('⚠ نام کاربری فقط حروف انگلیسی، اعداد و نقطه/خط تیره');return;}
-  if(newId&&newId!==userId&&USERS[newId]){showToast('⚠ این نام کاربری قبلاً وجود دارد');return;}
-  var payload={display_name:newName,role:newRole,phone:newPhone,department:newDept};
+  if(!newName)return {error:'نام «'+userId+'» خالی است'};
+  if(newId&&newId!==userId&&!/^[a-zA-Z0-9._-]+$/.test(newId))return {error:'نام کاربری نامعتبر: '+newId};
+  if(newId&&newId!==userId&&USERS[newId])return {error:'نام کاربری تکراری: '+newId};
+  if(newSwm&&!newDm)return {error:'برای «'+newName+'» اول مدیر مستقیم را انتخاب کنید، بعد تیک اشتراک را بزنید'};
+  var payload={display_name:newName,role:newRole,phone:newPhone,department:newDept,direct_manager:newDm,share_with_manager:newSwm};
   if(newColor)payload.color=newColor;
   if(newId&&newId!==userId)payload.new_username=newId;
-  fetch('/api/users/'+encodeURIComponent(userId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+  return {userId:userId,payload:payload,displayName:newName};
+}
+
+function umApplyUserSaveResult(userId, payload, d){
+  if(payload.new_username){
+    var nu=payload.new_username;
+    Object.keys(DB.edits||{}).forEach(function(k){if(DB.edits[k].owner===userId)DB.edits[k].owner=nu;});
+    getAllProvinces().forEach(function(p){var e=getE(getProvType(p.id),p.id);if(e.owner===userId)setE(getProvType(p.id),p.id,'owner',nu);});
+    if(typeof savePatchDB==='function')savePatchDB({edits:DB.edits});
+  }
+  return !!(d&&d.role_changed);
+}
+
+function umSaveUser(userId, opts){
+  opts=opts||{};
+  var built=umBuildUserPayload(userId);
+  if(built.error){
+    if(!opts.silent)showToast('⚠ '+built.error);
+    return Promise.reject(new Error(built.error));
+  }
+  var payload=built.payload;
+  return fetch('/api/users/'+encodeURIComponent(userId),{
+    method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)
+  })
     .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||r.status);return d;});})
     .then(function(d){
-      if(payload.new_username){
-        var nu=payload.new_username;
-        Object.keys(DB.edits||{}).forEach(function(k){if(DB.edits[k].owner===userId)DB.edits[k].owner=nu;});
-        getAllProvinces().forEach(function(p){var e=getE(getProvType(p.id),p.id);if(e.owner===userId)setE(getProvType(p.id),p.id,'owner',nu);});
-        if(typeof savePatchDB==='function')savePatchDB({edits:DB.edits});
+      var roleChanged=umApplyUserSaveResult(userId,payload,d);
+      if(!opts.silent){
+        if(roleChanged)showToast('⚠ نقش تغییر کرد — کاربر باید دوباره وارد شود',4000);
+        else showToast('✅ «'+built.displayName+'» ذخیره شد');
+        buildUSERS();
+        setTimeout(function(){umTab('users');},300);
       }
-      if(d.role_changed)showToast('⚠ نقش تغییر کرد — کاربر باید دوباره وارد شود',4000);
-      else showToast('✅ «'+newName+'» ذخیره شد');
-      buildUSERS();setTimeout(function(){umTab('users');},300);
-    })
-    .catch(function(e){showToast('❌ خطا: '+e.message);});
+      return {userId:userId,roleChanged:roleChanged,displayName:built.displayName};
+    });
 }
+
+function umSaveAllUsers(){
+  if(!_isManager()){showToast('⚠ فقط مدیران');return;}
+  var rows=document.querySelectorAll('#umUsersList tr[data-uid]');
+  if(!rows.length){showToast('کاربری برای ذخیره نیست');return;}
+  var items=[];
+  var i, built;
+  for(i=0;i<rows.length;i++){
+    built=umBuildUserPayload(rows[i].getAttribute('data-uid'));
+    if(built.error){showToast('⚠ '+built.error);return;}
+    items.push(built);
+  }
+  var btn=document.getElementById('umSaveAllBtn');
+  if(btn){btn.disabled=true;btn.textContent='در حال ذخیره…';}
+  var roleChangedAny=false;
+  var chain=Promise.resolve();
+  items.forEach(function(item){
+    chain=chain.then(function(){
+      return fetch('/api/users/'+encodeURIComponent(item.userId),{
+        method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(item.payload)
+      })
+        .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error((d&&d.error)||r.status);return d;});})
+        .then(function(d){
+          if(umApplyUserSaveResult(item.userId,item.payload,d))roleChangedAny=true;
+        });
+    });
+  });
+  chain.then(function(){
+    buildUSERS();
+    umClearDirtyState();
+    if(btn){btn.disabled=false;btn.textContent='💾 ذخیره همه';}
+    if(roleChangedAny)showToast('✅ ذخیره شد — بعضی نقش‌ها عوض شد؛ آن کاربران باید دوباره وارد شوند',4500);
+    else showToast('✅ '+items.length+' کاربر ذخیره شد');
+    setTimeout(function(){if(_UM_TAB==='users')umTab('users');},250);
+  }).catch(function(e){
+    if(btn){btn.disabled=false;btn.textContent='💾 ذخیره همه';}
+    showToast('❌ خطا در ذخیره: '+(e&&e.message?e.message:e));
+    buildUSERS();
+  });
+}
+
+window.umSaveAllUsers=umSaveAllUsers;
+window.umMarkDirty=umMarkDirty;
 
 
 // ── Permission Editor Modal ────────────────────────────────────────────────
@@ -267,7 +445,8 @@ function _umPermLevel(perms, role, modKey){
   if(perms&&perms[modKey]!==undefined){
     return typeof crmNormalizePermLevel==='function'?crmNormalizePermLevel(perms[modKey]):'none';
   }
-  var roleDef=CRM_ROLE_DEFAULTS[crmNormalizeRole(role)];
+  var rn=crmNormalizeRole(role);
+  var roleDef=CRM_ROLE_DEFAULTS[rn]||CRM_ROLE_DEFAULTS['کارشناس فروش'];
   if(roleDef&&roleDef.modules&&roleDef.modules[modKey]!==undefined){
     return typeof crmNormalizePermLevel==='function'?crmNormalizePermLevel(roleDef.modules[modKey]):'none';
   }
@@ -302,11 +481,36 @@ function umOpenPermissionsModal(userId){
   }).join('');
 
   var allProvs=typeof getAllProvinces==='function'?getAllProvinces():[];
+  var isMgrRole=m.role==='مدیر'||m.role==='سوپر ادمین';
+  var scope=m.manager_scope||(isMgrRole?{type:'global'}:{type:'none'});
+  var scopeType=scope.type||(isMgrRole?'global':'none');
+  if(scopeType==='team')scopeType='global'; // legacy UI removed
+  var scopeProvIds=scope.ids||[];
+  var scopeHtml='';
+  if(isMgrRole&&m.role!=='سوپر ادمین'){
+    scopeHtml='<div style="margin-top:14px;border:1px solid #c7d2fe;background:#eef2ff;border-radius:8px;padding:12px">'
+      +'<div style="font-size:12px;font-weight:700;color:#3730a3;margin-bottom:6px">محدوده داده مراکز</div>'
+      +'<div style="font-size:11px;color:#4338ca;margin-bottom:8px;line-height:1.5">پیش‌فرض «سراسری». برای دیدن مراکز کارشناسان، روی پروفایل آن‌ها تیک «اشتراک با مدیر» را بزنید (نیازی به گزینه تیم نیست).</div>'
+      +'<select id="umScopeType" onchange="umOnScopeTypeChange()" style="width:100%;padding:7px 10px;border:1px solid #a5b4fc;border-radius:6px;font-family:inherit;font-size:12px;margin-bottom:8px">'
+      +'<option value="global"'+(scopeType==='global'?' selected':'')+'>سراسری (همه مراکز)</option>'
+      +'<option value="provinces"'+(scopeType==='provinces'?' selected':'')+'>فقط استان‌های انتخاب‌شده</option>'
+      +'</select>'
+      +'<div id="umScopeProvBox" style="'+(scopeType==='provinces'?'':'display:none;')+'">'
+      +'<div style="font-size:11px;font-weight:600;margin-bottom:6px">استان‌های مجاز</div>'
+      +'<div style="display:flex;flex-wrap:wrap;gap:6px;max-height:120px;overflow:auto">'
+      +(allProvs.map(function(p){
+        var chk=scopeProvIds.indexOf(p.id)>=0?' checked':'';
+        return '<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;cursor:pointer">'
+          +'<input type="checkbox" class="scope-prov" value="'+p.id+'"'+chk+'> '+esc(p.name||p.id)
+          +'</label>';
+      }).join('')||'<span style="color:#94a3b8;font-size:11px">لیست استان‌ها در دسترس نیست</span>')
+      +'</div></div></div>';
+  }
+
   var provHtml='';
   if(allProvs.length){
-    var noneChecked=!existingProvs.length;
     provHtml='<div style="margin-top:16px;border:1px solid var(--border);border-radius:8px;padding:12px">'
-      +'<div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:8px">محدودیت استان (خالی = همه استان‌ها)</div>'
+      +'<div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:8px">محدودیت استان کارشناس (خالی = همه استان‌ها)</div>'
       +'<div style="display:flex;flex-wrap:wrap;gap:6px">'
       +allProvs.map(function(p){
         var chk=existingProvs.indexOf(p.id)>=0?' checked':'';
@@ -321,7 +525,8 @@ function umOpenPermissionsModal(userId){
     +'<div style="font-size:12.5px;color:var(--text-secondary);margin-bottom:12px">'
     +'کاربر: <strong>'+esc(m.name)+'</strong> — نقش: <strong>'+esc(m.role||'')+'</strong>'
     +'<br><span style="font-size:11px;color:var(--text-muted)">رادیو «بدون دسترسی» = پیش‌فرض نقش. برای override سفارشی، سطح دلخواه را انتخاب کنید.</span></div>'
-    +'<div style="overflow-x:auto;max-height:340px;overflow-y:auto">'
+    +scopeHtml
+    +'<div style="overflow-x:auto;max-height:340px;overflow-y:auto;margin-top:10px">'
     +'<table style="width:100%;border-collapse:collapse"><tbody>'+rows+'</tbody></table></div>'
     +provHtml
     +'<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">'
@@ -331,6 +536,11 @@ function umOpenPermissionsModal(userId){
 
   var _permFoot='<button class="btn-secondary" onclick="closeModal(\'permModal\')">بستن</button>';
   openModal('permModal','🛡 ویرایش دسترسی‌ها — '+esc(m.name),html,_permFoot,{lg:true});
+}
+function umOnScopeTypeChange(){
+  var t=(document.getElementById('umScopeType')||{}).value||'global';
+  var box=document.getElementById('umScopeProvBox');
+  if(box)box.style.display=t==='provinces'?'':'none';
 }
 function umSavePermissions(userId){
   var m=umGetMembers().find(function(x){return x.id===userId;});
@@ -349,12 +559,28 @@ function umSavePermissions(userId){
   var provinces=Array.from(provEls).map(function(e){return e.value;});
   var perms=Object.keys(modules).length?{modules:modules}:{};
   if(provinces.length)perms.provinces=provinces;
-  fetch('/api/users/'+encodeURIComponent(userId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({permissions:perms})})
+
+  var payload={permissions:perms};
+  var scopeSel=document.getElementById('umScopeType');
+  if(scopeSel&&(m.role==='مدیر')){
+    var st=scopeSel.value||'global';
+    if(st==='provinces'){
+      var ids=Array.from(document.querySelectorAll('.scope-prov:checked')).map(function(e){return e.value;});
+      if(!ids.length){showToast('⚠ حداقل یک استان برای محدوده استانی انتخاب کنید');return;}
+      payload.manager_scope={type:'provinces',ids:ids};
+    } else {
+      payload.manager_scope={type:'global'};
+    }
+  }
+
+  fetch('/api/users/'+encodeURIComponent(userId),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
     .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||r.status);return d;}); })
     .then(function(){
-      // به‌روزرسانی محلی
-      var m=umGetMembers().find(function(x){return x.id===userId;});
-      if(m)m.permissions=perms;
+      var mm=umGetMembers().find(function(x){return x.id===userId;});
+      if(mm){
+        mm.permissions=perms;
+        if(payload.manager_scope)mm.manager_scope=payload.manager_scope;
+      }
       closeModal('permModal');
       showToast('✅ دسترسی‌های «'+userId+'» ذخیره شد');
     })
@@ -373,15 +599,16 @@ function umClearPermissions(userId){
 }
 
 function umAddUser(){
-  var roles=ALL_ROLES;
-  var deptOpts='<option value="">—</option>'+DEPARTMENTS.map(function(d){return'<option>'+d+'</option>';}).join('');
+  var roles=typeof getOrgRoles==='function'?getOrgRoles():ALL_ROLES;
+  var depts=typeof getOrgDepartments==='function'?getOrgDepartments():DEPARTMENTS;
+  var deptOpts='<option value="">—</option>'+depts.map(function(d){return'<option>'+esc(d)+'</option>';}).join('');
   var body='<div style="display:flex;flex-direction:column;gap:12px">'
     +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">نام نمایشی *</label>'
     +'<input id="nu_name" class="ed-inp" style="width:100%;box-sizing:border-box" placeholder="نام کامل کارشناس"></div>'
     +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">نام کاربری * (انگلیسی)</label>'
     +'<input id="nu_id" class="ed-inp" dir="ltr" style="width:100%;box-sizing:border-box" placeholder="مثال: ali.ahmadi"></div>'
     +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">نقش</label>'
-    +'<select id="nu_role" class="ed-inp" style="width:100%;box-sizing:border-box">'+roles.map(function(r){return'<option>'+r+'</option>';}).join('')+'</select></div>'
+    +'<select id="nu_role" class="ed-inp" style="width:100%;box-sizing:border-box">'+roles.map(function(r){return'<option>'+esc(r)+'</option>';}).join('')+'</select></div>'
     +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">دپارتمان</label>'
     +'<select id="nu_dept" class="ed-inp" style="width:100%;box-sizing:border-box">'+deptOpts+'</select></div>'
     +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">موبایل</label>'
@@ -822,7 +1049,9 @@ function buildUSERS(){
           active:m.active,
           department:m.department||'',
           direct_manager:m.direct_manager||'',
+          share_with_manager:!!m.share_with_manager,
           permissions:m.permissions||{},
+          manager_scope:m.manager_scope||null,
           commissionPct:m.commission_pct||null
         };
       });
@@ -879,6 +1108,8 @@ function initSettings(){
   if(DB.settings.purchaseMethodList&&DB.settings.purchaseMethodList.length>=1)PURCHASE_METHOD_LIST=DB.settings.purchaseMethodList;
   if(DB.settings.centerPaymentTermsList&&DB.settings.centerPaymentTermsList.length>=1)CENTER_PAYMENT_TERMS_LIST=DB.settings.centerPaymentTermsList;
   if(DB.settings.shipMethodList&&DB.settings.shipMethodList.length>=1)SHIP_METHOD_LIST=DB.settings.shipMethodList;
+  if(typeof loadActionTypesFromSettings==='function')loadActionTypesFromSettings();
+  if(typeof applyOrgCatalog==='function')applyOrgCatalog();
   buildUSERS();
 }
 
@@ -949,6 +1180,7 @@ function loadMasterCenters(){
       clearPCCache();_ALL_PROVS=null;
       var total=(CENTERS.length||0)+Object.values(PC_RAW).reduce(function(s,a){return s+(a?a.length:0);},0);
       console.log('[AtenaCRM] Master centers loaded from server ('+total+' rows)');
+      if(typeof hydrateCenterNameCache==='function')hydrateCenterNameCache();
     })
     .catch(function(e){
       console.warn('[AtenaCRM] Server centers unavailable, trying IndexedDB:',e);
@@ -1043,17 +1275,160 @@ window.getCenterCompetitors = getCenterCompetitors;
 window.getCenterCompetitorsFromEdit = getCenterCompetitorsFromEdit;
 window.setCenterCompetitors = setCenterCompetitors;
 
-function _getCenterName(type,id){
-  var _over=(DB.edits[recK(type,id)]||{}).nameOverride;if(_over)return _over;
-  if(type==='center'){var c=CENTERS.find(function(x){return String(x.id)===String(id);});if(c)return c.name;}
-  _buildPCCache();
-  var provId=(id+'').split('||')[0];
-  var arr=_PC_CACHE[provId]||[];
-  var c2=arr.find(function(x){return String(x.id)===String(id);});
-  if(c2)return c2.name;
-  var ex=(DB.extra||[]).find(function(x){return String(x.id)===String(id);});
-  return ex?ex.name:id;
+function _lookupCenterNameFromWeek(rtype, id) {
+  if (!rtype || id == null || id === '') return '';
+  var want = rtype + '_' + id;
+  var best = '';
+  Object.keys(DB.weekEntries || {}).forEach(function (k) {
+    if (best) return;
+    var we = DB.weekEntries[k];
+    if (!we || !we.centerName) return;
+    var rk = we.recKey || ((we.rtype || '') + '_' + (we.rid != null ? we.rid : ''));
+    if (rk === want || (we.rtype === rtype && String(we.rid) === String(id))) {
+      var n = String(we.centerName).trim();
+      if (n && n !== id && n !== want) best = n;
+    }
+  });
+  return best;
 }
+
+/** آیا رشته شبیه کد/شناسه مرکز است تا به‌جای نام نشان داده نشود */
+function _looksLikeCenterCode(name, id) {
+  if (!name) return true;
+  var s = String(name).trim();
+  if (!s) return true;
+  if (id != null && s === String(id)) return true;
+  if (/^(center|pc)_/.test(s)) return true;
+  if (/^(c_|mz_t_|p\d+\|\|)/.test(s)) return true;
+  if (/\bp\d+\|\|/.test(s)) return true; // e.g. "فارس p1||141"
+  if (/^\d+$/.test(s)) return true;
+  return false;
+}
+
+function _getCenterName(type, id) {
+  var key = typeof recK === 'function' ? recK(type, id) : (type + '_' + id);
+  var _over = (DB.edits[key] || {}).nameOverride;
+  if (_over && !_looksLikeCenterCode(_over, id)) return _over;
+
+  if (typeof getRecLabel === 'function') {
+    var lbl = getRecLabel(key);
+    if (lbl && !_looksLikeCenterCode(lbl, id) && lbl !== '?') return lbl;
+  }
+
+  if (type === 'center') {
+    var c = (typeof CENTERS !== 'undefined' ? CENTERS : []).find(function (x) { return String(x.id) === String(id); });
+    if (c && c.name && !_looksLikeCenterCode(c.name, id)) return c.name;
+  }
+
+  if (typeof _buildPCCache === 'function') _buildPCCache();
+  var provId = (id + '').split('||')[0];
+  var arr = (typeof _PC_CACHE !== 'undefined' && _PC_CACHE[provId]) ? _PC_CACHE[provId] : [];
+  var c2 = arr.find(function (x) { return String(x.id) === String(id); });
+  if (c2 && c2.name && !_looksLikeCenterCode(c2.name, id)) return c2.name;
+
+  if (typeof _PC_CACHE !== 'undefined' && _PC_CACHE) {
+    for (var pv in _PC_CACHE) {
+      if (!_PC_CACHE.hasOwnProperty(pv)) continue;
+      var found = (_PC_CACHE[pv] || []).find(function (x) { return String(x.id) === String(id); });
+      if (found && found.name && !_looksLikeCenterCode(found.name, id)) return found.name;
+    }
+  }
+
+  var ex = (DB.extra || []).find(function (x) { return String(x.id) === String(id); });
+  if (ex && ex.name && !_looksLikeCenterCode(ex.name, id)) return ex.name;
+
+  var fromWeek = _lookupCenterNameFromWeek(type, id);
+  if (fromWeek) {
+    if (typeof _saveCNC === 'function') _saveCNC(key, fromWeek);
+    return fromWeek;
+  }
+
+  if (_over) return _over;
+  if (c2 && c2.name) return c2.name;
+  if (ex && ex.name) return ex.name;
+  return id;
+}
+
+/** نام نمایشی مرکز — همیشه بهترین منبع موجود (مودال، گزارش، لیست) */
+function resolveCenterDisplayName(rtype, id, hintName) {
+  if (hintName && !_looksLikeCenterCode(hintName, id)) return String(hintName).trim();
+  var n = _getCenterName(rtype, id);
+  if (n && !_looksLikeCenterCode(n, id)) return n;
+  if (hintName && !_looksLikeCenterCode(hintName, id)) return String(hintName).trim();
+  return (n && !_looksLikeCenterCode(n, id) ? n : null) || '?';
+}
+
+/** نام نمایشی از آبجکت week-entry / هر آبجکت با rtype+rid+centerName */
+function resolveWeekEntryDisplayName(we) {
+  if (!we) return '?';
+  var rtype = we.rtype || '';
+  var rid = we.rid != null ? we.rid : '';
+  if ((!rtype || !rid) && we.recKey) {
+    var i = String(we.recKey).indexOf('_');
+    if (i > 0) { rtype = we.recKey.slice(0, i); rid = we.recKey.slice(i + 1); }
+  }
+  var hint = we.centerName || we._name || we.name || '';
+  if (rtype === 'mtr') return we.mtrCustomer || rid || hint || '?';
+  return resolveCenterDisplayName(rtype || 'center', rid, hint);
+}
+
+/** لینک نام مرکز → پروفایل (data-open-center؛ handler سراسری در provinces.js) */
+function centerNameLinkHtml(rtype, rid, nameOrHint, opts) {
+  opts = opts || {};
+  var label = resolveCenterDisplayName(rtype, rid, nameOrHint);
+  if (!rtype || rid == null || rid === '' || rtype === 'mtr') {
+    return '<span>' + (typeof esc === 'function' ? esc(label) : label) + '</span>';
+  }
+  var style = opts.style || 'cursor:pointer;color:var(--brand);text-decoration:underline dotted;font-weight:600';
+  var cls = opts.className ? (' ' + opts.className) : '';
+  return '<span class="ctr-link' + cls + '" data-open-center="1" data-rtype="' +
+    (typeof esc === 'function' ? esc(rtype) : rtype) + '" data-rid="' +
+    (typeof esc === 'function' ? esc(String(rid)) : String(rid)) +
+    '" style="' + style + '" title="باز کردن پروفایل مرکز">' +
+    (typeof esc === 'function' ? esc(label) : label) + '</span>';
+}
+
+/** پر کردن کش نام‌ها از سرور (مراکز یتیم / حذف‌شده از master) */
+var _nameCacheHydrated = false;
+function hydrateCenterNameCache() {
+  if (_nameCacheHydrated) return Promise.resolve();
+  return fetch('/api/centers/name-cache', { credentials: 'include' })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      if (!d || !d.names) return;
+      _nameCacheHydrated = true;
+      if (typeof _loadCNC === 'function') _loadCNC();
+      var names = d.names;
+      var keys = Object.keys(names);
+      for (var i = 0; i < keys.length; i++) {
+        var ck = keys[i];
+        var nm = names[ck];
+        if (!nm || _looksLikeCenterCode(nm, ck)) continue;
+        var rid = ck;
+        var rtype = '';
+        if (ck.indexOf('pc_') === 0) { rtype = 'pc'; rid = ck.slice(3); }
+        else if (ck.indexOf('center_') === 0) { rtype = 'center'; rid = ck.slice(7); }
+        else if (/^p\d+\|\|/.test(ck)) { rtype = 'pc'; rid = ck; }
+        else if (/^(c_|mz_t_)/.test(ck)) { rtype = 'center'; rid = ck; }
+        if (rtype && typeof _saveCNC === 'function') {
+          _saveCNC(rtype + '_' + rid, nm);
+        } else if (typeof _saveCNC === 'function') {
+          _saveCNC(ck, nm);
+        }
+      }
+      if (typeof currentTab !== 'undefined' && currentTab === 'weekplan' && typeof renderWeekPlan === 'function') {
+        try { renderWeekPlan(); } catch (e) {}
+      }
+    })
+    .catch(function () {});
+}
+
+window.resolveCenterDisplayName = resolveCenterDisplayName;
+window.resolveWeekEntryDisplayName = resolveWeekEntryDisplayName;
+window.centerNameLinkHtml = centerNameLinkHtml;
+window.hydrateCenterNameCache = hydrateCenterNameCache;
+window._getCenterName = _getCenterName;
+window._looksLikeCenterCode = _looksLikeCenterCode;
 function getCenterById(rtype,id){
   if(rtype==='center'){return CENTERS.find(function(x){return x.id===id;})||null;}
   _buildPCCache();
