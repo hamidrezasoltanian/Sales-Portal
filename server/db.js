@@ -225,7 +225,6 @@ async function initSchema() {
   `);
 
   // Per-center pricing configuration
-  await query(`ALTER TABLE center_pricing_config ADD COLUMN IF NOT EXISTS product_commissions JSONB DEFAULT '{}'::jsonb`);
 
   await query(`
     CREATE TABLE IF NOT EXISTS center_pricing_config (
@@ -243,6 +242,7 @@ async function initSchema() {
     )
   `);
 
+    await query(`ALTER TABLE center_pricing_config ADD COLUMN IF NOT EXISTS product_commissions JSONB DEFAULT '{}'::jsonb`);
   // Price quotes (header)
   await query(`
     CREATE TABLE IF NOT EXISTS price_quotes (
