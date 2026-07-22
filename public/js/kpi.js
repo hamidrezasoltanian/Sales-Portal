@@ -225,9 +225,10 @@ function saveTeamKPITargets(month){
     // salesAmount preserved from existing via Object.assign
     saved++;
   });
-  // Persist each user target (incl. retention/region) + effective-dated weights
-  userKeys.forEach(function(u){
-    postKpiUserTargetApi(u, month, DB.kpiTargets[u+':'+month]);
+  // Persist each user target (incl. retention/region) + effective-dated weights.
+  // Success is shown only after every server write has completed.
+  var saveRequests=userKeys.map(function(u){
+    return postKpiUserTargetApi(u, month, DB.kpiTargets[u+':'+month]);
   });
   // save weights if present
   var wKeys=['conversion','retention','visits','calls','sales','mission','cash'];
@@ -240,10 +241,18 @@ function saveTeamKPITargets(month){
     });
     DB.kpiTargets.weights=weights;
   }
-  if(DB.kpiTargets.weights)postKpiWeightsApi(DB.kpiTargets.weights, _kpiMonth||currentJMonth());
-  closeModal('teamKpiModal');
-  showToast('✅ اهداف '+saved+' کارشناس ذخیره شد',2500);
-  if(typeof renderKPIPanel==='function')renderKPIPanel();
+  if(DB.kpiTargets.weights)saveRequests.push(postKpiWeightsApi(DB.kpiTargets.weights, _kpiMonth||currentJMonth()).then(function(r){
+    if(!r || !r.ok) throw new Error('ذخیره وزن‌های KPI ناموفق بود');
+    return r.json();
+  }));
+  return Promise.all(saveRequests).then(function(){
+    closeModal('teamKpiModal');
+    showToast('✅ اهداف '+saved+' کارشناس ذخیره شد',2500);
+    if(typeof renderKPIPanel==='function')renderKPIPanel();
+  }).catch(function(err){
+    showToast('❌ ذخیره اهداف انجام نشد: '+((err&&err.message)||'خطا'),3500);
+    throw err;
+  });
 }
 
 function _kpiUserChange(v){

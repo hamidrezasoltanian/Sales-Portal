@@ -282,7 +282,11 @@ async function start() {
   try {
     checkDevDatabaseGuard();
     checkProductionGuard();
-    await initSchema();
+    if (process.env.RUN_SCHEMA_INIT_ON_STARTUP === '1') {
+      await initSchema();
+    } else {
+      console.log('[DB] Startup schema initialization disabled; run npm run migrate during a maintenance release.');
+    }
     const pgDb = process.env.PG_DATABASE || 'atena_crm';
     const port = parseInt(process.env.PORT || '3000', 10);
     if (port === 4000 && pgDb === 'atena_crm') {

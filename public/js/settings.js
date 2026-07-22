@@ -343,9 +343,12 @@ function umBuildUserPayload(userId){
 function umApplyUserSaveResult(userId, payload, d){
   if(payload.new_username){
     var nu=payload.new_username;
-    Object.keys(DB.edits||{}).forEach(function(k){if(DB.edits[k].owner===userId)DB.edits[k].owner=nu;});
-    getAllProvinces().forEach(function(p){var e=getE(getProvType(p.id),p.id);if(e.owner===userId)setE(getProvType(p.id),p.id,'owner',nu);});
-    if(typeof savePatchDB==='function')savePatchDB({edits:DB.edits});
+    // Server atomically migrates center ownership during username rename.
+    // Update only this tab's in-memory view; never re-send the entire edits map.
+    Object.keys(DB.edits||{}).forEach(function(k){
+      if(DB.edits[k]&&DB.edits[k].owner===userId)DB.edits[k].owner=nu;
+    });
+    if(typeof invalidateKpiCache==='function')invalidateKpiCache();
   }
   return !!(d&&d.role_changed);
 }
@@ -1057,6 +1060,7 @@ function buildUSERS(){
       });
       _buildUSERSUI();
       if(typeof buildOwnerFilter==='function')buildOwnerFilter();
+      if(currentTab==='kpi'&&typeof renderKPIPanel==='function'){ if(typeof window._scheduleKpiPanelRefresh==='function')window._scheduleKpiPanelRefresh(); else setTimeout(renderKPIPanel,0); }
     })
     .catch(function(){
       // Fallback to DB.settings.members if server unavailable

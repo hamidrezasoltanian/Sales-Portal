@@ -274,6 +274,10 @@ router.delete('/:username', requireManager, async (req, res) => {
       return res.status(404).json({ error: 'کاربر یافت نشد' });
     }
     invalidateAuthCache(username);
+    // Revoke any linked Telegram session immediately.
+    await query("DELETE FROM bot_sessions WHERE data->>'username' = $1", [username]).catch((e) => {
+      console.warn('[users] revoke Telegram session:', e.message);
+    });
     try {
       await query('UPDATE employees SET active = false WHERE username = $1', [username]);
     } catch (e) {
@@ -307,6 +311,10 @@ router.post('/:username/set-password', requireManager, async (req, res) => {
       [hash, username]
     );
     invalidateAuthCache(username);
+    // Revoke any linked Telegram session immediately.
+    await query("DELETE FROM bot_sessions WHERE data->>'username' = $1", [username]).catch((e) => {
+      console.warn('[users] revoke Telegram session:', e.message);
+    });
 
     return res.json({ ok: true });
   } catch (e) {

@@ -227,6 +227,137 @@ function _renderManagerTasksWidget(){
   return html;
 }
 
+// راهنمای موقتِ قابل‌مشاهده برای مدیر: منبع هر امتیاز KPI در سرور چیست.
+function kpiSourceComment(k, data){
+  if(k.id==='conversion'){
+    return data.conversionSource==='paid_invoices'
+      ? 'فاکتور پرداخت‌شدهٔ همان ماه؛ مسئول فروش از commission_owner و در نبود آن created_by است. تغییر وضعیت مرکز به‌تنهایی شمارش نمی‌شود.'
+      : 'گزارش فروش sales_log همان ماه؛ تغییر وضعیت مرکز یا پیش‌فاکتور به‌تنهایی شمارش نمی‌شود.';
+  }
+  if(k.id==='sales'){
+    return data.conversionSource==='paid_invoices'
+      ? 'مبلغ/تعداد از فاکتورهای paid همان ماه است؛ فروش ثبت‌شده در sales_log هم‌زمان جمع نمی‌شود تا دوباره‌شماری نشود.'
+      : 'مبلغ/تعداد از sales_log همان ماه است؛ برای اثرگذاری باید فروش در «ثبت فعالیت» ثبت شود.';
+  }
+  if(k.id==='calls'){
+    return 'فقط تماس‌های انجام‌شده و ثبت‌شده در همان ماه حساب می‌شوند؛ کارت برنامه یا پیگیری آینده تا انجام شدن امتیاز ندارد.';
+  }
+  if(k.id==='visits'){
+    return 'فقط ویزیت‌های انجام‌شده و ثبت‌شده در همان ماه حساب می‌شوند؛ ملاقات برنامه‌ریزی‌شده تا انجام شدن امتیاز ندارد.';
+  }
+  if(k.id==='retention'){
+    return 'مرکزهای دارای لید «مشتری» که در سه ماهِ منتهی به ماه انتخاب‌شده حداقل یک فاکتور صادرشده دارند ÷ همهٔ مراکز مشتریِ کارشناس. مالک فعلی مرکز مبنای انتساب است.';
+  }
+  if(k.id==='mission'){
+    return 'فقط رکورد mission_log همین ماه با وضعیت «انجام شد» امتیاز می‌گیرد؛ متن گزارش برای امتیازدهی جزئی استفاده نمی‌شود.';
+  }
+  if(k.id==='cash'){
+    return data.conversionSource==='paid_invoices'
+      ? 'در حالت منبع «فاکتور پرداخت‌شده» نوع نقدی هنوز ثبت/محاسبه نمی‌شود و امتیاز این شاخص صفر است.'
+      : 'درصد فروش‌های is_cash در sales_log همان ماه است؛ نوع نقدی را هنگام ثبت فروش دقیق انتخاب کنید.';
+  }
+  return 'منبع محاسبه در سرور CRM است.';
+}
+
+// گزارش قابل‌استنادِ همان ماه: برای تشخیص «بدون گزارش» در ماه‌های گذشته.
+// وضعیت فعلی مراکز عمداً در این تشخیص وارد نمی‌شود؛ تاریخچهٔ آن اسنپ‌شات ندارد.
+function kpiMonthReportEvidence(userId, month, data){
+  var calls=(data.callBreakdown&&Number(data.callBreakdown.total))||getCallsMonth(userId,month).reduce(function(sum,l){return sum+(Number(l.count)||1);},0);
+  var visits=(data.visitBreakdown&&Number(data.visitBreakdown.total))||getVisitsMonth(userId,month).total||0;
+  var sales=getSalesMonth(userId,month).length;
+  var conversion=(data.kpis||[]).filter(function(k){return k.id==='conversion';})[0]||{};
+  var mission=(data.kpis||[]).filter(function(k){return k.id==='mission';})[0]||{};
+  // فاکتور paid ممکن است خارج از sales_log باشد؛ actual نرخ تبدیل آن را پوشش می‌دهد.
+  var contracts=Math.max(sales,Number(conversion.actual)||0);
+  var missions=Number(mission.actual)||0;
+  return {
+    calls:calls, visits:visits, sales:contracts, missions:missions,
+    hasData:calls>0||visits>0||contracts>0||missions>0
+  };
+}
+
+// نسخهٔ بدون وابستگی به DB محلی؛ برای نمودار و مقایسهٔ تیم استفاده می‌شود.
+function kpiDataHasReportEvidence(data){
+  var items=(data&&data.kpis)||[];
+  function actual(id){var k=items.filter(function(x){return x.id===id;})[0];return Number(k&&k.actual)||0;}
+  return actual('conversion')>0 || actual('visits')>0
+    || (!data.callsAutoMode && actual('calls')>0) || actual('mission')>0;
+}
+
+// بخش شفاف‌سازی ثبت‌های دستی: منبع جدیدی ایجاد نمی‌کند و همان لاگ‌های رسمی را نشان می‌دهد.
+function kpiManualInputsHtml(data, evidence){
+  var kpis=(data&&data.kpis)||[];
+  function get(id){return kpis.filter(function(k){return k.id===id;})[0]||{};}
+  var conversion=get('conversion'), cash=get('cash'), mission=get('mission');
+  var salesIsManual=data.conversionSource!=='paid_invoices';
+  var cards=[
+    {icon:'📞',title:'تماس',value:evidence.calls+' ثبت‌شده',text:(data.callBreakdown?'ثبت دستی: '+data.callBreakdown.manualTotal+' · کارت تکمیل‌شدهٔ قدیمی: '+(data.callBreakdown.legacyCompletedTotal||0):'تعداد تماس و یادداشت را کارشناس وارد می‌کند.')},
+    {icon:'🚗',title:'ویزیت',value:evidence.visits+' ثبت‌شده',text:(data.visitBreakdown?'ثبت دستی: '+data.visitBreakdown.manualTotal+' · کارت تکمیل‌شدهٔ قدیمی: '+(data.visitBreakdown.legacyCompletedTotal||0):'تعداد یا نام مرکزِ ویزیت‌شده باید ثبت شود.')},
+    {icon:'✈️',title:'ماموریت',value:mission.actual?'انجام شد':'ثبت نشده',text:'وضعیت انجام و توضیح مأموریت دستی است.'}
+  ];
+  if(salesIsManual)cards.push({icon:'💰',title:'فروش',value:evidence.sales+' ثبت‌شده',text:'تا وقتی فاکتور paid ندارید، مبلغ/نوع فروش را دستی ثبت کنید.'});
+  if(salesIsManual)cards.push({icon:'💵',title:'نوع تسویه',value:(cash.actual||0)+'٪ نقدی',text:'هنگام ثبت هر فروش، نقدی یا اعتباری را دقیق انتخاب کنید.'});
+  else cards.push({icon:'💵',title:'نوع تسویه',value:'ثبت نشده در فاکتور',text:'فاکتور paid منبع فروش است، اما نوع نقدی هنوز در KPI قابل محاسبه نیست.'});
+  var html='<div style="background:#faf5ff;border:1px solid #ddd6fe;border-radius:10px;padding:11px 13px;margin-bottom:12px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">'
+    +'<div style="font-size:12px;font-weight:700;color:#5b21b6">✍️ ثبت‌های دستی / تکمیلی KPI</div>'
+    +'<button onclick="openKPILog(_kpiUser)" style="background:#7c3aed;color:#fff;border:none;border-radius:5px;padding:5px 10px;font-size:11px;cursor:pointer;font-family:inherit">ثبت / اصلاح فعالیت دستی</button>'
+    +'</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:6px">';
+  cards.forEach(function(c){
+    html+='<div style="background:rgba(255,255,255,.7);border:1px solid #ede9fe;border-radius:7px;padding:7px 8px">'
+      +'<div style="font-size:11px;font-weight:700;color:#4c1d95">'+c.icon+' '+c.title+' <span style="font-weight:400;color:#6b7280">— '+c.value+'</span></div>'
+      +'<div style="font-size:10px;line-height:1.55;color:#6b7280;margin-top:3px">'+c.text+'</div></div>';
+  });
+  html+='</div><div style="font-size:10px;color:#6b7280;margin-top:8px">اهداف عددی و وزن شاخص‌ها نیز دستی تعیین می‌شوند؛ محاسبهٔ نهایی فقط با داده‌های ثبت‌شده انجام می‌شود.</div></div>';
+  return html;
+}
+
+var _kpiTraceOpen = false;
+// ردیابی فقط‌خواندنی: همان ردیف‌هایی که محاسبهٔ سمت سرور از آن‌ها استفاده کرده است.
+function kpiTraceHtml(trace){
+  if(!trace)return '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:14px;font-size:12px;color:var(--text-muted)">⏳ در حال دریافت ردیابی منابع KPI…</div>';
+  function list(title, icon, rows, render){
+    rows=rows||[];
+    var out='<div style="min-width:220px;flex:1;background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:8px 9px">'
+      +'<div style="font-size:11px;font-weight:700;color:var(--text-primary);margin-bottom:6px">'+icon+' '+title+' <span style="font-weight:400;color:var(--text-muted)">('+rows.length+' ردیف)</span></div>';
+    if(!rows.length)return out+'<div style="font-size:10px;color:var(--text-muted)">رکورد مؤثری در این ماه نیست.</div></div>';
+    rows.slice(0,8).forEach(function(r){out+='<div style="font-size:10px;line-height:1.55;border-top:1px solid var(--border);padding:4px 0;color:var(--text-secondary)">'+render(r)+'</div>';});
+    if(rows.length>8)out+='<div style="font-size:10px;color:var(--text-muted);padding-top:4px">… و '+(rows.length-8)+' ردیف دیگر</div>';
+    return out+'</div>';
+  }
+  function activity(r){
+    var center=r.center_name||'';
+    var note=r.note||'';
+    return '<b>'+esc(r.date||'')+'</b> — '+esc(String(r.count||1))+' مورد'
+      +(center?' · '+esc(center):'')+(note?'<br><span style="color:var(--text-muted)">'+esc(note)+'</span>':'');
+  }
+  function legacy(r){return '<b>'+esc(r.done_date||r.scheduled_date||r.week_id||'')+'</b> — '+esc(r.center_name||r.rec_key||'کارت قدیمی')+' <span style="color:var(--text-muted)">(تکمیل‌شده، بدون تعامل متصل)</span>';}
+  function sale(r){return '<b>'+esc(r.jalali_date||'')+'</b> — '+esc(r.invoice_no||r.center_name||'فروش ثبت‌شده')+' · '+Number(r.total||0).toLocaleString('fa-IR')+' ریال';}
+  var allLegacy=(trace.legacyCalls||[]).concat(trace.legacyVisits||[]);
+  var source=trace.salesSource==='paid_invoices'?'فاکتورهای پرداخت‌شده':'گزارش فروش ثبت‌شده';
+  var ret=trace.retention||{};
+  var mission=trace.mission;
+  var html='<div style="background:var(--bg-card);border:1px solid #93c5fd;border-radius:12px;padding:14px 16px;margin-bottom:14px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px">'
+    +'<div><span style="font-size:13px;font-weight:700;color:var(--text-primary)">🔎 ردیابی منابع محاسبهٔ KPI</span>'
+    +'<div style="font-size:10px;color:var(--text-muted);margin-top:2px">فقط رکوردهای مؤثر در '+esc(trace.month||'')+'؛ کارت‌های برنامه‌ریزی‌شده و انجام‌نشده اینجا نیستند.</div>'
+    +(trace.finalized?'<div style="font-size:10px;color:#92400e;margin-top:3px">🔒 این ماه نهایی شده است؛ امتیاز رسمی از اسنپ‌شات ماهانه است و این فهرست، ردیف‌های خام قابل‌ردیابی را نشان می‌دهد.</div>':'')+'</div>'
+    +'<button onclick="_kpiTraceOpen=!_kpiTraceOpen;renderKPIPanel()" style="background:none;border:none;cursor:pointer;font-size:12px;color:var(--text-muted)">'+(_kpiTraceOpen?'▲ جمع':'▼ باز')+'</button></div>';
+  if(_kpiTraceOpen){
+    html+='<div style="display:flex;gap:7px;flex-wrap:wrap">'
+      +list('تماس‌های محاسبه‌شده','📞',trace.calls,activity)
+      +list('ویزیت‌های محاسبه‌شده','🚗',trace.visits,activity)
+      +list('فروش — '+source,'💰',trace.sales,sale)
+      +list('کارت‌های تاریخیِ سازگار','🗂️',allLegacy,legacy)
+      +'</div>';
+    html+='<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);display:flex;gap:14px;flex-wrap:wrap;font-size:10px;color:var(--text-secondary)">'
+      +'<span>🤝 حفظ مشتری: '+Number(ret.retained||0)+' مرکز خریدکرده از '+Number(ret.total||0)+' مرکز مشتری در سه ماه اخیر</span>'
+      +'<span>✈️ مأموریت: '+(mission?(mission.done?'انجام شده':'ثبت شده ولی انجام نشده'):'رکوردی ندارد')+(mission&&mission.note?' — '+esc(mission.note):'')+'</span>'
+      +'</div>';
+  }
+  return html+'</div>';
+}
+
 function renderKPIPanel(){
   ensureKPIDB();
   if(!_kpiUser||!USERS[_kpiUser])_kpiUser=USERS[currentUser]?currentUser:Object.keys(USERS)[0];
@@ -235,7 +366,12 @@ function renderKPIPanel(){
   if(el)el.innerHTML='<div style="padding:24px;text-align:center;color:#64748b;font-size:13px">⏳ در حال محاسبه KPI از سرور…</div>';
   var _renderBody=function(data){
 
-  var _salesMembers=(_DEFAULT_MEMBERS||[]).filter(function(m){return m.role==='کارشناس فروش'&&m.active!==false;});
+  // KPI فروش برای کارشناس فروش و سوپروایزر فعال قابل مشاهده است.
+  // نقش‌های غیرعملیاتی (انبار، مهمان و …) عمداً در فهرست نیستند.
+  var _kpiEligibleRoles=['کارشناس فروش','سوپروایزر'];
+  var _salesMembers=(_DEFAULT_MEMBERS||[]).filter(function(m){
+    return _kpiEligibleRoles.indexOf(m.role)!==-1&&m.active!==false;
+  });
   if(!_salesMembers.length)_salesMembers=Object.keys(USERS).map(function(u){return{id:u,name:USERS[u]};});
   if(!_kpiUser||!_salesMembers.find(function(m){return m.id===_kpiUser;}))_kpiUser=(_salesMembers[0]||{}).id||_kpiUser;
   var userOpts=_salesMembers.map(function(m){
@@ -246,11 +382,39 @@ function renderKPIPanel(){
     return'<option value="'+m+'"'+(_kpiMonth===m?' selected':'')+'>'+jMonthLabel(m)+'</option>';
   }).join('');
 
+  var reportEvidence;
+  try { reportEvidence=kpiMonthReportEvidence(_kpiUser,_kpiMonth,data); }
+  catch(_e) { reportEvidence={calls:0,visits:0,sales:0,missions:0,hasData:true}; }
+  var isPastKpiMonth=_kpiMonth<currentJMonth();
+  var noReportMonth=isPastKpiMonth&&!data._finalized&&!reportEvidence.hasData;
+  // ماه بدون گزارش را فقط در لایهٔ نمایش صفر می‌کنیم؛ هیچ اسنپ‌شات یا لاگ تغییر نمی‌کند.
+  if(noReportMonth){
+    data=Object.assign({},data,{
+      overall:0,
+      kpis:(data.kpis||[]).map(function(k){
+        return Object.assign({},k,{actual:0,score:0,tip:'دادهٔ قابل‌استناد برای این ماه ثبت نشده'});
+      })
+    });
+  }
   var ov=data.overall;
   var oc=ov>=80?'#22c55e':ov>=50?'#f59e0b':'#ef4444';
   var og=ov>=90?'A':ov>=80?'B+':ov>=70?'B':ov>=60?'C':ov>=50?'D':'F';
 
   var html='';
+  if(noReportMonth){
+    html+='<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#713f12">'
+      +'<b>ℹ️ دادهٔ قابل‌استناد ثبت نشده:</b> برای این کارشناس در ماه انتخاب‌شده تماس، ویزیت، فروش/فاکتور صادرشده یا مأموریت ثبت نشده است؛ KPI نمایشی صفر است و وضعیت فعلی مراکز در آن دخالت داده نشده.</div>';
+  }
+
+  // ── خلاصهٔ خام گزارش‌های همان ماه (برای کنترل عادلانهٔ منبع امتیاز)
+  if(isPastKpiMonth){
+    html+='<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:11px;color:#1e3a8a">'
+      +'<b>🔎 گزارش‌های قابل‌استناد همین ماه:</b> '+reportEvidence.calls+' تماس، '+reportEvidence.visits+' ویزیت، '+reportEvidence.sales+' فروش/فاکتور، '+reportEvidence.missions+' مأموریت. '
+      +'<span style="color:#475569">این اعداد از لاگ ماه انتخاب‌شده‌اند؛ نه از وضعیت امروزِ مراکز.</span></div>';
+  }
+
+  // ── ثبت‌های دستی لازم (در همهٔ ماه‌ها، با مقدار فعلی همان ماه)
+  html+=kpiManualInputsHtml(data,reportEvidence);
 
   // ── smart alert banner
   var lowKPIs=data.kpis.filter(function(k){return k.score<50;});
@@ -270,15 +434,18 @@ function renderKPIPanel(){
     var thisWeekStart=toJalali(new Date(now.getTime()-6*24*60*60*1000));
     var lastWeekStart=toJalali(new Date(now.getTime()-13*24*60*60*1000));
     var lastWeekEnd=toJalali(new Date(now.getTime()-7*24*60*60*1000));
-    function countInRange(log,user,s,e){
-      return (log||[]).filter(function(l){
-        var by=l.by||l.user;var at=l.at?l.at.slice(0,10):'';
-        var jd=at?toJalali(new Date(at)).replace(/-/g,'/'):'';
-        return (!user||by===user)&&jd>=s&&jd<=e;
-      }).length;
+    // لاگ API با userId/date/count می‌آید؛ دادهٔ قدیمی ممکن است by/at داشته باشد.
+    // جمع count (نه تعداد ردیف) با منطق واقعی KPI هم‌راستا است.
+    function activityCountInRange(log,user,s,e){
+      return (log||[]).reduce(function(total,l){
+        var by=l.userId||l.by||l.user||'';
+        var jd=String(l.date||'').replace(/-/g,'/');
+        if(!jd&&l.at)jd=toJalali(new Date(l.at)).replace(/-/g,'/');
+        return (!user||by===user)&&jd>=s&&jd<=e ? total+(Number(l.count)||1) : total;
+      },0);
     }
-    var thisW={calls:countInRange(DB.callLog,_kpiUser,thisWeekStart,todayJ),visits:countInRange(DB.visitLog,_kpiUser,thisWeekStart,todayJ)};
-    var lastW={calls:countInRange(DB.callLog,_kpiUser,lastWeekStart,lastWeekEnd),visits:countInRange(DB.visitLog,_kpiUser,lastWeekStart,lastWeekEnd)};
+    var thisW={calls:activityCountInRange(DB.callLog,_kpiUser,thisWeekStart,todayJ),visits:activityCountInRange(DB.visitLog,_kpiUser,thisWeekStart,todayJ)};
+    var lastW={calls:activityCountInRange(DB.callLog,_kpiUser,lastWeekStart,lastWeekEnd),visits:activityCountInRange(DB.visitLog,_kpiUser,lastWeekStart,lastWeekEnd)};
     var totalThis=thisW.calls+thisW.visits;
     var totalLast=lastW.calls+lastW.visits;
     var diff=totalThis-totalLast;
@@ -293,11 +460,7 @@ function renderKPIPanel(){
     // ─ هشدار ۰ فعالیت
     if(totalThis===0&&_isManager()){
       var zeroExperts=Object.keys(USERS).filter(function(u){
-        return (DB.callLog||[]).concat(DB.visitLog||[]).filter(function(l){
-          var by=l.by||l.user;var at=l.at?l.at.slice(0,10):'';
-          var jd=at?toJalali(new Date(at)).replace(/-/g,'/'):'';
-          return by===u&&jd>=thisWeekStart&&jd<=todayJ;
-        }).length===0;
+        return activityCountInRange((DB.callLog||[]).concat(DB.visitLog||[]),u,thisWeekStart,todayJ)===0;
       });
       if(zeroExperts.length){
         html+='<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#991b1b">'
@@ -314,7 +477,7 @@ function renderKPIPanel(){
   }
 
   // ── header
-  html+='<div class="kpi-header-row" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px">'    +'<h2 style="margin:0;font-size:18px;color:var(--text-primary)">📊 عملکرد KPI</h2>'    +'<select onchange="_kpiUserChange(this.value)" style="padding:5px 10px;border:1px solid var(--border-input);border-radius:5px;background:var(--bg-input);color:var(--text-primary);font-family:inherit;font-size:12px">'+userOpts+'</select>'    +'<select onchange="_kpiMonth=this.value;renderKPIPanel()" style="padding:5px 10px;border:1px solid var(--border-input);border-radius:6px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)">'+monthOpts+'</select>'    +'<div style="margin-right:auto;display:flex;gap:8px">'    +'<button style="background:#f0fdf4;color:#15803d;border:1px solid #86efac;border-radius:5px;font-size:11px;padding:5px 12px;cursor:pointer;font-weight:600" onclick="openTeamKPITargets()">🎯 تنظیم اهداف تیم</button>'    +(_isManager()?'<button style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:5px;font-size:11px;padding:5px 12px;cursor:pointer;font-weight:600;margin-right:6px" onclick="openProvTargetsModal()">🗺 اهداف استانی</button>':'')    +'<button class="btn-primary" onclick="openKPILog(_kpiUser)" style="font-size:11px;padding:5px 12px">📝 ثبت فعالیت</button>'    +'<button style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:5px;font-size:11px;padding:5px 12px;cursor:pointer;font-weight:600" onclick="exportKPIReport()">📥 دانلود گزارش</button>'    +'</div></div>';
+  html+='<div class="kpi-header-row" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px">'    +'<h2 style="margin:0;font-size:18px;color:var(--text-primary)">📊 عملکرد KPI</h2>'    +'<select onchange="_kpiUserChange(this.value)" style="padding:5px 10px;border:1px solid var(--border-input);border-radius:5px;background:var(--bg-input);color:var(--text-primary);font-family:inherit;font-size:12px">'+userOpts+'</select>'    +'<select onchange="_kpiMonth=this.value;renderKPIPanel()" style="padding:5px 10px;border:1px solid var(--border-input);border-radius:6px;font-size:12px;font-family:inherit;background:var(--bg-input);color:var(--text-primary)">'+monthOpts+'</select>'    +'<div style="margin-right:auto;display:flex;gap:8px">'    +'<button style="background:#f0fdf4;color:#15803d;border:1px solid #86efac;border-radius:5px;font-size:11px;padding:5px 12px;cursor:pointer;font-weight:600" onclick="openKPITargets(_kpiUser,_kpiMonth)">💰 ثبت تارگت ماهانه فروش</button>'    +(_isManager()?'<button style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:5px;font-size:11px;padding:5px 12px;cursor:pointer;font-weight:600;margin-right:6px" onclick="openProvTargetsModal()">🗺 اهداف استانی</button>':'')    +'<button class="btn-primary" onclick="openKPILog(_kpiUser)" style="font-size:11px;padding:5px 12px">📝 ثبت فعالیت</button>'    +'<button style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:5px;font-size:11px;padding:5px 12px;cursor:pointer;font-weight:600" onclick="exportKPIReport()">📥 دانلود گزارش</button>'    +'</div></div>';
 
   // ── امتیاز کلی
   var dashPercent=Math.min(ov,100);
@@ -417,6 +580,7 @@ function renderKPIPanel(){
         +'<span>هدف: <strong>'+k.target+'</strong> <span style="color:#94a3b8">'+k.unit+'</span></span>'
       )
       +'</div>'
+      +'<div style="font-size:9px;line-height:1.55;color:#475569;background:rgba(255,255,255,.58);border-radius:5px;padding:5px 6px;margin-top:7px">🔎 <b>منبع موقت:</b> '+esc(kpiSourceComment(k,data))+'</div>'
       +(k.auto?'<div style="font-size:9px;color:#0ea5e9;margin-top:5px">⚡ محاسبه خودکار از CRM</div>':'')
       +'</div>';
   });
@@ -432,18 +596,21 @@ function renderKPIPanel(){
     if(_trendOpen) {
       var trendMonths = prevJMonths(6).reverse();
       var trendData = trendMonths.map(function(m) {
-        try { var d = calcKPIs(_kpiUser, m); return {month: m, score: Math.round(d.overall||0)}; }
-        catch(e) { return {month: m, score: 0}; }
+        try {
+          var d = calcKPIs(_kpiUser, m);
+          var hasData=!(m<currentJMonth()&&!kpiDataHasReportEvidence(d));
+          return {month: m, score: hasData?Math.round(d.overall||0):null, hasData:hasData};
+        } catch(e) { return {month: m, score: null, hasData:false}; }
       });
-      var maxScore = Math.max.apply(null, trendData.map(function(t){return t.score;})) || 1;
+      var maxScore = Math.max.apply(null, trendData.filter(function(t){return t.hasData;}).map(function(t){return t.score;})) || 1;
       html += '<div class="kpi-trend-bars">';
       trendData.forEach(function(t) {
-        var barH = Math.max(Math.round((t.score / 100) * 100), 3);
-        var bc = t.score >= 80 ? '#22c55e' : t.score >= 50 ? '#f59e0b' : '#ef4444';
+        var barH=t.hasData?Math.max(Math.round((t.score / 100) * 100), 3):3;
+        var bc=!t.hasData?'#cbd5e1':t.score >= 80 ? '#22c55e' : t.score >= 50 ? '#f59e0b' : '#ef4444';
         var parts = t.month.split('/');
         var mLabel = jMonthLabel(t.month).split(' ')[0];
         html += '<div class="kpi-trend-col">'
-          + '<div class="kpi-trend-score">' + t.score + '</div>'
+          + '<div class="kpi-trend-score">' + (t.hasData?t.score:'—') + '</div>'
           + '<div class="kpi-trend-bar" style="height:' + barH + 'px;background:' + bc + '"></div>'
           + '<div class="kpi-trend-label">' + mLabel + '</div></div>';
       });
@@ -464,6 +631,8 @@ function renderKPIPanel(){
       Object.keys(USERS).forEach(function(u) {
         try {
           var d = calcKPIs(u, _kpiMonth);
+          // در ماه گذشته، افراد بدون گزارش قابل‌استناد رتبه و عدد نمی‌گیرند.
+          if(_kpiMonth<currentJMonth()&&!kpiDataHasReportEvidence(d))return;
           var ov2 = Math.round(d.overall||0);
           var gr = ov2>=90?'A':ov2>=80?'B+':ov2>=70?'B':ov2>=60?'C':ov2>=50?'D':'F';
           var bestKPI = d.kpis[0], worstKPI = d.kpis[0];
@@ -472,6 +641,7 @@ function renderKPIPanel(){
         } catch(e) {}
       });
       teamData.sort(function(a,b){return b.score-a.score;});
+      if(!teamData.length)html+='<div style="font-size:12px;color:var(--text-muted);padding:8px">برای این ماه، گزارش قابل‌استناد تیمی ثبت نشده است.</div>';
       teamData.forEach(function(m, idx) {
         var rankEmoji = idx===0?'🥇':idx===1?'🥈':idx===2?'🥉':'• '+(idx+1);
         var sc2 = m.score;
@@ -492,52 +662,8 @@ function renderKPIPanel(){
     html += '</div>';
   }
 
-  // ── smart center recommendations (manager only)
-  if(_isManager()) {
-    var recs = [];
-    try { recs = calcCenterRecommendations(); } catch(e) { recs = []; }
-    html += '<div style="background:var(--bg-card);border-radius:12px;border:1px solid var(--border);padding:14px 16px;margin-bottom:14px">';
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
-      + '<div>'
-      + '<span style="font-size:13px;font-weight:700;color:var(--text-primary)">&#128161; پیشنهاد مراکز برای تماس</span>'
-      + '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">بر اساس پتانسیل، وضعیت، لید و آخرین تماس</div>'
-      + '</div>'
-      + '<button onclick="_recsOpen=!_recsOpen;renderKPIPanel()" style="background:none;border:none;cursor:pointer;font-size:12px;color:var(--text-muted)">'
-      + (_recsOpen ? '▲ جمع' : '▼ باز') + '</button></div>';
-    if(_recsOpen) {
-      if(recs.length === 0) {
-        html += '<div style="text-align:center;padding:16px;color:var(--text-muted);font-size:12px">هیچ توصیه‌ای یافت نشد</div>';
-      } else {
-        recs.forEach(function(r) {
-          var urgBadge = r.urgency==='critical'
-            ? '<span style="background:#fef2f2;color:#dc2626;border-radius:10px;padding:2px 8px;font-size:10px;font-weight:700">🔴 فوری</span>'
-            : r.urgency==='high'
-            ? '<span style="background:#fff7ed;color:#ea580c;border-radius:10px;padding:2px 8px;font-size:10px;font-weight:700">🟠 مهم</span>'
-            : r.urgency==='medium'
-            ? '<span style="background:#fefce8;color:#ca8a04;border-radius:10px;padding:2px 8px;font-size:10px;font-weight:700">🟡 معمول</span>'
-            : '<span style="background:#f1f5f9;color:#64748b;border-radius:10px;padding:2px 8px;font-size:10px;font-weight:700">⚪ کم‌اولویت</span>';
-          var potStars = '';
-          for(var ps=0;ps<r.pot;ps++) potStars+='⭐';
-          var ownerName = r.owner ? (USERS[r.owner]||r.owner) : '—';
-          html += '<div class="rec-card rec-' + r.urgency + '">'
-            + '<div class="rec-body">'
-            + '<div class="rec-name">' + urgBadge + ' ' + esc(r.name) + ' — <span style="font-weight:400;color:var(--text-muted)">' + esc(r.prov) + '</span></div>'
-            + '<div class="rec-reason">' + r.reasons.map(function(rs){return esc(rs);}).join(' • ') + '</div>'
-            + '<div class="rec-action">&#128161; اقدام پیشنهادی: ' + esc(r.action) + '</div>'
-            + '<div class="rec-meta">'
-            + '👤 ' + esc(ownerName) + '  |  ' + potStars
-            + '  \xa0|\xa0 <button onclick="(function(){var wks=DB.weekEntries?Object.keys(DB.weekEntries):[];if(!wks.length){showToast(\'ابتدا یک هفته بسازید\',2000);return;}var wId=wks[wks.length-1];addToWeekAuto(wId,\''
-            + r.rtype + '\',\''
-            + r.id + '\',\''
-            + r.name.replace(/'/g, "&#39;")
-            + '\',\'visit\');})()" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:5px;font-size:10px;padding:2px 8px;cursor:pointer;font-family:inherit">📅 برنامه‌ریزی</button>'
-            + '</div></div></div>';
-        });
-      }
-    }
-    html += '</div>';
-  }
-
+  // ── auditable KPI trace (replaces center recommendations)
+  html += kpiTraceHtml(window._kpiTraceData);
 
   // ── discovered centers from web (manager + super admin)
   if(_isManager()||_isSuperAdmin()) {
@@ -610,7 +736,10 @@ function renderKPIPanel(){
     }).catch(function() {});
   }
   };
-  // Preload server KPIs into cache, then render (display-only client)
+  // Preload server KPIs and their read-only source trace, then render.
+  window._kpiTraceData=null;
+  var tracePromise=fetch('/api/kpi-data/trace?user='+encodeURIComponent(_kpiUser)+'&month='+encodeURIComponent(_kpiMonth))
+    .then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});
   var preload = [fetchKPIs(_kpiUser, _kpiMonth)];
   prevJMonths(6).forEach(function (m) {
     preload.push(fetchKPIs(_kpiUser, m).catch(function () { return null; }));
@@ -637,8 +766,8 @@ function renderKPIPanel(){
     ? loadKpiActualsFromApi(_kpiUser, _kpiMonth)
     : Promise.resolve();
   start
-    .then(function () { return Promise.all(preload); })
-    .then(_afterLoad)
+    .then(function () { return Promise.all([Promise.all(preload), tracePromise]); })
+    .then(function(pair) { window._kpiTraceData=pair[1]; _afterLoad(); })
     .catch(function (err) {
       var el3 = document.getElementById('kpiPanel');
       if (el3) el3.innerHTML = '<div style="color:#dc2626;padding:20px">خطا: ' + esc((err && err.message) || err) + '</div>';
@@ -653,7 +782,7 @@ function _renderKPIHistory(userId,month){
   getCallsMonth(userId,month).forEach(function(l){
     entries.push({ts:dateStrToTs(l.date),date:l.date,icon:'📞',
       text:'تماس: '+l.count+' تماس'+(l.note?' — '+esc(l.note):''),
-      del:function(){DB.callLog=DB.callLog.filter(function(x){return x.id!==l.id;});deleteActivityLog('call',l.id).then(function(){renderKPIPanel();});}});
+      del:{type:'call',id:l.id}});
   });
   var visitsData=getVisitsMonth(userId,month);
   // ویزیت‌های خودکار از برنامه هفته
@@ -666,12 +795,12 @@ function _renderKPIHistory(userId,month){
   visitsData.manual.forEach(function(l){
     entries.push({ts:dateStrToTs(l.date),date:l.date,icon:'🚗',
       text:'ویزیت (دستی): '+(l.centerName?esc(l.centerName):'حضوری')+(l.note?' — '+esc(l.note):''),
-      del:function(){DB.visitLog=DB.visitLog.filter(function(x){return x.id!==l.id;});deleteActivityLog('visit',l.id).then(function(){renderKPIPanel();});}});
+      del:{type:'visit',id:l.id}});
   });
   getSalesMonth(userId,month).forEach(function(l){
     entries.push({ts:dateStrToTs(l.date),date:l.date,icon:l.isCash?'💵':'💳',
       text:'فروش: '+(l.centerName?esc(l.centerName):'')+(l.amount?' — '+Number(l.amount).toLocaleString('fa-IR')+' ریال':'')+(l.isCash?' (نقدی)':' (اعتباری)'),
-      del:function(){DB.salesLog=DB.salesLog.filter(function(x){return x.id!==l.id;});deleteActivityLog('sales',l.id).then(function(){renderKPIPanel();});}});
+      del:{type:'sales',id:l.id}});
   });
   var ms=getMissionMonth(userId,month);
   if(ms)entries.push({ts:b.startTs,date:month,icon:'✈️',
@@ -692,7 +821,7 @@ function _renderKPIHistory(userId,month){
     +'<div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:10px">📋 سوابق فعالیت — '+jMonthLabel(month)+'</div>'
     +'<div style="display:flex;flex-direction:column;gap:5px">';
   entries.slice(0,20).forEach(function(e,i){
-    var delBtn=e.del?'<button onclick="_kpiDelEntry('+i+')" style="background:none;border:none;cursor:pointer;color:#ef4444;font-size:11px;padding:2px 6px;margin-right:auto">✕</button>':'';
+    var delBtn=e.del?'<button onclick="_kpiDeleteActivity(\''+e.del.type+'\','+Number(e.del.id)+')" style="background:none;border:none;cursor:pointer;color:#ef4444;font-size:11px;padding:2px 6px;margin-right:auto">✕</button>':'';
     html+='<div style="display:flex;gap:8px;align-items:center;font-size:11px;background:var(--bg-card);border-radius:6px;padding:6px 10px;border:1px solid #f1f5f9">'
       +'<span style="font-size:14px">'+e.icon+'</span>'
       +'<span style="color:var(--text-muted);min-width:58px;font-size:10px">'+e.date+'</span>'
@@ -703,27 +832,29 @@ function _renderKPIHistory(userId,month){
   return html;
 }
 
-// حذف آیتم از لاگ
-function _kpiDelEntry(i){
-  var userId=_kpiUser;var month=_kpiMonth;
-  var entries=[];
-  getCallsMonth(userId,month).forEach(function(l){entries.push({id:l.id,type:'call'});});
-  getVisitsMonth(userId,month).manual.forEach(function(l){entries.push({id:l.id,type:'visit'});});
-  getSalesMonth(userId,month).forEach(function(l){entries.push({id:l.id,type:'sale'});});
-  var e=entries[i];if(!e)return;
-  var apiType=e.type==='sale'?'sales':e.type;
-  if(e.type==='call')DB.callLog=DB.callLog.filter(function(x){return x.id!==e.id;});
-  else if(e.type==='visit')DB.visitLog=DB.visitLog.filter(function(x){return x.id!==e.id;});
-  else if(e.type==='sale')DB.salesLog=DB.salesLog.filter(function(x){return x.id!==e.id;});
-  deleteActivityLog(apiType,e.id).then(function(){renderKPIPanel();});
+// حذف فقط بعد از تأیید سرور؛ شناسهٔ صریح جلوی حذفِ ردیف اشتباه پس از مرتب‌سازی را می‌گیرد.
+function _kpiDeleteActivity(type,id){
+  var userId=_kpiUser,month=_kpiMonth;
+  deleteActivityLog(type,id).then(function(ok){
+    if(!ok){showToast('❌ حذف در سرور انجام نشد',3000);return;}
+    ensureKPIDB();
+    var list=type==='call'?DB.callLog:type==='visit'?DB.visitLog:DB.salesLog;
+    if(list)list.splice(0,list.length,...list.filter(function(x){return Number(x.id)!==Number(id);}));
+    if(typeof invalidateKpiCache==='function')invalidateKpiCache(userId,month);
+    showToast('✅ ثبت حذف شد');renderKPIPanel();
+  }).catch(function(){showToast('❌ حذف در سرور انجام نشد',3000);});
 }
 
 // ── Modal ثبت فعالیت ──────────────────────────────────────────────
 function openKPILog(userId){
   userId=userId||_kpiUser||currentUser;
+  var selectedMonth=_kpiMonth||currentJMonth();
   var today=todayStr();
-  var ms=getMissionMonth(userId,_kpiMonth||currentJMonth());
+  if(today.slice(0,7)!==selectedMonth) today=selectedMonth+'/01';
+  var ms=getMissionMonth(userId,selectedMonth);
   var mStatus=ms?(ms.done?'done':'planned'):'';
+  var salesKpiSource='';
+  try { salesKpiSource=(calcKPIs(userId,selectedMonth)||{}).conversionSource||''; } catch(_e) {}
 
   var sectionStyle='background:var(--bg-raised);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px';
   var labelStyle='font-size:11px;font-weight:600;color:var(--text-primary);display:block;margin-bottom:4px';
@@ -761,6 +892,7 @@ function openKPILog(userId){
     // فروش
     +'<div style="'+sectionStyle+'">'
     +'<div style="font-size:12px;font-weight:700;color:#92400e;margin-bottom:10px">💰 ثبت فروش</div>'
+    +(salesKpiSource==='paid_invoices'?'<div style="font-size:10px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:5px;padding:5px 7px;margin-bottom:7px">این فروش ذخیره می‌شود؛ اما KPI فروش این ماه از فاکتورهای پرداخت‌شده محاسبه می‌شود و فروش دستی به آن اضافه نمی‌گردد.</div>':'')
     +'<div style="display:grid;grid-template-columns:130px 1fr 120px 120px;gap:8px">'
     +'<div><label style="'+labelStyle+'">تاریخ</label><input id="ls_date" value="'+today+'" style="'+inputStyle+'"></div>'
     +'<div><label style="'+labelStyle+'">نام مشتری / مرکز</label><input id="ls_center" placeholder="نام" style="'+inputStyle+'"></div>'
@@ -785,18 +917,41 @@ function openKPILog(userId){
   openModal('kpiLogModal','📝 ثبت فعالیت KPI — '+USERS[userId],body,'<button class="btn-secondary" onclick="closeModal(\'kpiLogModal\')">بستن</button>',{lg:true});
 }
 
-function _saveCallLog(userId){
-  var date=document.getElementById('lc_date').value.trim();
-  var count=parseInt((document.getElementById('lc_count')||{}).value)||0;
-  var note=(document.getElementById('lc_note').value||'').trim();
-  if(!date||count<1){showToast('تاریخ و تعداد تماس را وارد کنید');return;}
-  ensureKPIDB();
-  var entry={id:Date.now(),date:date,userId:userId,count:count,note:note};
-  DB.callLog.push(entry);
-  postActivityLog('call',entry).catch(function(){showToast('⚠ خطا در ثبت تماس',2500);});
-  showToast('✅ '+count+' تماس ثبت شد');closeModal('kpiLogModal');renderKPIPanel();
+function _kpiNewLogId(){
+  // More collision-resistant than Date.now() while remaining inside JS safe integer range.
+  return Date.now()*1000+Math.floor(Math.random()*1000);
 }
-
+function _kpiRefreshAfterPersist(userId, month){
+  if(typeof invalidateKpiCache==='function')invalidateKpiCache(userId,month);
+  if(typeof loadKpiActualsFromApi==='function'){
+    loadKpiActualsFromApi(userId,month).then(function(){
+      if(_kpiUser===userId&&_kpiMonth===month)renderKPIPanel();
+    });
+  } else if(_kpiUser===userId&&_kpiMonth===month)renderKPIPanel();
+}
+function _kpiPersistActivity(type, entry, userId, successText){
+  var month=(entry.date||'').slice(0,7);
+  return postActivityLog(type,entry).then(function(result){
+    // Update only after the database accepted the record; no optimistic ghost rows.
+    var saved=(result&&result.entry)||entry;
+    ensureKPIDB();
+    var list=type==='call'?DB.callLog:type==='visit'?DB.visitLog:DB.salesLog;
+    list.push(saved);
+    showToast(successText);closeModal('kpiLogModal');
+    _kpiRefreshAfterPersist(userId,month);
+    return saved;
+  }).catch(function(err){
+    showToast('❌ ذخیره نشد: '+((err&&err.error)||(err&&err.message)||'خطای سرور'),3500);
+    return null;
+  });
+}
+function _saveCallLog(userId){
+  var date=(((document.getElementById('lc_date')||{}).value)||'').trim();
+  var count=parseInt(((document.getElementById('lc_count')||{}).value)||'',10);
+  var note=(((document.getElementById('lc_note')||{}).value)||'').trim();
+  if(!date||!Number.isInteger(count)||count<1){showToast('تاریخ و تعداد تماس معتبر را وارد کنید');return;}
+  _kpiPersistActivity('call',{id:_kpiNewLogId(),date:date,userId:userId,count:count,note:note},userId,'✅ '+count+' تماس ذخیره شد');
+}
 function _setVisitMode(mode){
   var countRow=document.getElementById('lv_count_row');
   var centerRow=document.getElementById('lv_center_row');
@@ -813,59 +968,56 @@ function _setVisitMode(mode){
     if(btnCount){btnCount.style.background='var(--bg-raised)';btnCount.style.color='var(--text-secondary)';}
   }
 }
-
 function _saveVisitLog(userId){
-  ensureKPIDB();
   var centerRow=document.getElementById('lv_center_row');
   var isCenterMode=centerRow&&centerRow.style.display!=='none';
   var entry;
   if(isCenterMode){
     var date=(((document.getElementById('lv_date2')||document.getElementById('lv_date'))||{}).value||'').trim();
-    var center=(document.getElementById('lv_center').value||'').trim();
-    var note=(document.getElementById('lv_note2')||document.getElementById('lv_note')).value.trim();
+    var center=(((document.getElementById('lv_center')||{}).value)||'').trim();
+    var note=(((document.getElementById('lv_note2')||document.getElementById('lv_note'))||{}).value||'').trim();
     if(!date){showToast('تاریخ را وارد کنید');return;}
-    entry={id:Date.now(),date:date,userId:userId,centerName:center,note:note,count:1};
-    DB.visitLog.push(entry);
+    if(!center){showToast('نام مرکز را وارد کنید یا حالت «تعداد کل» را انتخاب کنید');return;}
+    entry={id:_kpiNewLogId(),date:date,userId:userId,centerName:center,note:note,count:1};
   } else {
-    var date=(document.getElementById('lv_date')||{}).value.trim();
-    var countVal=parseInt((document.getElementById('lv_count')||{}).value)||1;
-    var note=(document.getElementById('lv_note')||{}).value.trim();
-    if(!date){showToast('تاریخ را وارد کنید');return;}
-    if(countVal<1){showToast('تعداد باید حداقل ۱ باشد');return;}
-    entry={id:Date.now(),date:date,userId:userId,centerName:'',note:note,count:countVal};
-    DB.visitLog.push(entry);
+    var date=(((document.getElementById('lv_date')||{}).value)||'').trim();
+    var countVal=parseInt(((document.getElementById('lv_count')||{}).value)||'',10);
+    var note=(((document.getElementById('lv_note')||{}).value)||'').trim();
+    if(!date||!Number.isInteger(countVal)||countVal<1){showToast('تاریخ و تعداد ویزیت معتبر را وارد کنید');return;}
+    entry={id:_kpiNewLogId(),date:date,userId:userId,centerName:'',note:note,count:countVal};
   }
-  postActivityLog('visit',entry).catch(function(){showToast('⚠ خطا در ثبت ویزیت',2500);});
-  showToast('✅ ویزیت ثبت شد');closeModal('kpiLogModal');renderKPIPanel();
+  _kpiPersistActivity('visit',entry,userId,'✅ ویزیت ذخیره شد');
 }
 function _saveSaleLog(userId){
-  var date=((document.getElementById('ls_date')||{}).value||'').trim();
-  var center=(document.getElementById('ls_center').value||'').trim();
-  var amount=parseFloat(document.getElementById('ls_amount').value)||0;
-  var isCash=document.getElementById('ls_cash').value==='1';
-  if(!date){showToast('تاریخ را وارد کنید');return;}
-  ensureKPIDB();
-  var entry={id:Date.now(),date:date,userId:userId,centerName:center,amount:amount,isCash:isCash};
-  DB.salesLog.push(entry);
-  postActivityLog('sales',entry).catch(function(){showToast('⚠ خطا در ثبت فروش',2500);});
-  showToast('✅ فروش ثبت شد — '+(isCash?'نقدی':'اعتباری'));closeModal('kpiLogModal');renderKPIPanel();
+  var date=(((document.getElementById('ls_date')||{}).value)||'').trim();
+  var center=(((document.getElementById('ls_center')||{}).value)||'').trim();
+  var amount=parseFloat(((document.getElementById('ls_amount')||{}).value)||'');
+  var isCash=((document.getElementById('ls_cash')||{}).value)==='1';
+  if(!date||!Number.isFinite(amount)||amount<0){showToast('تاریخ و مبلغ معتبر را وارد کنید');return;}
+  _kpiPersistActivity('sales',{id:_kpiNewLogId(),date:date,userId:userId,centerName:center,amount:amount,isCash:isCash},userId,'✅ فروش ذخیره شد — '+(isCash?'نقدی':'اعتباری'));
 }
 function _saveMissionLog(userId,done){
-  var month=document.getElementById('lm_month').value;
-  var note=(document.getElementById('lm_note').value||'').trim();
-  ensureKPIDB();
-  DB.missionLog=DB.missionLog.filter(function(l){return!(l.userId===userId&&l.month===month);});
-  var entry={id:Date.now(),userId:userId,month:month,done:done,note:note};
-  DB.missionLog.push(entry);
-  postMissionLog(entry);
-  showToast(done?'✅ ماموریت انجام‌شده ثبت شد':'⏳ ماموریت برنامه‌ریزی شد');closeModal('kpiLogModal');renderKPIPanel();
+  var month=(((document.getElementById('lm_month')||{}).value)||'').trim();
+  var note=(((document.getElementById('lm_note')||{}).value)||'').trim();
+  if(!month){showToast('ماه مأموریت را انتخاب کنید');return;}
+  var entry={id:_kpiNewLogId(),userId:userId,month:month,done:done,note:note};
+  postMissionLog(entry).then(function(result){
+    ensureKPIDB();
+    DB.missionLog=DB.missionLog.filter(function(l){return !(l.userId===userId&&l.month===month);});
+    DB.missionLog.push((result&&result.entry)||entry);
+    if(typeof invalidateKpiCache==='function')invalidateKpiCache(userId,month);
+    showToast(done?'✅ مأموریت انجام‌شده ذخیره شد':'⏳ مأموریت برنامه‌ریزی ذخیره شد');closeModal('kpiLogModal');
+    if(_kpiUser===userId&&_kpiMonth===month)renderKPIPanel();
+  }).catch(function(err){showToast('❌ ذخیره مأموریت انجام نشد: '+((err&&err.error)||(err&&err.message)||'خطای سرور'),3500);});
 }
 function _delMissionLog(userId){
-  var month=document.getElementById('lm_month').value;
-  ensureKPIDB();
-  DB.missionLog=DB.missionLog.filter(function(l){return!(l.userId===userId&&l.month===month);});
-  deleteMissionLog(userId,month);
-  showToast('ماموریت حذف شد');closeModal('kpiLogModal');renderKPIPanel();
+  var month=(((document.getElementById('lm_month')||{}).value)||'').trim();
+  if(!month)return;
+  deleteMissionLog(userId,month).then(function(){
+    ensureKPIDB();DB.missionLog=DB.missionLog.filter(function(l){return !(l.userId===userId&&l.month===month);});
+    if(typeof invalidateKpiCache==='function')invalidateKpiCache(userId,month);
+    showToast('✅ مأموریت حذف شد');closeModal('kpiLogModal');if(_kpiUser===userId&&_kpiMonth===month)renderKPIPanel();
+  }).catch(function(err){showToast('❌ حذف مأموریت انجام نشد: '+((err&&err.error)||(err&&err.message)||'خطای سرور'),3500);});
 }
 
 // ── Modal تنظیم هدف ───────────────────────────────────────────────

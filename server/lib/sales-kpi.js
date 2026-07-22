@@ -122,9 +122,9 @@ async function getUserTargets(username, month) {
   if (!r.rows.length) return Object.assign({}, DEFAULT_TARGETS);
   const row = r.rows[0];
   return {
-    callsPerDay: row.calls_per_day || DEFAULT_TARGETS.callsPerDay,
-    visitsPerWeek: row.visits_per_week || DEFAULT_TARGETS.visitsPerWeek,
-    salesCount: row.sales_count || DEFAULT_TARGETS.salesCount,
+    callsPerDay: row.calls_per_day != null ? row.calls_per_day : DEFAULT_TARGETS.callsPerDay,
+    visitsPerWeek: row.visits_per_week != null ? row.visits_per_week : DEFAULT_TARGETS.visitsPerWeek,
+    salesCount: row.sales_count != null ? row.sales_count : DEFAULT_TARGETS.salesCount,
     salesAmount: Number(row.sales_amount) || 0,
     cashPct: row.cash_pct != null ? row.cash_pct : DEFAULT_TARGETS.cashPct,
     retentionTarget: row.retention_target != null ? row.retention_target : DEFAULT_TARGETS.retentionTarget,
@@ -199,22 +199,75 @@ async function getConversionSales(username, bounds, month) {
   };
 }
 
-async function getCallsMonth(username, bounds) {
-  const r = await query(
-    `SELECT COALESCE(SUM(count), 0)::int AS total FROM call_log
-     WHERE username = $1 AND date >= $2 AND date <= $3`,
-    [username, bounds.start, bounds.end]
-  );
-  return parseInt(r.rows[0].total, 10) || 0;
+/**
+ * Counts only completed, attributable work for the selected Jalali month.
+ *
+ * Primary source is the activity log, which is written under the username of
+ * the person who actually submits the outcome. A week-plan card is not work
+ * by itself and an unfinished card therefore has no KPI effect.
+ *
+ * For legacy completed cards created before the interaction audit trail, keep
+ * a compatibility fallback. It is used only when no interaction is linked to
+ * the card; its attribution can only be the old card creator (added_by).
+ * A same-day manual log by that legacy creator consumes one fallback unit.
+ */
+async function getActivityMonthData(username, bounds, kind) {
+  const isVisit = kind === 'visit';
+  const logTable = isVisit ? 'visit_log' : 'call_log';
+  const actionWhere = isVisit
+    ? "we.action_type IN ('visit', 'meeting', 'committee')"
+    : "COALESCE(we.action_type, 'call') NOT IN ('visit', 'meeting', 'committee')";
+  const results = await Promise.all([
+    query(
+      'SELECT date, count FROM ' + logTable + ' ' +
+      'WHERE username = $1 AND date >= $2 AND date <= $3',
+      [username, bounds.start, bounds.end]
+    ),
+    query(
+      'SELECT we.id, we.done_date, we.scheduled_date, we.week_id ' +
+      'FROM week_entries we ' +
+      'WHERE we.added_by = $1 AND we.done = true AND ' + actionWhere + ' ' +
+      "AND COALESCE(NULLIF(we.done_date, ''), NULLIF(we.scheduled_date, ''), NULLIF(we.week_id, '')) >= $2 " +
+      "AND COALESCE(NULLIF(we.done_date, ''), NULLIF(we.scheduled_date, ''), NULLIF(we.week_id, '')) <= $3 " +
+      "AND NOT EXISTS (SELECT 1 FROM center_interactions ci WHERE ci.week_entry_id = we.id AND ci.mode = 'done')",
+      [username, bounds.start, bounds.end]
+    ),
+  ]);
+  const manualByDate = {};
+  let manualTotal = 0;
+  results[0].rows.forEach(function (row) {
+    const n = parseInt(row.count, 10) || 1;
+    manualTotal += n;
+    manualByDate[row.date] = (manualByDate[row.date] || 0) + n;
+  });
+  let legacyCompletedTotal = 0;
+  results[1].rows.forEach(function (row) {
+    const completionDate = row.done_date || row.scheduled_date || row.week_id || '';
+    // Old fallback clients could create a manual log but had no interaction ID.
+    // Never let that one physical activity become two KPI units.
+    if (completionDate && manualByDate[completionDate] > 0) {
+      manualByDate[completionDate] -= 1;
+      return;
+    }
+    legacyCompletedTotal += 1;
+  });
+  return {
+    total: manualTotal + legacyCompletedTotal,
+    manualTotal,
+    legacyCompletedTotal,
+    // Keep this alias for existing clients while making its meaning explicit.
+    weeklyTotal: legacyCompletedTotal,
+    weeklyCompleted: legacyCompletedTotal,
+    weeklyScheduled: 0,
+  };
 }
 
-async function getVisitsMonth(username, bounds) {
-  const r = await query(
-    `SELECT COALESCE(SUM(count), 0)::int AS total FROM visit_log
-     WHERE username = $1 AND date >= $2 AND date <= $3`,
-    [username, bounds.start, bounds.end]
-  );
-  return parseInt(r.rows[0].total, 10) || 0;
+async function getCallsMonthData(username, bounds) {
+  return getActivityMonthData(username, bounds, 'call');
+}
+
+async function getVisitsMonthData(username, bounds) {
+  return getActivityMonthData(username, bounds, 'visit');
 }
 
 async function getMissionMonth(username, month) {
@@ -226,27 +279,44 @@ async function getMissionMonth(username, month) {
   return { done: !!r.rows[0].done, note: r.rows[0].note || '' };
 }
 
-async function getRetentionData(username) {
+/**
+ * Rolling three-month customer retention.
+ * A customer center is retained when it has at least one official issued/paid
+ * invoice in the three Jalali months ending in `month`. Invoice ownership is
+ * resolved through the center's current owner, never commission attribution.
+ */
+async function getRetentionData(username, month) {
+  const bounds = jMonthBounds(month);
+  const startMonth = prevJMonth(prevJMonth(month));
+  const windowStart = startMonth + '/01';
   const r = await query(
-    `SELECT
-       COUNT(*) FILTER (
-         WHERE COALESCE(data->>'status','') <> 'غیرفعال'
-           AND COALESCE(data->>'status','') <> ''
-       )::int AS total,
-       COUNT(*) FILTER (
-         WHERE COALESCE(data->>'lead','') = 'مشتری'
-           AND COALESCE(data->>'status','') <> 'غیرفعال'
-       )::int AS cust
-     FROM center_edits
-     WHERE COALESCE(data->>'owner','') = $1`,
-    [username]
+    `WITH customer_centers AS (
+       SELECT center_key
+       FROM center_edits
+       WHERE COALESCE(data->>'owner','') = $1
+         AND COALESCE(data->>'lead','') = 'مشتری'
+     ), purchases AS (
+       SELECT DISTINCT center_key
+       FROM invoices
+       WHERE status = 'issued'
+         AND COALESCE(center_key, '') <> ''
+         AND jalali_date >= $2 AND jalali_date <= $3
+     )
+     SELECT COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE EXISTS (
+              SELECT 1 FROM purchases p WHERE p.center_key = c.center_key
+            ))::int AS retained
+     FROM customer_centers c`,
+    [username, windowStart, bounds.end]
   );
   const total = r.rows[0] ? r.rows[0].total : 0;
-  const cust = r.rows[0] ? r.rows[0].cust : 0;
+  const retained = r.rows[0] ? r.rows[0].retained : 0;
   return {
-    cust,
+    retained,
     total,
-    pct: total > 0 ? Math.round((cust / total) * 100) : 0,
+    pct: total > 0 ? Math.round((retained / total) * 100) : 0,
+    windowStart,
+    windowEnd: bounds.end,
   };
 }
 
@@ -288,30 +358,26 @@ async function calcKPIs(username, month) {
   const bounds = jMonthBounds(month);
   if (!bounds) throw new Error('ماه نامعتبر');
 
-  const [weightInfo, targets, conv, callsRaw, visitsTotal, mission, retention] = await Promise.all([
+  const [weightInfo, targets, conv, callsData, visitsData, mission, retention] = await Promise.all([
     getActiveWeights(month),
     getUserTargets(username, month),
     getConversionSales(username, bounds, month),
-    getCallsMonth(username, bounds),
-    getVisitsMonth(username, bounds),
+    getCallsMonthData(username, bounds),
+    getVisitsMonthData(username, bounds),
     getMissionMonth(username, month),
-    getRetentionData(username),
+    getRetentionData(username, month),
   ]);
+  const visitsTotal = visitsData.total;
 
   let retentionTarget = targets.retentionTarget;
   const regionOverride = await getRegionRetentionOverride(targets.regionKey);
   if (regionOverride != null) retentionTarget = regionOverride;
 
   const wd = workingDaysInJMonth(month);
-  let totalCalls = callsRaw;
-  let callsAutoMode = false;
-  if (totalCalls === 0) {
-    const auto = await getAutoCallTouchpoints(username, bounds);
-    if (auto > 0) {
-      totalCalls = auto;
-      callsAutoMode = true;
-    }
-  }
+  // Only completed work in the selected month counts. A planned/future card has no KPI effect.
+  // change_log touchpoints are deliberately excluded from the KPI.
+  const totalCalls = callsData.total;
+  const callsAutoMode = false;
 
   const avgCalls = wd > 0 ? totalCalls / wd : 0;
   const avgVisits = visitsTotal / 4.3;
@@ -342,20 +408,23 @@ async function calcKPIs(username, month) {
     {
       id: 'retention', name: 'نرخ حفظ مشتری', icon: '🤝', weight: _w.retention, score: s2,
       actual: retention.pct, target: retentionTarget, unit: 'درصد',
-      tip: retention.cust + ' مشتری از ' + retention.total + ' مرکز'
+      tip: retention.retained + ' مرکزِ خریدکرده از ' + retention.total + ' مرکز مشتری'
+        + ' · بازه ' + retention.windowStart + ' تا ' + retention.windowEnd
         + (targets.regionKey ? ' · منطقه ' + targets.regionKey : ''),
       auto: true,
     },
     {
       id: 'visits', name: 'ویزیت حضوری هفتگی', icon: '🚗', weight: _w.visits, score: s3,
       actual: Math.round(avgVisits * 10) / 10, target: targets.visitsPerWeek, unit: 'ویزیت/هفته',
-      tip: 'این ماه: ' + visitsTotal + ' ویزیت', auto: true,
+      tip: 'این ماه: ' + visitsTotal + ' ویزیت (ثبت دستی: ' + visitsData.manualTotal
+        + ' · کارت تکمیل‌شدهٔ قدیمی: ' + visitsData.legacyCompletedTotal + ')', auto: true,
     },
     {
       id: 'calls', name: 'تماس روزانه', icon: '📞', weight: _w.calls, score: s4,
       actual: Math.round(avgCalls * 10) / 10, target: targets.callsPerDay, unit: 'تماس/روز',
-      tip: 'مجموع ' + totalCalls + ' در ' + wd + ' روز کاری' + (callsAutoMode ? ' (برآورد)' : ''),
-      auto: callsAutoMode,
+      tip: 'مجموع ' + totalCalls + ' در ' + wd + ' روز کاری (ثبت دستی: ' + callsData.manualTotal
+        + ' · کارت تکمیل‌شدهٔ قدیمی: ' + callsData.legacyCompletedTotal + ')',
+      auto: false,
     },
     {
       id: 'sales', name: 'تارگت فروش', icon: '💰', weight: _w.sales, score: s5,
@@ -403,6 +472,8 @@ async function calcKPIs(username, month) {
     forecast,
     callsAutoMode,
     conversionSource: conv.source,
+    visitBreakdown: visitsData,
+    callBreakdown: callsData,
     weightVersionId: weightInfo.versionId,
     weightEffectiveFrom: weightInfo.effectiveFrom,
     scoreCap: SCORE_CAP,
@@ -550,4 +621,5 @@ module.exports = {
   finalizeMonth,
   finalizeAllActiveExperts,
   getFinalizedRow,
+  getRetentionData,
 };

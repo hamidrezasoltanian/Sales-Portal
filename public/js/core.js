@@ -244,7 +244,10 @@ function initSSE() {
         if (typeof window._notifVueLoad === 'function') window._notifVueLoad();
         if (typeof _refreshNotifs === 'function') _refreshNotifs();
       } else if (data.type === 'week-entry-changed') {
+        if (typeof window.invalidateKpiCache === 'function') window.invalidateKpiCache();
         if (typeof _wpOnWeekEntryChanged === 'function') _wpOnWeekEntryChanged(data);
+        // Weekly «ملاقات» is a KPI visit source; refresh an open KPI view.
+        if (currentTab === 'kpi' && typeof renderKPIPanel === 'function') renderKPIPanel();
       } else if (data.type === 'calendar-changed') {
         reloadEventsFromApi().then(function () {
           if (currentTab === 'calendar' && typeof renderCalendar === 'function') renderCalendar();
@@ -256,10 +259,14 @@ function initSSE() {
           });
         }
       } else if (data.type === 'activity-log-changed') {
+        if (typeof window.invalidateKpiCache === 'function') window.invalidateKpiCache();
         reloadActivityLogsFromApi().then(function () {
           if (currentTab === 'kpi' && typeof renderKPIPanel === 'function') renderKPIPanel();
           if (currentTab === 'activity' && typeof renderActivityPanel === 'function') renderActivityPanel();
         });
+      } else if (data.type === 'mission-log-changed') {
+        if (typeof window.invalidateKpiCache === 'function') window.invalidateKpiCache(data.username, data.month);
+        if (typeof reloadMissionLogsFromApi === 'function') reloadMissionLogsFromApi().then(function(){ if(currentTab==='kpi'&&typeof renderKPIPanel==='function')renderKPIPanel(); });
       } else if (data.type === 'center-changed') {
         if (data.centerKey) {
           if ((data.field === 'notes' || data.field === 'interaction') && typeof ensureCenterNotesLoaded === 'function') {
@@ -268,6 +275,12 @@ function initSSE() {
           }
           if (data.field !== 'notes' && typeof reloadCenterEditFromApi === 'function') {
             reloadCenterEditFromApi(data.centerKey);
+          }
+          // retention KPI is computed from owner/lead/status in center_edits.
+          if (typeof window.invalidateKpiCache === 'function') window.invalidateKpiCache();
+          // Refresh an open KPI tab in another browser tab after any center update.
+          if (currentTab === 'kpi' && typeof renderKPIPanel === 'function') {
+            renderKPIPanel();
           }
           if ((data.field === 'followupDate' || data.field === 'status' || data.field === 'interaction') && typeof _scheduleInboxRefresh === 'function') {
             _scheduleInboxRefresh();
@@ -307,7 +320,8 @@ if (typeof document !== 'undefined') {
 function _sseReloadDB(byUser) {
   if (!byUser) return;
   var _isTgBot = byUser && byUser.indexOf(':bot') !== -1;
-  if (!_isTgBot && byUser === currentUser) return;
+  // The server already excludes the tab that submitted a write by its X-Cid.
+  // Do not exclude every tab of the same user: another tab must receive the update.
   _ssePendingBy = _isTgBot ? byUser.replace(':bot','') : byUser;
   clearTimeout(_sseReloadTimer);
   _sseReloadTimer = setTimeout(function() {
@@ -549,7 +563,7 @@ function _debouncedRenderWeekPlan(){
       }
     }
     var url=_apiUrlFromFetch(input);
-    if(url.indexOf('/api/week-entries')!==-1||url.indexOf('/api/centers/')!==-1){
+    if(url.indexOf('/api/week-entries')!==-1||url.indexOf('/api/centers/')!==-1||url.indexOf('/api/data/db')!==-1||url.indexOf('/api/data/patch')!==-1){
       init=init?Object.assign({},init):{};
       var headers=new Headers(init.headers||{});
       if(!headers.has('X-Cid')&&typeof _sseClientId!=='undefined'&&_sseClientId){
@@ -855,13 +869,13 @@ function postMissionLog(entry) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(entry),
-  }).catch(function (e) { console.warn('[postMissionLog]', e.message); });
+  }).then(function(r){ return r.ok ? r.json() : r.json().then(function(j){ return Promise.reject(j); }); });
 }
 
 function deleteMissionLog(userId, month) {
   return fetch('/api/mission-log?userId=' + encodeURIComponent(userId) + '&month=' + encodeURIComponent(month), {
     method: 'DELETE',
-  }).catch(function (e) { console.warn('[deleteMissionLog]', e.message); });
+  }).then(function(r){ return r.ok ? r.json() : r.json().then(function(j){ return Promise.reject(j); }); });
 }
 
 function postKpiSnapshot(snap) {
@@ -956,15 +970,18 @@ function postKpiUserTargetApi(username, month, targets) {
     body: JSON.stringify({
       username: username,
       month: month,
-      callsPerDay: targets.callsPerDay || 10,
-      visitsPerWeek: targets.visitsPerWeek || 5,
-      salesCount: targets.salesCount || 5,
-      salesAmount: targets.salesAmount || 0,
+      callsPerDay: targets.callsPerDay != null ? targets.callsPerDay : 10,
+      visitsPerWeek: targets.visitsPerWeek != null ? targets.visitsPerWeek : 5,
+      salesCount: targets.salesCount != null ? targets.salesCount : 5,
+      salesAmount: targets.salesAmount != null ? targets.salesAmount : 0,
       cashPct: targets.cashPct != null ? targets.cashPct : 50,
       retentionTarget: targets.retentionTarget != null ? targets.retentionTarget : 90,
       regionKey: targets.regionKey || null,
     }),
-  }).catch(function (e) { console.warn('[postKpiUserTargetApi]', e.message); });
+  }).then(function (r) {
+    if (!r.ok) throw new Error('ذخیره هدف KPI ناموفق بود');
+    return r.json();
+  });
 }
 
 function postKpiProvinceTargetApi(provinceId, targets) {
@@ -1371,6 +1388,12 @@ function _cleanCenterData(rtype, id) {
   Promise.all(dels).finally(function () {
     setE(rtype, id, 'followupDate', '');
   });
+}
+
+function reloadMissionLogsFromApi() {
+  return fetch('/api/mission-log').then(function(r){ return r.ok ? r.json() : {entries:[]}; }).then(function(body){
+    DB.missionLog=(body.entries||[]);
+  }).catch(function(){});
 }
 
 function reloadActivityLogsFromApi() {

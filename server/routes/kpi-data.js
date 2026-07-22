@@ -249,6 +249,120 @@ router.get('/actuals', async function (req, res) {
   }
 });
 
+
+// GET /api/kpi-data/trace?user=&month= — read-only, auditable source rows for KPI.
+router.get('/trace', async function (req, res) {
+  try {
+    const month = req.query.month || salesKpi.currentJMonth();
+    const bounds = jMonthBounds(month);
+    if (!bounds) return res.status(400).json({ error: 'month نامعتبر' });
+    const username = resolveUsername(req);
+    const actionVisit = "('visit', 'meeting', 'committee')";
+    const [callsR, visitsR, legacyCallsR, legacyVisitsR, missionR, retentionR, paidInvoicesR] = await Promise.all([
+      query(
+        `SELECT l.id, l.date, l.count, l.note,
+                COALESCE(ci.center_key, '') AS center_key,
+                COALESCE(ci.payload->>'centerName', '') AS center_name
+         FROM call_log l
+         LEFT JOIN LATERAL (
+           SELECT center_key, payload FROM center_interactions ci
+           WHERE ci.username = l.username AND ci.projections->>'callLogId' = l.id::text
+           ORDER BY ci.created_at DESC LIMIT 1
+         ) ci ON TRUE
+         WHERE l.username = $1 AND l.date >= $2 AND l.date <= $3
+         ORDER BY l.date DESC, l.id DESC`,
+        [username, bounds.start, bounds.end]
+      ),
+      query(
+        `SELECT l.id, l.date, l.count, l.note,
+                COALESCE(ci.center_key, '') AS center_key,
+                COALESCE(ci.payload->>'centerName', '') AS center_name
+         FROM visit_log l
+         LEFT JOIN LATERAL (
+           SELECT center_key, payload FROM center_interactions ci
+           WHERE ci.username = l.username AND ci.projections->>'visitLogId' = l.id::text
+           ORDER BY ci.created_at DESC LIMIT 1
+         ) ci ON TRUE
+         WHERE l.username = $1 AND l.date >= $2 AND l.date <= $3
+         ORDER BY l.date DESC, l.id DESC`,
+        [username, bounds.start, bounds.end]
+      ),
+      query(
+        `SELECT we.id, we.done_date, we.scheduled_date, we.week_id, we.center_name, we.rec_key, we.action_type
+         FROM week_entries we
+         WHERE we.added_by = $1 AND we.done = TRUE
+           AND COALESCE(we.action_type, 'call') NOT IN ${actionVisit}
+           AND COALESCE(NULLIF(we.done_date, ''), NULLIF(we.scheduled_date, ''), NULLIF(we.week_id, '')) >= $2
+           AND COALESCE(NULLIF(we.done_date, ''), NULLIF(we.scheduled_date, ''), NULLIF(we.week_id, '')) <= $3
+           AND NOT EXISTS (SELECT 1 FROM center_interactions ci WHERE ci.week_entry_id = we.id AND ci.mode = 'done')
+         ORDER BY we.done_date DESC, we.id DESC`,
+        [username, bounds.start, bounds.end]
+      ),
+      query(
+        `SELECT we.id, we.done_date, we.scheduled_date, we.week_id, we.center_name, we.rec_key, we.action_type
+         FROM week_entries we
+         WHERE we.added_by = $1 AND we.done = TRUE
+           AND we.action_type IN ${actionVisit}
+           AND COALESCE(NULLIF(we.done_date, ''), NULLIF(we.scheduled_date, ''), NULLIF(we.week_id, '')) >= $2
+           AND COALESCE(NULLIF(we.done_date, ''), NULLIF(we.scheduled_date, ''), NULLIF(we.week_id, '')) <= $3
+           AND NOT EXISTS (SELECT 1 FROM center_interactions ci WHERE ci.week_entry_id = we.id AND ci.mode = 'done')
+         ORDER BY we.done_date DESC, we.id DESC`,
+        [username, bounds.start, bounds.end]
+      ),
+      query('SELECT done, note FROM mission_log WHERE username = $1 AND month = $2 LIMIT 1', [username, month]),
+      query(
+        `WITH customer_centers AS (
+           SELECT center_key FROM center_edits
+           WHERE COALESCE(data->>'owner','') = $1 AND COALESCE(data->>'lead','') = 'مشتری'
+         ), purchases AS (
+           SELECT DISTINCT center_key FROM invoices
+           WHERE status IN ('issued','paid') AND COALESCE(center_key,'') <> ''
+             AND jalali_date >= $2 AND jalali_date <= $3
+         )
+         SELECT COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM purchases p WHERE p.center_key=c.center_key))::int AS retained
+         FROM customer_centers c`,
+        [username, salesKpi.prevJMonth(salesKpi.prevJMonth(month)) + '/01', bounds.end]
+      ),
+      query(
+        `SELECT id, invoice_no, jalali_date, center_key, center_name, total
+         FROM invoices WHERE status = 'paid' AND jalali_date LIKE $2
+           AND COALESCE(NULLIF(TRIM(commission_owner), ''), created_by) = $1
+         ORDER BY jalali_date DESC, id DESC`,
+        [username, month + '%']
+      ),
+    ]);
+    const sales = paidInvoicesR.rows.length ? paidInvoicesR.rows : (await query(
+      `SELECT id, date AS jalali_date, center_key, center_name, amount AS total, is_cash
+       FROM sales_log WHERE username = $1 AND date >= $2 AND date <= $3 ORDER BY date DESC, id DESC`,
+      [username, bounds.start, bounds.end]
+    )).rows;
+    function legacyEffective(rows, manualRows) {
+      const manualByDate = {};
+      manualRows.forEach(function (r) { manualByDate[r.date] = (manualByDate[r.date] || 0) + (parseInt(r.count, 10) || 1); });
+      return rows.filter(function (r) {
+        const date = r.done_date || r.scheduled_date || r.week_id || '';
+        if (date && manualByDate[date] > 0) { manualByDate[date] -= 1; return false; }
+        return true;
+      });
+    }
+    const calc = await salesKpi.calcKPIs(username, month);
+    const finalized = await salesKpi.getFinalizedRow(username, month);
+    res.json({
+      ok: true, username, month, bounds, calc, finalized: !!(finalized && finalized.finalized),
+      calls: callsR.rows, visits: visitsR.rows,
+      legacyCalls: legacyEffective(legacyCallsR.rows, callsR.rows),
+      legacyVisits: legacyEffective(legacyVisitsR.rows, visitsR.rows),
+      salesSource: paidInvoicesR.rows.length ? 'paid_invoices' : 'sales_log', sales,
+      mission: missionR.rows[0] || null,
+      retention: Object.assign({ total: 0, retained: 0, windowStart: salesKpi.prevJMonth(salesKpi.prevJMonth(month)) + '/01', windowEnd: bounds.end }, retentionR.rows[0] || {}),
+    });
+  } catch (e) {
+    console.error('[kpi-data GET trace]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/kpi-data/targets?month=1404/04
 router.get('/targets', async function (req, res) {
   try {
@@ -351,8 +465,10 @@ router.post('/user-target', requireManager, async function (req, res) {
          updated_by = EXCLUDED.updated_by`,
       [
         username, month,
-        callsPerDay || 10, visitsPerWeek || 5, salesCount || 5,
-        salesAmount || 0, cashPct != null ? cashPct : 50,
+        callsPerDay != null ? callsPerDay : 10,
+        visitsPerWeek != null ? visitsPerWeek : 5,
+        salesCount != null ? salesCount : 5,
+        salesAmount != null ? salesAmount : 0, cashPct != null ? cashPct : 50,
         retentionTarget != null ? retentionTarget : 90,
         regionKey || null,
         req.user.username,

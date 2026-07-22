@@ -1,6 +1,7 @@
 'use strict';
 
 const { query } = require('../db');
+const crypto = require('crypto');
 const { calcTodayJ } = require('./jalali-utils');
 
 let _globalPrefsCache = null;
@@ -361,7 +362,10 @@ async function createAckReply(original, actorUsername, actorName) {
 }
 
 function genLinkToken() {
-  return Math.random().toString(36).slice(2, 8).toUpperCase();
+  return crypto.randomBytes(24).toString('base64url');
+}
+function linkTokenHash(token) {
+  return crypto.createHash('sha256').update(String(token || '')).digest('hex');
 }
 
 async function createTelegramLinkToken(username) {
@@ -370,7 +374,7 @@ async function createTelegramLinkToken(username) {
   await query(
     `INSERT INTO telegram_link_tokens (token, username, expires_at)
      VALUES ($1, $2, $3)`,
-    [token, username, expires]
+    [linkTokenHash(token), username, expires]
   );
   return { token, expiresAt: expires.toISOString() };
 }
@@ -380,7 +384,7 @@ async function consumeTelegramLinkToken(token, chatId) {
     `UPDATE telegram_link_tokens SET used_at = NOW()
      WHERE token = $1 AND expires_at > NOW() AND used_at IS NULL
      RETURNING username`,
-    [String(token || '').toUpperCase()]
+    [linkTokenHash(token)]
   );
   if (!r.rows.length) return null;
   return r.rows[0].username;

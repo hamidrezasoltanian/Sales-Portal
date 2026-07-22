@@ -7,3 +7,5 @@ scripts/__pycache__/
 mizito.txt
 sync_hashes.json
 faradis-sync/sync_hashes.json
+*.bak_*
+*.env.bak_*
