@@ -281,7 +281,7 @@ async function getMissionMonth(username, month) {
 
 /**
  * Rolling three-month customer retention.
- * A customer center is retained when it has at least one official issued/paid
+ * A customer center is retained when it has at least one official issued
  * invoice in the three Jalali months ending in `month`. Invoice ownership is
  * resolved through the center's current owner, never commission attribution.
  */

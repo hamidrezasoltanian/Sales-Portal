@@ -4,6 +4,7 @@ const express = require('express');
 const { query } = require('../db');
 const { requireAuth } = require('../auth');
 const { isManagerRole } = require('../lib/roles');
+const { broadcast } = require('./events');
 
 const router = express.Router();
 
@@ -53,6 +54,7 @@ router.post('/', requireAuth, async function (req, res) {
        RETURNING *`,
       [entryId, userId, month, !!done, note || null, req.user.username]
     );
+    broadcast('mission-log-changed', { username: userId, month, by: req.user.username });
     res.json({ ok: true, entry: rowToObj(result.rows[0]) });
   } catch (e) {
     console.error('[mission-log POST]', e.message);
@@ -72,6 +74,7 @@ router.delete('/', requireAuth, async function (req, res) {
       'DELETE FROM mission_log WHERE username = $1 AND month = $2 RETURNING id',
       [userId, month]
     );
+    if (result.rows.length) broadcast('mission-log-changed', { username: userId, month, by: req.user.username });
     res.json({ ok: true, deleted: result.rows.length });
   } catch (e) {
     console.error('[mission-log DELETE]', e.message);

@@ -316,7 +316,7 @@ router.get('/trace', async function (req, res) {
            WHERE COALESCE(data->>'owner','') = $1 AND COALESCE(data->>'lead','') = 'مشتری'
          ), purchases AS (
            SELECT DISTINCT center_key FROM invoices
-           WHERE status IN ('issued','paid') AND COALESCE(center_key,'') <> ''
+           WHERE status = 'issued' AND COALESCE(center_key,'') <> ''
              AND jalali_date >= $2 AND jalali_date <= $3
          )
          SELECT COUNT(*)::int AS total,

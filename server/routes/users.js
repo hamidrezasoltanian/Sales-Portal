@@ -233,6 +233,7 @@ router.put('/:username', requireAuth, async (req, res) => {
       }
     }
 
+    if (renamedUsername) {
     try {
       await query(
         `UPDATE center_edits SET data = jsonb_set(COALESCE(data, '{}'::jsonb), '{owner}', to_jsonb($2::text), true), updated_at = NOW(), updated_by = $2 WHERE data->>'owner' = $1`,
@@ -240,6 +241,7 @@ router.put('/:username', requireAuth, async (req, res) => {
       );
     } catch (e) {
       console.error('[users] rename center ownership:', e.message);
+    }
     }
 
     // Always mirror SoT profile into employees after any user update
