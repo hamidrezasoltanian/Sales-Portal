@@ -41,16 +41,18 @@ function _gsCenterHaystack(rtype, id, rawName) {
       parts.push(ct.name, ct.title, (ct.phones || []).join(' '));
     });
   }
-  return fNorm(parts.filter(Boolean).join(' '));
+  var cacheKey = rtype + '|' + id; var cache = window._gsHaystackCache || (window._gsHaystackCache = Object.create(null)); if (cache[cacheKey]) return cache[cacheKey]; return (cache[cacheKey] = fNorm(parts.filter(Boolean).join(' ')));
 }
 
 function _gsScoreMatch(qn, hay, displayName) {
-  var nd = fNorm(displayName || '');
-  if (nd === qn) return 100;
-  if (nd.indexOf(qn) === 0) return 80;
-  if (nd.indexOf(qn) >= 0) return 60;
-  if (hay.indexOf(qn) >= 0) return 40;
-  return 0;
+  var tokens = qn.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0 || tokens.some(function (t) { return hay.indexOf(t) < 0; })) return 0;
+  var nd = fNorm(String(displayName || ""));
+  if (nd === qn) return 120;
+  if (nd.indexOf(qn) === 0) return 105;
+  if (nd.indexOf(qn) >= 0) return 90;
+  var inName = tokens.filter(function (t) { return nd.indexOf(t) >= 0; }).length;
+  return 45 + Math.min(30, inName * 10);
 }
 
 function _gsIsInMaster(rtype, id) {
@@ -68,7 +70,7 @@ function _gsIsInMaster(rtype, id) {
  * @returns {Array<{score,icon,title,sub,rtype,id,centerKey}>}
  */
 function _gsCollectCenterHits(q, maxN) {
-  maxN = maxN || 24;
+  maxN = maxN || 80;
   var qn = fNorm((q || '').trim());
   if (!qn) return [];
 
@@ -148,6 +150,7 @@ function _gsOpenCenterHit(hit) {
 }
 
 function openGSearch() {
+  window._gsHaystackCache = Object.create(null);
   document.getElementById('gSearchOverlay').classList.add('open');
   setTimeout(function () {
     var el = document.getElementById('gSearchInput');
@@ -163,7 +166,7 @@ function gSearchQuery(q) {
   var res = [];
 
   if (q.length >= 1) {
-    _gsCollectCenterHits(q, 20).forEach(function (h) {
+    _gsCollectCenterHits(q, 70).forEach(function (h) {
       var rt = h.rtype;
       var cid = h.id;
       var ck = h.centerKey;
@@ -182,8 +185,8 @@ function gSearchQuery(q) {
 
     var qn = fNorm(q);
     (DB.events || []).forEach(function (ev) {
-      if (!ev || !ev.title || res.length >= 28) return;
-      if (fNorm(ev.title).indexOf(qn) !== -1) {
+      if (!ev || !ev.title || res.length >= 90) return;
+      if (_gsScoreMatch(qn, fNorm(ev.title), ev.title) > 0) {
         res.push({
           icon: '🗓',
           title: esc(ev.title),
@@ -193,9 +196,9 @@ function gSearchQuery(q) {
       }
     });
     (PROVINCES || []).forEach(function (p) {
-      if (res.length >= 30) return;
+      if (res.length >= 100) return;
       var pn = p.name || p.n || '';
-      if (fNorm(pn).indexOf(qn) !== -1) {
+      if (_gsScoreMatch(qn, fNorm(pn), pn) > 0) {
         var pid = p.id;
         res.push({
           icon: '🗺',
@@ -248,6 +251,7 @@ function gSearchKey(e) {
 
 // ════════════════════════ QUICK SEARCH ═══════════════
 function openQS() {
+  window._gsHaystackCache = Object.create(null);
   var o = document.getElementById('qsOverlay');
   if (o) { o.style.display = 'flex'; setTimeout(function () { var i = document.getElementById('qsInput'); if (i) { i.focus(); i.select(); } }, 60); }
 }
@@ -269,7 +273,7 @@ function qsSearch(q) {
   }
 
   var results = [];
-  _gsCollectCenterHits(q, 30).forEach(function (h) {
+  _gsCollectCenterHits(q, 90).forEach(function (h) {
     var _rt = h.rtype;
     var _id = String(h.id).replace(/'/g, "\\'");
     var _ck = (h.centerKey || '').replace(/'/g, "\\'");
@@ -287,14 +291,14 @@ function qsSearch(q) {
   Object.keys(DB.weekEntries || {}).forEach(function (k) {
     var we = DB.weekEntries[k];
     var nm = we.centerName || we.mtrCustomer || '';
-    if (nm && fNorm(nm).indexOf(qn) >= 0) {
+    if (nm && _gsScoreMatch(qn, fNorm(nm), nm) > 0) {
       results.push({ type: 'برنامه هفته', icon: '📅', name: nm, sub: we.scheduledDate || 'بدون تاریخ', action: "switchTab('weekplan');closeQS()" });
     }
   });
   Object.keys(DB.notes || {}).forEach(function (k) {
     (DB.notes[k] || []).forEach(function (n) {
       if (!n || !n.text) return;
-      if (fNorm(n.text).indexOf(qn) >= 0) {
+      if (_gsScoreMatch(qn, fNorm(n.text), n.text) > 0) {
         results.push({
           type: 'یادداشت',
           icon: '📝',
@@ -310,12 +314,12 @@ function qsSearch(q) {
     r.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:12px">نتیجه‌ای یافت نشد</div>';
     return;
   }
-  r.innerHTML = results.slice(0, 25).map(function (item) {
+  r.innerHTML = results.slice(0, 80).map(function (item) {
     return '<div onclick="' + item.action + '" style="display:flex;gap:10px;align-items:center;padding:8px 10px;border-radius:6px;cursor:pointer;transition:.15s" onmouseover="this.style.background=\'var(--bg-raised)\'" onmouseout="this.style.background=\'\'">'
       + '<span style="font-size:18px">' + item.icon + '</span>'
       + '<div style="flex:1;min-width:0">'
       + '<div style="font-size:12px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(item.name) + '</div>'
       + '<div style="font-size:10px;color:var(--text-muted)">' + esc(item.type) + (item.sub ? ' — ' + esc(item.sub) : '') + '</div>'
       + '</div></div>';
-  }).join('') + (results.length > 25 ? '<div style="text-align:center;padding:8px;font-size:11px;color:var(--text-muted)">... و ' + (results.length - 25) + ' نتیجه دیگر</div>' : '');
+  }).join('') + (results.length > 80 ? '<div style="text-align:center;padding:8px;font-size:11px;color:var(--text-muted)">... و ' + (results.length - 80) + ' نتیجه دیگر</div>' : '');
 }
