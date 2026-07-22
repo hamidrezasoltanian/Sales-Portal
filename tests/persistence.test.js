@@ -418,7 +418,7 @@ async function testNotifications() {
   }
   const returnedId = create.body.id || create.body.notification?.id;
   assert(returnedId, 'notification id returned');
-  const list = await req('GET', '/api/notifications');
+  const list = await req('GET', '/api/notifications?to=TEST_MANAGER');
   assert(list.status === 200, 'GET notifications → 200');
   const found = (list.body || []).some(n => n.id === returnedId || (n.msg && n.msg.includes(PREFIX)));
   assert(found, 'notification in list');
