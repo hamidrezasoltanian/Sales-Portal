@@ -370,7 +370,7 @@ function _renderExpertUserPanel(el){
     if(owner===currentUser)visitsWeek++;
   });
 
-  var contractsMonth=(getSalesMonth(currentUser,month)||[]).length+(getAutoConversions?getAutoConversions(currentUser,month):0);
+  var contractsMonth=(getSalesMonth(currentUser,month)||[]).length+(typeof getAutoConversions==='function'?getAutoConversions(currentUser,month):0);
   var kpiT=getKPITarget(currentUser,month);
   var callTarget=(kpiT.callsPerDay||10)*5;
   var visitTarget=kpiT.visitsPerWeek||5;
