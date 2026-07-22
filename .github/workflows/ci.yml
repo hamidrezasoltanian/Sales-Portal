@@ -58,6 +58,8 @@ jobs:
           node-version: '20'
           cache: npm
       - run: npm ci
+      - name: Initialize test database schema
+        run: npm run migrate
       - name: Run behavioral integration tests
         run: npm test
       - name: Run QA persistence agent (3 rounds max)
