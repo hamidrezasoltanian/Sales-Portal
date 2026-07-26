@@ -1180,6 +1180,7 @@ function _renderPfPanel(el) {
       '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
         '<button onclick="pfOpenNew()" style="padding:8px 16px;background:var(--brand);color:white;border:none;border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer;font-weight:600">+ \u067e\u06cc\u0634\u0641\u0627\u06a9\u062a\u0648\u0631 \u062c\u062f\u06cc\u062f</button>' +
         '<button onclick="pfOpenInvoices()" style="padding:8px 12px;background:#ecfeff;color:#0e7490;border:1px solid #a5f3fc;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer">\ud83e\uddfe \u0641\u0627\u06a9\u062a\u0648\u0631\u0647\u0627\u06cc \u0635\u0627\u062f\u0631\u0634\u062f\u0647</button>' +
+        '<button onclick="pfOpenWorkQueue()" style="padding:8px 12px;background:#f5f3ff;color:#6d28d9;border:1px solid #ddd6fe;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer">\ud83d\udccb \u06a9\u0627\u0631\u062a\u0627\u0628\u0644 \u0639\u0645\u0644\u06cc\u0627\u062a</button>' +
 (isManager ? '<button onclick="pfManageTemplates()" style="padding:8px 12px;background:#f8fafc;color:#475569;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer" title="\u0645\u062f\u06cc\u0631\u06cc\u062a \u0642\u0627\u0644\u0628\u200c\u0647\u0627\u06cc \u0686\u0627\u067e">\ud83c\udfa8 \u0642\u0627\u0644\u0628\u200c\u0647\u0627\u06cc \u0686\u0627\u067e</button>' +
                      '<button onclick="pfOpenSellerEditor()" style="padding:8px 12px;background:#f8fafc;color:#475569;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer" title="\u0648\u06cc\u0631\u0627\u06cc\u0634 \u0645\u0634\u062e\u0635\u0627\u062a \u0641\u0631\u0648\u0634\u0646\u062f\u0647">\ud83c\udfe2 \u0641\u0631\u0648\u0634\u0646\u062f\u0647</button>' : '') +
       '</div>' +
@@ -1575,6 +1576,30 @@ async function pfIssueInvoice(pfId) {
     showToast('❌ خطا: ' + e.message);
   }
 }
+
+async function pfOpenWorkQueue() {
+  try {
+    var queues = ['warehouse', 'finance', 'delivery', 'collections'];
+    var labels = { warehouse: 'انبار / حواله', finance: 'مالی / فاکتور', delivery: 'تحویل و رسید', collections: 'وصول مطالبات' };
+    var results = await Promise.all(queues.map(function(q) { return fetch('/api/sales-orders/work/queue/' + q, { credentials: 'same-origin', cache: 'no-store' }).then(function(r) { return r.json().then(function(d) { return { ok:r.ok, q:q, data:d }; }); }); }));
+    var body = results.map(function(x) {
+      if (!x.ok) return '<section style="padding:10px;border:1px solid #fecaca;border-radius:8px;margin-bottom:8px">' + esc(labels[x.q]) + ': دسترسی یا دریافت ناموفق</section>';
+      var rows = x.data.length ? x.data.map(function(w) { return '<div style="padding:8px 0;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;gap:8px"><div><strong>' + esc(w.title || '') + '</strong><div style="font-size:11px;color:#64748b">' + esc(w.owner || 'بدون مسئول') + '</div></div><button onclick="pfClaimWork(\'' + w.id + '\')" style="height:28px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;border-radius:6px;font-family:inherit;cursor:pointer">برداشتن کار</button></div>'; }).join('') : '<div style="font-size:12px;color:#64748b;padding-top:6px">کاری در صف نیست.</div>';
+      return '<section style="padding:12px;border:1px solid #ddd6fe;border-radius:10px;margin-bottom:10px"><strong>📌 ' + esc(labels[x.q]) + '</strong>' + rows + '</section>';
+    }).join('');
+    openModal('pfWorkQueue', 'کارتابل عملیات فروش', body, '<button onclick="closeModal(\'pfWorkQueue\')" style="padding:8px 16px;border:1px solid #cbd5e1;background:#fff;border-radius:8px;font-family:inherit;cursor:pointer">بستن</button>', { lg:true });
+  } catch (e) { showToast('❌ ' + e.message); }
+}
+
+async function pfClaimWork(workId) {
+  try {
+    var r = await fetch('/api/sales-orders/work/' + encodeURIComponent(workId) + '/claim', { method:'POST', credentials:'same-origin' });
+    var d = await r.json(); if (!r.ok) throw new Error(d.error || 'برداشتن کار ناموفق بود');
+    showToast('✅ کار به شما ارجاع شد'); pfOpenWorkQueue();
+  } catch (e) { showToast('❌ ' + e.message); }
+}
+window.pfOpenWorkQueue = pfOpenWorkQueue;
+window.pfClaimWork = pfClaimWork;
 
 // The invoice register is server-backed; it never reads the proforma cache.
 async function pfOpenInvoices() {
