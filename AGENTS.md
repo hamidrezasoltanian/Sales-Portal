@@ -335,7 +335,8 @@ The receivables AI tab calls `https://api.anthropic.com/v1/messages` directly fr
 | Trade KPI evidence: finance approvals require an uploaded document; clearance and supplier records accept documents with image/PDF preview | trade-kpi.js + /api/trade-files + trade_attachments | ✅ |
 | Proforma invoice module: draft→customer response→manager approval→warehouse + finance, auto-number PF-YYYY-NNNN | proforma tab + /api/proforma | ✅ |
 | Proforma customer response: revise → draft; final no-buy → mandatory loss reason, center profile + reports | proforma-action + center reports | ✅ |
-| Proforma fulfillment: manager approval creates pending WMS dispatch; finance/manager can issue the linked invoice | proforma + invoices + WMS | ✅ |
+| Controlled sales fulfillment: approved PF → sales order → FEFO-reserved dispatch → invoice → delivery receipt → receivable | proforma + sales-orders + invoices + WMS | ✅ |
+| Operational work queues: warehouse/finance/delivery/collections are role-gated; managers can explicitly assign and notify a responsible user | sales_work_items + notification engine | ✅ |
 | Proforma auto-migration: blob migrated to SQL on first startup | server/db.js _migrateProformasFromBlob() | ✅ |
 | Telegram bot: long-polling, CRM auth, proforma approve/reject inline keyboard, inventory check, QR scan | server/bot/telegram.js | ✅ |
 | Security middleware: helmet (CSP off) + compression (graceful fallback) | server/index.js | ✅ |
@@ -546,3 +547,5 @@ approved proforma → sales order → FEFO warehouse reservation/dispatch
 - `POST /api/invoices/:id/delivery-receipt` requires an issued invoice and approved exit transactions. It records proof of delivery, marks dispatches delivered, then creates or updates `receivables`. Payments update the receivable and close the collection work item only when fully settled.
 - New SQL tables: `sales_orders`, `sales_order_items`, `invoice_items`, `invoice_line_dispatches`, `delivery_receipts`, `receivables`, `sales_work_items`. `wms_transactions` stores `sales_order_id`, `sales_order_item_id`, `invoice_id`, delivery time and idempotency key. `wms_lots.reserved_qty` separates available from committed stock.
 - Work routing uses `sales_work_items` queues: `warehouse`, `finance`, `delivery`, `collections`. Do not reopen or silently overwrite a completed work item without an explicit corrective workflow.
+- Queue permissions are enforced server-side: warehouse and delivery require WMS access; finance and collections require the existing `mtr` access. A manager can use `POST /api/sales-orders/work/:id/assign` to nominate an active user, which creates a deduplicated in-app/Telegram notification. A claimed item cannot be claimed by another user unless a manager reassigns it.
+- Delivery receipt creation requires WMS edit permission; payment registration requires `mtr` edit permission. Finance users can read the invoice register even when they are not the sales owner. The reports tab must start the controlled dispatch route, never the retired direct invoice endpoint.

@@ -3,6 +3,7 @@
 const express = require('express');
 const { pool, query } = require('../db');
 const { requireAuth } = require('../auth');
+const { requirePermission } = require('../permissions');
 const { loadCenterAccessContext } = require('../lib/center-access');
 const { resolveCenterOwner } = require('../lib/center-ownership');
 
@@ -79,7 +80,7 @@ router.get('/', requireAuth, async (req, res) => {
     if (to)     { conds.push(`i.jalali_date <= $${params.length + 1}`); params.push(to); }
     if (employee && isManager(req.user.role)) {
       conds.push(`${attributionSql('i')} = $${params.length + 1}`); params.push(employee);
-    } else if (!isManager(req.user.role)) {
+    } else if (!isFinance(req.user.role)) {
       conds.push(`${attributionSql('i')} = $${params.length + 1}`); params.push(req.user.username);
     }
 
@@ -263,7 +264,7 @@ router.post('/from-dispatches', requireAuth, async (req, res) => {
 });
 
 // Delivery is prohibited until invoice exists. A receipt activates receivables when payment is incomplete.
-router.post('/:id/delivery-receipt', requireAuth, async (req, res) => {
+router.post('/:id/delivery-receipt', requireAuth, requirePermission('wms', 'edit'), async (req, res) => {
   const client = await pool.connect();
   try {
     const b = req.body || {};
@@ -308,7 +309,7 @@ router.get('/:id', requireAuth, async (req, res) => {
     const inv = r.rows[0];
 
     const attributed = (inv.commission_owner && String(inv.commission_owner).trim()) || inv.created_by;
-    if (!isManager(req.user.role) && attributed !== req.user.username) {
+    if (!isFinance(req.user.role) && attributed !== req.user.username) {
       return res.status(403).json({ error: 'دسترسی ندارید' });
     }
 
@@ -349,7 +350,7 @@ router.put('/:id', requireAuth, async (req, res) => {
 });
 
 // POST /api/invoices/:id/payment — register payment
-router.post('/:id/payment', requireAuth, async (req, res) => {
+router.post('/:id/payment', requireAuth, requirePermission('mtr', 'edit'), async (req, res) => {
   try {
     const { amount, method, ref_no, jalali_date, notes } = req.body;
     if (!amount || !jalali_date) return res.status(400).json({ error: 'مبلغ و تاریخ الزامی است' });

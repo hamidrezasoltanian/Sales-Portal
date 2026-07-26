@@ -10,7 +10,8 @@ router.use(requireAuth);
 
 function isManager(role) { return ['مدیر', 'سوپر ادمین'].includes(role); }
 
-router.get('/', requirePermission('receivables', 'view'), async function (req, res) {
+// Receivables are part of the established مطالبات (mtr) permission module.
+router.get('/', requirePermission('mtr', 'view'), async function (req, res) {
   try {
     const conds = [], params = [];
     if (req.query.status) { params.push(req.query.status); conds.push(`r.status=$${params.length}`); }
@@ -23,7 +24,7 @@ router.get('/', requirePermission('receivables', 'view'), async function (req, r
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/:id/assign', requirePermission('receivables', 'edit'), async function (req, res) {
+router.post('/:id/assign', requirePermission('mtr', 'edit'), async function (req, res) {
   try {
     if (!isManager(req.user.role)) return res.status(403).json({ error: 'فقط مدیر می‌تواند مسئول وصول را تعیین کند' });
     const owner = String(req.body && req.body.owner || '').trim();
@@ -35,7 +36,7 @@ router.post('/:id/assign', requirePermission('receivables', 'edit'), async funct
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/refresh-overdue', requirePermission('receivables', 'edit'), async function (req, res) {
+router.post('/refresh-overdue', requirePermission('mtr', 'edit'), async function (req, res) {
   try {
     if (!isManager(req.user.role)) return res.status(403).json({ error: 'فقط مدیر' });
     const today = String(req.body && req.body.today || '');

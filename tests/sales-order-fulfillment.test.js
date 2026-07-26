@@ -17,17 +17,17 @@ const MANAGER_ROLE = '\u0645\u062f\u06cc\u0631';
 const PREFIX = '_tfulfill_' + Date.now().toString(36);
 let serverProc;
 
-function token() {
-  return jwt.sign({ username: MANAGER, role: MANAGER_ROLE, name: 'Fulfillment Test Manager' }, JWT_SECRET, { expiresIn: '1h' });
+function token(role, username) {
+  return jwt.sign({ username: username || MANAGER, role: role || MANAGER_ROLE, name: 'Fulfillment Test Manager' }, JWT_SECRET, { expiresIn: '1h' });
 }
 
-function request(method, urlPath, body) {
+function request(method, urlPath, body, auth) {
   return new Promise((resolve, reject) => {
     const raw = body == null ? '' : JSON.stringify(body);
     const req = http.request({
       hostname: 'localhost', port: TEST_PORT, path: urlPath, method,
       headers: {
-        Authorization: 'Bearer ' + token(),
+        Authorization: 'Bearer ' + token(auth && auth.role, auth && auth.username),
         'Content-Type': 'application/json',
         ...(raw ? { 'Content-Length': Buffer.byteLength(raw) } : {}),
       },
@@ -67,6 +67,12 @@ async function seed() {
   await query(`INSERT INTO app_users (username,display_name,role,color,active)
     VALUES ($1,'Fulfillment Test Manager',$2,'#6366f1',true)
     ON CONFLICT (username) DO UPDATE SET role=EXCLUDED.role,active=true`, [MANAGER, MANAGER_ROLE]);
+  await query(`INSERT INTO app_users (username,display_name,role,color,active)
+    VALUES ('_tfulfill_sales','Fulfillment Test Sales','کارشناس فروش','#10b981',true)
+    ON CONFLICT (username) DO UPDATE SET role=EXCLUDED.role,active=true`);
+  await query(`INSERT INTO app_users (username,display_name,role,color,active)
+    VALUES ('_tfulfill_finance','Fulfillment Test Finance','مالی','#f59e0b',true)
+    ON CONFLICT (username) DO UPDATE SET role=EXCLUDED.role,active=true`);
   await query(`INSERT INTO wms_products (id,name,sale_price) VALUES ($1,'Fulfillment Test Product',1000)`, [product]);
   await query(`INSERT INTO wms_warehouses (id,name) VALUES ($1,'Fulfillment Test Warehouse')`, [warehouse]);
   await query(`INSERT INTO wms_lots (id,product_id,warehouse_id,lot_no,qty,expiry,purchase_price)
@@ -118,9 +124,25 @@ async function main() {
   assert.strictEqual(replay.status, 200, 'dispatch retry is idempotent');
   assert.strictEqual(replay.body.already, true, 'dispatch retry reports prior reservation');
 
+  const financeQueue = await request('GET', '/api/sales-orders/work/queue/finance');
+  const financeWork = financeQueue.body.find((row) => row.source_id === orderId);
+  assert(financeWork, 'dispatch opens finance work');
+  const salesRole = { role: '\u06a9\u0627\u0631\u0634\u0646\u0627\u0633 \u0641\u0631\u0648\u0634', username: '_tfulfill_sales' };
+  const invalidAssignment = await request('POST', '/api/sales-orders/work/' + encodeURIComponent(financeWork.id) + '/assign', { username: salesRole.username });
+  assert.strictEqual(invalidAssignment.status, 400, 'manager cannot assign a queue to an unauthorized user');
+  const financeAssignment = await request('POST', '/api/sales-orders/work/' + encodeURIComponent(financeWork.id) + '/assign', { username: '_tfulfill_finance' });
+  assert.strictEqual(financeAssignment.status, 200, 'manager can assign finance work to an authorized finance user');
+
   const invoiced = await request('POST', '/api/invoices/from-dispatches', { salesOrderId: orderId, jalali_date: '1405/05/01' });
   assert.strictEqual(invoiced.status, 201, 'reserved dispatches create an invoice');
   assert.strictEqual(Number(invoiced.body.total), 2180, 'invoice includes the configured tax');
+
+  const deniedDelivery = await request('POST', '/api/invoices/' + invoiced.body.id + '/delivery-receipt', { receiver_name: 'Denied' }, salesRole);
+  assert.strictEqual(deniedDelivery.status, 403, 'only warehouse-authorized users can record delivery');
+  const deniedPayment = await request('POST', '/api/invoices/' + invoiced.body.id + '/payment', { amount: 1, jalali_date: '1405/05/02' }, salesRole);
+  assert.strictEqual(deniedPayment.status, 403, 'only finance/receivables-authorized users can register payment');
+  const deniedFinanceQueue = await request('GET', '/api/sales-orders/work/queue/finance', null, salesRole);
+  assert.strictEqual(deniedFinanceQueue.status, 403, 'sales users cannot read the finance queue');
 
   const delivered = await request('POST', '/api/invoices/' + invoiced.body.id + '/delivery-receipt', {
     receiver_name: 'Fulfillment Receiver', due_date: '1405/05/15', owner: MANAGER,

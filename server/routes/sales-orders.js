@@ -4,6 +4,8 @@ const express = require('express');
 const { pool, query } = require('../db');
 const { requireAuth } = require('../auth');
 const { requirePermission } = require('../permissions');
+const notificationEngine = require('../lib/notification-engine');
+const { resolvePermLevel, levelSatisfies } = require('../lib/perm-resolve');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -56,6 +58,39 @@ async function openWork(client, sourceType, sourceId, queue, title, meta) {
 
 async function closeWork(client, sourceType, sourceId, queue) {
   await client.query(`UPDATE sales_work_items SET status='done', updated_at=NOW() WHERE id=$1`, [`${sourceType}:${sourceId}:${queue}`]);
+}
+
+const WORK_QUEUE_PERMISSION = {
+  warehouse: { module: 'wms', level: 'view' },
+  finance: { module: 'mtr', level: 'edit' },
+  delivery: { module: 'wms', level: 'edit' },
+  collections: { module: 'mtr', level: 'edit' },
+};
+
+function authorizeQueue(req, res, next, queue) {
+  const rule = WORK_QUEUE_PERMISSION[queue];
+  if (!rule) return res.status(400).json({ error: 'صف عملیاتی نامعتبر است' });
+  return requirePermission(rule.module, rule.level)(req, res, next);
+}
+
+function userCanWorkQueue(user, queue) {
+  const rule = WORK_QUEUE_PERMISSION[queue];
+  return !!(rule && (isManager(user && user.role) || levelSatisfies(resolvePermLevel(user, rule.module), rule.level)));
+}
+
+async function notifyAssignee(work, username, assignedBy) {
+  if (!username) return;
+  await notificationEngine.emitNotification({
+    id: `sales-work:${work.id}:${Date.now()}`,
+    to: username,
+    msg: `کارتابل «${work.title}» توسط ${assignedBy} به شما ارجاع شد.`,
+    type: 'task',
+    severity: 'high',
+    bucket: `sales-work:${work.id}:${username}`,
+    dedupHours: 1,
+    autoSend: true,
+    meta: { salesWorkId: work.id, queue: work.queue },
+  }).catch(function (e) { console.warn('[sales-work notification]', e.message); });
 }
 
 // Create exactly one active sales order from an approved proforma.
@@ -252,17 +287,46 @@ router.post('/:id/cancel', requirePermission('proforma', 'edit'), async function
   finally { client.release(); }
 });
 
-router.get('/work/queue/:queue', requireAuth, async function (req, res) {
+router.get('/work/queue/:queue', requireAuth, function (req, res, next) {
+  authorizeQueue(req, res, next, req.params.queue);
+}, async function (req, res) {
   try {
-    const r = await query(`SELECT * FROM sales_work_items WHERE queue=$1 AND status='open' ORDER BY created_at`, [req.params.queue]);
+    const r = await query(`SELECT * FROM sales_work_items WHERE queue=$1 AND status IN ('open','claimed') ORDER BY created_at`, [req.params.queue]);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.post('/work/:id/claim', requireAuth, async function (req, res) {
   try {
-    const r = await query(`UPDATE sales_work_items SET claimed_by=$2,owner=$2,status='claimed',updated_at=NOW() WHERE id=$1 AND status IN ('open','claimed') RETURNING *`, [req.params.id, req.user.username]);
-    if (!r.rows.length) return res.status(404).json({ error: 'کار یافت نشد یا بسته شده است' });
+    const current = await query(`SELECT * FROM sales_work_items WHERE id=$1`, [req.params.id]);
+    if (!current.rows.length) return res.status(404).json({ error: 'کار یافت نشد یا بسته شده است' });
+    return authorizeQueue(req, res, async function () {
+      const work = current.rows[0];
+      if (work.owner && work.owner !== req.user.username && !isManager(req.user.role)) {
+        return res.status(403).json({ error: 'این کار به فرد دیگری ارجاع شده است' });
+      }
+      const r = await query(`UPDATE sales_work_items SET claimed_by=$2,owner=$2,status='claimed',updated_at=NOW() WHERE id=$1 AND status IN ('open','claimed') RETURNING *`, [req.params.id, req.user.username]);
+      if (!r.rows.length) return res.status(409).json({ error: 'کار هم‌زمان تغییر کرده است' });
+      res.json(r.rows[0]);
+    }, current.rows[0].queue);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Managers can explicitly route an operational item; the assignee gets an in-app/Telegram notification.
+router.post('/work/:id/assign', requireAuth, async function (req, res) {
+  try {
+    if (!isManager(req.user.role)) return res.status(403).json({ error: 'ارجاع کار فقط توسط مدیر انجام می‌شود' });
+    const username = String(req.body && req.body.username || '').trim();
+    if (!username) return res.status(400).json({ error: 'کاربر مسئول الزامی است' });
+    const current = await query(`SELECT * FROM sales_work_items WHERE id=$1 AND status IN ('open','claimed')`, [req.params.id]);
+    if (!current.rows.length) return res.status(404).json({ error: 'کار باز یافت نشد' });
+    const user = await query(`SELECT username,role,permissions FROM app_users WHERE username=$1 AND active=true`, [username]);
+    if (!user.rows.length) return res.status(400).json({ error: 'کاربر فعال یافت نشد' });
+    if (!userCanWorkQueue(user.rows[0], current.rows[0].queue)) {
+      return res.status(400).json({ error: 'کاربر انتخاب‌شده دسترسی این صف عملیاتی را ندارد' });
+    }
+    const r = await query(`UPDATE sales_work_items SET owner=$2,claimed_by='',status='open',updated_at=NOW() WHERE id=$1 RETURNING *`, [req.params.id, username]);
+    await notifyAssignee(r.rows[0], username, req.user.username);
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

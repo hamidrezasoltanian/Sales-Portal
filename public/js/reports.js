@@ -1320,7 +1320,7 @@
             '<td style="padding:8px 12px">' +
               '<button onclick="window._invIssueFromPF(\'' + pf.id + '\')" ' +
                 'style="padding:4px 10px;background:#ea580c;color:white;border:none;border-radius:6px;font-size:.78rem;cursor:pointer;font-family:inherit;font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,0.05)"' +
-                '>🧾 صدور فاکتور</button>' +
+                '>📦 شروع حواله</button>' +
             '</td>' +
           '</tr>';
         }).join('');
@@ -1473,16 +1473,12 @@
   };
 
   window._invIssueFromPF = function(pfId) {
-    if (!confirm('آیا می‌خواهید برای این پیش‌فاکتور فاکتور رسمی صادر کنید؟')) return;
-    fetch('/api/invoices/from-proforma/' + pfId, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tax_pct: 9 })
-    })
-      .then(function(r){ return r.json().then(function(d){ if (!r.ok) throw new Error(d.error); return d; }); })
-      .then(function(d){
-        if (typeof showToast==='function') showToast('✅ فاکتور با شماره ' + d.invoice_no + ' صادر شد');
-        _rInvoicesLoad();
+    if (!confirm('مسیر کنترل‌شده اجرا شود؟ ابتدا حواله و رزرو موجودی ثبت می‌شود؛ سپس واحد مالی فاکتور را صادر می‌کند.')) return;
+    if (typeof switchTab === 'function') switchTab('proforma');
+    Promise.resolve(typeof pfLoad === 'function' ? pfLoad() : null)
+      .then(function(){
+        if (typeof pfIssueDispatch !== 'function') throw new Error('ماژول عملیات حواله آماده نیست');
+        return pfIssueDispatch(pfId);
       })
       .catch(function(e){ if(typeof showToast==='function') showToast('❌ ' + e.message); });
   };

@@ -1584,7 +1584,7 @@ async function pfOpenWorkQueue() {
     var results = await Promise.all(queues.map(function(q) { return fetch('/api/sales-orders/work/queue/' + q, { credentials: 'same-origin', cache: 'no-store' }).then(function(r) { return r.json().then(function(d) { return { ok:r.ok, q:q, data:d }; }); }); }));
     var body = results.map(function(x) {
       if (!x.ok) return '<section style="padding:10px;border:1px solid #fecaca;border-radius:8px;margin-bottom:8px">' + esc(labels[x.q]) + ': دسترسی یا دریافت ناموفق</section>';
-      var rows = x.data.length ? x.data.map(function(w) { return '<div style="padding:8px 0;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;gap:8px"><div><strong>' + esc(w.title || '') + '</strong><div style="font-size:11px;color:#64748b">' + esc(w.owner || 'بدون مسئول') + '</div></div><button onclick="pfClaimWork(\'' + w.id + '\')" style="height:28px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;border-radius:6px;font-family:inherit;cursor:pointer">برداشتن کار</button></div>'; }).join('') : '<div style="font-size:12px;color:#64748b;padding-top:6px">کاری در صف نیست.</div>';
+      var rows = x.data.length ? x.data.map(function(w) { var assign = _pfIsManager() ? '<button onclick="pfOpenAssignWork(\'' + w.id + '\')" style="height:28px;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;border-radius:6px;font-family:inherit;cursor:pointer">ارجاع</button>' : ''; return '<div style="padding:8px 0;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;gap:8px"><div><strong>' + esc(w.title || '') + '</strong><div style="font-size:11px;color:#64748b">' + esc(w.owner || 'بدون مسئول') + '</div></div><div style="display:flex;gap:5px">' + assign + '<button onclick="pfClaimWork(\'' + w.id + '\')" style="height:28px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;border-radius:6px;font-family:inherit;cursor:pointer">برداشتن کار</button></div></div>'; }).join('') : '<div style="font-size:12px;color:#64748b;padding-top:6px">کاری در صف نیست.</div>';
       return '<section style="padding:12px;border:1px solid #ddd6fe;border-radius:10px;margin-bottom:10px"><strong>📌 ' + esc(labels[x.q]) + '</strong>' + rows + '</section>';
     }).join('');
     openModal('pfWorkQueue', 'کارتابل عملیات فروش', body, '<button onclick="closeModal(\'pfWorkQueue\')" style="padding:8px 16px;border:1px solid #cbd5e1;background:#fff;border-radius:8px;font-family:inherit;cursor:pointer">بستن</button>', { lg:true });
@@ -1598,8 +1598,33 @@ async function pfClaimWork(workId) {
     showToast('✅ کار به شما ارجاع شد'); pfOpenWorkQueue();
   } catch (e) { showToast('❌ ' + e.message); }
 }
+async function pfOpenAssignWork(workId) {
+  try {
+    var r = await fetch('/api/users', { credentials: 'same-origin', cache: 'no-store' });
+    var users = await r.json();
+    if (!r.ok || !Array.isArray(users)) throw new Error((users && users.error) || 'دریافت کاربران ناموفق بود');
+    var options = users.filter(function(u) { return u.active !== false; }).map(function(u) {
+      return '<option value="' + esc(u.username) + '">' + esc(u.display_name || u.username) + '</option>';
+    }).join('');
+    openModal('pfAssignWorkModal', 'ارجاع کارتابل عملیات',
+      '<label style="display:grid;gap:6px;font-size:12px;color:#475569">مسئول انجام کار<select id="pfWorkAssignee" style="padding:8px;border:1px solid #cbd5e1;border-radius:7px;font-family:inherit">' + options + '</select></label>',
+      '<button onclick="closeModal(\'pfAssignWorkModal\')" style="padding:8px 14px;border:1px solid #cbd5e1;background:#fff;border-radius:8px;font-family:inherit;cursor:pointer">انصراف</button><button onclick="pfAssignWork(\'' + workId + '\')" style="padding:8px 14px;border:0;background:#2563eb;color:#fff;border-radius:8px;font-family:inherit;cursor:pointer">ارجاع و اطلاع‌رسانی</button>'
+    );
+  } catch (e) { showToast('❌ ' + e.message); }
+}
+async function pfAssignWork(workId) {
+  try {
+    var username = (document.getElementById('pfWorkAssignee') || {}).value;
+    if (!username) throw new Error('مسئول را انتخاب کنید');
+    var r = await fetch('/api/sales-orders/work/' + encodeURIComponent(workId) + '/assign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: username }) });
+    var d = await r.json(); if (!r.ok) throw new Error(d.error || 'ارجاع کار ناموفق بود');
+    closeModal('pfAssignWorkModal'); showToast('✅ کار ارجاع شد و اعلان برای مسئول ارسال شد'); pfOpenWorkQueue();
+  } catch (e) { showToast('❌ ' + e.message); }
+}
 window.pfOpenWorkQueue = pfOpenWorkQueue;
 window.pfClaimWork = pfClaimWork;
+window.pfOpenAssignWork = pfOpenAssignWork;
+window.pfAssignWork = pfAssignWork;
 
 // The invoice register is server-backed; it never reads the proforma cache.
 async function pfOpenInvoices() {
