@@ -530,3 +530,19 @@ var ACTION_TYPE_LABELS = {
 3. `node --check public/js/app.js` — must pass.
 4. Commit with a descriptive message; push to the designated branch.
 5. Update this file's Feature Inventory / Function Map / Roadmap if they changed.
+
+## Sales Fulfillment Workflow (July 2026)
+
+The enforced fulfillment path is:
+
+```
+approved proforma → sales order → FEFO warehouse reservation/dispatch
+→ invoice → customer delivery + signed receipt → receivable/collection (when unpaid)
+```
+
+- Never issue an inventory exit automatically when a proforma is approved. Approval only makes it eligible for a sales order.
+- `POST /api/sales-orders/from-proforma/:id` creates the order and opens the warehouse queue; `POST /:id/dispatch` locks selected lots and increases `wms_lots.reserved_qty` atomically. This is the only new-path dispatch operation.
+- `POST /api/invoices/from-dispatches` is the new-path invoice operation. It consumes only `reserved` dispatches, turns them into approved exits, and creates an immutable invoice-to-lot trace (`invoice_items`, `invoice_line_dispatches`). Direct `POST /api/invoices/from-proforma/:id` is retired (410) so it cannot bypass warehouse control.
+- `POST /api/invoices/:id/delivery-receipt` requires an issued invoice and approved exit transactions. It records proof of delivery, marks dispatches delivered, then creates or updates `receivables`. Payments update the receivable and close the collection work item only when fully settled.
+- New SQL tables: `sales_orders`, `sales_order_items`, `invoice_items`, `invoice_line_dispatches`, `delivery_receipts`, `receivables`, `sales_work_items`. `wms_transactions` stores `sales_order_id`, `sales_order_item_id`, `invoice_id`, delivery time and idempotency key. `wms_lots.reserved_qty` separates available from committed stock.
+- Work routing uses `sales_work_items` queues: `warehouse`, `finance`, `delivery`, `collections`. Do not reopen or silently overwrite a completed work item without an explicit corrective workflow.

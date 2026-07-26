@@ -1543,10 +1543,14 @@ async function pfIssueInvoice(pfId) {
   var pf = _pfList.find(function(p){ return p.id === pfId; });
   if (!pf) return;
   try {
-    var r = await fetch('/api/invoices/from-proforma/' + pfId, {
+    var ordersR = await fetch('/api/sales-orders', { credentials: 'same-origin' });
+    var orders = await ordersR.json();
+    var order = (orders || []).find(function(o) { return o.proforma_id === pfId; });
+    if (!order) { showToast('ابتدا سفارش فروش و حواله انبار را ثبت کنید'); return; }
+    var r = await fetch('/api/invoices/from-dispatches', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jalali_date: pf.jalaliDate, tax_pct: 9 })
+      body: JSON.stringify({ salesOrderId: order.id, jalali_date: pf.jalaliDate, tax_pct: 9 })
     });
     var data = await r.json();
     if (!r.ok) { showToast('❌ ' + (data.error || 'خطا')); return; }
@@ -4383,17 +4387,55 @@ async function pfDeleteAttachment(fileId) {
   } catch (e) { showToast('❌ ' + e.message); }
 }
 
-function pfIssueDispatch(pfId) {
+async function pfCreateSalesOrder(pfId) {
   var pf = _pfList.find(function(p) { return p.id === pfId; });
-  if (!pf) { showToast('پیشفاکتور یافت نشد'); return; }
-  if (!['approved', 'invoiced'].includes(pf.status)) {
-    showToast('فقط پیشفاکتور تأییدشده قابل صدور حواله است');
-    return;
-  }
-  window.open('/wms?pf=' + encodeURIComponent(pfId) + '#exit', '_blank');
+  if (!pf) return null;
+  var r = await fetch('/api/sales-orders/from-proforma/' + encodeURIComponent(pfId), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ warehouseId: pf.wmsWarehouseId || '' })
+  });
+  var data = await r.json();
+  if (!r.ok) throw new Error(data.error || 'خطا در ایجاد سفارش فروش');
+  return data.order;
+}
+
+async function pfIssueDispatch(pfId) {
+  var pf = _pfList.find(function(p) { return p.id === pfId; });
+  if (!pf) { showToast('پیش‌فاکتور یافت نشد'); return; }
+  if (pf.status !== 'approved') { showToast('فقط پیش‌فاکتور تأییدشده قابل صدور حواله است'); return; }
+  try {
+    var order = await pfCreateSalesOrder(pfId);
+    var r = await fetch('/api/sales-orders/' + encodeURIComponent(order.id) + '/dispatch-preview', { credentials: 'same-origin' });
+    var preview = await r.json();
+    if (!r.ok) throw new Error(preview.error || 'پیش‌نمایش حواله ناموفق بود');
+    var rows = preview.lines.map(function(line) {
+      var lots = line.allocations.map(function(a) { return esc(a.lotNo || a.lotId) + ' (' + a.qty + ')'; }).join('، ') || 'موجودی ندارد';
+      return '<li><strong>' + esc(line.name) + '</strong>: ' + line.requiredQty + ' — ' + lots + (line.shortage ? ' <span style="color:#b91c1c">(کسری ' + line.shortage + ')</span>' : '') + '</li>';
+    }).join('');
+    var canReserve = !preview.lines.some(function(line) { return line.shortage; });
+    openModal('pfDispatchPreview', 'حواله خروج — ' + esc(order.order_no),
+      '<p style="color:#475569">لات‌های پیشنهادی با FEFO بررسی شده‌اند؛ ثبت نهایی موجودی را رزرو و کار را به مالی ارجاع می‌دهد.</p><ul style="line-height:2">' + rows + '</ul>',
+      (canReserve ? '<button onclick="pfReserveSalesOrder(\'' + order.id + '\');closeModal(\'pfDispatchPreview\')" style="padding:8px 14px;background:#4f46e5;color:#fff;border:0;border-radius:8px;font-family:inherit;cursor:pointer">ثبت حواله و رزرو موجودی</button>' : '') +
+      '<button onclick="closeModal(\'pfDispatchPreview\')" style="padding:8px 14px;border:1px solid #cbd5e1;background:#fff;border-radius:8px;font-family:inherit;cursor:pointer">بستن</button>');
+  } catch (e) { showToast('❌ ' + e.message); }
+}
+
+async function pfReserveSalesOrder(orderId) {
+  try {
+    var r = await fetch('/api/sales-orders/' + encodeURIComponent(orderId) + '/dispatch-preview');
+    var p = await r.json();
+    if (!r.ok) throw new Error(p.error || 'پیش‌نمایش حواله ناموفق بود');
+    if (p.lines.some(function(line) { return line.shortage; })) throw new Error('موجودی برای حواله کامل کافی نیست');
+    var lines = p.lines.map(function(line) { return { salesOrderItemId: line.salesOrderItemId, allocations: line.allocations.map(function(a) { return { lotId: a.lotId, qty: a.qty }; }) }; });
+    var save = await fetch('/api/sales-orders/' + encodeURIComponent(orderId) + '/dispatch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idempotencyKey: 'ui-' + orderId + '-' + Date.now(), lines: lines }) });
+    var result = await save.json();
+    if (!save.ok) throw new Error(result.error || 'ثبت حواله ناموفق بود');
+    showToast('✅ حواله ثبت و برای صدور فاکتور به مالی ارجاع شد');
+  } catch (e) { showToast('❌ ' + e.message); }
 }
 window.pfIssueDispatch = pfIssueDispatch;
 window.pfShowDispatch = pfIssueDispatch;
+window.pfReserveSalesOrder = pfReserveSalesOrder;
 
 // ── Vue bridge callbacks ──────────────────────────────────────────────────
 // Called by ProformaPanel.vue — pf is the full object from Vue's API fetch.

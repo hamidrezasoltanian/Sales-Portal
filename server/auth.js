@@ -64,10 +64,23 @@ async function requireAuth(req, res, next) {
       userDirectManager = cached.direct_manager || '';
       tokenVersion = cached.token_version;
     } else {
-      const userResult = await query(
-        'SELECT active, permissions, department, COALESCE(token_version, 0) AS token_version, manager_scope, direct_manager FROM app_users WHERE username = $1',
-        [decoded.username]
-      );
+      // During a rolling release an application node can start before the
+      // additive user-scope migration has run. Keep authentication available
+      // with safe, non-manager defaults instead of returning a 503 for every
+      // authenticated request.
+      let userResult;
+      try {
+        userResult = await query(
+          'SELECT active, permissions, department, COALESCE(token_version, 0) AS token_version, manager_scope, direct_manager FROM app_users WHERE username = $1',
+          [decoded.username]
+        );
+      } catch (e) {
+        if (e.code !== '42703') throw e;
+        userResult = await query(
+          "SELECT active, permissions, department, COALESCE(token_version, 0) AS token_version, NULL::jsonb AS manager_scope, ''::text AS direct_manager FROM app_users WHERE username = $1",
+          [decoded.username]
+        );
+      }
       if (userResult.rows.length === 0) {
         return res.status(401).json({ error: 'حساب کاربری غیرفعال است' });
       }

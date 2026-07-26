@@ -1934,9 +1934,132 @@ async function initSchema() {
   `);
   await query(`CREATE INDEX IF NOT EXISTS idx_invoices_proforma ON invoices(proforma_id)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_invoice_payments_inv ON invoice_payments(invoice_id)`).catch(()=>{});
+  // Sales-order triad: keep legacy invoice JSON for compatibility, but use
+  // normalized rows and explicit WMS reservations for all new fulfillment.
+  await query(`ALTER TABLE wms_lots ADD COLUMN IF NOT EXISTS reserved_qty INTEGER NOT NULL DEFAULT 0`).catch(()=>{});
+  await query(`ALTER TABLE wms_lots ADD CONSTRAINT wms_lots_reserved_nonnegative CHECK (reserved_qty >= 0)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_wms_lots_fefo ON wms_lots(warehouse_id, product_id, expiry) WHERE qty > reserved_qty`).catch(()=>{});
+  await query(`ALTER TABLE wms_transactions ADD COLUMN IF NOT EXISTS sales_order_id TEXT`).catch(()=>{});
+  await query(`ALTER TABLE wms_transactions ADD COLUMN IF NOT EXISTS sales_order_item_id TEXT`).catch(()=>{});
+  await query(`ALTER TABLE wms_transactions ADD COLUMN IF NOT EXISTS invoice_id TEXT`).catch(()=>{});
+  await query(`ALTER TABLE wms_transactions ADD COLUMN IF NOT EXISTS idempotency_key TEXT`).catch(()=>{});
+  await query(`ALTER TABLE wms_transactions ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ`).catch(()=>{});
+  await query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_wms_txn_idempotency ON wms_transactions(idempotency_key) WHERE idempotency_key IS NOT NULL`).catch(()=>{});
+  await query(`
+    CREATE TABLE IF NOT EXISTS sales_orders (
+      id              TEXT PRIMARY KEY,
+      order_no        TEXT UNIQUE NOT NULL,
+      proforma_id     TEXT UNIQUE REFERENCES proformas(id),
+      center_key      TEXT,
+      center_name     TEXT,
+      warehouse_id    TEXT REFERENCES wms_warehouses(id),
+      status          TEXT NOT NULL DEFAULT 'awaiting_dispatch',
+      payment_terms   TEXT DEFAULT '',
+      sales_owner     TEXT,
+      created_by      TEXT NOT NULL,
+      note            TEXT DEFAULT '',
+      created_at      TIMESTAMPTZ DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ DEFAULT NOW(),
+      cancelled_at    TIMESTAMPTZ,
+      cancelled_by    TEXT,
+      cancel_reason   TEXT DEFAULT ''
+    )
+  `);
+  await query(`CREATE INDEX IF NOT EXISTS idx_sales_orders_status ON sales_orders(status, created_at DESC)`);
+  await query(`CREATE TABLE IF NOT EXISTS sales_order_items (
+      id              TEXT PRIMARY KEY,
+      sales_order_id  TEXT NOT NULL REFERENCES sales_orders(id) ON DELETE CASCADE,
+      product_id      TEXT REFERENCES wms_products(id),
+      item_name       TEXT NOT NULL,
+      qty_ordered     INTEGER NOT NULL CHECK (qty_ordered > 0),
+      qty_reserved    INTEGER NOT NULL DEFAULT 0 CHECK (qty_reserved >= 0),
+      qty_invoiced    INTEGER NOT NULL DEFAULT 0 CHECK (qty_invoiced >= 0),
+      qty_delivered   INTEGER NOT NULL DEFAULT 0 CHECK (qty_delivered >= 0),
+      unit_price      BIGINT NOT NULL DEFAULT 0,
+      line_note       TEXT DEFAULT ''
+    )`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_sales_order_items_order ON sales_order_items(sales_order_id)`);
+  await query(`CREATE TABLE IF NOT EXISTS invoice_items (
+      id              TEXT PRIMARY KEY,
+      invoice_id      TEXT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+      sales_order_item_id TEXT REFERENCES sales_order_items(id),
+      product_id      TEXT REFERENCES wms_products(id),
+      description     TEXT NOT NULL,
+      qty             INTEGER NOT NULL CHECK (qty > 0),
+      unit_price      BIGINT NOT NULL DEFAULT 0,
+      discount_pct    DECIMAL(5,2) NOT NULL DEFAULT 0,
+      tax_pct         DECIMAL(5,2) NOT NULL DEFAULT 0,
+      line_total      DECIMAL(15,2) NOT NULL DEFAULT 0
+    )`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id)`);
+  await query(`CREATE TABLE IF NOT EXISTS invoice_line_dispatches (
+      id              TEXT PRIMARY KEY,
+      invoice_id      TEXT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+      invoice_item_id TEXT NOT NULL REFERENCES invoice_items(id) ON DELETE CASCADE,
+      sales_order_item_id TEXT REFERENCES sales_order_items(id),
+      wms_transaction_id TEXT NOT NULL REFERENCES wms_transactions(id),
+      lot_id          TEXT REFERENCES wms_lots(id),
+      qty             INTEGER NOT NULL CHECK (qty > 0),
+      lot_no_snapshot TEXT DEFAULT '',
+      expiry_snapshot DATE,
+      fefo_violation  BOOLEAN NOT NULL DEFAULT FALSE,
+      fefo_violation_reason TEXT DEFAULT '',
+      dispatched_at   TIMESTAMPTZ DEFAULT NOW()
+    )`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_ild_invoice ON invoice_line_dispatches(invoice_id)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_ild_txn ON invoice_line_dispatches(wms_transaction_id)`);
+  await query(`CREATE TABLE IF NOT EXISTS delivery_receipts (
+      id              TEXT PRIMARY KEY,
+      receipt_no      TEXT UNIQUE NOT NULL,
+      invoice_id      TEXT NOT NULL REFERENCES invoices(id),
+      status          TEXT NOT NULL DEFAULT 'received',
+      delivered_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      receiver_name   TEXT NOT NULL,
+      receiver_role   TEXT DEFAULT '',
+      carrier         TEXT DEFAULT '',
+      tracking_no     TEXT DEFAULT '',
+      attachment_url  TEXT DEFAULT '',
+      dispute_reason  TEXT DEFAULT '',
+      recorded_by     TEXT NOT NULL,
+      created_at      TIMESTAMPTZ DEFAULT NOW()
+    )`);
+  await query(`CREATE TABLE IF NOT EXISTS receivables (
+      id              TEXT PRIMARY KEY,
+      invoice_id      TEXT UNIQUE NOT NULL REFERENCES invoices(id),
+      center_key      TEXT,
+      total_amount    DECIMAL(15,2) NOT NULL DEFAULT 0,
+      paid_amount     DECIMAL(15,2) NOT NULL DEFAULT 0,
+      outstanding_amount DECIMAL(15,2) NOT NULL DEFAULT 0,
+      due_date        TEXT DEFAULT '',
+      status          TEXT NOT NULL DEFAULT 'not_due',
+      owner           TEXT DEFAULT '',
+      opened_at       TIMESTAMPTZ,
+      settled_at      TIMESTAMPTZ,
+      created_at      TIMESTAMPTZ DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ DEFAULT NOW()
+    )`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_receivables_status_due ON receivables(status, due_date)`);
+  await query(`CREATE TABLE IF NOT EXISTS sales_work_items (
+      id              TEXT PRIMARY KEY,
+      source_type     TEXT NOT NULL,
+      source_id       TEXT NOT NULL,
+      queue           TEXT NOT NULL,
+      status          TEXT NOT NULL DEFAULT 'open',
+      owner           TEXT DEFAULT '',
+      claimed_by      TEXT DEFAULT '',
+      due_at          TEXT DEFAULT '',
+      title           TEXT NOT NULL,
+      meta            JSONB DEFAULT '{}',
+      created_at      TIMESTAMPTZ DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ DEFAULT NOW()
+    )`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_sales_work_queue ON sales_work_items(queue, status, created_at DESC)`);
   // Frozen sales attribution at invoice issue time (center owner snapshot)
   await query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS commission_owner TEXT`).catch(()=>{});
   await query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS commission_owner_name TEXT`).catch(()=>{});
+  await query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS sales_order_id TEXT`).catch(()=>{});
+  await query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS wms_status TEXT DEFAULT 'pending'`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_invoices_sales_order ON invoices(sales_order_id)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_invoices_commission_owner ON invoices(commission_owner)`).catch(()=>{});
   await query(`
     UPDATE invoices i

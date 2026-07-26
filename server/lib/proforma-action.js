@@ -1,7 +1,6 @@
 'use strict';
 
 const { query } = require('../db');
-const { createDispatchFromProforma } = require('./wms-dispatch');
 const { appendProformaEvent, appendAuditLog, computeExpiryDate } = require('./proforma-helpers');
 const {
   loadDiscountCaps, exceedsDiscountCap, canApproveDiscount, maxDiscountPct, getDiscountCap,
@@ -269,19 +268,9 @@ async function executeProformaAction(pfId, action, user, opts) {
 
   let dispatch = null;
   if (action === 'approve') {
-    try {
-      dispatch = await createDispatchFromProforma({
-        id: updated.id,
-        no: updated.no,
-        centerName: updated.centerName,
-        items: updated.items,
-        wmsWarehouseId: updated.wmsWarehouseId,
-      }, user.username);
-    } catch (e) {
-      console.error('[proforma-action dispatch]', e.message);
-    }
-    await appendProformaEvent(pfId, 'warehouse_queued', user.username, 'ارجاع به انبار برای حواله خروج', { dispatchIds: dispatch && dispatch.transactionIds || [] });
-    await appendProformaEvent(pfId, 'finance_queued', user.username, 'ارجاع به مالی برای صدور فاکتور', {});
+    // Approval creates a sales commitment, not an inventory movement. A warehouse
+    // user must explicitly reserve lots (FEFO) before finance can issue an invoice.
+    await appendProformaEvent(pfId, 'sales_order_queued', user.username, 'آمادهٔ تبدیل به سفارش فروش و ارجاع به انبار', {});
   }
 
   if (!opts.skipTelegram) {
