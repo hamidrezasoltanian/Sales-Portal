@@ -1179,6 +1179,7 @@ function _renderPfPanel(el) {
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
         '<button onclick="pfOpenNew()" style="padding:8px 16px;background:var(--brand);color:white;border:none;border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer;font-weight:600">+ \u067e\u06cc\u0634\u0641\u0627\u06a9\u062a\u0648\u0631 \u062c\u062f\u06cc\u062f</button>' +
+        '<button onclick="pfOpenInvoices()" style="padding:8px 12px;background:#ecfeff;color:#0e7490;border:1px solid #a5f3fc;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer">\ud83e\uddfe \u0641\u0627\u06a9\u062a\u0648\u0631\u0647\u0627\u06cc \u0635\u0627\u062f\u0631\u0634\u062f\u0647</button>' +
 (isManager ? '<button onclick="pfManageTemplates()" style="padding:8px 12px;background:#f8fafc;color:#475569;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer" title="\u0645\u062f\u06cc\u0631\u06cc\u062a \u0642\u0627\u0644\u0628\u200c\u0647\u0627\u06cc \u0686\u0627\u067e">\ud83c\udfa8 \u0642\u0627\u0644\u0628\u200c\u0647\u0627\u06cc \u0686\u0627\u067e</button>' +
                      '<button onclick="pfOpenSellerEditor()" style="padding:8px 12px;background:#f8fafc;color:#475569;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer" title="\u0648\u06cc\u0631\u0627\u06cc\u0634 \u0645\u0634\u062e\u0635\u0627\u062a \u0641\u0631\u0648\u0634\u0646\u062f\u0647">\ud83c\udfe2 \u0641\u0631\u0648\u0634\u0646\u062f\u0647</button>' : '') +
       '</div>' +
@@ -1545,6 +1546,7 @@ async function pfIssueInvoice(pfId) {
   try {
     var ordersR = await fetch('/api/sales-orders', { credentials: 'same-origin' });
     var orders = await ordersR.json();
+    if (!ordersR.ok || !Array.isArray(orders)) throw new Error((orders && orders.error) || 'دریافت سفارش‌های فروش ناموفق بود');
     var order = (orders || []).find(function(o) { return o.proforma_id === pfId; });
     if (!order) { showToast('ابتدا سفارش فروش و حواله انبار را ثبت کنید'); return; }
     var r = await fetch('/api/invoices/from-dispatches', {
@@ -1554,10 +1556,17 @@ async function pfIssueInvoice(pfId) {
     });
     var data = await r.json();
     if (!r.ok) { showToast('❌ ' + (data.error || 'خطا')); return; }
+    // A toast is never proof of issuance. Read the persisted invoice back before
+    // changing this panel; this prevents a stale client/cache from hiding a PF.
+    var invoiceId = data.id || (data.invoice && data.invoice.id);
+    if (!invoiceId) throw new Error('پاسخ صدور فاکتور شناسهٔ معتبر ندارد');
+    var verifyR = await fetch('/api/invoices/' + encodeURIComponent(invoiceId), { credentials: 'same-origin', cache: 'no-store' });
+    var invoice = await verifyR.json();
+    if (!verifyR.ok || !invoice || invoice.id !== invoiceId) throw new Error((invoice && invoice.error) || 'فاکتور در سرور ثبت نشد');
     if (data.already) {
-      showToast('ℹ️ فاکتور این پیش‌فاکتور قبلاً صادر شده: ' + data.invoice.invoice_no);
+      showToast('ℹ️ فاکتور این پیش‌فاکتور قبلاً صادر شده: ' + (invoice.invoice_no || invoice.id));
     } else {
-      showToast('✅ فاکتور ' + data.invoice_no + ' صادر شد');
+      showToast('✅ فاکتور ' + (invoice.invoice_no || invoice.id) + ' صادر شد');
     }
     await pfLoad();
     var el = _pfRoot();
@@ -1566,6 +1575,20 @@ async function pfIssueInvoice(pfId) {
     showToast('❌ خطا: ' + e.message);
   }
 }
+
+// The invoice register is server-backed; it never reads the proforma cache.
+async function pfOpenInvoices() {
+  try {
+    var r = await fetch('/api/invoices', { credentials: 'same-origin', cache: 'no-store' });
+    var rows = await r.json();
+    if (!r.ok || !Array.isArray(rows)) throw new Error((rows && rows.error) || 'دریافت فاکتورها ناموفق بود');
+    var body = rows.length ? '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#f8fafc"><th style="padding:8px;text-align:right">شماره</th><th style="padding:8px;text-align:right">مشتری</th><th style="padding:8px;text-align:right">تاریخ</th><th style="padding:8px;text-align:right">مبلغ</th><th style="padding:8px;text-align:right">وضعیت</th></tr></thead><tbody>' +
+      rows.map(function(inv) { return '<tr style="border-top:1px solid #e2e8f0"><td style="padding:8px;font-family:monospace">' + esc(inv.invoice_no || inv.id) + '</td><td style="padding:8px">' + esc(inv.center_name || '—') + '</td><td style="padding:8px">' + esc(inv.jalali_date || '—') + '</td><td style="padding:8px">' + fmtNum(inv.total || 0) + ' ﷼</td><td style="padding:8px">' + esc(inv.status || 'issued') + '</td></tr>'; }).join('') +
+      '</tbody></table>' : '<div style="padding:28px;text-align:center;color:#64748b">هنوز هیچ فاکتور ثبت‌شده‌ای در سرور وجود ندارد.</div>';
+    openModal('pfInvoiceRegister', 'فاکتورهای صادرشده', body, '<button onclick="closeModal(\'pfInvoiceRegister\')" style="padding:8px 16px;border:1px solid #cbd5e1;background:#fff;border-radius:8px;font-family:inherit;cursor:pointer">بستن</button>', { lg: true });
+  } catch (e) { showToast('❌ ' + e.message); }
+}
+window.pfOpenInvoices = pfOpenInvoices;
 
 async function pfOpenFulfillment(pfId) {
   var pf = _pfList.find(function(p){ return p.id === pfId; });
