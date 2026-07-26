@@ -1583,12 +1583,46 @@ async function pfOpenInvoices() {
     var rows = await r.json();
     if (!r.ok || !Array.isArray(rows)) throw new Error((rows && rows.error) || 'دریافت فاکتورها ناموفق بود');
     var body = rows.length ? '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#f8fafc"><th style="padding:8px;text-align:right">شماره</th><th style="padding:8px;text-align:right">مشتری</th><th style="padding:8px;text-align:right">تاریخ</th><th style="padding:8px;text-align:right">مبلغ</th><th style="padding:8px;text-align:right">وضعیت</th></tr></thead><tbody>' +
-      rows.map(function(inv) { return '<tr style="border-top:1px solid #e2e8f0"><td style="padding:8px;font-family:monospace">' + esc(inv.invoice_no || inv.id) + '</td><td style="padding:8px">' + esc(inv.center_name || '—') + '</td><td style="padding:8px">' + esc(inv.jalali_date || '—') + '</td><td style="padding:8px">' + fmtNum(inv.total || 0) + ' ﷼</td><td style="padding:8px">' + esc(inv.status || 'issued') + '</td></tr>'; }).join('') +
+      rows.map(function(inv) { return '<tr style="border-top:1px solid #e2e8f0"><td style="padding:8px;font-family:monospace">' + esc(inv.invoice_no || inv.id) + '</td><td style="padding:8px">' + esc(inv.center_name || '—') + '</td><td style="padding:8px">' + esc(inv.jalali_date || '—') + '</td><td style="padding:8px">' + fmtNum(inv.total || 0) + ' ﷼</td><td style="padding:8px">' + esc(inv.status || 'issued') + '</td><td style="padding:8px;white-space:nowrap"><button onclick="pfOpenDelivery(\'' + inv.id + '\')" style="font:inherit;font-size:11px;border:1px solid #86efac;background:#f0fdf4;color:#15803d;border-radius:6px;padding:4px 7px;cursor:pointer">تحویل</button> <button onclick="pfOpenPayment(\'' + inv.id + '\')" style="font:inherit;font-size:11px;border:1px solid #bae6fd;background:#eff6ff;color:#0369a1;border-radius:6px;padding:4px 7px;cursor:pointer">پرداخت</button></td></tr>'; }).join('') +
       '</tbody></table>' : '<div style="padding:28px;text-align:center;color:#64748b">هنوز هیچ فاکتور ثبت‌شده‌ای در سرور وجود ندارد.</div>';
     openModal('pfInvoiceRegister', 'فاکتورهای صادرشده', body, '<button onclick="closeModal(\'pfInvoiceRegister\')" style="padding:8px 16px;border:1px solid #cbd5e1;background:#fff;border-radius:8px;font-family:inherit;cursor:pointer">بستن</button>', { lg: true });
   } catch (e) { showToast('❌ ' + e.message); }
 }
 window.pfOpenInvoices = pfOpenInvoices;
+
+function pfOpenDelivery(invoiceId) {
+  openModal('pfDeliveryModal', 'ثبت تحویل و رسید مشتری',
+    '<div style="display:grid;gap:10px"><label>نام تحویل‌گیرنده<input id="pfDeliveryReceiver" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px"></label><label>سمت / نقش<input id="pfDeliveryRole" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px"></label><label>تاریخ سررسید مطالبات (اختیاری)<input id="pfDeliveryDue" placeholder="1405/01/01" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px"></label><label>کد رهگیری یا توضیح حمل<input id="pfDeliveryTrack" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px"></label></div>',
+    '<button onclick="pfSubmitDelivery(\'' + invoiceId + '\')" style="padding:8px 14px;background:#15803d;color:#fff;border:0;border-radius:8px;font-family:inherit;cursor:pointer">ثبت رسید تحویل</button>', { lg: false });
+}
+
+async function pfSubmitDelivery(invoiceId) {
+  try {
+    var body = { receiver_name: document.getElementById('pfDeliveryReceiver').value.trim(), receiver_role: document.getElementById('pfDeliveryRole').value.trim(), due_date: document.getElementById('pfDeliveryDue').value.trim(), tracking_no: document.getElementById('pfDeliveryTrack').value.trim() };
+    var r = await fetch('/api/invoices/' + encodeURIComponent(invoiceId) + '/delivery-receipt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    var d = await r.json(); if (!r.ok) throw new Error(d.error || 'ثبت تحویل ناموفق بود');
+    closeModal('pfDeliveryModal'); showToast('✅ رسید تحویل ثبت شد' + (d.outstanding ? '؛ مانده مطالبات: ' + fmtNum(d.outstanding) : ''));
+  } catch (e) { showToast('❌ ' + e.message); }
+}
+
+function pfOpenPayment(invoiceId) {
+  openModal('pfPaymentModal', 'ثبت دریافت وجه',
+    '<div style="display:grid;gap:10px"><label>مبلغ<input id="pfPayAmount" type="number" min="1" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px"></label><label>تاریخ جلالی<input id="pfPayDate" placeholder="1405/01/01" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px"></label><label>شماره پیگیری<input id="pfPayRef" style="width:100%;box-sizing:border-box;margin-top:4px;padding:8px"></label></div>',
+    '<button onclick="pfSubmitPayment(\'' + invoiceId + '\')" style="padding:8px 14px;background:#0369a1;color:#fff;border:0;border-radius:8px;font-family:inherit;cursor:pointer">ثبت پرداخت</button>', { lg: false });
+}
+
+async function pfSubmitPayment(invoiceId) {
+  try {
+    var body = { amount: Number(document.getElementById('pfPayAmount').value), jalali_date: document.getElementById('pfPayDate').value.trim(), ref_no: document.getElementById('pfPayRef').value.trim(), method: 'transfer' };
+    var r = await fetch('/api/invoices/' + encodeURIComponent(invoiceId) + '/payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    var d = await r.json(); if (!r.ok) throw new Error(d.error || 'ثبت پرداخت ناموفق بود');
+    closeModal('pfPaymentModal'); showToast('✅ پرداخت ثبت شد؛ وضعیت: ' + (d.status || ''));
+  } catch (e) { showToast('❌ ' + e.message); }
+}
+window.pfOpenDelivery = pfOpenDelivery;
+window.pfSubmitDelivery = pfSubmitDelivery;
+window.pfOpenPayment = pfOpenPayment;
+window.pfSubmitPayment = pfSubmitPayment;
 
 async function pfOpenFulfillment(pfId) {
   var pf = _pfList.find(function(p){ return p.id === pfId; });
